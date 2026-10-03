@@ -1,0 +1,17 @@
+[package]
+name = "codoseo-core"
+description = "Shared types for CodoSEO, the open-source SEO crawler and monitor."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+url.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true
