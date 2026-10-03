@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use codoseo_core::Url;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
-use codoseo_core::page::{Indexability, PageRecord};
+use codoseo_core::page::{FetchFailure, Indexability, PageRecord};
 use codoseo_crawler::crawl::{CrawlError, crawl, inspect_page};
 use codoseo_crawler::preflight::BLOCKED_MSG;
 use codoseo_crawler::{CrawlOutput, StopReason};
@@ -268,20 +268,31 @@ async fn an_endless_calendar_stops_at_the_page_limit() {
 
 #[tokio::test]
 async fn the_time_limit_stops_the_crawl_and_keeps_pages() {
-    // 50 pages of 300 ms over 2 connections would take about 7.5 s.
+    // 50 pages of 300 ms over 2 connections would take about 7.5 s. Fetches cut short by
+    // the deadline must not be recorded as timeouts; the race with the deadline is close,
+    // so the scenario runs several times.
     let links: Vec<String> = (0..50).map(|i| format!("/s/{i}")).collect();
     let site = SiteBuilder::new()
         .html("/", "Home", &refs(&links))
         .every_path(Page::slow(Duration::from_millis(300)))
         .start()
         .await;
-    let started = std::time::Instant::now();
-    let out = crawl(cfg_time(site.url("/"), Duration::from_secs(1)), |_| {})
-        .await
-        .unwrap();
-    assert_eq!(out.stop, StopReason::TimeLimit);
-    assert!(!out.pages.is_empty());
-    assert!(started.elapsed() < Duration::from_secs(3));
+    for run in 0..8 {
+        let started = std::time::Instant::now();
+        let out = crawl(cfg_time(site.url("/"), Duration::from_millis(500)), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(out.stop, StopReason::TimeLimit);
+        assert!(!out.pages.is_empty());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let cut: Vec<&str> = out
+            .pages
+            .iter()
+            .filter(|p| p.error == Some(FetchFailure::Timeout))
+            .map(|p| p.url.path())
+            .collect();
+        assert!(cut.is_empty(), "run {run}: recorded as timeouts: {cut:?}");
+    }
 }
 
 #[tokio::test]

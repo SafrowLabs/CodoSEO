@@ -291,13 +291,19 @@ impl Run {
                 }
                 break;
             }
+            // The deadline goes first: a fetch cut short by it ends on the same tick and
+            // must not be recorded as a timeout.
             tokio::select! {
+                biased;
+                () = sleep_until(deadline) => self.stop = Some(StopReason::TimeLimit),
                 Some((q, res)) = in_flight.next() => {
-                    if self.on_result(limiter, q, res) {
+                    if Instant::now() >= deadline {
+                        // Too late to count, and no new work may start.
+                        self.stop = Some(StopReason::TimeLimit);
+                    } else if self.on_result(limiter, q, res) {
                         on_progress(self.progress(in_flight.len()));
                     }
                 }
-                () = sleep_until(deadline) => self.stop = Some(StopReason::TimeLimit),
             }
         }
     }
