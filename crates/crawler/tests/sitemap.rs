@@ -1,6 +1,12 @@
 mod support;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
 use axum::Router;
+use axum::extract::Path;
+use axum::http::StatusCode;
 use axum::http::header;
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -124,6 +130,10 @@ fn routes() -> Router {
         )
 }
 
+fn far() -> tokio::time::Instant {
+    tokio::time::Instant::now() + std::time::Duration::from_secs(60)
+}
+
 fn fetcher() -> Fetcher {
     Fetcher::new(FetcherConfig::new(AddressPolicy::AllowPrivate)).unwrap()
 }
@@ -131,7 +141,7 @@ fn fetcher() -> Fetcher {
 #[tokio::test]
 async fn follows_indexes_to_depth_2_and_dedupes() {
     let srv = TestServer::start(routes()).await;
-    let found = discover(&fetcher(), &[srv.url("/index.xml")], 50_000).await;
+    let found = discover(&fetcher(), &[srv.url("/index.xml")], 50_000, far()).await;
     let mut paths: Vec<&str> = found.urls.iter().map(|u| u.path()).collect();
     paths.sort();
     assert_eq!(paths, ["/a", "/b", "/d", "/e"]);
@@ -149,7 +159,7 @@ async fn follows_indexes_to_depth_2_and_dedupes() {
 #[tokio::test]
 async fn stops_at_the_url_cap() {
     let srv = TestServer::start(routes()).await;
-    let found = discover(&fetcher(), &[srv.url("/huge.xml")], 50_000).await;
+    let found = discover(&fetcher(), &[srv.url("/huge.xml")], 50_000, far()).await;
     assert_eq!(found.urls.len(), 50_000);
     assert!(found.summary.truncated);
 }
@@ -157,7 +167,95 @@ async fn stops_at_the_url_cap() {
 #[tokio::test]
 async fn missing_sitemaps_give_nothing() {
     let srv = TestServer::start(routes()).await;
-    let found = discover(&fetcher(), &[srv.url("/missing.xml")], 50_000).await;
+    let found = discover(&fetcher(), &[srv.url("/missing.xml")], 50_000, far()).await;
     assert!(found.urls.is_empty());
     assert!(found.summary.files.is_empty());
+}
+
+// Fixes from the M1 review.
+
+#[test]
+fn image_locs_are_not_page_urls() {
+    let xml = br#"<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+      <url><loc>https://e.test/post</loc><image:image><image:loc>https://e.test/a.jpg</image:loc></image:image></url>
+    </urlset>"#;
+    assert_eq!(parse_sitemap(xml).unwrap().locs, ["https://e.test/post"]);
+}
+
+#[tokio::test]
+async fn failed_children_count_toward_the_file_cap() {
+    let requests = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&requests);
+    let children: Vec<String> = (0..3_000).map(|i| format!("/nope/{i}.xml")).collect();
+    let fan = index(&children.iter().map(String::as_str).collect::<Vec<_>>());
+    let router = Router::new()
+        .route(
+            "/fan.xml",
+            get(move || {
+                let fan = fan.clone();
+                async move { xml(fan) }
+            }),
+        )
+        .route(
+            "/nope/{i}",
+            get(move |Path(_i): Path<String>| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async { StatusCode::NOT_FOUND }
+            }),
+        );
+    let srv = TestServer::start(router).await;
+    let found = discover(&fetcher(), &[srv.url("/fan.xml")], 50_000, far()).await;
+    assert!(
+        requests.load(Ordering::SeqCst) < 100,
+        "{} child requests",
+        requests.load(Ordering::SeqCst)
+    );
+    assert!(found.summary.failed_files > 0);
+    assert!(!found.summary.complete);
+}
+
+#[tokio::test]
+async fn a_deadline_returns_partial_results() {
+    let router = routes()
+        .route(
+            "/slow-index.xml",
+            get(|| async { xml(index(&["/sm1.xml", "/slow.xml"])) }),
+        )
+        .route(
+            "/slow.xml",
+            get(|| async {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                xml(urlset(&["/late"]))
+            }),
+        );
+    let srv = TestServer::start(router).await;
+    let started = std::time::Instant::now();
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(800);
+    let found = discover(&fetcher(), &[srv.url("/slow-index.xml")], 50_000, deadline).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "took {:?}",
+        started.elapsed()
+    );
+    let paths: Vec<&str> = found.urls.iter().map(|u| u.path()).collect();
+    assert_eq!(paths, ["/a", "/b"]);
+    assert!(!found.summary.complete);
+}
+
+#[tokio::test]
+async fn non_utf8_sitemaps_still_yield_urls() {
+    let mut body = br#"<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>/a</loc></url><url><loc>/caf"#.to_vec();
+    body.push(0xE9);
+    body.extend_from_slice(b"</loc></url><url><loc>/b</loc></url></urlset>");
+    let router = Router::new().route(
+        "/latin1.xml",
+        get(move || {
+            let body = body.clone();
+            async move { ([(header::CONTENT_TYPE, "application/xml")], body).into_response() }
+        }),
+    );
+    let srv = TestServer::start(router).await;
+    let found = discover(&fetcher(), &[srv.url("/latin1.xml")], 50_000, far()).await;
+    let paths: Vec<&str> = found.urls.iter().map(|u| u.path()).collect();
+    assert!(paths.contains(&"/a") && paths.contains(&"/b"), "{paths:?}");
 }

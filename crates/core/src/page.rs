@@ -33,6 +33,8 @@ pub enum JsonLdStatus {
     Valid(u16),
     /// At least one block does not parse as JSON.
     Invalid,
+    /// A block is too big to check (over 1 MB).
+    TooLarge,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

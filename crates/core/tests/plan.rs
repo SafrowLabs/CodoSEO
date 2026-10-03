@@ -44,11 +44,11 @@ fn agency_plan_matches_spec() {
 }
 
 #[test]
-fn self_hosted_is_unlimited_with_one_year_default_history() {
+fn self_hosted_has_no_plan_caps_but_finite_safety_defaults() {
     let l = PlanLimits::for_plan(Plan::SelfHosted);
     assert_eq!(l.max_sites, None);
-    assert_eq!(l.max_pages, None);
-    assert_eq!(l.max_duration, None);
+    assert_eq!(l.max_pages, Some(100_000));
+    assert_eq!(l.max_duration, Some(Duration::from_secs(24 * HOUR)));
     assert_eq!(l.fastest_schedule, Some(Schedule::Daily));
     assert_eq!(l.manual_crawls, ManualAllowance::Unlimited);
     assert_eq!(l.history_days, Some(365));

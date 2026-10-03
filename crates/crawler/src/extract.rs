@@ -25,6 +25,10 @@ const MAX_HEADING_CHARS: usize = 300;
 const MAX_ANCHOR_CHARS: usize = 200;
 const MAX_HEADINGS: usize = 50;
 const MAX_LINKS: usize = 5_000;
+/// JSON-LD blocks bigger than this are reported as too large instead of parsed.
+const MAX_JSONLD_BYTES: usize = 1024 * 1024;
+/// How far to look for `<meta charset>` before parsing, as browsers do.
+const PRESCAN_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Link {
@@ -76,7 +80,7 @@ impl Extractor {
     pub fn write(&mut self, chunk: &[u8]) {
         if let Stage::Sniffing(pending) = &mut self.stage {
             pending.extend_from_slice(chunk);
-            if pending.len() >= 3 {
+            if pending.len() >= PRESCAN_BYTES {
                 let first = std::mem::take(pending);
                 self.begin(&first);
             }
@@ -116,7 +120,10 @@ impl Extractor {
             (UTF_16BE, 2, false)
         } else if let Some(enc) = self.header_encoding {
             (enc, 0, false)
+        } else if let Some(enc) = prescan_meta_charset(first) {
+            (enc, 0, false)
         } else {
+            // A meta tag past the pre-scan window can still switch encoding mid-stream.
             (UTF_8, 0, true)
         };
         self.stage = match AsciiCompatibleEncoding::new(encoding) {
@@ -207,8 +214,12 @@ fn build_rewriter(
     let settings = Settings::new()
         .with_encoding(encoding)
         .with_adjust_charset_on_meta_tag(adjust_on_meta)
-        .append_element_content_handler(element!("*", move |_el| {
-            s_any.borrow_mut().words.break_word();
+        .append_element_content_handler(element!("*", move |el| {
+            let mut st = s_any.borrow_mut();
+            st.words.break_word();
+            if is_block_or_break(&el.tag_name()) {
+                st.separate_open_text();
+            }
             Ok(())
         }))
         .append_element_content_handler(element!("svg", move |el| {
@@ -248,7 +259,10 @@ fn build_rewriter(
             } else {
                 2
             };
-            s_head.borrow_mut().heading = Some((level, String::new()));
+            let mut st = s_head.borrow_mut();
+            st.close_heading(); // an unclosed heading ends where the next one starts
+            st.heading = Some((level, String::new()));
+            drop(st);
             let st = Rc::clone(&s_head);
             on_end(el, move || st.borrow_mut().close_heading())
         }))
@@ -392,8 +406,11 @@ struct State {
     images_missing_alt: u32,
     og: OgTags,
     jsonld_buf: Option<String>,
+    /// The open JSON-LD block went over [`MAX_JSONLD_BYTES`]; its text is dropped.
+    jsonld_overflow: bool,
     jsonld_valid: u16,
     jsonld_invalid: bool,
+    jsonld_too_large: bool,
     mixed_content: u32,
     words: WordCounter,
 }
@@ -420,8 +437,10 @@ impl State {
             images_missing_alt: 0,
             og: OgTags::default(),
             jsonld_buf: None,
+            jsonld_overflow: false,
             jsonld_valid: 0,
             jsonld_invalid: false,
+            jsonld_too_large: false,
             mixed_content: 0,
             words: WordCounter {
                 count: 0,
@@ -435,7 +454,14 @@ impl State {
 
     fn on_text(&mut self, raw: &str) {
         if let Some(buf) = &mut self.jsonld_buf {
-            buf.push_str(raw);
+            if !self.jsonld_overflow {
+                if buf.len() + raw.len() > MAX_JSONLD_BYTES {
+                    self.jsonld_overflow = true;
+                    *buf = String::new();
+                } else {
+                    buf.push_str(raw);
+                }
+            }
             return;
         }
         if let Some(buf) = &mut self.title_buf {
@@ -456,10 +482,22 @@ impl State {
         self.words.feed(raw);
     }
 
+    /// A block element or `<br>` starts: keep words apart in open heading and link text.
+    fn separate_open_text(&mut self) {
+        if let Some((_, buf)) = &mut self.heading {
+            push_capped(buf, " ", MAX_HEADING_CHARS * 4);
+        }
+        if self.anchor_open
+            && let Some(link) = self.links_raw.last_mut()
+        {
+            push_capped(&mut link.anchor, " ", MAX_ANCHOR_CHARS * 4);
+        }
+    }
+
     fn on_meta(&mut self, el: &Element<'_, '_>) {
         let content = || {
             el.get_attribute("content")
-                .map(|c| clean(&c, MAX_TITLE_CHARS))
+                .map(|c| clean_attribute(&c, MAX_TITLE_CHARS))
         };
         if let Some(name) = el.get_attribute("name") {
             match name.trim().to_ascii_lowercase().as_str() {
@@ -542,7 +580,9 @@ impl State {
     fn close_script(&mut self) {
         self.skip_depth = self.skip_depth.saturating_sub(1);
         if let Some(buf) = self.jsonld_buf.take() {
-            if serde_json::from_str::<serde_json::Value>(buf.trim()).is_ok() {
+            if std::mem::take(&mut self.jsonld_overflow) {
+                self.jsonld_too_large = true;
+            } else if serde_json::from_str::<serde::de::IgnoredAny>(buf.trim()).is_ok() {
                 self.jsonld_valid = self.jsonld_valid.saturating_add(1);
             } else {
                 self.jsonld_invalid = true;
@@ -562,9 +602,9 @@ impl State {
         let base = self
             .base_raw
             .as_deref()
-            .and_then(|b| normalize(page_url, &unescape(b)))
+            .and_then(|b| normalize(page_url, &unescape_attribute(b)))
             .unwrap_or_else(|| page_url.clone());
-        let resolve = |raw: &str| normalize(&base, &unescape(raw));
+        let resolve = |raw: &str| normalize(&base, &unescape_attribute(raw));
 
         let links = self
             .links_raw
@@ -580,6 +620,8 @@ impl State {
 
         let jsonld = if self.jsonld_invalid {
             JsonLdStatus::Invalid
+        } else if self.jsonld_too_large {
+            JsonLdStatus::TooLarge
         } else if self.jsonld_valid > 0 {
             JsonLdStatus::Valid(self.jsonld_valid)
         } else {
@@ -621,6 +663,21 @@ fn unescape(raw: &str) -> String {
     htmlize::unescape(raw).into_owned()
 }
 
+/// Attribute values follow different rules: a legacy entity without `;` followed by
+/// `=` or a letter stays as written, so `?a=1&region=us` is not turned into `®ion`.
+fn unescape_attribute(raw: &str) -> String {
+    htmlize::unescape_attribute(raw).into_owned()
+}
+
+fn clean_attribute(raw: &str, max_chars: usize) -> String {
+    let decoded = unescape_attribute(raw);
+    let collapsed = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
+    match collapsed.char_indices().nth(max_chars) {
+        Some((cut, _)) => collapsed[..cut].to_owned(),
+        None => collapsed,
+    }
+}
+
 /// Decodes entities, collapses whitespace and caps the length in characters.
 fn clean(raw: &str, max_chars: usize) -> String {
     let decoded = unescape(raw);
@@ -629,4 +686,157 @@ fn clean(raw: &str, max_chars: usize) -> String {
         Some((cut, _)) => collapsed[..cut].to_owned(),
         None => collapsed,
     }
+}
+
+fn is_block_or_break(tag: &str) -> bool {
+    matches!(
+        tag,
+        "br" | "p"
+            | "div"
+            | "li"
+            | "ul"
+            | "ol"
+            | "dl"
+            | "dt"
+            | "dd"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "section"
+            | "article"
+            | "header"
+            | "footer"
+            | "nav"
+            | "aside"
+            | "main"
+            | "table"
+            | "tr"
+            | "td"
+            | "th"
+            | "thead"
+            | "tbody"
+            | "blockquote"
+            | "figure"
+            | "figcaption"
+            | "hr"
+            | "pre"
+            | "address"
+            | "details"
+            | "summary"
+            | "form"
+            | "fieldset"
+            | "legend"
+            | "option"
+            | "button"
+    )
+}
+
+/// The HTML spec's encoding pre-scan, simplified: the first `<meta>` in the first
+/// 1024 bytes that declares a charset (via `charset` or `http-equiv` + `content`).
+fn prescan_meta_charset(bytes: &[u8]) -> Option<&'static Encoding> {
+    let s = &bytes[..bytes.len().min(PRESCAN_BYTES)];
+    let mut i = 0;
+    while i < s.len() {
+        if s[i..].starts_with(b"<!--") {
+            i = find(s, i + 4, b"-->")? + 3;
+            continue;
+        }
+        let is_meta = s[i] == b'<'
+            && s.len() > i + 5
+            && s[i + 1..i + 5].eq_ignore_ascii_case(b"meta")
+            && matches!(s[i + 5], b' ' | b'\t' | b'\n' | b'\r' | b'\x0c' | b'/');
+        if is_meta {
+            let (attrs, end) = meta_attributes(s, i + 5);
+            if let Some(enc) = charset_from_meta(&attrs) {
+                return Some(match enc.name() {
+                    "UTF-16LE" | "UTF-16BE" => UTF_8,
+                    "x-user-defined" => encoding_rs::WINDOWS_1252,
+                    _ => enc,
+                });
+            }
+            i = end;
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
+fn find(s: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+    s.get(from..)?
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .map(|p| p + from)
+}
+
+fn meta_attributes(s: &[u8], mut i: usize) -> (Vec<(String, String)>, usize) {
+    let mut attrs = Vec::new();
+    loop {
+        while i < s.len() && (s[i].is_ascii_whitespace() || s[i] == b'/') {
+            i += 1;
+        }
+        if i >= s.len() || s[i] == b'>' {
+            return (attrs, i + 1);
+        }
+        let start = i;
+        while i < s.len() && !s[i].is_ascii_whitespace() && !matches!(s[i], b'=' | b'>' | b'/') {
+            i += 1;
+        }
+        let name = String::from_utf8_lossy(&s[start..i]).to_ascii_lowercase();
+        while i < s.len() && s[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let mut value = String::new();
+        if i < s.len() && s[i] == b'=' {
+            i += 1;
+            while i < s.len() && s[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < s.len() && matches!(s[i], b'"' | b'\'') {
+                let quote = s[i];
+                let vstart = i + 1;
+                i = vstart;
+                while i < s.len() && s[i] != quote {
+                    i += 1;
+                }
+                value = String::from_utf8_lossy(&s[vstart..i.min(s.len())]).into_owned();
+                i += 1;
+            } else {
+                let vstart = i;
+                while i < s.len() && !s[i].is_ascii_whitespace() && s[i] != b'>' {
+                    i += 1;
+                }
+                value = String::from_utf8_lossy(&s[vstart..i]).into_owned();
+            }
+        }
+        attrs.push((name, value));
+    }
+}
+
+fn charset_from_meta(attrs: &[(String, String)]) -> Option<&'static Encoding> {
+    let get = |name: &str| {
+        attrs
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    };
+    if let Some(charset) = get("charset") {
+        return Encoding::for_label(charset.trim().as_bytes());
+    }
+    if get("http-equiv").is_some_and(|v| v.trim().eq_ignore_ascii_case("content-type")) {
+        let content = get("content")?;
+        let lower = content.to_ascii_lowercase();
+        let at = lower.find("charset")? + "charset".len();
+        let rest = content[at..].trim_start().strip_prefix('=')?.trim_start();
+        let label: String = rest
+            .trim_start_matches(['"', '\''])
+            .chars()
+            .take_while(|c| !matches!(c, ';' | '"' | '\'' | ' '))
+            .collect();
+        return Encoding::for_label(label.as_bytes());
+    }
+    None
 }

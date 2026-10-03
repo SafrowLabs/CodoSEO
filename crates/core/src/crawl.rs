@@ -83,5 +83,11 @@ pub struct SitemapSummary {
     pub files: Vec<Url>,
     pub url_count: u32,
     pub hash: u64,
+    /// The URL cap was reached.
     pub truncated: bool,
+    /// Sitemap files that could not be fetched or parsed.
+    pub failed_files: u32,
+    /// False when discovery stopped early (file cap or deadline), so the URL
+    /// list may be partial and must not be read as the site shrinking.
+    pub complete: bool,
 }

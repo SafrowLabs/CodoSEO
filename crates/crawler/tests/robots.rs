@@ -111,3 +111,76 @@ async fn server_error_blocks_everything() {
     let (rules, _) = fetch_robots(&fetcher(), &srv.url("/")).await.unwrap();
     assert!(rules.blocks_everything());
 }
+
+// Fixes from the M1 review.
+
+/// 500 KiB of wildcard rules that end in `$` (review C2).
+pub fn hostile_robots_txt() -> Vec<u8> {
+    let mut body = b"User-agent: *\n".to_vec();
+    let mut i = 0;
+    while body.len() < 500 * 1024 {
+        body.extend_from_slice(format!("Disallow: /*a*b*c*d*e*f*g*h*{i}$\n").as_bytes());
+        i += 1;
+    }
+    body
+}
+
+#[test]
+fn hostile_rule_lists_stay_fast() {
+    let started = std::time::Instant::now();
+    let r = RobotsRules::parse(&hostile_robots_txt(), AGENT);
+    for i in 0..200 {
+        r.allowed(&format!("/products/item-{i}?colour=green"));
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn huge_or_odd_crawl_delays_do_not_panic() {
+    for (value, want_ms) in [
+        ("1e30", Some(10_000)),
+        ("99999999999999999999999", Some(10_000)),
+        ("2.5", Some(2_500)),
+        ("inf", None),
+        ("-5", None),
+        ("NaN", None),
+        ("soon", None),
+    ] {
+        let r = RobotsRules::parse(
+            format!("User-agent: *\nCrawl-delay: {value}\n").as_bytes(),
+            AGENT,
+        );
+        assert_eq!(
+            r.crawl_delay().map(|d| d.as_millis()),
+            want_ms,
+            "Crawl-delay: {value}"
+        );
+    }
+}
+
+#[test]
+fn rate_limited_robots_txt_blocks_everything() {
+    assert!(RobotsRules::from_status(429).blocks_everything());
+}
+
+#[test]
+fn versioned_agent_lines_match_our_product_token() {
+    let r = RobotsRules::parse(
+        b"User-agent: *\nDisallow: /\n\nUser-agent: CodoSEObot/0.1\nAllow: /\n",
+        AGENT,
+    );
+    assert!(r.allowed("/anything"));
+}
+
+#[test]
+fn an_oversized_rule_is_skipped_not_the_whole_file() {
+    let body = format!(
+        "User-agent: *\nDisallow: /{}\nDisallow: /private\n",
+        "*a".repeat(30_000)
+    );
+    assert!(!RobotsRules::parse(body.as_bytes(), AGENT).allowed("/private"));
+}

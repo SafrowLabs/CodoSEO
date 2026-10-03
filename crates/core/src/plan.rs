@@ -76,10 +76,12 @@ impl PlanLimits {
                 api_calls_per_day: Some(10_000),
                 email_alerts_only: false,
             },
+            // No plan caps, but finite defaults so a calendar or faceted search
+            // can't crawl forever. Self-hosters can raise them in config.
             Plan::SelfHosted => PlanLimits {
                 max_sites: None,
-                max_pages: None,
-                max_duration: None,
+                max_pages: Some(100_000),
+                max_duration: Some(Duration::from_secs(24 * HOUR)),
                 fastest_schedule: Some(Schedule::Daily),
                 manual_crawls: ManualAllowance::Unlimited,
                 history_days: Some(365),

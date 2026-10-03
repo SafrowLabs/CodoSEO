@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::error::Error as _;
 use std::time::{Duration, Instant};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use codoseo_core::crawl::{AddressPolicy, CrawlLimits, USER_AGENT};
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, LOCATION};
 use reqwest::redirect::Policy;
@@ -192,19 +192,26 @@ impl Fetcher {
         let (body, truncated, read) = match cap {
             None => (None, false, 0),
             Some(cap) => {
-                let mut buf = BytesMut::new();
+                // Size the buffer from Content-Length and never let it grow past
+                // the cap, so a capped body holds `cap` bytes, not the next power of two.
+                let initial = declared_len.map_or(64 * 1024, |len| len as usize).min(cap);
+                let mut buf: Vec<u8> = Vec::with_capacity(initial);
                 let mut truncated = false;
                 while let Some(chunk) = resp.chunk().await.map_err(map_err)? {
-                    let room = cap - buf.len();
-                    if chunk.len() > room {
-                        buf.extend_from_slice(&chunk[..room]);
+                    let take = chunk.len().min(cap - buf.len());
+                    let needed = buf.len() + take;
+                    if needed > buf.capacity() {
+                        let target = (buf.capacity() * 2).max(needed).min(cap);
+                        buf.reserve_exact(target - buf.len());
+                    }
+                    buf.extend_from_slice(&chunk[..take]);
+                    if take < chunk.len() {
                         truncated = true;
                         break;
                     }
-                    buf.extend_from_slice(&chunk);
                 }
                 let read = buf.len() as u64;
-                (Some(buf.freeze()), truncated, read)
+                (Some(Bytes::from(buf)), truncated, read)
             }
         };
 

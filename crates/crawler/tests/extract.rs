@@ -223,3 +223,61 @@ fn never_panics_on_binary_garbage() {
     let e = extract(&page("https://e.test/"), Some("text/html"), &garbage);
     assert!(e.fields.title.is_none());
 }
+
+// Fixes from the M1 review.
+
+fn extract_html(html: &str) -> Extracted {
+    extract(
+        &page("https://northwind.test/"),
+        Some("text/html"),
+        html.as_bytes(),
+    )
+}
+
+#[test]
+fn attribute_urls_keep_legacy_entity_lookalikes() {
+    let e = extract_html(
+        r#"<link rel="canonical" href="/s?q=tent&region=us&section=2"><a href="/p?a=1&copy=2&amp;b=3&not=4">x</a>"#,
+    );
+    assert_eq!(
+        e.fields.canonical.unwrap().as_str(),
+        "https://northwind.test/s?q=tent&region=us&section=2"
+    );
+    assert_eq!(
+        e.links[0].url.as_str(),
+        "https://northwind.test/p?a=1&copy=2&b=3&not=4"
+    );
+}
+
+#[test]
+fn oversized_json_ld_is_reported_as_too_large() {
+    let html = format!(
+        r#"<script type="application/ld+json">[{}[]]</script>"#,
+        "[],".repeat(400_000)
+    );
+    assert_eq!(extract_html(&html).fields.jsonld, JsonLdStatus::TooLarge);
+}
+
+#[test]
+fn finds_a_meta_charset_after_the_title() {
+    let mut html = b"<html><head><title>Caf".to_vec();
+    html.push(0xE9);
+    html.extend_from_slice(b"</title><meta charset=\"windows-1252\"></head><body></body></html>");
+    let whole = extract(&page("https://e.test/"), None, &html);
+    assert_eq!(whole.fields.title.as_deref(), Some("Café"));
+    let mut chunked = Extractor::new(&page("https://e.test/"), None);
+    for b in &html {
+        chunked.write(std::slice::from_ref(b));
+    }
+    assert_eq!(chunked.finish(), whole);
+}
+
+#[test]
+fn heading_and_link_text_keep_word_breaks() {
+    let e = extract_html(
+        r#"<h1>Tents<br>Shelters</h1><a href="/r"><h3>Ridgeline 2P</h3><p>Light tent</p></a><h1>A<h2>B</h2>"#,
+    );
+    assert_eq!(e.fields.h1, vec!["Tents Shelters", "A"]);
+    assert_eq!(e.fields.h2, vec!["B"]);
+    assert_eq!(e.links[0].anchor, "Ridgeline 2P Light tent");
+}
