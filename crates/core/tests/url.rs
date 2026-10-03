@@ -91,3 +91,9 @@ fn hash_is_stable_across_equivalent_spellings() {
         url_hash(&Url::parse("https://example.com/b").unwrap())
     );
 }
+
+#[test]
+fn drops_an_empty_query() {
+    assert_eq!(norm("/a?").as_deref(), Some("https://example.com/a"));
+    assert_eq!(norm("/a?x").as_deref(), Some("https://example.com/a?x"));
+}
