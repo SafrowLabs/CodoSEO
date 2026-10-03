@@ -1,0 +1,39 @@
+---
+source: crates/app/tests/cli.rs
+expression: out
+---
+# CodoSEO report for http://[host]/
+
+- **Health score:** 84 / 100
+- **Checks:** 37 of 44 checks passed
+- **Stop reason:** Completed
+
+## Critical (1)
+
+| Check | Slug | Affected | Examples |
+|---|---|---|---|
+| Page returns a 4xx error | `http_4xx` | 1 page | http://[host]/gone |
+
+## Warning (2)
+
+| Check | Slug | Affected | Examples |
+|---|---|---|---|
+| Page links to a broken URL | `links_to_broken` | 1 page | http://[host]/b |
+| Page is served over HTTP | `not_https` | 3 pages | http://[host]/<br>http://[host]/a<br>http://[host]/b |
+
+## Notice (4)
+
+| Check | Slug | Affected | Examples |
+|---|---|---|---|
+| Canonical URL is missing | `canonical_missing` | 3 pages | http://[host]/<br>http://[host]/a<br>http://[host]/b |
+| Meta description is under 70 characters | `description_too_short` | 3 pages | http://[host]/<br>http://[host]/a<br>http://[host]/b |
+| Page has under 200 words | `thin_content` | 3 pages | http://[host]/<br>http://[host]/a<br>http://[host]/b |
+| Open Graph title or image is missing | `og_missing` | 3 pages | http://[host]/<br>http://[host]/a<br>http://[host]/b |
+
+## Summary
+
+- **Pages:** 4 (3 indexable)
+- **Status:** 2xx 3 · 3xx 0 · 4xx 1 · 5xx 0 · no response 0 · blocked 0
+- **Click depth:** 0: 1 · 1: 1 · 2: 1 · 3: 1
+- **Avg response:** [ms]
+- **Duration:** [s]
