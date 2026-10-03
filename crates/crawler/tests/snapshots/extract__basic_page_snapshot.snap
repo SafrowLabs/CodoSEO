@@ -1,0 +1,35 @@
+---
+source: crates/crawler/tests/extract.rs
+expression: "extract_file(\"basic.html\")"
+---
+fields:
+  title: Tents & Shelters | Northwind
+  title_count: 1
+  meta_description: Backpacking tents & tarps.
+  meta_robots: ~
+  x_robots_tag: ~
+  canonical: "https://northwind.test/tents"
+  hreflang:
+    - - de
+      - "https://northwind.test/de/zelte"
+  h1:
+    - Tents & Shelters
+  h2:
+    - Two person
+    - Family
+  word_count: 16
+  content_hash: 9655661615115690513
+  images_missing_alt: 0
+  og:
+    title: ~
+    description: ~
+    image: ~
+  jsonld: absent
+  mixed_content: 0
+links:
+  - url: "https://northwind.test/tents/ridgeline-2p"
+    anchor: Ridgeline 2P
+    nofollow: false
+  - url: "https://other.test/x"
+    anchor: Partner
+    nofollow: false

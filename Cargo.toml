@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "AGPL-3.0-only"
+repository = "https://github.com/SafrowLabs/codoSEO"
+homepage = "https://codoseo.com"
+
+[workspace.dependencies]
+codoseo-core = { path = "crates/core", version = "0.0.1" }
+url = { version = "2.5.8", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+proptest = "1.11.0"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "gzip", "brotli", "stream"] }
+bytes = "1.12.1"
+futures-util = "0.3.34"
+axum = "0.8.9"
+flate2 = "1.1.10"
+lol_html = "3.0.1"
+encoding_rs = "0.8.42"
+htmlize = { version = "1.1.0", features = ["unescape"] }
+quick-xml = "0.42.0"
+peak_alloc = "0.3.0"
+insta = { version = "1.49.0", features = ["yaml"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
