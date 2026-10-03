@@ -331,6 +331,25 @@ fn redirect_chain_grew() {
 }
 
 #[test]
+fn redirect_chain_grew_with_the_same_target_and_key_hash() {
+    let mut prev = site_at("https://e.com/");
+    edit(&mut prev, "https://e.com/a", |p| {
+        p.status = 301;
+        p.redirect_chain = vec![(301, u("https://e.com/a"))];
+        p.redirect_target = Some(u("https://e.com/b"));
+    });
+    let mut curr = prev.clone();
+    edit(&mut curr, "https://e.com/a", |p| {
+        p.redirect_chain = vec![(301, u("https://e.com/a")), (301, u("https://e.com/x"))];
+    });
+    // The chain length is not part of the key hash.
+    assert_eq!(prev.pages[1].key_hash, curr.pages[1].key_hash);
+    let c = only(diff(&prev, &curr, &none()));
+    assert_eq!(c.kind, ChangeKind::RedirectChainGrew);
+    assert_eq!((c.before.as_str(), c.after.as_str()), ("1", "2"));
+}
+
+#[test]
 fn new_and_removed_urls() {
     let prev = site_at("https://e.com/");
     let mut curr = prev.clone();
@@ -414,6 +433,10 @@ fn robots_rule_change_is_reported() {
         (ChangeKind::RobotsTxtChanged, Severity::Warning)
     );
     assert_eq!(c.url, None);
+    assert_eq!(
+        (c.before.as_str(), c.after.as_str()),
+        ("200", "200 (rules changed)")
+    );
     // Comment-only edits are not reported.
     curr.robots = robots(
         200,

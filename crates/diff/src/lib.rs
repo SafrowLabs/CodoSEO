@@ -17,7 +17,7 @@ use codoseo_core::snapshot::Snapshot;
 use codoseo_core::url::url_hash;
 use url::Url;
 
-use kinds::{PrevPage, is_error, ordinal, page_changes, raise, sitemap_shrank};
+use kinds::{PrevPage, chain_grew, is_error, ordinal, page_changes, raise, sitemap_shrank};
 pub use robots::robots_fingerprint;
 
 /// Pages from the top of the inlink ranking that count as key pages.
@@ -131,6 +131,10 @@ pub fn diff(prev: &Snapshot, curr: &Snapshot, key_pages: &HashSet<u64>) -> Vec<C
     for (hash, page) in &curr_pages {
         match prev_pages.get(hash) {
             Some(old) => {
+                // The chain length is not in the key hash, so it is always checked.
+                if let Some((kind, severity, before, after)) = chain_grew(old.rec, page) {
+                    page_change(*hash, kind, severity, &page.url, before, after);
+                }
                 // Across a move the key hash can't be trusted to be comparable, so compare fields.
                 if !moved && old.rec.key_hash == page.key_hash {
                     continue;

@@ -47,8 +47,8 @@ pub(crate) fn robots_change(
             }
             if p.status == c.status {
                 (
-                    format!("{} rules {:016x}", p.status, robots_fingerprint(&p.body)),
-                    format!("{} rules {:016x}", c.status, robots_fingerprint(&c.body)),
+                    p.status.to_string(),
+                    format!("{} (rules changed)", c.status),
                 )
             } else {
                 (p.status.to_string(), c.status.to_string())

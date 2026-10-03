@@ -6,6 +6,9 @@ use codoseo_core::crawl::SitemapSummary;
 use codoseo_core::page::{Indexability, PageRecord};
 use url::Url;
 
+/// Kind, base severity, before and after.
+pub(crate) type PageChange = (ChangeKind, Severity, String, String);
+
 /// A page from the earlier crawl, with its URLs moved onto the current origin if the site moved.
 pub(crate) struct PrevPage<'a> {
     pub rec: &'a PageRecord,
@@ -62,11 +65,21 @@ fn url_or_none(u: Option<&Url>) -> String {
     u.map_or_else(|| "none".to_owned(), |u| u.as_str().to_owned())
 }
 
+/// The redirect chain got longer. Checked on every matched pair, because the key hash
+/// doesn't include the chain length.
+pub(crate) fn chain_grew(prev: &PageRecord, curr: &PageRecord) -> Option<PageChange> {
+    (curr.redirect_chain.len() > prev.redirect_chain.len()).then(|| {
+        (
+            ChangeKind::RedirectChainGrew,
+            Severity::Notice,
+            prev.redirect_chain.len().to_string(),
+            curr.redirect_chain.len().to_string(),
+        )
+    })
+}
+
 /// What changed on one page: kind, base severity, before and after.
-pub(crate) fn page_changes(
-    prev: &PrevPage<'_>,
-    curr: &PageRecord,
-) -> Vec<(ChangeKind, Severity, String, String)> {
+pub(crate) fn page_changes(prev: &PrevPage<'_>, curr: &PageRecord) -> Vec<PageChange> {
     let mut out = Vec::new();
     let old = prev.rec;
 
@@ -112,14 +125,6 @@ pub(crate) fn page_changes(
             Severity::Notice,
             url_or_none(prev.canonical.as_ref()),
             url_or_none(curr.fields.canonical.as_ref()),
-        ));
-    }
-    if curr.redirect_chain.len() > old.redirect_chain.len() {
-        out.push((
-            ChangeKind::RedirectChainGrew,
-            Severity::Notice,
-            old.redirect_chain.len().to_string(),
-            curr.redirect_chain.len().to_string(),
         ));
     }
     out
