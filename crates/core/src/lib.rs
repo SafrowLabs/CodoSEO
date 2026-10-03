@@ -5,5 +5,6 @@ pub mod check;
 pub mod crawl;
 pub mod page;
 pub mod plan;
+pub mod url;
 
-pub use url::Url;
+pub use ::url::Url;

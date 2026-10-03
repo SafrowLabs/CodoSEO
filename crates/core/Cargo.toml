@@ -10,8 +10,10 @@ homepage.workspace = true
 [dependencies]
 url.workspace = true
 serde.workspace = true
+xxhash-rust.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true
