@@ -254,6 +254,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "htmlize",
+ "httpdate",
  "insta",
  "lol_html",
  "peak_alloc",

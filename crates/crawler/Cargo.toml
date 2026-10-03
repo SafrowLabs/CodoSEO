@@ -22,11 +22,12 @@ serde_json.workspace = true
 xxhash-rust.workspace = true
 quick-xml.workspace = true
 flate2.workspace = true
+httpdate.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
 peak_alloc.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 axum.workspace = true
 flate2.workspace = true
 
