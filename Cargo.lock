@@ -233,6 +233,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "codoseo-checks"
+version = "0.0.1"
+dependencies = [
+ "codoseo-core",
+ "url",
+]
+
+[[package]]
 name = "codoseo-core"
 version = "0.0.1"
 dependencies = [

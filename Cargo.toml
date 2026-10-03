@@ -11,6 +11,7 @@ homepage = "https://codoseo.com"
 
 [workspace.dependencies]
 codoseo-core = { path = "crates/core", version = "0.0.1" }
+codoseo-checks = { path = "crates/checks", version = "0.0.1" }
 codoseo-testkit = { path = "crates/testkit" }
 url = { version = "2.5.8", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
