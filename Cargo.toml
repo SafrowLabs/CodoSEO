@@ -23,6 +23,10 @@ bytes = "1.12.1"
 futures-util = "0.3.34"
 axum = "0.8.9"
 flate2 = "1.1.10"
+lol_html = "3.0.1"
+encoding_rs = "0.8.42"
+htmlize = { version = "1.1.0", features = ["unescape"] }
+insta = { version = "1.49.0", features = ["yaml"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
