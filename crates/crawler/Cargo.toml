@@ -20,6 +20,9 @@ htmlize.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 xxhash-rust.workspace = true
+texting_robots.workspace = true
+quick-xml.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
