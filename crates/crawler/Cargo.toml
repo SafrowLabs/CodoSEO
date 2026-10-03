@@ -13,9 +13,12 @@ url.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
+bytes.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+axum.workspace = true
+flate2.workspace = true
 
 [lints]
 workspace = true
