@@ -26,6 +26,8 @@ struct State {
 pub struct Limiter {
     state: Mutex<State>,
     max_interval: Duration,
+    /// `1 / requests_per_sec`, before any crawl delay or back-off.
+    rate_gap: Duration,
     site: Arc<Semaphore>,
     global: Arc<Semaphore>,
 }
@@ -58,6 +60,7 @@ impl Limiter {
                 paused_until: now,
             }),
             max_interval,
+            rate_gap,
             site: Arc::new(Semaphore::new(p.per_site_connections.max(1) as usize)),
             global,
         }
@@ -65,7 +68,8 @@ impl Limiter {
 
     /// Waits for a site connection, then for this request's start time, then for a
     /// global slot. The start time is reserved before waiting, so concurrent callers
-    /// get evenly spaced slots.
+    /// get evenly spaced slots. A pause set while waiting (a 429 or 503 on another
+    /// connection) still applies: the request then reserves a new slot after it.
     pub async fn acquire(&self) -> Permit {
         let site = self
             .site
@@ -73,13 +77,18 @@ impl Limiter {
             .acquire_owned()
             .await
             .expect("the site semaphore is never closed");
-        let slot = {
-            let mut s = self.lock();
-            let slot = Instant::now().max(s.next_slot).max(s.paused_until);
-            s.next_slot = slot + s.interval;
-            slot
-        };
-        sleep_until(slot).await;
+        loop {
+            let slot = {
+                let mut s = self.lock();
+                let slot = Instant::now().max(s.next_slot).max(s.paused_until);
+                s.next_slot = slot + s.interval;
+                slot
+            };
+            sleep_until(slot).await;
+            if self.lock().paused_until <= Instant::now() {
+                break;
+            }
+        }
         let global = self
             .global
             .clone()
@@ -105,6 +114,18 @@ impl Limiter {
             .unwrap_or_else(|| s.interval.saturating_mul(2))
             .min(MAX_RETRY_AFTER);
         s.paused_until = s.paused_until.max(Instant::now() + pause);
+    }
+
+    /// Applies a `Crawl-delay` learned after creation (robots.txt is read through this
+    /// limiter). The gap becomes the slower of `1 / requests_per_sec` and `delay`, capped
+    /// as in [`Limiter::new`]; a longer gap from a 429/503 back-off is kept.
+    pub fn set_crawl_delay(&self, delay: Option<Duration>) {
+        let base = self
+            .rate_gap
+            .max(delay.unwrap_or(Duration::ZERO))
+            .min(self.max_interval);
+        let mut s = self.lock();
+        s.interval = s.interval.max(base);
     }
 
     /// The current gap between requests.

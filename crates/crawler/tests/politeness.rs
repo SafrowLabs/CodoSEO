@@ -143,3 +143,48 @@ fn retry_after_parsing() {
     assert_eq!(parse_retry_after(&past, now), Some(Duration::ZERO));
     assert_eq!(parse_retry_after("soon", now), None);
 }
+
+#[tokio::test(start_paused = true)]
+async fn pause_also_holds_a_request_already_waiting_for_its_slot() {
+    let l = lim(5.0, None);
+    drop(l.acquire().await); // takes the slot at t0; the next one is t0 + 200 ms
+    let t = Instant::now();
+    let waiting = async {
+        drop(l.acquire().await);
+        t.elapsed()
+    };
+    let pause = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        l.on_response(429, Some(Duration::from_secs(5)));
+    };
+    let (waited, ()) = tokio::join!(waiting, pause);
+    assert!(
+        waited >= Duration::from_millis(100) + Duration::from_secs(5),
+        "waited {waited:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn crawl_delay_can_be_set_after_creation() {
+    let l = lim(1000.0, None);
+    l.set_crawl_delay(Some(Duration::from_secs(2)));
+    assert_eq!(l.interval(), Duration::from_secs(2));
+    assert!(
+        gaps(&l, 3)
+            .await
+            .iter()
+            .all(|g| *g >= Duration::from_secs(2))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn setting_crawl_delay_keeps_a_backoff_and_the_cap() {
+    let l = lim(5.0, None);
+    l.on_response(429, None); // 400 ms
+    l.set_crawl_delay(Some(Duration::from_millis(300)));
+    assert_eq!(l.interval(), Duration::from_millis(400));
+    l.set_crawl_delay(None);
+    assert_eq!(l.interval(), Duration::from_millis(400));
+    l.set_crawl_delay(Some(Duration::from_secs(60)));
+    assert_eq!(l.interval(), Duration::from_secs(10));
+}
