@@ -6,12 +6,16 @@ use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
 
 use super::{
-    change_url, count_text, findings, headline, one_line, severity_label, slug, summary,
+    change_url, clean, count_text, findings, headline, one_line, severity_label, slug, summary,
     write_pairs,
 };
 
 pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
-    writeln!(w, "CodoSEO report for {}\n", audit.start_url)?;
+    writeln!(
+        w,
+        "CodoSEO report for {}\n",
+        clean(audit.start_url.as_str())
+    )?;
     write_pairs(w, "", &headline(audit))?;
 
     let groups = findings(audit);
@@ -38,7 +42,7 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
                 count_text(f)
             )?;
             for url in &f.examples {
-                writeln!(w, "      {url}")?;
+                writeln!(w, "      {}", clean(url.as_str()))?;
             }
         }
     }

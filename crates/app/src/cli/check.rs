@@ -10,7 +10,7 @@ use codoseo_core::page::PageRecord;
 use codoseo_crawler::crawl::inspect_page;
 use url::Url;
 
-use super::output::{severity_label, slug, write_json, write_pairs};
+use super::output::{clean, severity_label, slug, write_json, write_pairs};
 use super::{CliError, EXIT_OK, Outcome, PlainFormat};
 
 #[derive(Debug, Args)]
@@ -79,10 +79,10 @@ fn write_table(w: &mut impl Write, p: &PageRecord) -> std::io::Result<()> {
         writeln!(w, "  none")?;
     }
     for (status, url) in &p.redirect_chain {
-        writeln!(w, "  {status}  {url}")?;
+        writeln!(w, "  {status}  {}", clean(url.as_str()))?;
     }
     if let Some(target) = &p.redirect_target {
-        writeln!(w, "  → {target}")?;
+        writeln!(w, "  → {}", clean(target.as_str()))?;
     }
 
     let mut issues: Vec<_> = p

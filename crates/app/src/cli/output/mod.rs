@@ -21,6 +21,14 @@ mod table;
 const EXAMPLES: usize = 3;
 const SEVERITIES: [Severity; 3] = [Severity::Critical, Severity::Warning, Severity::Notice];
 
+/// Crawled text made safe to print: C0 controls (including ESC, BEL, tab and newline), DEL
+/// and the C1 controls U+0080 to U+009F are dropped, so a page can't send escape sequences
+/// to the terminal. Every crawled string in the table, markdown and CSV output goes through
+/// this; JSON output stays raw because serde escapes control characters.
+pub fn clean(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// The serde (snake_case) name of a plain enum value.
 pub fn slug<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
@@ -49,7 +57,7 @@ pub fn write_pairs(
         .max()
         .unwrap_or(0);
     for (label, value) in pairs {
-        writeln!(w, "{indent}{label:<width$}  {value}")?;
+        writeln!(w, "{indent}{label:<width$}  {}", clean(value))?;
     }
     Ok(())
 }
@@ -66,8 +74,8 @@ pub fn stop_text(stop: &StopReason) -> String {
         StopReason::Completed => "Completed".to_owned(),
         StopReason::PageLimit => "Page limit reached".to_owned(),
         StopReason::TimeLimit => "Time limit reached".to_owned(),
-        StopReason::Unreachable(why) => format!("Site unreachable ({why})"),
-        StopReason::Blocked(why) => format!("Blocked ({why})"),
+        StopReason::Unreachable(why) => format!("Site unreachable ({})", clean(why)),
+        StopReason::Blocked(why) => format!("Blocked ({})", clean(why)),
         StopReason::RobotsBlocked => "Blocked by robots.txt".to_owned(),
     }
 }
@@ -214,14 +222,39 @@ pub fn write_changes(
 }
 
 pub(super) fn one_line(text: &str) -> String {
-    if text.is_empty() {
-        return "(none)".to_owned();
+    let line = clean(&text.split_whitespace().collect::<Vec<_>>().join(" "));
+    if line.is_empty() {
+        "(none)".to_owned()
+    } else {
+        line
     }
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub(super) fn change_url(c: &Change) -> String {
     c.url
         .as_ref()
-        .map_or_else(|| "-".to_owned(), Url::to_string)
+        .map_or_else(|| "-".to_owned(), |u| clean(u.as_str()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_drops_c0_del_and_c1_controls_and_keeps_text() {
+        assert_eq!(clean("Evil\u{1b}[31mRed"), "Evil[31mRed");
+        assert_eq!(
+            clean("a\u{0}b\u{7}c\u{7f}d\u{85}e\u{9b}f\u{9f}g"),
+            "abcdefg"
+        );
+        assert_eq!(clean("tab\there\nline\r"), "tabhereline");
+        assert_eq!(clean("Zürich → 東京 \u{a0}ok"), "Zürich → 東京 \u{a0}ok");
+    }
+
+    #[test]
+    fn one_line_collapses_whitespace_then_cleans() {
+        assert_eq!(one_line("a \n  b\u{1b}c"), "a bc");
+        assert_eq!(one_line(""), "(none)");
+        assert_eq!(one_line("\u{1b}"), "(none)");
+    }
 }

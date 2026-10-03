@@ -9,7 +9,7 @@ use codoseo_crawler::robots::fetch_robots;
 use serde::Serialize;
 use url::Url;
 
-use super::output::{write_json, write_pairs};
+use super::output::{clean, write_json, write_pairs};
 use super::{CliError, EXIT_OK, Outcome, PlainFormat};
 
 #[derive(Debug, Args)]
@@ -79,7 +79,7 @@ fn write_table(w: &mut impl Write, r: &RobotsReport) -> std::io::Result<()> {
     ];
     write_pairs(w, "", &pairs)?;
     for sitemap in &r.sitemaps {
-        writeln!(w, "  {sitemap}")?;
+        writeln!(w, "  {}", clean(sitemap))?;
     }
     Ok(())
 }

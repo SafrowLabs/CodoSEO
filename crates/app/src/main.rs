@@ -22,7 +22,7 @@ fn main() -> ExitCode {
     match runtime.block_on(cli::run(args)) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
-            eprintln!("error: {e}");
+            eprintln!("error: {}", cli::clean(&e.to_string()));
             ExitCode::from(2)
         }
     }

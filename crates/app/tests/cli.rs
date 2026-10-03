@@ -447,3 +447,111 @@ fn bad_arguments_exit_2() {
         .code(2);
     codoseo().args(["bogus"]).assert().code(2);
 }
+
+/// A page whose text fields are hostile: spreadsheet formulas and terminal escapes.
+fn hostile_page(title: &str, description: &str, h1: &str) -> Page {
+    Page::html(&format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title>\
+         <meta name=\"description\" content=\"{description}\"></head>\
+         <body><h1>{h1}</h1></body></html>"
+    ))
+}
+
+#[test]
+fn csv_neutralises_spreadsheet_formulas_in_text_columns_only() {
+    let url = serve(SiteBuilder::new().page(
+        "/",
+        hostile_page(
+            "=HYPERLINK(\"http://x\",\"y\")",
+            "-2+3 for the price",
+            "@SUM(A1)",
+        ),
+    ));
+    let out = run(["crawl", url.as_str(), "--rps", "50", "--format", "csv"]);
+    let mut reader = csv::Reader::from_reader(out.as_bytes());
+    let row = reader
+        .records()
+        .next()
+        .expect("a row")
+        .expect("a valid row");
+    assert_eq!(&row[3], "'=HYPERLINK(\"http://x\",\"y\")");
+    assert_eq!(&row[4], "'-2+3 for the price");
+    assert_eq!(&row[5], "'@SUM(A1)");
+    // Other columns are untouched, including a URL and a negative-looking number column.
+    assert_eq!(&row[0], url.as_str());
+    assert_eq!(&row[1], "200");
+}
+
+#[test]
+fn terminal_escapes_in_crawled_text_never_reach_stdout() {
+    let url = serve(SiteBuilder::new().page(
+        "/",
+        hostile_page(
+            "Evil\u{1b}[31mRed",
+            "Desc\u{7}with\u{9b}bell",
+            "Head\u{1b}]0;x\u{7}ing",
+        ),
+    ));
+    let has_escape = |bytes: &[u8]| bytes.iter().any(|b| *b == 0x1b || *b == 0x07);
+
+    let check = run(["check", url.as_str()]);
+    assert!(!has_escape(check.as_bytes()), "{check:?}");
+    assert!(!check.contains('\u{9b}'), "{check:?}");
+    assert!(check.contains("Evil[31mRed"), "{check:?}");
+
+    for format in ["md", "table", "csv"] {
+        let out = run(["crawl", url.as_str(), "--rps", "50", "--format", format]);
+        assert!(!has_escape(out.as_bytes()), "{format}: {out:?}");
+        assert!(!out.contains('\u{9b}'), "{format}: {out:?}");
+    }
+    let csv = run(["crawl", url.as_str(), "--rps", "50", "--format", "csv"]);
+    assert!(csv.contains("Evil[31mRed"), "{csv:?}");
+
+    // JSON stays raw: serde escapes the control character and the value round-trips.
+    let json = run(["check", url.as_str(), "--format", "json"]);
+    assert!(json.contains("\\u001b"), "{json}");
+    let record: serde_json::Value = serde_json::from_str(&json).expect("json");
+    assert_eq!(record["fields"]["title"], "Evil\u{1b}[31mRed");
+}
+
+#[test]
+fn terminal_escapes_in_diffed_values_never_reach_stdout() {
+    let url = serve(SiteBuilder::new().page(
+        "/",
+        Page::sequence(vec![
+            hostile_page("Calm title for the first crawl", "d", "h"),
+            hostile_page("Evil\u{1b}[31mRed title after", "d", "h"),
+        ]),
+    ));
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let a = dir.path().join("a.json");
+    let b = dir.path().join("b.json");
+    for file in [&a, &b] {
+        crawl(&url)
+            .args(["--format", "json", "-o"])
+            .arg(file)
+            .assert()
+            .success();
+    }
+    for format in ["table", "md"] {
+        let out = run([
+            OsStr::new("diff"),
+            a.as_os_str(),
+            b.as_os_str(),
+            OsStr::new("--format"),
+            OsStr::new(format),
+        ]);
+        assert!(out.contains("title_changed"), "{out}");
+        assert!(out.contains("Evil[31mRed"), "{format}: {out:?}");
+        assert!(!out.contains('\u{1b}'), "{format}: {out:?}");
+    }
+    // JSON keeps the raw value, escaped.
+    let json = run([
+        OsStr::new("diff"),
+        a.as_os_str(),
+        b.as_os_str(),
+        OsStr::new("--format"),
+        OsStr::new("json"),
+    ]);
+    assert!(json.contains("\\u001b"), "{json}");
+}

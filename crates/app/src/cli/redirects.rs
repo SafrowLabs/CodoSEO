@@ -8,7 +8,7 @@ use codoseo_crawler::fetch::{FetchError, Fetcher, FetcherConfig, Hop};
 use serde::Serialize;
 use url::Url;
 
-use super::output::write_json;
+use super::output::{clean, write_json};
 use super::{EXIT_OK, Outcome, PlainFormat};
 
 #[derive(Debug, Args)]
@@ -79,10 +79,10 @@ fn settled_not(chain: Vec<Hop>, problem: &'static str) -> RedirectReport {
 
 fn write_table(w: &mut impl Write, r: &RedirectReport) -> std::io::Result<()> {
     for hop in &r.hops {
-        writeln!(w, "{}  {}", hop.status, hop.url)?;
+        writeln!(w, "{}  {}", hop.status, clean(hop.url.as_str()))?;
     }
     if let (Some(status), Some(url)) = (r.final_status, &r.final_url) {
-        writeln!(w, "{status}  {url}")?;
+        writeln!(w, "{status}  {}", clean(url.as_str()))?;
     }
     match r.problem {
         Some("redirect_loop") => {

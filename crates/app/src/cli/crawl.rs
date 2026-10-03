@@ -121,7 +121,7 @@ pub async fn run(args: CrawlArgs) -> Outcome {
 
     // A crawl that could not run says so after its report, and that wins over --fail-on.
     if let Some(message) = stop_message(&audit.snapshot.stop) {
-        eprintln!("crawl stopped: {message}");
+        eprintln!("crawl stopped: {}", super::clean(&message));
         return Ok(EXIT_RUNTIME);
     }
     let failed = args.fail_on.is_some_and(|threshold| {

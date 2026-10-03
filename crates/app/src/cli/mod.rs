@@ -15,6 +15,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use codoseo_core::check::Severity;
 
 /// What a command did: its exit code, or the reason it could not run.
+pub use output::clean;
+
 pub type Outcome = Result<u8, CliError>;
 
 pub const EXIT_OK: u8 = 0;

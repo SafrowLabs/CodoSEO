@@ -5,14 +5,20 @@ use std::io::Write;
 use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
 
-use super::{change_url, count_text, findings, headline, one_line, severity_label, slug, summary};
+use super::{
+    change_url, clean, count_text, findings, headline, one_line, severity_label, slug, summary,
+};
 
 fn md_cell(text: &str) -> String {
-    text.replace('|', "\\|").replace(['\n', '\r'], " ")
+    clean(text).replace('|', "\\|")
 }
 
 pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
-    writeln!(w, "# CodoSEO report for {}\n", audit.start_url)?;
+    writeln!(
+        w,
+        "# CodoSEO report for {}\n",
+        clean(audit.start_url.as_str())
+    )?;
     for (label, value) in headline(audit) {
         writeln!(w, "- **{label}:** {value}")?;
     }
