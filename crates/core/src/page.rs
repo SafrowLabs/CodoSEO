@@ -165,22 +165,34 @@ fn indexability_code(i: Indexability) -> u8 {
 /// Bots whose scoped robots directives (`googlebot: noindex`) apply to us.
 const OUR_AGENTS: [&str; 2] = ["codoseobot", "googlebot"];
 
+/// Directives that carry a value after a colon; these are not agent prefixes.
+const VALUE_DIRECTIVES: [&str; 4] = [
+    "unavailable_after",
+    "max-snippet",
+    "max-image-preview",
+    "max-video-preview",
+];
+
 /// True when a robots directive list (meta robots or `X-Robots-Tag`) contains one of `words`
-/// for us. A `bot: directive` token counts only for `codoseobot` and `googlebot`.
+/// for us. Follows Google's rules: an `agent:` prefix scopes every following comma-separated
+/// directive until the next prefix, directives before any prefix apply to all bots, and only
+/// `codoseobot` and `googlebot` scopes apply to us.
 fn has_directive(value: Option<&str>, words: [&str; 2]) -> bool {
     let Some(value) = value else { return false };
-    value.to_ascii_lowercase().split(',').any(|token| {
+    let mut applies = true;
+    for token in value.to_ascii_lowercase().split(',') {
         let directive = match token.split_once(':') {
-            Some((agent, directive)) => {
-                if !OUR_AGENTS.contains(&agent.trim()) {
-                    return false;
-                }
-                directive
+            Some((name, rest)) if !VALUE_DIRECTIVES.contains(&name.trim()) => {
+                applies = OUR_AGENTS.contains(&name.trim());
+                rest
             }
-            None => token,
+            _ => token,
         };
-        words.contains(&directive.trim())
-    })
+        if applies && words.contains(&directive.trim()) {
+            return true;
+        }
+    }
+    false
 }
 
 /// `noindex` or `none` in the meta robots tag or the `X-Robots-Tag` header.

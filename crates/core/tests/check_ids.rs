@@ -28,6 +28,60 @@ fn slug_matches_serde_name_for_every_check() {
     }
 }
 
+/// The persisted bit of every check. Never edit an existing row; new checks are appended.
+const PINNED: [(&str, u8); 44] = [
+    ("http_4xx", 0),
+    ("http_5xx", 1),
+    ("fetch_failed", 2),
+    ("redirect_loop", 3),
+    ("redirected", 4),
+    ("redirect_chain", 5),
+    ("noindex", 6),
+    ("canonicalised", 7),
+    ("canonical_missing", 8),
+    ("blocked_by_robots", 9),
+    ("canonical_to_non_200", 10),
+    ("robots_blocks_site", 11),
+    ("title_missing", 12),
+    ("title_too_long", 13),
+    ("title_too_short", 14),
+    ("title_multiple", 15),
+    ("title_duplicate", 16),
+    ("description_missing", 17),
+    ("description_too_long", 18),
+    ("description_too_short", 19),
+    ("description_duplicate", 20),
+    ("h1_missing", 21),
+    ("h1_multiple", 22),
+    ("h1_duplicate", 23),
+    ("thin_content", 24),
+    ("content_duplicate", 25),
+    ("images_missing_alt", 26),
+    ("links_to_broken", 27),
+    ("links_to_redirect", 28),
+    ("orphan", 29),
+    ("no_internal_outlinks", 30),
+    ("nofollow_internal_links", 31),
+    ("deep_page", 32),
+    ("sitemap_non_200", 33),
+    ("sitemap_noindex", 34),
+    ("sitemap_canonicalised", 35),
+    ("not_in_sitemap", 36),
+    ("sitemap_missing", 37),
+    ("mixed_content", 38),
+    ("not_https", 39),
+    ("slow_response", 40),
+    ("og_missing", 41),
+    ("jsonld_invalid", 42),
+    ("hreflang_missing_self", 43),
+];
+
+#[test]
+fn every_slug_keeps_its_persisted_bit() {
+    let actual: Vec<(&str, u8)> = CheckId::ALL.iter().map(|c| (c.slug(), c.bit())).collect();
+    assert_eq!(actual, PINNED);
+}
+
 #[test]
 fn stable_values_never_move() {
     assert_eq!(CheckId::Http4xx as u8, 0);

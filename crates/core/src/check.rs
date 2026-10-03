@@ -16,15 +16,15 @@ pub enum Severity {
 pub struct IssueBits(pub u64);
 
 macro_rules! check_ids {
-    ($($variant:ident = $slug:literal,)+) => {
+    ($($variant:ident = $id:literal => $slug:literal,)+) => {
         /// Every check, with its stable ID. The value is the bit in `IssueBits` and is never
-        /// reused; new checks are appended. The slug is the serde name.
+        /// reused; new checks are appended with the next number. The slug is the serde name.
         #[repr(u8)]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub enum CheckId {
             $(
                 #[serde(rename = $slug)]
-                $variant,
+                $variant = $id,
             )+
         }
 
@@ -43,62 +43,65 @@ macro_rules! check_ids {
 }
 
 check_ids! {
-    Http4xx = "http_4xx",
-    Http5xx = "http_5xx",
-    FetchFailed = "fetch_failed",
-    RedirectLoop = "redirect_loop",
-    Redirected = "redirected",
-    RedirectChain = "redirect_chain",
-    Noindex = "noindex",
-    Canonicalised = "canonicalised",
-    CanonicalMissing = "canonical_missing",
-    BlockedByRobots = "blocked_by_robots",
-    CanonicalToNon200 = "canonical_to_non_200",
-    RobotsBlocksSite = "robots_blocks_site",
-    TitleMissing = "title_missing",
-    TitleTooLong = "title_too_long",
-    TitleTooShort = "title_too_short",
-    TitleMultiple = "title_multiple",
-    TitleDuplicate = "title_duplicate",
-    DescriptionMissing = "description_missing",
-    DescriptionTooLong = "description_too_long",
-    DescriptionTooShort = "description_too_short",
-    DescriptionDuplicate = "description_duplicate",
-    H1Missing = "h1_missing",
-    H1Multiple = "h1_multiple",
-    H1Duplicate = "h1_duplicate",
-    ThinContent = "thin_content",
-    ContentDuplicate = "content_duplicate",
-    ImagesMissingAlt = "images_missing_alt",
-    LinksToBroken = "links_to_broken",
-    LinksToRedirect = "links_to_redirect",
-    Orphan = "orphan",
-    NoInternalOutlinks = "no_internal_outlinks",
-    NofollowInternalLinks = "nofollow_internal_links",
-    DeepPage = "deep_page",
-    SitemapNon200 = "sitemap_non_200",
-    SitemapNoindex = "sitemap_noindex",
-    SitemapCanonicalised = "sitemap_canonicalised",
-    NotInSitemap = "not_in_sitemap",
-    SitemapMissing = "sitemap_missing",
-    MixedContent = "mixed_content",
-    NotHttps = "not_https",
-    SlowResponse = "slow_response",
-    OgMissing = "og_missing",
-    JsonldInvalid = "jsonld_invalid",
-    HreflangMissingSelf = "hreflang_missing_self",
+    Http4xx = 0 => "http_4xx",
+    Http5xx = 1 => "http_5xx",
+    FetchFailed = 2 => "fetch_failed",
+    RedirectLoop = 3 => "redirect_loop",
+    Redirected = 4 => "redirected",
+    RedirectChain = 5 => "redirect_chain",
+    Noindex = 6 => "noindex",
+    Canonicalised = 7 => "canonicalised",
+    CanonicalMissing = 8 => "canonical_missing",
+    BlockedByRobots = 9 => "blocked_by_robots",
+    CanonicalToNon200 = 10 => "canonical_to_non_200",
+    RobotsBlocksSite = 11 => "robots_blocks_site",
+    TitleMissing = 12 => "title_missing",
+    TitleTooLong = 13 => "title_too_long",
+    TitleTooShort = 14 => "title_too_short",
+    TitleMultiple = 15 => "title_multiple",
+    TitleDuplicate = 16 => "title_duplicate",
+    DescriptionMissing = 17 => "description_missing",
+    DescriptionTooLong = 18 => "description_too_long",
+    DescriptionTooShort = 19 => "description_too_short",
+    DescriptionDuplicate = 20 => "description_duplicate",
+    H1Missing = 21 => "h1_missing",
+    H1Multiple = 22 => "h1_multiple",
+    H1Duplicate = 23 => "h1_duplicate",
+    ThinContent = 24 => "thin_content",
+    ContentDuplicate = 25 => "content_duplicate",
+    ImagesMissingAlt = 26 => "images_missing_alt",
+    LinksToBroken = 27 => "links_to_broken",
+    LinksToRedirect = 28 => "links_to_redirect",
+    Orphan = 29 => "orphan",
+    NoInternalOutlinks = 30 => "no_internal_outlinks",
+    NofollowInternalLinks = 31 => "nofollow_internal_links",
+    DeepPage = 32 => "deep_page",
+    SitemapNon200 = 33 => "sitemap_non_200",
+    SitemapNoindex = 34 => "sitemap_noindex",
+    SitemapCanonicalised = 35 => "sitemap_canonicalised",
+    NotInSitemap = 36 => "not_in_sitemap",
+    SitemapMissing = 37 => "sitemap_missing",
+    MixedContent = 38 => "mixed_content",
+    NotHttps = 39 => "not_https",
+    SlowResponse = 40 => "slow_response",
+    OgMissing = 41 => "og_missing",
+    JsonldInvalid = 42 => "jsonld_invalid",
+    HreflangMissingSelf = 43 => "hreflang_missing_self",
 }
 
-// IDs are dense from 0, unique and fit in the 64-bit mask; a bad edit fails the build.
+// IDs are unique, below 64, and `ALL` lists them in ascending order. Each ID is written
+// out in the table above, so moving or renumbering a variant is a visible edit that the
+// pinned table in tests/check_ids.rs catches.
 const _: () = {
     let mut i = 0;
     while i < CheckId::ALL.len() {
-        let value = CheckId::ALL[i] as u8;
-        assert!(value < 64, "check ID is 64 or more");
-        assert!(
-            value as usize == i,
-            "check IDs must be dense, unique and in order"
-        );
+        assert!((CheckId::ALL[i] as u8) < 64, "check ID is 64 or more");
+        if i > 0 {
+            assert!(
+                (CheckId::ALL[i - 1] as u8) < (CheckId::ALL[i] as u8),
+                "check IDs must be unique and in ascending order"
+            );
+        }
         i += 1;
     }
 };
@@ -110,7 +113,7 @@ impl CheckId {
     }
 
     pub fn from_bit(bit: u8) -> Option<CheckId> {
-        CheckId::ALL.get(usize::from(bit)).copied()
+        CheckId::ALL.into_iter().find(|c| c.bit() == bit)
     }
 }
 
