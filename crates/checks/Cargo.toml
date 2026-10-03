@@ -11,5 +11,8 @@ homepage.workspace = true
 codoseo-core.workspace = true
 url.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true
