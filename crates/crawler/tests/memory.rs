@@ -141,7 +141,7 @@ fn sitemap_index_fan_out_keeps_memory_flat() {
     let f = fetcher();
     let seeds = [srv.url("/index.xml")];
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    let (found, peak) = peak_during(|| rt.block_on(discover(&f, &seeds, 50_000, deadline)));
+    let (found, peak) = peak_during(|| rt.block_on(discover(&f, None, &seeds, 50_000, deadline)));
     assert!(found.urls.is_empty());
     assert!(peak < 40 * MB, "peak {} MB", peak / MB);
 }

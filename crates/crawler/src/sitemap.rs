@@ -18,6 +18,7 @@ use url::Url;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::fetch::Fetcher;
+use crate::politeness::Limiter;
 
 /// The sitemap protocol's size limit, also applied after decompression.
 const MAX_SITEMAP_BYTES: usize = 50 * 1024 * 1024;
@@ -196,9 +197,11 @@ impl<R: Read> Read for LossyUtf8<R> {
 }
 
 /// Fetches the seed sitemaps, follows indexes up to depth 2, and returns up to
-/// `max_urls` unique page URLs. Stops at `deadline` with what it has.
+/// `max_urls` unique page URLs. Stops at `deadline` with what it has. With a `limiter`,
+/// every sitemap fetch waits for a permit first.
 pub async fn discover(
     fetcher: &Fetcher,
+    limiter: Option<&Limiter>,
     seeds: &[Url],
     max_urls: u32,
     deadline: Instant,
@@ -229,7 +232,13 @@ pub async fn discover(
             break;
         }
         attempts += 1;
-        let fetch = fetcher.fetch_raw(&sitemap_url, MAX_SITEMAP_BYTES);
+        let fetch = async {
+            let _permit = match limiter {
+                Some(l) => Some(l.acquire().await),
+                None => None,
+            };
+            fetcher.fetch_raw(&sitemap_url, MAX_SITEMAP_BYTES).await
+        };
         let res = match timeout_at(deadline, fetch).await {
             Err(_) => {
                 stopped = true;

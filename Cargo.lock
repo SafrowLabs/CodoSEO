@@ -251,6 +251,7 @@ dependencies = [
  "axum",
  "bytes",
  "codoseo-core",
+ "codoseo-testkit",
  "encoding_rs",
  "flate2",
  "htmlize",
@@ -266,6 +267,16 @@ dependencies = [
  "tokio",
  "url",
  "xxhash-rust",
+]
+
+[[package]]
+name = "codoseo-testkit"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "codoseo-core",
+ "flate2",
+ "tokio",
 ]
 
 [[package]]

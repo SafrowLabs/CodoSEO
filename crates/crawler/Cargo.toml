@@ -25,6 +25,7 @@ flate2.workspace = true
 httpdate.workspace = true
 
 [dev-dependencies]
+codoseo-testkit.workspace = true
 insta.workspace = true
 peak_alloc.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
