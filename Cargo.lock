@@ -280,6 +280,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codoseo-diff"
+version = "0.0.1"
+dependencies = [
+ "codoseo-core",
+ "url",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "codoseo-testkit"
 version = "0.0.1"
 dependencies = [
