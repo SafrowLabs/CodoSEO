@@ -5,19 +5,18 @@
 //! 429 or 503), then robots.txt again when the start page moved to another origin.
 //! Every request goes through the limiter.
 
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
 use codoseo_core::output::StopReason;
 use codoseo_core::url::normalize;
-use reqwest::header::RETRY_AFTER;
 use tokio::time::Instant;
 use url::Url;
 
 use crate::crawl::CrawlError;
 use crate::fetch::{FetchError, FetchResult, Fetcher};
 use crate::guard::check_url;
-use crate::politeness::{Limiter, parse_retry_after};
+use crate::politeness::{Limiter, retry_after_of};
 use crate::robots::{RobotsRules, fetch_robots};
 use crate::sitemap::discover;
 
@@ -170,12 +169,7 @@ async fn fetch_start(
     if !matches!(res.status, 429 | 503) {
         return first;
     }
-    let retry_after = res
-        .headers
-        .get(RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| parse_retry_after(v, SystemTime::now()));
-    limiter.on_response(res.status, retry_after);
+    limiter.on_response(res.status, retry_after_of(&res.headers));
     let _permit = limiter.acquire().await;
     fetcher.fetch(url).await
 }
@@ -194,7 +188,7 @@ fn sitemap_seeds(origin: &Url, rules: &RobotsRules) -> Vec<Url> {
 }
 
 /// Scheme, host and port of `url`, with path `/`.
-fn origin_of(url: &Url) -> Url {
+pub(crate) fn origin_of(url: &Url) -> Url {
     let mut origin = url.clone();
     origin.set_path("/");
     origin.set_query(None);

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 use codoseo_core::crawl::Politeness;
+use reqwest::header::{HeaderMap, RETRY_AFTER};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, sleep_until};
 
@@ -148,4 +149,12 @@ pub fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
     }
     let at = httpdate::parse_http_date(value).ok()?;
     Some(at.duration_since(now).unwrap_or(Duration::ZERO))
+}
+
+/// The `Retry-After` of a response, read against the current wall clock.
+pub(crate) fn retry_after_of(headers: &HeaderMap) -> Option<Duration> {
+    headers
+        .get(RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| parse_retry_after(v, SystemTime::now()))
 }

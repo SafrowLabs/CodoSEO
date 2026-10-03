@@ -254,6 +254,7 @@ dependencies = [
  "codoseo-testkit",
  "encoding_rs",
  "flate2",
+ "futures-util",
  "htmlize",
  "httpdate",
  "insta",
