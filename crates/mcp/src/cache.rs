@@ -17,6 +17,7 @@ pub enum CacheError {
     Corrupt(String, codoseo_core::audit::AuditError),
 }
 
+#[derive(Clone)]
 pub struct AuditCache {
     dir: PathBuf,
 }
