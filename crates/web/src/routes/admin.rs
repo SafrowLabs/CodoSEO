@@ -83,23 +83,24 @@ fn label(kind: EventKind) -> &'static str {
     }
 }
 
-/// `66.7%`, or `100%` without a pointless `.0`.
-fn percent(part: i64, whole: i64) -> String {
-    let p = fmt::pct1(part.max(0) as u64, whole.max(0) as u64);
-    format!("{}%", p.strip_suffix(".0").unwrap_or(&p))
-}
-
 fn table(title: &'static str, counts: &[FunnelCount]) -> FunnelTable {
     let rows = counts
         .iter()
         .enumerate()
         .map(|(i, c)| {
             let conversion = match i {
-                // RankOrg clicks aren't a step after the last one, they branch off the report.
                 0 => "—".to_owned(),
-                _ if c.kind == EventKind::RankorgClick => "—".to_owned(),
+                // RankOrg clicks branch off the report, and the 4-week step needs the
+                // scheduler (M7): neither is a step after the one before it yet.
+                _ if matches!(
+                    c.kind,
+                    EventKind::RankorgClick | EventKind::ActiveAfter4Weeks
+                ) =>
+                {
+                    "—".to_owned()
+                }
                 _ if counts[i - 1].unique == 0 => "—".to_owned(),
-                _ => percent(c.unique, counts[i - 1].unique),
+                _ => fmt::percent(c.unique, counts[i - 1].unique),
             };
             FunnelRow {
                 kind: c.kind.as_str(),

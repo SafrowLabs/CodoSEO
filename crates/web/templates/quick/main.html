@@ -13,7 +13,7 @@
     <div class="ring" style="--p: {{ done.score }}"><b class="{{ done.tone }}">{{ done.score }}</b></div>
     <div>
       <h2>Health score {{ done.score }} out of 100</h2>
-      <p class="muted">{{ done.checks_chip }} · {{ done.pages }} pages crawled</p>
+      <p class="muted">{{ done.checks_chip }} · {{ done.pages_crawled }}</p>
       {% if let Some(chip) = done.stop_chip %}<p class="chip" style="margin-top:8px;display:inline-block">{{ chip }}. A full crawl covers up to 500 pages.</p>{% endif %}
     </div>
   </div>
@@ -27,7 +27,7 @@
       <li class="issue-row {{ i.severity }}">
         <span class="q-sev {{ i.severity }}">{{ i.label }}</span>
         <span class="t">{{ i.title }}</span>
-        <span class="n mono">{{ i.count }} pages · {{ i.pct }}</span>
+        <span class="n mono">{{ i.detail }}</span>
       </li>
       {% endfor %}
       {% if let Some(lock) = done.locked %}

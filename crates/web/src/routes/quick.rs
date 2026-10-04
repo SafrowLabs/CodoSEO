@@ -198,8 +198,8 @@ pub struct IssueLine {
     pub severity: &'static str,
     pub label: &'static str,
     pub title: &'static str,
-    pub count: String,
-    pub pct: String,
+    /// `12 pages · 4.8%`
+    pub detail: String,
 }
 
 pub struct DoneView {
@@ -207,7 +207,8 @@ pub struct DoneView {
     /// `c-ok`, `c-warn` or `c-err`.
     pub tone: &'static str,
     pub checks_chip: String,
-    pub pages: String,
+    /// `1,284 pages crawled`
+    pub pages_crawled: String,
     pub stop_chip: Option<String>,
     pub issues: Vec<IssueLine>,
     /// `3 more issues`, when there are more than the preview shows.
@@ -404,8 +405,11 @@ fn done_view(
                 severity,
                 label,
                 title: d.title,
-                count: fmt::thousands(n),
-                pct: format!("{}%", fmt::pct1(u64::from(n), pages)),
+                detail: format!(
+                    "{} · {}",
+                    fmt::pages(n),
+                    fmt::percent(i64::from(n), pages as i64)
+                ),
             }
         })
         .collect();
@@ -430,7 +434,7 @@ fn done_view(
             _ => "c-err",
         },
         checks_chip: format!("{passed} of {total} checks passed"),
-        pages: fmt::thousands(summary.report_summary.pages),
+        pages_crawled: format!("{} crawled", fmt::pages(summary.report_summary.pages)),
         stop_chip,
         issues,
         locked: (more > 0)
