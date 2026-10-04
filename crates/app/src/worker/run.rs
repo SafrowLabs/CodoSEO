@@ -106,6 +106,17 @@ async fn run_one_crawl(
     crawl_queue: &CrawlQueue,
     claimed: ClaimedCrawl,
 ) -> Result<(), String> {
+    // Test-only panic seam: lets integration tests prove a panicking crawl is isolated to its
+    // own task without needing the real crawler to panic. Never set by production code.
+    if claimed
+        .crawl_settings
+        .get("test_panic_before_crawl")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        panic!("test_panic_before_crawl");
+    }
+
     let start_url = Url::parse(&claimed.start_url).map_err(|e| format!("bad start URL: {e}"))?;
     let max_pages = claimed
         .crawl_settings
