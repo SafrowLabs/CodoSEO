@@ -137,18 +137,28 @@ impl CrawlQueue {
     }
 
     /// Moves `running` crawls whose heartbeat is older than `older_than` back to `queued` (the
-    /// dead-worker path), and returns how many rows moved.
+    /// dead-worker path), and returns how many rows moved. A stale quick (no-signup) audit is
+    /// failed instead: like `finish_failed`, it is never retried, so a crawl that hangs every
+    /// time can't hold a quick slot, and a visitor's spinner, forever.
     pub async fn requeue_stale(&self, older_than: std::time::Duration) -> Result<u64, sqlx::Error> {
         let age = time::Duration::try_from(older_than).unwrap_or(time::Duration::ZERO);
         let threshold = OffsetDateTime::now_utc() - age;
-        let result = sqlx::query(
+        let failed = sqlx::query(
+            "UPDATE crawls SET status = 'failed', finished_at = now(), \
+               failure_reason = 'the crawler stopped before the audit finished' \
+             WHERE status = 'running' AND heartbeat_at < $1 AND trigger = 'quick'",
+        )
+        .bind(threshold)
+        .execute(&self.pool)
+        .await?;
+        let requeued = sqlx::query(
             "UPDATE crawls SET status = 'queued', worker_id = NULL, heartbeat_at = NULL \
              WHERE status = 'running' AND heartbeat_at < $1",
         )
         .bind(threshold)
         .execute(&self.pool)
         .await?;
-        Ok(result.rows_affected())
+        Ok(failed.rows_affected() + requeued.rows_affected())
     }
 
     /// First failure (`attempt = 0`): requeue once, gated 15 minutes out via `queued_at` (which
@@ -191,7 +201,8 @@ impl CrawlQueue {
     pub async fn previous_snapshot(&self, site_id: Uuid) -> Result<Option<Snapshot>, sqlx::Error> {
         let row = sqlx::query(
             "SELECT id, finished_at, summary FROM crawls \
-             WHERE site_id = $1 AND status = 'done' ORDER BY finished_at DESC, id DESC LIMIT 1",
+             WHERE site_id = $1 AND status = 'done' AND trigger <> 'quick' \
+             ORDER BY finished_at DESC, id DESC LIMIT 1",
         )
         .bind(site_id)
         .fetch_optional(&self.pool)

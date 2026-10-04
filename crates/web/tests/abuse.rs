@@ -344,3 +344,71 @@ async fn at_most_three_unlock_emails_per_audit_per_hour() {
     let res = unlock(&app, other, "person4@example.com").await;
     assert!(res.body.contains("Check your email"));
 }
+
+#[tokio::test]
+async fn the_limits_hold_across_the_utc_midnight_rollover() {
+    let app = TestApp::with_config(cloud_config()).await;
+    for i in 0..3 {
+        assert_eq!(
+            submit_from(&app, &format!("site{i}.com"), "203.0.113.9")
+                .await
+                .status,
+            StatusCode::SEE_OTHER
+        );
+    }
+    // Make those three look like they were started 20 minutes ago, just before midnight, under
+    // yesterday's salt: their stored hash is yesterday's, not today's.
+    let ip = "203.0.113.9".parse().unwrap();
+    let yesterday = time::OffsetDateTime::now_utc()
+        .date()
+        .previous_day()
+        .unwrap();
+    sqlx::query(
+        "UPDATE crawls SET requester_ip_hash = $1, created_at = now() - interval '20 minutes'",
+    )
+    .bind(codoseo_web::abuse::ip_hash("test-secret", ip, yesterday))
+    .execute(app.pool())
+    .await
+    .unwrap();
+
+    let res = submit_from(&app, "site3.com", "203.0.113.9").await;
+    assert_eq!(
+        res.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "midnight must not reset the hourly limit: {}",
+        res.body
+    );
+}
+
+#[tokio::test]
+async fn one_address_cannot_be_mailed_through_many_audits() {
+    let app = TestApp::with_config(cloud_config()).await;
+    let mut audits = Vec::new();
+    for (i, ip) in [
+        "198.51.100.1",
+        "198.51.100.2",
+        "198.51.100.3",
+        "198.51.100.4",
+    ]
+    .iter()
+    .enumerate()
+    {
+        audits.push(crawl_id(
+            &submit_from(&app, &format!("site{i}.com"), ip).await,
+        ));
+    }
+    for crawl in &audits[..3] {
+        let res = unlock(&app, *crawl, "victim@example.com").await;
+        assert!(res.body.contains("Check your email"), "{}", res.body);
+    }
+    // A fourth audit, a fourth email to the same person: refused, whatever the spelling.
+    for address in ["victim@example.com", "Victim@Example.com"] {
+        let res = unlock(&app, audits[3], address).await;
+        assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS, "{address}");
+        assert!(res.body.contains("already sent"), "{}", res.body);
+    }
+    assert_eq!(app.mail.lock().unwrap().len(), 3);
+    // Someone else is unaffected.
+    let res = unlock(&app, audits[3], "someone@example.com").await;
+    assert!(res.body.contains("Check your email"));
+}

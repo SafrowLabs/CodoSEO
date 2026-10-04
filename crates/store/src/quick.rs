@@ -50,6 +50,9 @@ pub struct StartRequest<'a> {
     pub claim_hash: &'a [u8],
     /// The visitor's IP hash (daily salt), kept on the crawl for the per-IP limits.
     pub ip_hash: Option<&'a [u8]>,
+    /// The same address hashed with yesterday's salt. The limits count rolling windows of up to
+    /// 24 hours, which span two salts, so both are counted; only `ip_hash` is stored.
+    pub previous_ip_hash: Option<&'a [u8]>,
     /// Per-IP limits; they only apply when there is an `ip_hash`.
     pub limits: Limits,
 }
@@ -108,6 +111,10 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
         .bind(ip)
         .execute(&mut *tx)
         .await?;
+        let hashes: Vec<Vec<u8>> = std::iter::once(ip)
+            .chain(req.previous_ip_hash)
+            .map(<[u8]>::to_vec)
+            .collect();
         let (hour, day, hour_retry, day_retry): (i64, i64, Option<f64>, Option<f64>) =
             sqlx::query_as(
                 "SELECT count(*) FILTER (WHERE created_at > now() - interval '1 hour'), \
@@ -116,10 +123,10 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
                                            + interval '1 hour' - now())::float8, \
                         EXTRACT(EPOCH FROM min(created_at) + interval '1 day' - now())::float8 \
                  FROM crawls \
-                 WHERE trigger = 'quick' AND requester_ip_hash = $1 \
+                 WHERE trigger = 'quick' AND requester_ip_hash = ANY($1) \
                    AND created_at > now() - interval '1 day'",
             )
-            .bind(ip)
+            .bind(&hashes)
             .fetch_one(&mut *tx)
             .await?;
         let secs = |s: Option<f64>| s.map_or(1, |s| s.ceil().max(1.0) as i64);
@@ -182,17 +189,80 @@ pub async fn queue_depth(pool: &PgPool) -> Result<i64, sqlx::Error> {
         .await
 }
 
-/// How many sign-in emails were sent for this audit in the last hour (the cap on mail sent to
-/// arbitrary addresses).
-pub async fn unlock_emails_last_hour(pool: &PgPool, crawl_id: Uuid) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM login_tokens \
-         WHERE purpose = 'magic_link' AND payload->>'audit' = $1 \
-           AND created_at > now() - interval '1 hour'",
+/// How many sign-in emails an audit's unlock form may trigger, per audit and per recipient, per
+/// hour. The form mails an arbitrary address, so the recipient cap is what stops it being used
+/// to flood someone's inbox through many different audits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnlockCaps {
+    pub per_audit: i64,
+    pub per_address: i64,
+}
+
+impl UnlockCaps {
+    pub const DEFAULT: UnlockCaps = UnlockCaps {
+        per_audit: 3,
+        per_address: 3,
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnlockSlot {
+    /// The token was stored: send the email.
+    Created,
+    AuditCapReached,
+    AddressCapReached,
+}
+
+/// Stores the magic-link token for an unlock email unless a cap is reached. The counts and the
+/// insert happen under advisory locks, so concurrent requests can't all pass the count before
+/// any of them inserts. `canonical` (the address's deduplication key) must also be in `payload`,
+/// which is what later counts read.
+pub async fn create_unlock_token(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    canonical: &str,
+    token_hash: &[u8],
+    payload: serde_json::Value,
+    ttl: time::Duration,
+    caps: UnlockCaps,
+) -> Result<UnlockSlot, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    // Always address first, then audit, so two requests can't wait on each other.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.unlock.address:' || $1))")
+        .bind(canonical)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.unlock.audit:' || $1))")
+        .bind(crawl_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+    let (audit, address): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE payload->>'audit' = $1), \
+                count(*) FILTER (WHERE payload->>'canonical' = $2) \
+         FROM login_tokens \
+         WHERE purpose = 'magic_link' AND created_at > now() - interval '1 hour'",
     )
     .bind(crawl_id.to_string())
-    .fetch_one(pool)
-    .await
+    .bind(canonical)
+    .fetch_one(&mut *tx)
+    .await?;
+    if audit >= caps.per_audit {
+        return Ok(UnlockSlot::AuditCapReached);
+    }
+    if address >= caps.per_address {
+        return Ok(UnlockSlot::AddressCapReached);
+    }
+    sqlx::query(
+        "INSERT INTO login_tokens (purpose, token_hash, payload, expires_at) \
+         VALUES ('magic_link', $1, $2, now() + make_interval(secs => $3))",
+    )
+    .bind(token_hash)
+    .bind(payload)
+    .bind(ttl.as_seconds_f64())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(UnlockSlot::Created)
 }
 
 /// A quick audit as the public report page reads it.
@@ -254,14 +324,17 @@ pub enum ClaimOutcome {
 /// Gives the account the audited site and queues its `first` crawl at `first_priority`.
 ///
 /// The account row is locked around the checks and writes, so two unlocks at once can't pass
-/// the site limit. With the visitor's claim cookie (`claim_hash`) and a still-unclaimed site,
-/// the audit's own site is attached, which keeps the quick crawl in the account's history;
-/// otherwise (another browser, an audit someone else already claimed) a fresh site is made.
+/// the site limit. With one of the visitor's claim tokens (`claim_hashes`, since a visitor can
+/// have audited several sites), a still-unclaimed site and a quick crawl that has ended, the
+/// audit's own site is attached, which keeps the quick crawl in the account's history;
+/// otherwise (another browser, an audit someone else already claimed, a crawl still running,
+/// which would otherwise be governed by the account's larger limits) a fresh site is made.
+/// The first crawl is marked `source = 'audit'`, so the funnel counts only these.
 pub async fn claim(
     pool: &PgPool,
     account_id: Uuid,
     crawl_id: Uuid,
-    claim_hash: Option<&[u8]>,
+    claim_hashes: &[Vec<u8>],
     max_sites: Option<i64>,
     first_priority: i16,
     schedule: Option<&str>,
@@ -273,6 +346,7 @@ pub async fn claim(
         start_url: String,
         account_id: Option<Uuid>,
         claim_token_hash: Option<Vec<u8>>,
+        status: String,
     }
 
     let mut tx = pool.begin().await?;
@@ -282,7 +356,8 @@ pub async fn claim(
         .await?;
 
     let quick: Option<Quick> = sqlx::query_as(
-        "SELECT s.id AS site_id, s.domain, s.start_url, s.account_id, s.claim_token_hash \
+        "SELECT s.id AS site_id, s.domain, s.start_url, s.account_id, s.claim_token_hash, \
+                c.status::text AS status \
          FROM crawls c JOIN sites s ON s.id = c.site_id \
          WHERE c.id = $1 AND c.trigger = 'quick' FOR UPDATE OF s",
     )
@@ -318,8 +393,13 @@ pub async fn claim(
         return Ok(ClaimOutcome::LimitReached(oldest.map(Site::from)));
     }
 
+    let ended = matches!(quick.status.as_str(), "done" | "failed");
     let own_audit = quick.account_id.is_none()
-        && matches!((claim_hash, quick.claim_token_hash.as_deref()), (Some(a), Some(b)) if a == b);
+        && ended
+        && quick
+            .claim_token_hash
+            .as_deref()
+            .is_some_and(|stored| claim_hashes.iter().any(|h| h.as_slice() == stored));
     let (row, attached): (SiteRow, bool) = if own_audit {
         let row = sqlx::query_as(&format!(
             "UPDATE sites SET account_id = $2, claim_token_hash = NULL, schedule = $3 \
@@ -344,13 +424,15 @@ pub async fn claim(
         .await?;
         (row, false)
     };
-    sqlx::query("INSERT INTO crawls (site_id, domain, trigger, priority) VALUES ($1, $2, $3, $4)")
-        .bind(row.id)
-        .bind(&row.domain)
-        .bind(CrawlTrigger::First)
-        .bind(first_priority)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, source) VALUES ($1, $2, $3, $4, 'audit')",
+    )
+    .bind(row.id)
+    .bind(&row.domain)
+    .bind(CrawlTrigger::First)
+    .bind(first_priority)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     let site: Site = row.into();
     Ok(if attached {

@@ -11,6 +11,7 @@ use axum::http::{HeaderMap, header};
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use codoseo_store::accounts::{SignIn, SignInOutcome};
 use codoseo_store::auth::TokenPurpose;
+use codoseo_store::quick::{self, UnlockCaps, UnlockSlot};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -102,7 +103,7 @@ pub async fn request_link(
         return respond(card(&state, form.email.trim().to_owned(), next, err, false));
     };
 
-    issue_link(&state, address, &next, None).await?;
+    let _ = issue_link(&state, address, &next, None).await?;
 
     respond(card(&state, address.to_owned(), next, None, true))
 }
@@ -113,28 +114,57 @@ pub struct AuditLink<'a> {
     pub domain: &'a str,
 }
 
+/// What [`issue_link`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkOutcome {
+    Sent,
+    /// An audit's unlock form already sent its share of emails this hour (nothing was sent).
+    Throttled(UnlockSlot),
+}
+
 /// Stores a magic-link token for `address` and emails the link. With an `audit`, the link also
-/// carries the audit's crawl id, and using it attaches the audited site to the account.
+/// carries the audit's crawl id, and using it attaches the audited site to the account. Those
+/// links are capped per audit and per recipient (see [`quick::create_unlock_token`]).
 pub async fn issue_link(
     state: &AppState,
     address: &str,
     next: &str,
     audit: Option<AuditLink<'_>>,
-) -> Result<(), AppError> {
+) -> Result<LinkOutcome, AppError> {
     let token = session::random_token();
+    let token_hash = session::hash(&token);
     let mut payload = serde_json::json!({ "email": address, "next": next });
-    if let Some(a) = &audit {
-        payload["audit"] = serde_json::json!(a.crawl_id);
+    match &audit {
+        None => {
+            codoseo_store::auth::create_token(
+                &state.pool,
+                TokenPurpose::MagicLink,
+                &token_hash,
+                None,
+                Some(payload),
+                MAGIC_TTL,
+            )
+            .await?;
+        }
+        Some(a) => {
+            let canonical = email::canonical(address);
+            payload["audit"] = serde_json::json!(a.crawl_id);
+            payload["canonical"] = serde_json::json!(canonical);
+            let slot = quick::create_unlock_token(
+                &state.pool,
+                a.crawl_id,
+                &canonical,
+                &token_hash,
+                payload,
+                MAGIC_TTL,
+                UnlockCaps::DEFAULT,
+            )
+            .await?;
+            if slot != UnlockSlot::Created {
+                return Ok(LinkOutcome::Throttled(slot));
+            }
+        }
     }
-    codoseo_store::auth::create_token(
-        &state.pool,
-        TokenPurpose::MagicLink,
-        &session::hash(&token),
-        None,
-        Some(payload),
-        MAGIC_TTL,
-    )
-    .await?;
 
     let mut link = state.config.base_url.clone();
     link.set_path(&format!("/auth/magic/{token}"));
@@ -165,7 +195,7 @@ pub async fn issue_link(
             text,
         })
         .await;
-    Ok(())
+    Ok(LinkOutcome::Sent)
 }
 
 #[derive(Template)]

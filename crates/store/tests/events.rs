@@ -171,6 +171,7 @@ async fn queue_depth_counts_waiting_quick_audits_only() {
                 claim_hash: d.as_bytes(),
                 ip_hash: None,
                 limits: quick::Limits::NONE,
+                previous_ip_hash: None,
             },
         )
         .await

@@ -20,7 +20,7 @@ use codoseo_store::accounts::Account;
 use codoseo_store::crawls::CrawlStatus;
 use codoseo_store::events::{self, EventKind};
 use codoseo_store::quick::{
-    self, Audit, ClaimOutcome, LimitWindow, Limits, StartOutcome, StartRequest,
+    self, Audit, ClaimOutcome, LimitWindow, Limits, StartOutcome, StartRequest, UnlockSlot,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use super::sites::{FIRST_CRAWL_PRIORITY, check_public_target, parse_start_url, schedule_for};
 use crate::abuse::{self, ClientIp};
-use crate::auth::magic::{self, AuditLink};
+use crate::auth::magic::{self, AuditLink, LinkOutcome};
 use crate::auth::{email, session};
 use crate::config::Mode;
 use crate::error::AppError;
@@ -40,11 +40,11 @@ use crate::turnstile::{self, Verdict};
 pub const CLAIM_COOKIE: &str = "codoseo_audit";
 /// Unclaimed audits live 7 days (spec section 6), and so does the cookie.
 const CLAIM_TTL_SECS: i64 = 7 * 24 * 3600;
+/// A visitor can audit several sites before unlocking one, so the cookie holds the claim tokens
+/// of their last few audits, joined with `.` (tokens are URL-safe base64, which has no dot).
+const MAX_CLAIM_TOKENS: usize = 5;
 /// How many issues the preview shows; the rest are counted and locked.
 const PREVIEW_ISSUES: usize = 5;
-/// Sign-in emails one audit may trigger per hour, so the unlock form can't be used to mail
-/// arbitrary addresses.
-const UNLOCK_EMAILS_PER_HOUR: i64 = 3;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -63,6 +63,25 @@ pub fn require_cloud(state: &AppState) -> Result<(), AppError> {
     }
 }
 
+/// The claim tokens in the visitor's cookie, oldest first.
+fn claim_tokens(headers: &HeaderMap) -> Vec<String> {
+    session::cookie(headers, CLAIM_COOKIE)
+        .map(|v| {
+            v.split('.')
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The cookie value after adding `new`: the last [`MAX_CLAIM_TOKENS`] tokens.
+fn with_claim_token(mut tokens: Vec<String>, new: &str) -> String {
+    tokens.push(new.to_owned());
+    let skip = tokens.len().saturating_sub(MAX_CLAIM_TOKENS);
+    tokens[skip..].join(".")
+}
+
 pub fn clear_claim_cookie(state: &AppState) -> HeaderValue {
     session::set_cookie(CLAIM_COOKIE, "", 0, state.config.secure_cookies())
 }
@@ -78,6 +97,7 @@ pub struct StartForm {
 async fn start(
     State(state): State<AppState>,
     hx: Hx,
+    headers: HeaderMap,
     ClientIp(ip): ClientIp,
     Form(form): Form<StartForm>,
 ) -> Result<Response, AppError> {
@@ -109,13 +129,12 @@ async fn start(
         }
     }
     let domain = url.host_str().unwrap_or_default().to_ascii_lowercase();
-    let ip_hash = ip.map(|ip| {
-        abuse::ip_hash(
-            &state.config.secret_key,
-            ip,
-            time::OffsetDateTime::now_utc().date(),
-        )
-    });
+    // Today's hash is stored; yesterday's is also counted, since a limit window can span
+    // midnight and the salt changes then.
+    let today = time::OffsetDateTime::now_utc().date();
+    let hash_for = |day: time::Date| ip.map(|ip| abuse::ip_hash(&state.config.secret_key, ip, day));
+    let ip_hash = hash_for(today);
+    let previous_ip_hash = today.previous_day().and_then(hash_for);
 
     let claim_token = session::random_token();
     let outcome = quick::start(
@@ -125,6 +144,7 @@ async fn start(
             start_url: url.as_str(),
             claim_hash: &session::hash(&claim_token),
             ip_hash: ip_hash.as_deref(),
+            previous_ip_hash: previous_ip_hash.as_deref(),
             limits: Limits::DEFAULT,
         },
     )
@@ -171,7 +191,7 @@ async fn start(
             header::SET_COOKIE,
             session::set_cookie(
                 CLAIM_COOKIE,
-                &claim_token,
+                &with_claim_token(claim_tokens(&headers), &claim_token),
                 CLAIM_TTL_SECS,
                 state.config.secure_cookies(),
             ),
@@ -228,6 +248,9 @@ pub struct Notice {
 pub struct MainView {
     pub id: Uuid,
     pub domain: String,
+    /// The page the audit started from, when it isn't the site's homepage: reports are shared
+    /// per domain for 24 hours, so a visitor can see another start page's audit.
+    pub start_url: Option<String>,
     /// Waiting or running: the block polls itself every 2 s.
     pub polling: bool,
     /// Waiting vs running, for the headline.
@@ -299,6 +322,7 @@ fn build_main(audit: &Audit) -> MainView {
     let mut view = MainView {
         id: crawl.id,
         domain: audit.domain.clone(),
+        start_url: start_page(&audit.start_url, &audit.domain),
         polling: false,
         running: false,
         pages_done: 0,
@@ -345,6 +369,11 @@ fn build_main(audit: &Audit) -> MainView {
         },
     }
     view
+}
+
+/// The start URL when it is more than `https://{domain}/`.
+fn start_page(start_url: &str, domain: &str) -> Option<String> {
+    (start_url != format!("https://{domain}/")).then(|| start_url.to_owned())
 }
 
 fn failure_notice(reason: Option<&str>) -> Notice {
@@ -498,20 +527,9 @@ async fn unlock(
                     .to_owned(),
             );
         }
-        Some(_)
-            if quick::unlock_emails_last_hour(&state.pool, audit.crawl.id).await?
-                >= UNLOCK_EMAILS_PER_HOUR =>
-        {
-            status = StatusCode::TOO_MANY_REQUESTS;
-            card.error = Some(
-                "We already sent several links for this audit. Check your inbox and spam \
-                 folder, or try again in an hour."
-                    .to_owned(),
-            );
-        }
         Some(address) => {
             let address = address.to_owned();
-            magic::issue_link(
+            let outcome = magic::issue_link(
                 &state,
                 &address,
                 "/",
@@ -521,16 +539,36 @@ async fn unlock(
                 }),
             )
             .await?;
-            events::record(
-                &state.pool,
-                EventKind::EmailGiven,
-                None,
-                Some(audit.site_id),
-                Some(json!({ "crawl_id": audit.crawl.id })),
-            )
-            .await?;
+            match outcome {
+                LinkOutcome::Sent => {
+                    events::record(
+                        &state.pool,
+                        EventKind::EmailGiven,
+                        None,
+                        Some(audit.site_id),
+                        Some(json!({ "crawl_id": audit.crawl.id })),
+                    )
+                    .await?;
+                    card.sent = true;
+                }
+                LinkOutcome::Throttled(slot) => {
+                    status = StatusCode::TOO_MANY_REQUESTS;
+                    card.error = Some(
+                        match slot {
+                            UnlockSlot::AddressCapReached => {
+                                "We've already sent several emails to that address recently. \
+                                 Check your inbox and spam folder, or try again in an hour."
+                            }
+                            _ => {
+                                "We already sent several links for this audit. Check your \
+                                 inbox and spam folder, or try again in an hour."
+                            }
+                        }
+                        .to_owned(),
+                    );
+                }
+            }
             card.email = address;
-            card.sent = true;
         }
     }
 
@@ -552,13 +590,16 @@ pub async fn attach_after_login(
     audit_id: Uuid,
     headers: &HeaderMap,
 ) -> Result<String, AppError> {
-    let claim_hash = session::cookie(headers, CLAIM_COOKIE).map(|t| session::hash(&t));
+    let claim_hashes: Vec<Vec<u8>> = claim_tokens(headers)
+        .iter()
+        .map(|t| session::hash(t))
+        .collect();
     let limits = PlanLimits::for_plan(account.plan);
     let outcome = quick::claim(
         &state.pool,
         account.id,
         audit_id,
-        claim_hash.as_deref(),
+        &claim_hashes,
         limits.max_sites.map(i64::from),
         FIRST_CRAWL_PRIORITY,
         schedule_for(account.plan),

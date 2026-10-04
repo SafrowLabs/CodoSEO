@@ -789,3 +789,106 @@ async fn one_visitor_leaves_every_funnel_step_in_order() {
         ]
     );
 }
+
+#[tokio::test]
+async fn auditing_a_second_site_does_not_lose_the_first_ones_claim() {
+    let app = cloud().await;
+    let a = submit(&app, "a.com").await;
+    let crawl_a = crawl_id(&a);
+    let token_a = claim_token(&a);
+    // The same browser audits another site: it sends its cookie and gets one holding both.
+    let b = app
+        .post(
+            "/audit",
+            "url=b.com",
+            Some(&format!("{CLAIM_COOKIE}={token_a}")),
+        )
+        .await;
+    let both = claim_token(&b);
+    assert!(both.contains(&token_a) && both.contains('.'), "{both}");
+
+    finish(&app, crawl_a, vec![page("a.com", "/")]).await;
+    unlock(&app, crawl_a, "ana@example.com").await;
+    let link = emailed_token(&app);
+    let res = app
+        .post(
+            &format!("/auth/magic/{link}"),
+            "",
+            Some(&format!("{CLAIM_COOKIE}={both}")),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    let owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT s.account_id FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
+    )
+    .bind(crawl_a)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert!(
+        owner.is_some(),
+        "the audited site itself was attached, not a duplicate"
+    );
+    assert_eq!(
+        count(&app, "SELECT count(*) FROM sites WHERE domain = 'a.com'").await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn the_cookie_keeps_only_the_last_five_tokens() {
+    let app = cloud().await;
+    let mut cookie = String::new();
+    for i in 0..7 {
+        let res = app
+            .post(
+                "/audit",
+                &format!("url=site{i}.com"),
+                if cookie.is_empty() {
+                    None
+                } else {
+                    Some(cookie.as_str())
+                },
+            )
+            .await;
+        cookie = format!("{CLAIM_COOKIE}={}", claim_token(&res));
+    }
+    let tokens = cookie.split_once('=').unwrap().1.split('.').count();
+    assert_eq!(tokens, 5);
+}
+
+#[tokio::test]
+async fn the_report_names_the_start_page_when_it_is_not_the_homepage() {
+    let app = cloud().await;
+    let shop = crawl_id(&submit(&app, "example.com/shop/").await);
+    let body = app.get(&format!("/audit/{shop}"), None).await.body;
+    assert!(body.contains("Started from"), "{body}");
+    assert!(body.contains("https://example.com/shop/"));
+
+    let root = crawl_id(&submit(&app, "other.com").await);
+    let body = app.get(&format!("/audit/{root}"), None).await.body;
+    assert!(!body.contains("Started from"), "{body}");
+}
+
+#[tokio::test]
+async fn the_cloud_serves_the_sitemap_robots_txt_points_to() {
+    let app = cloud().await;
+    let res = app.get("/sitemap.xml", None).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(
+        res.header("content-type")
+            .unwrap()
+            .starts_with("application/xml")
+    );
+    assert!(
+        res.body.contains("<loc>https://codoseo.com/</loc>"),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains("<loc>https://codoseo.com/bot</loc>"));
+    assert!(!res.body.contains("/audit/"), "private pages stay out");
+    assert_eq!(
+        TestApp::new().await.get("/sitemap.xml", None).await.status,
+        StatusCode::NOT_FOUND
+    );
+}

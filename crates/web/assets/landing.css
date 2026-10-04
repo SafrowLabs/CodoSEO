@@ -90,3 +90,4 @@
 
 .q-rankorg { margin-top: 18px; font-size: 13.5px; }
 .q-rankorg a { text-decoration: underline; text-underline-offset: 2px; }
+.q-start { margin: -14px 0 20px; font: 12.5px var(--mono); overflow-wrap: anywhere; }

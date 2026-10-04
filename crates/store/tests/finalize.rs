@@ -416,14 +416,17 @@ async fn make_crawl_with_trigger(
     domain: &str,
     trigger: &str,
 ) -> Uuid {
+    // First crawls in these tests come from an unlocked audit, like the ones the funnel counts.
+    let source = (trigger == "first").then_some("audit");
     sqlx::query(
-        "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id) \
-         VALUES ($1, $2, $3::crawl_trigger, 1, 'running', $4) RETURNING id",
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id, source) \
+         VALUES ($1, $2, $3::crawl_trigger, 1, 'running', $4, $5) RETURNING id",
     )
     .bind(site_id)
     .bind(domain)
     .bind(trigger)
     .bind(WORKER_ID)
+    .bind(source)
     .fetch_one(pool)
     .await
     .expect("insert crawl")
@@ -497,4 +500,79 @@ async fn a_failed_finalize_leaves_no_funnel_event() {
         .await
         .unwrap();
     assert_eq!(events, 0);
+}
+
+#[tokio::test]
+async fn a_first_crawl_added_directly_is_not_a_funnel_step() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "direct.example").await;
+    // `source` is NULL for a site added through the add-site form.
+    let crawl_id: Uuid = sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id) \
+         VALUES ($1, 'direct.example', 'first', 1, 'running', $2) RETURNING id",
+    )
+    .bind(site_id)
+    .bind(WORKER_ID)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap()
+    .get(0);
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &empty_output(vec![sample_page(1)], StopReason::Completed),
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize");
+    let events: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(events, 0);
+}
+
+#[tokio::test]
+async fn the_diff_baseline_skips_quick_audits() {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let site_id = make_site(&db.pool, "baseline.example").await;
+
+    // A finished 100-page quick audit is not what the 500-page first crawl is compared with.
+    let quick = make_crawl_with_trigger(&db.pool, site_id, "baseline.example", "quick").await;
+    finalize(
+        &db.pool,
+        quick,
+        site_id,
+        WORKER_ID,
+        &empty_output(vec![sample_page(1)], StopReason::PageLimit),
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize quick");
+    assert!(queue.previous_snapshot(site_id).await.unwrap().is_none());
+
+    // The first full crawl is.
+    let first = make_crawl_with_trigger(&db.pool, site_id, "baseline.example", "first").await;
+    finalize(
+        &db.pool,
+        first,
+        site_id,
+        WORKER_ID,
+        &empty_output(vec![sample_page(1), sample_page(2)], StopReason::Completed),
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize first");
+    let snapshot = queue
+        .previous_snapshot(site_id)
+        .await
+        .unwrap()
+        .expect("a baseline");
+    assert_eq!(snapshot.pages.len(), 2);
 }

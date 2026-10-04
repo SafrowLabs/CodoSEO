@@ -12,6 +12,7 @@
 <main class="l-wrap q-page">
   <p class="l-eyebrow">Site audit</p>
   <h1 class="q-title">{{ main.domain }}</h1>
+  {% if let Some(start) = main.start_url %}<p class="muted q-start">Started from {{ start }}</p>{% endif %}
   {% include "quick/main.html" %}
 </main>
 {% endblock %}

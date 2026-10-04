@@ -42,6 +42,7 @@ pub fn router() -> Router<AppState> {
         .route("/bot", get(bot::page))
         .route("/robots.txt", get(seo::robots))
         .route("/llms.txt", get(seo::llms))
+        .route("/sitemap.xml", get(seo::sitemap))
 }
 
 /// `/`: the first site's audit, or onboarding when there is no site yet. A signed-out visitor

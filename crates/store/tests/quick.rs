@@ -4,7 +4,9 @@
 mod support;
 
 use codoseo_store::crawl_queue::CrawlQueue;
-use codoseo_store::quick::{self, ClaimOutcome, LimitWindow, Limits, StartOutcome, StartRequest};
+use codoseo_store::quick::{
+    self, ClaimOutcome, LimitWindow, Limits, StartOutcome, StartRequest, UnlockCaps, UnlockSlot,
+};
 use sqlx::PgPool;
 use support::TestDb;
 use uuid::Uuid;
@@ -16,6 +18,7 @@ fn request<'a>(domain: &'a str, start_url: &'a str, claim: &'a [u8]) -> StartReq
         claim_hash: claim,
         ip_hash: Some(b"ip-hash-1"),
         limits: Limits::NONE,
+        previous_ip_hash: None,
     }
 }
 
@@ -204,13 +207,14 @@ async fn get_serves_quick_crawls_only() {
 async fn claiming_with_the_cookie_attaches_the_site_and_queues_the_first_crawl() {
     let db = TestDb::new().await;
     let crawl = crawl_id(&start(&db.pool, "example.com", b"secret").await);
+    set_status(&db.pool, crawl, "done", "1 minute").await;
     let ana = account(&db.pool, "ana@example.com").await;
 
     let outcome = quick::claim(
         &db.pool,
         ana,
         crawl,
-        Some(b"secret"),
+        &[b"secret".to_vec()],
         Some(1),
         1,
         Some("weekly"),
@@ -246,7 +250,7 @@ async fn claiming_without_the_cookie_creates_a_fresh_site_and_leaves_the_audit_a
     let crawl = crawl_id(&start(&db.pool, "example.com", b"secret").await);
     let ana = account(&db.pool, "ana@example.com").await;
 
-    for cookie in [None, Some(&b"wrong"[..])] {
+    for cookie in [&[][..], &[b"wrong".to_vec()][..]] {
         let _ = sqlx::query("DELETE FROM sites WHERE account_id = $1")
             .bind(ana)
             .execute(&db.pool)
@@ -287,7 +291,7 @@ async fn claiming_respects_existing_sites_and_the_plan_limit() {
         &db.pool,
         ana,
         crawl,
-        Some(b"secret"),
+        &[b"secret".to_vec()],
         Some(1),
         1,
         Some("weekly"),
@@ -311,7 +315,7 @@ async fn claiming_respects_existing_sites_and_the_plan_limit() {
         &db.pool,
         bo,
         crawl,
-        Some(b"secret"),
+        &[b"secret".to_vec()],
         Some(1),
         1,
         Some("weekly"),
@@ -325,7 +329,7 @@ async fn claiming_respects_existing_sites_and_the_plan_limit() {
 
     // Not a quick crawl at all.
     let cy = account(&db.pool, "cy@example.com").await;
-    let outcome = quick::claim(&db.pool, cy, Uuid::new_v4(), None, Some(1), 1, None)
+    let outcome = quick::claim(&db.pool, cy, Uuid::new_v4(), &[], Some(1), 1, None)
         .await
         .unwrap();
     assert!(matches!(outcome, ClaimOutcome::NotFound));
@@ -398,6 +402,7 @@ async fn start_from(pool: &PgPool, domain: &str, ip: &[u8], limits: Limits) -> S
             claim_hash: domain.as_bytes(),
             ip_hash: Some(ip),
             limits,
+            previous_ip_hash: None,
         },
     )
     .await
@@ -503,6 +508,7 @@ async fn a_visitor_with_no_ip_hash_is_not_limited_per_ip() {
                 claim_hash: format!("site{i}.com").as_bytes(),
                 ip_hash: None,
                 limits: Limits::DEFAULT,
+                previous_ip_hash: None,
             },
         )
         .await
@@ -590,35 +596,287 @@ async fn at_most_eight_quick_crawls_run_at_once_and_the_ninth_waits_its_turn() {
     assert_eq!(claimed.id, ids[8]);
 }
 
+fn unlock_payload(crawl: Uuid, canonical: &str) -> serde_json::Value {
+    serde_json::json!({ "email": canonical, "canonical": canonical, "audit": crawl })
+}
+
+async fn unlock(pool: &PgPool, crawl: Uuid, canonical: &str, n: u32) -> UnlockSlot {
+    quick::create_unlock_token(
+        pool,
+        crawl,
+        canonical,
+        format!("{crawl}-{canonical}-{n}").as_bytes(),
+        unlock_payload(crawl, canonical),
+        time::Duration::minutes(15),
+        UnlockCaps::DEFAULT,
+    )
+    .await
+    .expect("unlock token")
+}
+
 #[tokio::test]
-async fn unlock_emails_are_counted_per_audit_and_hour() {
+async fn unlock_emails_are_capped_per_audit_and_per_address_each_hour() {
     let db = TestDb::new().await;
     let one = crawl_id(&start(&db.pool, "one.com", b"one").await);
     let two = crawl_id(&start(&db.pool, "two.com", b"two").await);
-    for _ in 0..3 {
-        sqlx::query(
-            "INSERT INTO login_tokens (purpose, token_hash, payload, expires_at) \
-             VALUES ('magic_link', sha256(gen_random_uuid()::text::bytea), jsonb_build_object('email', 'a@b.co', 'audit', $1::text), now() + interval '15 minutes')",
-        )
-        .bind(one.to_string())
-        .execute(&db.pool)
-        .await
-        .unwrap();
+
+    // Three different people on one audit, then the audit is full.
+    for i in 0..3 {
+        assert_eq!(
+            unlock(&db.pool, one, &format!("p{i}@x.co"), 0).await,
+            UnlockSlot::Created
+        );
     }
     assert_eq!(
-        quick::unlock_emails_last_hour(&db.pool, one).await.unwrap(),
-        3
+        unlock(&db.pool, one, "p9@x.co", 0).await,
+        UnlockSlot::AuditCapReached
     );
     assert_eq!(
-        quick::unlock_emails_last_hour(&db.pool, two).await.unwrap(),
-        0
+        unlock(&db.pool, two, "p9@x.co", 0).await,
+        UnlockSlot::Created,
+        "another audit has room"
     );
+
+    // One address can't be sent mail through many audits: p9 has one, give it two more.
+    assert_eq!(
+        unlock(&db.pool, two, "p9@x.co", 1).await,
+        UnlockSlot::Created
+    );
+    let three = crawl_id(&start(&db.pool, "three.com", b"three").await);
+    assert_eq!(
+        unlock(&db.pool, three, "p9@x.co", 2).await,
+        UnlockSlot::Created
+    );
+    let four = crawl_id(&start(&db.pool, "four.com", b"four").await);
+    assert_eq!(
+        unlock(&db.pool, four, "p9@x.co", 3).await,
+        UnlockSlot::AddressCapReached,
+        "a fourth email to the same address in an hour is refused whichever audit asks"
+    );
+    // ...and a refused request stores nothing.
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM login_tokens WHERE payload->>'canonical' = 'p9@x.co'",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, 3);
+
+    // The hour rolls over.
     sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
         .execute(&db.pool)
         .await
         .unwrap();
     assert_eq!(
-        quick::unlock_emails_last_hour(&db.pool, one).await.unwrap(),
-        0
+        unlock(&db.pool, one, "p9@x.co", 4).await,
+        UnlockSlot::Created
     );
+}
+
+#[tokio::test]
+async fn ten_unlock_requests_at_once_store_exactly_three() {
+    let db = TestDb::new().await;
+    let crawl = crawl_id(&start(&db.pool, "one.com", b"one").await);
+    let results =
+        futures_util::future::join_all((0..10).map(|n| unlock(&db.pool, crawl, "victim@x.co", n)))
+            .await;
+    let created = results
+        .iter()
+        .filter(|r| **r == UnlockSlot::Created)
+        .count();
+    assert_eq!(created, 3, "{results:?}");
+}
+
+#[tokio::test]
+async fn limits_count_the_previous_days_hash_too() {
+    let db = TestDb::new().await;
+    let limits = Limits {
+        per_hour: 2,
+        per_day: 10,
+    };
+    // Two audits started 20 minutes ago under yesterday's salt (just before UTC midnight).
+    for i in 0..2 {
+        let outcome =
+            start_from(&db.pool, &format!("site{i}.com"), b"hash-yesterday", limits).await;
+        assert!(matches!(outcome, StartOutcome::Started { .. }));
+    }
+    age_all(&db.pool, "20 minutes").await;
+
+    // Now it is after midnight: the visitor's hash is new, but yesterday's is counted as well.
+    let url = "https://site2.com/";
+    let outcome = quick::start(
+        &db.pool,
+        &StartRequest {
+            domain: "site2.com",
+            start_url: url,
+            claim_hash: b"c2",
+            ip_hash: Some(b"hash-today"),
+            previous_ip_hash: Some(b"hash-yesterday"),
+            limits,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(
+            outcome,
+            StartOutcome::Limited {
+                window: LimitWindow::Hour,
+                ..
+            }
+        ),
+        "{outcome:?}"
+    );
+    // Without the previous hash the rollover would have reset the count.
+    let outcome = quick::start(
+        &db.pool,
+        &StartRequest {
+            domain: "site2.com",
+            start_url: url,
+            claim_hash: b"c3",
+            ip_hash: Some(b"hash-today"),
+            previous_ip_hash: None,
+            limits,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, StartOutcome::Started { .. }));
+}
+
+#[tokio::test]
+async fn a_stale_quick_crawl_fails_instead_of_looping_but_others_still_requeue() {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let quick_id = crawl_id(&start(&db.pool, "example.com", b"a").await);
+    let owner = account(&db.pool, "owner@example.com").await;
+    let site: Uuid = sqlx::query_scalar(
+        "INSERT INTO sites (account_id, domain, start_url) VALUES ($1, 'mine.com', 'https://mine.com/') RETURNING id",
+    )
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    let manual = queue
+        .enqueue(
+            site,
+            "mine.com",
+            codoseo_store::crawl_queue::CrawlTrigger::Manual,
+            2,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    queue.claim("w1").await.unwrap().expect("quick");
+    queue.claim("w1").await.unwrap().expect("manual");
+    sqlx::query(
+        "UPDATE crawls SET heartbeat_at = now() - interval '10 minutes' WHERE status = 'running'",
+    )
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let moved = queue
+        .requeue_stale(std::time::Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(moved, 2);
+    let (status, reason): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, failure_reason FROM crawls WHERE id = $1")
+            .bind(quick_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert!(reason.unwrap().contains("stopped"));
+    let status: String = sqlx::query_scalar("SELECT status::text FROM crawls WHERE id = $1")
+        .bind(manual)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "queued");
+}
+
+#[tokio::test]
+async fn any_of_several_claim_tokens_attaches_the_audit() {
+    let db = TestDb::new().await;
+    let a = crawl_id(&start(&db.pool, "a.com", b"token-a").await);
+    let _b = crawl_id(&start(&db.pool, "b.com", b"token-b").await);
+    set_status(&db.pool, a, "done", "1 minute").await;
+    let ana = account(&db.pool, "ana@example.com").await;
+    // The cookie holds both tokens, in either order.
+    let outcome = quick::claim(
+        &db.pool,
+        ana,
+        a,
+        &[b"token-b".to_vec(), b"token-a".to_vec()],
+        Some(5),
+        1,
+        Some("weekly"),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(outcome, ClaimOutcome::Attached(ref s) if s.domain == "a.com"),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_audit_still_running_is_not_attached_and_the_first_crawl_is_marked_as_from_an_audit() {
+    let db = TestDb::new().await;
+    let crawl = crawl_id(&start(&db.pool, "example.com", b"secret").await);
+    let ana = account(&db.pool, "ana@example.com").await;
+
+    // Queued: the quick crawl would be governed by the account's larger limits if attached.
+    let outcome = quick::claim(
+        &db.pool,
+        ana,
+        crawl,
+        &[b"secret".to_vec()],
+        Some(5),
+        1,
+        Some("weekly"),
+    )
+    .await
+    .unwrap();
+    let ClaimOutcome::Created(site) = outcome else {
+        panic!("expected Created while still queued, got {outcome:?}");
+    };
+    let source: Option<String> =
+        sqlx::query_scalar("SELECT source FROM crawls WHERE site_id = $1 AND trigger = 'first'")
+            .bind(site.id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(source.as_deref(), Some("audit"));
+    let original: Option<Uuid> = sqlx::query_scalar(
+        "SELECT s.account_id FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
+    )
+    .bind(crawl)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(original, None);
+
+    // Once it has ended, the same token attaches it.
+    sqlx::query("DELETE FROM sites WHERE account_id = $1")
+        .bind(ana)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    set_status(&db.pool, crawl, "done", "1 minute").await;
+    let outcome = quick::claim(
+        &db.pool,
+        ana,
+        crawl,
+        &[b"secret".to_vec()],
+        Some(5),
+        1,
+        Some("weekly"),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, ClaimOutcome::Attached(_)), "{outcome:?}");
 }

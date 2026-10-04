@@ -79,8 +79,8 @@ pub async fn finalize(
     Ok(())
 }
 
-/// Funnel steps the crawl itself marks (spec section 11): a no-signup audit finishing, and a
-/// site's first full crawl finishing. Written in the finalize transaction, so each happens
+/// Funnel steps the crawl itself marks (spec section 11): a no-signup audit finishing, and the
+/// first full crawl of a site that came from an audit finishing. Written in the finalize transaction, so each happens
 /// exactly once, and not at all when finalize rolls back.
 async fn record_funnel_event(
     tx: &mut Transaction<'_, Postgres>,
@@ -88,13 +88,16 @@ async fn record_funnel_event(
     site_id: Uuid,
     report: &CrawlReport,
 ) -> Result<(), sqlx::Error> {
-    let trigger: String = sqlx::query_scalar("SELECT trigger::text FROM crawls WHERE id = $1")
-        .bind(crawl_id)
-        .fetch_one(&mut **tx)
-        .await?;
-    let kind = match trigger.as_str() {
-        "quick" => EventKind::AuditFinished,
-        "first" => EventKind::FirstFullCrawl,
+    let (trigger, source): (String, Option<String>) =
+        sqlx::query_as("SELECT trigger::text, source FROM crawls WHERE id = $1")
+            .bind(crawl_id)
+            .fetch_one(&mut **tx)
+            .await?;
+    // Only a first crawl queued by unlocking an audit (`source = 'audit'`) is a funnel step;
+    // sites added directly never saw the audit.
+    let kind = match (trigger.as_str(), source.as_deref()) {
+        ("quick", _) => EventKind::AuditFinished,
+        ("first", Some("audit")) => EventKind::FirstFullCrawl,
         _ => return Ok(()),
     };
     let account_id: Option<Uuid> = sqlx::query_scalar("SELECT account_id FROM sites WHERE id = $1")
