@@ -32,6 +32,8 @@ pub struct Config {
     pub secret_key: String,
     pub smtp_url: Option<String>,
     pub github: Option<GithubConfig>,
+    /// The fixed address cloud crawls come from, listed on the bot page (`CODOSEO_BOT_IP`).
+    pub bot_ip: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -107,6 +109,7 @@ impl Config {
             secret_key,
             smtp_url: get("SMTP_URL"),
             github,
+            bot_ip: get("CODOSEO_BOT_IP"),
         })
     }
 

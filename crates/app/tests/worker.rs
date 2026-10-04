@@ -320,21 +320,21 @@ async fn a_cloud_worker_never_connects_to_a_private_address() {
         0,
         "the cloud worker must not send a single request to 127.0.0.1"
     );
-    let (reason, attempt, pages): (Option<String>, i16, i64) = sqlx::query_as(
-        "SELECT c.failure_reason, c.attempt, (SELECT count(*) FROM pages p WHERE p.crawl_id = c.id) \
+    let (reason, status, pages): (Option<String>, String, i64) = sqlx::query_as(
+        "SELECT c.failure_reason, c.status::text, (SELECT count(*) FROM pages p WHERE p.crawl_id = c.id) \
          FROM crawls c WHERE c.site_id = $1",
     )
     .bind(site_id)
     .fetch_one(&db.pool)
     .await
     .expect("read crawl row");
-    // `finish_failed` records the reason and requeues once for the 15-minute retry.
+    // A quick audit fails for good (no 15-minute retry): the visitor is watching it.
     let reason = reason.expect("a refused address records why the crawl failed");
     assert!(
         reason.contains("address not allowed"),
         "unexpected reason: {reason}"
     );
-    assert_eq!(attempt, 1);
+    assert_eq!(status, "failed");
     assert_eq!(pages, 0);
 }
 

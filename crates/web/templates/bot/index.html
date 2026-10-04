@@ -1,0 +1,40 @@
+{% extends "solo_base.html" %}
+{% block title %}CodoSEObot — CodoSEO{% endblock %}
+{% block head %}
+<meta name="description" content="CodoSEObot is the crawler behind CodoSEO audits. How it identifies itself, how politely it crawls, and how to allow or block it.">
+<link rel="canonical" href="{{ base }}/bot">
+<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% endblock %}
+{% block body %}
+<header class="l-top l-wrap">
+  <a class="brand" href="/" style="width:auto;padding:0;height:auto"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+  <nav class="l-nav"><a class="btn btn-sm" href="/">Audit your site</a></nav>
+</header>
+<main class="l-wrap q-page prose">
+  <p class="l-eyebrow">About the crawler</p>
+  <h1 class="q-title">CodoSEObot</h1>
+  <p>CodoSEObot is the crawler behind <a href="/">CodoSEO</a> audits. Someone asked us to check your site, usually its owner or an SEO working for them. It reads public pages to find SEO problems such as broken links, missing titles and noindex tags. It never submits forms, logs in or changes anything.</p>
+
+  <h2>How it identifies itself</h2>
+  <p>Every request sends this user agent:</p>
+  <p><code>{{ user_agent }}</code></p>
+  {% if let Some(ip) = ip %}<p>Cloud crawls come from one fixed address: <code>{{ ip }}</code>.</p>{% endif %}
+
+  <h2>How politely it crawls</h2>
+  <ul>
+    <li>At most 5 requests per second and 2 connections at a time, per site.</li>
+    <li>It follows robots.txt, including <code>Crawl-delay</code> (up to 10 seconds) and <code>Disallow</code> rules for CodoSEObot. A site that blocks all crawlers is left alone.</li>
+    <li>On a 429 or 503 it waits for <code>Retry-After</code> and halves its speed. After 20 failures in a row it stops.</li>
+    <li>It reads pages up to 5 MB, never stores a page's HTML, and a free audit stops after 100 pages.</li>
+  </ul>
+
+  <h2>Allow or block it</h2>
+  <p>To keep CodoSEObot out of part of your site, or all of it, add this to <code>robots.txt</code>:</p>
+  <pre>User-agent: CodoSEObot
+Disallow: /private/</pre>
+  <p>Use <code>Disallow: /</code> to block it completely. If your firewall or bot protection stops it, allow the user agent above (and the address, if listed) to let audits through.</p>
+
+  <h2>Questions</h2>
+  <p>Open an issue on <a href="https://github.com/SafrowLabs/codoSEO/issues">GitHub</a> and mention your domain. CodoSEO is open source, so you can read exactly what the crawler does.</p>
+</main>
+{% endblock %}

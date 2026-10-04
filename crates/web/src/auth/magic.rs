@@ -7,11 +7,12 @@
 use askama::Template;
 use axum::Form;
 use axum::extract::{Path, Query, State};
-use axum::http::header;
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::http::{HeaderMap, header};
+use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use codoseo_store::accounts::{SignIn, SignInOutcome};
 use codoseo_store::auth::TokenPurpose;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use super::{CurrentUser, email, safe_next, session, signup_policy};
 use crate::assets;
@@ -101,32 +102,70 @@ pub async fn request_link(
         return respond(card(&state, form.email.trim().to_owned(), next, err, false));
     };
 
+    issue_link(&state, address, &next, None).await?;
+
+    respond(card(&state, address.to_owned(), next, None, true))
+}
+
+/// A no-signup audit a sign-in link should attach to the new account when it is used.
+pub struct AuditLink<'a> {
+    pub crawl_id: Uuid,
+    pub domain: &'a str,
+}
+
+/// Stores a magic-link token for `address` and emails the link. With an `audit`, the link also
+/// carries the audit's crawl id, and using it attaches the audited site to the account.
+pub async fn issue_link(
+    state: &AppState,
+    address: &str,
+    next: &str,
+    audit: Option<AuditLink<'_>>,
+) -> Result<(), AppError> {
     let token = session::random_token();
+    let mut payload = serde_json::json!({ "email": address, "next": next });
+    if let Some(a) = &audit {
+        payload["audit"] = serde_json::json!(a.crawl_id);
+    }
     codoseo_store::auth::create_token(
         &state.pool,
         TokenPurpose::MagicLink,
         &session::hash(&token),
         None,
-        Some(serde_json::json!({ "email": address, "next": next })),
+        Some(payload),
         MAGIC_TTL,
     )
     .await?;
 
     let mut link = state.config.base_url.clone();
     link.set_path(&format!("/auth/magic/{token}"));
+    let (subject, text) = match audit {
+        None => (
+            "Your CodoSEO sign-in link".to_owned(),
+            format!(
+                "Sign in to CodoSEO:\n\n{link}\n\nThe link works once and expires in 15 minutes. \
+                 If you didn't ask for it, you can ignore this email."
+            ),
+        ),
+        Some(a) => (
+            format!("Your CodoSEO report for {}", a.domain),
+            format!(
+                "Open the full CodoSEO report for {}:\n\n{link}\n\nThe link works once and \
+                 expires in 15 minutes. It also starts weekly monitoring of the site, with an \
+                 email when something important breaks. If you didn't ask for it, you can \
+                 ignore this email.",
+                a.domain
+            ),
+        ),
+    };
     state
         .mailer
         .send(Email {
             to: address.to_owned(),
-            subject: "Your CodoSEO sign-in link".to_owned(),
-            text: format!(
-                "Sign in to CodoSEO:\n\n{link}\n\nThe link works once and expires in 15 minutes. \
-                 If you didn't ask for it, you can ignore this email."
-            ),
+            subject,
+            text,
         })
         .await;
-
-    respond(card(&state, address.to_owned(), next, None, true))
+    Ok(())
 }
 
 #[derive(Template)]
@@ -142,6 +181,7 @@ pub async fn confirm_page(Path(token): Path<String>) -> Result<Response, AppErro
 pub async fn consume(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let used = codoseo_store::auth::consume_token(
         &state.pool,
@@ -176,7 +216,21 @@ pub async fn consume(
         SignInOutcome::SignupsClosed => return Err(signups_closed()),
     };
     let cookie = session::start(&state, account.id).await?;
-    Ok(([(header::SET_COOKIE, cookie)], Redirect::to(&next)).into_response())
+
+    // A link from the no-signup audit also attaches the audited site to the account.
+    let audit = payload["audit"]
+        .as_str()
+        .and_then(|a| Uuid::parse_str(a).ok());
+    let Some(audit) = audit else {
+        return Ok(([(header::SET_COOKIE, cookie)], Redirect::to(&next)).into_response());
+    };
+    let to = crate::routes::quick::attach_after_login(&state, &account, audit, &headers).await?;
+    let spent = crate::routes::quick::clear_claim_cookie(&state);
+    Ok((
+        AppendHeaders([(header::SET_COOKIE, cookie), (header::SET_COOKIE, spent)]),
+        Redirect::to(&to),
+    )
+        .into_response())
 }
 
 pub fn signups_closed() -> AppError {

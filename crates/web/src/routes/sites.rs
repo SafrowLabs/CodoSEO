@@ -111,6 +111,15 @@ pub fn parse_start_url(raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
+/// How often a new site on `plan` is crawled on a schedule: daily on paid plans, weekly on Free.
+pub fn schedule_for(plan: Plan) -> Option<&'static str> {
+    match PlanLimits::for_plan(plan).fastest_schedule {
+        Some(Schedule::Daily) if plan != Plan::Free => Some("daily"),
+        Some(_) => Some("weekly"),
+        None => None,
+    }
+}
+
 /// What the cloud says to an address it won't crawl.
 const PRIVATE_TARGET: &str = "That address is private or internal, so we can't audit it.";
 
@@ -192,11 +201,7 @@ async fn create(
         return invalid(msg);
     }
     let domain = start.host_str().unwrap_or_default().to_lowercase();
-    let schedule = match limits.fastest_schedule {
-        Some(Schedule::Daily) if user.account.plan != Plan::Free => Some("daily"),
-        Some(_) => Some("weekly"),
-        None => None,
-    };
+    let schedule = schedule_for(user.account.plan);
     let outcome = codoseo_store::sites::create_checked(
         &state.pool,
         user.id(),

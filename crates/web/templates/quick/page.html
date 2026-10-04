@@ -1,0 +1,17 @@
+{% extends "solo_base.html" %}
+{% block title %}Audit of {{ main.domain }} — CodoSEO{% endblock %}
+{% block head %}
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% endblock %}
+{% block body %}
+<header class="l-top l-wrap">
+  <a class="brand" href="/" style="width:auto;padding:0;height:auto"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+  <nav class="l-nav"><a class="btn btn-sm" href="/">Audit another site</a></nav>
+</header>
+<main class="l-wrap q-page">
+  <p class="l-eyebrow">Site audit</p>
+  <h1 class="q-title">{{ main.domain }}</h1>
+  {% include "quick/main.html" %}
+</main>
+{% endblock %}

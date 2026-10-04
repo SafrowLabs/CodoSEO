@@ -263,8 +263,38 @@ impl TestApp {
         .fetch_one(self.pool())
         .await
         .expect("insert crawl");
+        self.finalize_crawl(crawl_id, pages, changes, StopReason::Completed)
+            .await;
+        crawl_id
+    }
 
-        let origin = Url::parse(&site.start_url).expect("start url");
+    /// Finishes a crawl that already exists (queued or running) as the worker would: claims it
+    /// for `test-worker`, runs the checks over `pages` and `finalize`s. For no-signup audits
+    /// and first crawls the test queued itself.
+    pub async fn finalize_crawl(
+        &self,
+        crawl_id: Uuid,
+        pages: Vec<PageRecord>,
+        changes: Vec<Change>,
+        stop: StopReason,
+    ) {
+        let (site_id, start_url): (Uuid, String) = sqlx::query_as(
+            "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
+        )
+        .bind(crawl_id)
+        .fetch_one(self.pool())
+        .await
+        .expect("crawl and site");
+        sqlx::query(
+            "UPDATE crawls SET status = 'running', worker_id = 'test-worker', \
+             started_at = now() - interval '95 seconds', heartbeat_at = now() WHERE id = $1",
+        )
+        .bind(crawl_id)
+        .execute(self.pool())
+        .await
+        .expect("claim crawl");
+
+        let origin = Url::parse(&start_url).expect("start url");
         let edges = (1..pages.len() as u32)
             .map(|to| Edge {
                 from: 0,
@@ -282,14 +312,14 @@ impl TestApp {
             },
             robots: None,
             sitemap: SitemapSummary::default(),
-            stop: StopReason::Completed,
+            stop,
             duration_ms: 95_000,
         };
         let report = codoseo_checks::run_checks(&mut out);
         codoseo_store::finalize::finalize(
             self.pool(),
             crawl_id,
-            site.id,
+            site_id,
             "test-worker",
             &out,
             &report,
@@ -297,7 +327,6 @@ impl TestApp {
         )
         .await
         .expect("finalize");
-        crawl_id
     }
 }
 

@@ -47,6 +47,11 @@ const SOURCES: &[Source] = &[
         content_type: "image/svg+xml",
         bytes: include_bytes!("../assets/favicon.svg"),
     },
+    Source {
+        name: "landing.css",
+        content_type: "text/css; charset=utf-8",
+        bytes: include_bytes!("../assets/landing.css"),
+    },
     // Last, so its font URLs can be rewritten to the fonts' hashed names.
     Source {
         name: "app.css",
