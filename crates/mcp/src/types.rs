@@ -184,7 +184,9 @@ mod tests {
                 severity: Severity::Warning,
                 count: 500,
                 example_urls: (0..3)
-                    .map(|i| Url::parse(&format!("https://example.com/some/long/path/{i}")).unwrap())
+                    .map(|i| {
+                        Url::parse(&format!("https://example.com/some/long/path/{i}")).unwrap()
+                    })
                     .collect(),
             })
             .collect();

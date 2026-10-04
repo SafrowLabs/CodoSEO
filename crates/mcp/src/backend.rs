@@ -32,7 +32,10 @@ pub trait Backend: Send + Sync {
         max_pages: u32,
     ) -> impl Future<Output = Result<AuditHandle, BackendError>> + Send;
 
-    fn get_audit(&self, id: &AuditId) -> impl Future<Output = Result<AuditState, BackendError>> + Send;
+    fn get_audit(
+        &self,
+        id: &AuditId,
+    ) -> impl Future<Output = Result<AuditState, BackendError>> + Send;
 
     fn issue_urls(
         &self,
@@ -48,7 +51,8 @@ pub trait Backend: Send + Sync {
         url: &Url,
     ) -> impl Future<Output = Result<PageRecord, BackendError>> + Send;
 
-    fn check_page(&self, url: Url) -> impl Future<Output = Result<PageRecord, BackendError>> + Send;
+    fn check_page(&self, url: Url)
+    -> impl Future<Output = Result<PageRecord, BackendError>> + Send;
 
     fn check_robots(
         &self,

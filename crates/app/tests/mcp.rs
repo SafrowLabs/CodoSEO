@@ -25,7 +25,11 @@ impl McpChild {
             .expect("spawn `codoseo mcp`");
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
-        McpChild { child, stdin, stdout }
+        McpChild {
+            child,
+            stdin,
+            stdout,
+        }
     }
 
     fn send(&mut self, message: &Value) {
@@ -84,10 +88,7 @@ fn tools_list_shows_all_8_tools_over_real_stdio() {
     let tools = response["result"]["tools"]
         .as_array()
         .expect("a tools array");
-    let names: Vec<&str> = tools
-        .iter()
-        .filter_map(|t| t["name"].as_str())
-        .collect();
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     for expected in [
         "audit_site",
         "get_audit",
@@ -98,7 +99,10 @@ fn tools_list_shows_all_8_tools_over_real_stdio() {
         "check_redirects",
         "compare_audits",
     ] {
-        assert!(names.contains(&expected), "missing tool {expected} in {names:?}");
+        assert!(
+            names.contains(&expected),
+            "missing tool {expected} in {names:?}"
+        );
     }
     assert_eq!(tools.len(), 8);
 }

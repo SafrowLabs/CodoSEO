@@ -160,7 +160,9 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
         to_json(&state)
     }
 
-    #[tool(description = "List the URLs affected by one failing check from a finished audit, paginated.")]
+    #[tool(
+        description = "List the URLs affected by one failing check from a finished audit, paginated."
+    )]
     async fn get_issue_urls(
         &self,
         Parameters(IssueUrlsRequest {
@@ -174,7 +176,12 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
             .ok_or_else(|| format!("unknown check \"{check}\""))?;
         let rows = self
             .backend
-            .issue_urls(&AuditId(audit_id), check_id, limit.unwrap_or(50), offset.unwrap_or(0))
+            .issue_urls(
+                &AuditId(audit_id),
+                check_id,
+                limit.unwrap_or(50),
+                offset.unwrap_or(0),
+            )
             .await
             .map_err(|e| e.to_string())?;
         to_json(&rows)
@@ -194,13 +201,19 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
         to_json(&page)
     }
 
-    #[tool(description = "Fetch and check one page right now, without a full crawl: fields, redirect chain and page issues.")]
+    #[tool(
+        description = "Fetch and check one page right now, without a full crawl: fields, redirect chain and page issues."
+    )]
     async fn check_page(
         &self,
         Parameters(UrlRequest { url }): Parameters<UrlRequest>,
     ) -> Result<String, String> {
         let url = parse_url(&url)?;
-        let page = self.backend.check_page(url).await.map_err(|e| e.to_string())?;
+        let page = self
+            .backend
+            .check_page(url)
+            .await
+            .map_err(|e| e.to_string())?;
         to_json(&page)
     }
 
@@ -286,7 +299,10 @@ mod tests {
         // not just until the handshake completes - dropping it early tears down the
         // session and the client's next write hits a broken pipe.
         tokio::spawn(async move {
-            let running = server.serve(server_transport).await.expect("server handshake");
+            let running = server
+                .serve(server_transport)
+                .await
+                .expect("server handshake");
             let _ = running.waiting().await;
         });
         ().serve(client_transport).await.unwrap()
@@ -332,9 +348,11 @@ mod tests {
 
         let result = client
             .peer()
-            .call_tool(CallToolRequestParams::new("audit_site").with_arguments(args(json!({
-                "url": site.url("/").to_string(),
-            }))))
+            .call_tool(
+                CallToolRequestParams::new("audit_site").with_arguments(args(json!({
+                    "url": site.url("/").to_string(),
+                }))),
+            )
             .await
             .unwrap();
         let body: Value = serde_json::from_str(&text_of(&result)).unwrap();
@@ -350,9 +368,11 @@ mod tests {
 
         let result = client
             .peer()
-            .call_tool(CallToolRequestParams::new("check_page").with_arguments(args(json!({
-                "url": site.url("/").to_string(),
-            }))))
+            .call_tool(
+                CallToolRequestParams::new("check_page").with_arguments(args(json!({
+                    "url": site.url("/").to_string(),
+                }))),
+            )
             .await
             .unwrap();
         let body: Value = serde_json::from_str(&text_of(&result)).unwrap();
@@ -366,13 +386,19 @@ mod tests {
             .start()
             .await;
         let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
-        let client = serve(CodoseoMcp::with_wait_timeout(backend, StdDuration::from_millis(50))).await;
+        let client = serve(CodoseoMcp::with_wait_timeout(
+            backend,
+            StdDuration::from_millis(50),
+        ))
+        .await;
 
         let result = client
             .peer()
-            .call_tool(CallToolRequestParams::new("audit_site").with_arguments(args(json!({
-                "url": site.url("/").to_string(),
-            }))))
+            .call_tool(
+                CallToolRequestParams::new("audit_site").with_arguments(args(json!({
+                    "url": site.url("/").to_string(),
+                }))),
+            )
             .await
             .unwrap();
         let body: Value = serde_json::from_str(&text_of(&result)).unwrap();
@@ -382,9 +408,11 @@ mod tests {
         tokio::time::sleep(StdDuration::from_millis(700)).await;
         let result = client
             .peer()
-            .call_tool(CallToolRequestParams::new("get_audit").with_arguments(args(json!({
-                "audit_id": audit_id,
-            }))))
+            .call_tool(
+                CallToolRequestParams::new("get_audit").with_arguments(args(json!({
+                    "audit_id": audit_id,
+                }))),
+            )
             .await
             .unwrap();
         let body: Value = serde_json::from_str(&text_of(&result)).unwrap();
@@ -421,7 +449,9 @@ mod tests {
                     severity: codoseo_core::check::Severity::Warning,
                     count: 500,
                     example_urls: (0..3)
-                        .map(|i| Url::parse(&format!("https://example.com/some/long/path/{i}")).unwrap())
+                        .map(|i| {
+                            Url::parse(&format!("https://example.com/some/long/path/{i}")).unwrap()
+                        })
                         .collect(),
                 })
                 .collect();
@@ -497,9 +527,11 @@ mod tests {
         let client = serve(CodoseoMcp::new(HugeFailureBackend)).await;
         let result = client
             .peer()
-            .call_tool(CallToolRequestParams::new("audit_site").with_arguments(args(json!({
-                "url": "https://example.com/",
-            }))))
+            .call_tool(
+                CallToolRequestParams::new("audit_site").with_arguments(args(json!({
+                    "url": "https://example.com/",
+                }))),
+            )
             .await
             .unwrap();
         let text = text_of(&result);

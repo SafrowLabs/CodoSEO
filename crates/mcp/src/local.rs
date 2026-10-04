@@ -16,7 +16,7 @@ use codoseo_core::output::StopReason;
 use codoseo_core::page::PageRecord;
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::{crawl, inspect_page};
-use codoseo_crawler::fetch::{Fetcher, FetcherConfig, FetchError, Hop};
+use codoseo_crawler::fetch::{FetchError, Fetcher, FetcherConfig, Hop};
 use codoseo_crawler::robots::fetch_robots;
 use codoseo_diff::{diff, key_pages};
 use url::Url;
@@ -24,8 +24,8 @@ use url::Url;
 use crate::backend::{Backend, BackendError};
 use crate::cache::AuditCache;
 use crate::types::{
-    AuditHandle, AuditId, AuditState, AuditStatus, AuditSummary, FailingCheck,
-    MAX_FAILING_CHECKS, RedirectReport, RobotsReport, UrlRow,
+    AuditHandle, AuditId, AuditState, AuditStatus, AuditSummary, FailingCheck, MAX_FAILING_CHECKS,
+    RedirectReport, RobotsReport, UrlRow,
 };
 
 pub struct LocalBackend {
@@ -107,7 +107,9 @@ impl Backend for LocalBackend {
                 Err(e) => AuditStatus::Failed(e.to_string()),
             };
             let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
-            if !matches!(guard.status, AuditStatus::Done) || matches!(new_status, AuditStatus::Failed(_)) {
+            if !matches!(guard.status, AuditStatus::Done)
+                || matches!(new_status, AuditStatus::Failed(_))
+            {
                 guard.status = new_status;
             }
         });
@@ -121,7 +123,8 @@ impl Backend for LocalBackend {
     async fn get_audit(&self, id: &AuditId) -> Result<AuditState, BackendError> {
         let running = {
             let map = self.running.lock().unwrap_or_else(|e| e.into_inner());
-            map.get(id).map(|s| s.lock().unwrap_or_else(|e| e.into_inner()).clone())
+            map.get(id)
+                .map(|s| s.lock().unwrap_or_else(|e| e.into_inner()).clone())
         };
         if let Some(state) = running {
             return Ok(state);
@@ -378,7 +381,11 @@ mod tests {
             .unwrap();
         assert_eq!(page1.len(), 4);
         assert_eq!(page2.len(), 2);
-        let all: HashSet<_> = page1.iter().chain(page2.iter()).map(|r| r.url.clone()).collect();
+        let all: HashSet<_> = page1
+            .iter()
+            .chain(page2.iter())
+            .map(|r| r.url.clone())
+            .collect();
         assert_eq!(all.len(), 6, "no gaps or repeats across the two pages");
     }
 
