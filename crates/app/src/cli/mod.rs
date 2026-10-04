@@ -8,6 +8,7 @@ mod migrate;
 mod output;
 mod redirects;
 mod robots;
+mod worker;
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -86,6 +87,8 @@ enum Command {
     Mcp(mcp::McpArgs),
     /// Apply every pending Postgres migration from DATABASE_URL
     Migrate(migrate::MigrateArgs),
+    /// Claim and run crawls from the Postgres queue until SIGTERM
+    Worker(worker::WorkerArgs),
 }
 
 pub async fn run(cli: Cli) -> Outcome {
@@ -97,6 +100,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Diff(args) => diff::run(args),
         Command::Mcp(args) => mcp::run(args).await,
         Command::Migrate(args) => migrate::run(args).await,
+        Command::Worker(args) => worker::run(args).await,
     }
 }
 

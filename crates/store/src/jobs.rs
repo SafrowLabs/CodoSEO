@@ -24,6 +24,7 @@ pub struct ClaimedJob {
     pub max_attempts: i16,
 }
 
+#[derive(Clone)]
 pub struct JobQueue {
     pool: PgPool,
 }

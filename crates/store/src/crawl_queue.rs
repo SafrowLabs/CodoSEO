@@ -38,6 +38,7 @@ pub struct ClaimedCrawl {
     pub crawl_settings: serde_json::Value,
 }
 
+#[derive(Clone)]
 pub struct CrawlQueue {
     pool: PgPool,
 }
