@@ -12,8 +12,10 @@ pub struct Queued {
     pub depth: Option<u16>,
 }
 
-/// Holds the URLs still to fetch. Never admits more than `max_pages` URLs in total
-/// (fetched plus queued), so memory stays flat on endless URL spaces.
+/// Holds the URLs still to fetch. Never admits more than `max_pages` URLs to fetch in
+/// total (fetched plus queued), so memory stays flat on endless URL spaces. Redirect
+/// targets are remembered past the cap but never queued, so records stay at most
+/// `2 × max_pages`.
 ///
 /// Levels are a barrier: `pop` only returns URLs of the current level, and the next level
 /// becomes current when the caller asks with `advance`. Sitemap-only URLs come last.
@@ -65,10 +67,11 @@ impl Frontier {
         true
     }
 
-    /// Marks a URL as seen and counts it without queueing it (a redirect target whose
-    /// record is built from the response that already arrived).
-    pub fn admit(&mut self, url: &Url) -> bool {
-        self.try_admit(url)
+    /// Marks a redirect target as seen without queueing or counting it: its record is
+    /// built from the response that already arrived, so it costs no fetch. The cap does
+    /// not apply (it bounds fetches), but a URL already seen is refused.
+    pub fn admit_redirect_target(&mut self, url: &Url) -> bool {
+        self.seen.insert(url_hash(url))
     }
 
     /// Queues sitemap URLs that nothing linked to; they are fetched after link exploration.
@@ -181,18 +184,24 @@ mod tests {
     }
 
     #[test]
-    fn admit_counts_and_marks_seen_without_queueing() {
+    fn redirect_targets_are_marked_seen_past_the_cap_without_counting() {
         let mut f = Frontier::new(2);
         assert!(f.seed(u("https://e.com/")));
-        assert!(f.admit(&u("https://e.com/new")));
+        assert!(f.admit_redirect_target(&u("https://e.com/new")));
         assert!(f.is_seen(&u("https://e.com/new")));
-        assert!(!f.admit(&u("https://e.com/new")));
+        assert!(!f.admit_redirect_target(&u("https://e.com/new"))); // dedup
+        assert!(!f.push_link(u("https://e.com/new"), 0));
         assert_eq!(f.queued(), 1);
-        // The cap is full: a link is refused, flagged, and not remembered.
+        // Not counted: one more link still fits.
+        assert!(f.push_link(u("https://e.com/a"), 0));
+        // The cap is full: a link is refused, flagged, and not remembered...
         assert!(!f.capped());
         assert!(!f.push_link(u("https://e.com/x"), 0));
         assert!(f.capped());
         assert!(!f.is_seen(&u("https://e.com/x")));
+        // ...but a redirect target is still admitted.
+        assert!(f.admit_redirect_target(&u("https://e.com/t")));
+        assert_eq!(f.queued(), 2);
     }
 
     #[test]

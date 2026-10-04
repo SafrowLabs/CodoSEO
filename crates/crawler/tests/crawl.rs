@@ -267,6 +267,106 @@ async fn an_endless_calendar_stops_at_the_page_limit() {
 }
 
 #[tokio::test]
+async fn redirect_stubs_do_not_spend_the_page_budget() {
+    // 31 pages: home links /p0../p29 without a trailing slash, and each answers 301 to
+    // its trailing-slash URL. max_pages bounds fetches, so every redirect keeps the
+    // record of its target, admitted past the cap.
+    let links: Vec<String> = (0..30).map(|i| format!("/p{i}")).collect();
+    let mut b = SiteBuilder::new().html("/", "Home", &refs(&links));
+    for i in 0..30 {
+        let next = format!("/p{}", (i + 1) % 30);
+        b = b
+            .page(&format!("/p{i}"), Page::redirect(301, &format!("/p{i}/")))
+            .html(&format!("/p{i}/"), &format!("P{i}"), &[&next]);
+    }
+    let site = b.start().await;
+    let out = crawl(cfg_pages(site.url("/"), 20), |_| {}).await.unwrap();
+
+    let fetches = site.path_hits("/") + links.iter().map(|l| site.path_hits(l)).sum::<usize>();
+    assert_eq!(fetches, 20);
+    assert_eq!(out.stop, StopReason::PageLimit);
+    let redirects: Vec<&PageRecord> = out.pages.iter().filter(|p| p.status == 301).collect();
+    assert_eq!(redirects.len(), 19);
+    for r in &redirects {
+        let target = r.redirect_target.as_ref().unwrap();
+        let t = try_page(&out, target.path())
+            .unwrap_or_else(|| panic!("no record for redirect target {target}"));
+        assert_eq!((t.status, t.depth), (200, Some(1)));
+    }
+    assert_eq!(out.pages.len(), 1 + 19 * 2);
+    assert!(out.pages.len() <= 2 * 20);
+    assert_edges_are_sound(&out);
+}
+
+#[tokio::test]
+async fn a_redirect_into_a_robots_disallowed_path_keeps_only_the_redirect_record() {
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: *\nDisallow: /private")
+        .html("/", "Home", &["/go"])
+        .page("/go", Page::redirect(301, "/private/x"))
+        .html("/private/x", "Private", &["/private/child", "/leak"])
+        .html("/private/child", "Child", &[])
+        .html("/leak", "Leak", &[])
+        .start()
+        .await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+    let go = page(&out, "/go");
+    assert_eq!(go.redirect_target, Some(site.url("/private/x")));
+    assert!(
+        try_page(&out, "/private/x").is_none(),
+        "a disallowed redirect target is not recorded as a fetched page"
+    );
+    assert_eq!(site.path_hits("/leak"), 0, "its links are not followed");
+    assert!(try_page(&out, "/leak").is_none());
+    assert_eq!(out.stop, StopReason::Completed);
+}
+
+#[tokio::test]
+async fn repeated_links_from_one_page_make_one_edge() {
+    let site = SiteBuilder::new()
+        .page(
+            "/",
+            Page::html(concat!(
+                r#"<a href="/x">First</a><a href="/x">Second</a><a href="/x#top">Third</a>"#,
+                r#"<a rel="nofollow" href="/y">Y1</a><a href="/y">Y2</a>"#,
+            )),
+        )
+        .page(
+            "/x",
+            Page::html(r#"<a rel="nofollow" href="/">H1</a><a rel="nofollow" href="/?">H2</a>"#),
+        )
+        .html("/y", "Y", &[])
+        .start()
+        .await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+    let edges = |from: &str, to: &str| -> Vec<_> {
+        out.links
+            .edges
+            .iter()
+            .filter(|e| {
+                out.pages[e.from as usize].url.path() == from
+                    && out.pages[e.to as usize].url.path() == to
+            })
+            .collect()
+    };
+    let from_home = |to: &str| edges("/", to);
+    let x = from_home("/x");
+    assert_eq!(x.len(), 1, "one edge per (from, to)");
+    assert_eq!(out.links.anchor(x[0]), "First", "the first anchor is kept");
+    assert!(!x[0].nofollow);
+    let y = from_home("/y");
+    assert_eq!(y.len(), 1);
+    assert!(
+        !y[0].nofollow,
+        "nofollow only when every occurrence is nofollow"
+    );
+    let home = edges("/x", "/");
+    assert_eq!(home.len(), 1);
+    assert!(home[0].nofollow, "every link to it was nofollow");
+    assert_edges_are_sound(&out);
+}
+
+#[tokio::test]
 async fn the_time_limit_stops_the_crawl_and_keeps_pages() {
     // 50 pages of 300 ms over 2 connections would take about 7.5 s. Fetches cut short by
     // the deadline must not be recorded as timeouts; the race with the deadline is close,

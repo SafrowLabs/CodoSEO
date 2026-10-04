@@ -86,22 +86,15 @@ pub async fn crawl_shared(
     } = pre?;
     limiter.set_crawl_delay(rules.crawl_delay());
 
-    let mut run = Run::new(&cfg, &origin, &sitemap_urls, started);
+    let mut run = Run::new(&cfg, &origin, rules, &sitemap_urls, started);
     run.stop = stop;
     if let Some((url, result)) = start {
         run.record_start(url, result);
         on_progress(run.progress(0));
     }
     if run.stop.is_none() {
-        run.crawl(
-            &fetcher,
-            &limiter,
-            &rules,
-            sitemap_urls,
-            deadline,
-            &on_progress,
-        )
-        .await;
+        run.crawl(&fetcher, &limiter, sitemap_urls, deadline, &on_progress)
+            .await;
     }
     Ok(run.finish(origin, robots, sitemap))
 }
@@ -190,6 +183,7 @@ struct PendingEdge {
 /// The state of one crawl after preflight.
 struct Run {
     scope: SiteScope,
+    rules: RobotsRules,
     frontier: Frontier,
     in_sitemap: HashSet<u64>,
     pages: Vec<PageRecord>,
@@ -213,9 +207,16 @@ struct Run {
 }
 
 impl Run {
-    fn new(cfg: &CrawlConfig, origin: &Url, sitemap_urls: &[Url], started: Instant) -> Run {
+    fn new(
+        cfg: &CrawlConfig,
+        origin: &Url,
+        rules: RobotsRules,
+        sitemap_urls: &[Url],
+        started: Instant,
+    ) -> Run {
         Run {
             scope: SiteScope::new(origin),
+            rules,
             frontier: Frontier::new(cfg.limits.max_pages),
             in_sitemap: sitemap_urls.iter().map(url_hash).collect(),
             pages: Vec::new(),
@@ -255,7 +256,6 @@ impl Run {
         &mut self,
         fetcher: &Fetcher,
         limiter: &Limiter,
-        rules: &RobotsRules,
         sitemap_urls: Vec<Url>,
         deadline: Instant,
         on_progress: &(impl Fn(Progress) + Send + Sync),
@@ -267,7 +267,7 @@ impl Run {
         while self.stop.is_none() {
             while in_flight.len() < self.connections {
                 let Some(q) = self.frontier.pop() else { break };
-                if rules.allowed(q.url.as_str()) {
+                if self.rules.allowed(q.url.as_str()) {
                     in_flight.push(fetch_one(fetcher, limiter, q, deadline, self.fetch_timeout));
                 } else {
                     let in_sitemap = self.is_in_sitemap(&q.url);
@@ -346,14 +346,17 @@ impl Run {
                     self.consecutive_failures = 0;
                 }
                 let in_sitemap = &self.in_sitemap;
+                let rules = &self.rules;
                 let frontier = &mut self.frontier;
+                // An internal redirect target costs no fetch, so it is admitted past the
+                // page limit; one robots.txt disallows is not recorded as a fetched page.
                 let built = record::from_fetch(
                     &q.url,
                     q.depth,
                     |u| in_sitemap.contains(&url_hash(u)),
                     &r,
                     &self.scope,
-                    |u| frontier.admit(u),
+                    |u| rules.allowed(u.as_str()) && frontier.admit_redirect_target(u),
                 );
                 for b in built {
                     self.add(b);
@@ -373,6 +376,9 @@ impl Run {
 
     /// Adds a record, queues its followed internal links and keeps its edges to pages
     /// the frontier knows. Pages with no depth (sitemap-only) are not followed.
+    ///
+    /// A page that links the same URL several times gets one edge: it keeps the first
+    /// anchor text, and is `nofollow` only when every one of those links is.
     fn add(&mut self, b: Built) {
         let from = u32::try_from(self.pages.len()).unwrap_or(u32::MAX);
         let depth = b.record.depth;
@@ -388,11 +394,17 @@ impl Run {
                 }
             }
         }
+        let mut by_target: HashMap<u64, usize> = HashMap::new();
         for link in b.links {
             if !self.scope.is_internal(&link.url) || !self.frontier.is_seen(&link.url) {
                 continue;
             }
             let to = url_hash(&link.url);
+            if let Some(&i) = by_target.get(&to) {
+                self.edges[i].nofollow &= link.nofollow;
+                continue;
+            }
+            by_target.insert(to, self.edges.len());
             let anchor = self.intern(link.anchor);
             self.edges.push(PendingEdge {
                 from,
