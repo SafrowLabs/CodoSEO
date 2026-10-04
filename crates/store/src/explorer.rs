@@ -310,6 +310,8 @@ pub struct PageDetail {
     pub status: u16,
     /// Every redirect hop in order: the status and the URL that returned it.
     pub redirect_chain: Vec<(u16, String)>,
+    /// Where a redirecting URL finally lands.
+    pub redirect_target: Option<String>,
     pub response_ms: Option<u32>,
     pub size_bytes: Option<u64>,
     pub content_type: Option<String>,
@@ -338,6 +340,7 @@ struct PageDetailDb {
     url_hash: i64,
     status: i16,
     redirect_chain: serde_json::Value,
+    redirect_target: Option<String>,
     response_ms: Option<i32>,
     size_bytes: Option<i64>,
     content_type: Option<String>,
@@ -366,6 +369,7 @@ impl From<PageDetailDb> for PageDetail {
             url_hash: hash::from_db(r.url_hash),
             status: u16::try_from(r.status).unwrap_or(0),
             redirect_chain: serde_json::from_value(r.redirect_chain).unwrap_or_default(),
+            redirect_target: r.redirect_target,
             response_ms: r.response_ms.map(unsigned),
             size_bytes: r.size_bytes.and_then(|n| u64::try_from(n).ok()),
             content_type: r.content_type,
@@ -396,8 +400,8 @@ pub async fn page(
     url_hash: u64,
 ) -> Result<Option<PageDetail>, sqlx::Error> {
     let row: Option<PageDetailDb> = sqlx::query_as(
-        "SELECT id, url, url_hash, status, redirect_chain, response_ms, size_bytes, content_type, \
-                depth, in_sitemap, indexability::text AS indexability, title, meta_description, \
+        "SELECT id, url, url_hash, status, redirect_chain, redirect_target, response_ms, \
+                size_bytes, content_type, depth, in_sitemap, indexability::text AS indexability, title, meta_description, \
                 meta_robots, x_robots_tag, canonical, h1, h2, word_count, inlinks, \
                 outlinks_internal, outlinks_external, issues \
          FROM pages WHERE site_id = $1 AND url_hash = $2 AND crawl_id = $3 \

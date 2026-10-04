@@ -149,7 +149,10 @@ impl Shell {
                 initial: initial(&site.domain),
                 base: base.clone(),
                 urls_label: match &summary {
-                    Some(s) => format!("{} urls", fmt::thousands(s.report_summary.pages)),
+                    Some(s) => {
+                        let n = s.report_summary.pages;
+                        format!("{} url{}", fmt::thousands(n), if n == 1 { "" } else { "s" })
+                    }
                     None => "not crawled yet".to_owned(),
                 },
                 last_crawl: latest.as_ref().map(|c| {

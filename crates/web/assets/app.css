@@ -399,7 +399,7 @@ kbd {
 /* Rail (collapsed sidebar), ⌘\ or [ */
 :root.rail { --side-w: 60px; }
 :root.rail .brand { padding: 0; justify-content: center; }
-:root.rail .brand span, :root.rail .nav-title, :root.rail .nav-item .label, :root.rail .nav-item .count,
+:root.rail .brand > span:not(.owl), :root.rail .nav-title, :root.rail .nav-item .label, :root.rail .nav-item .count,
 :root.rail .nav-item .tag, :root.rail .site-pill .meta, :root.rail .site-pill .chev, :root.rail .crawler .row,
 :root.rail .crawler .state span, :root.rail .user .who { display: none; }
 :root.rail .sidebar { padding: 4px 8px 12px; align-items: stretch; }
@@ -434,7 +434,7 @@ kbd {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .topbar .menu-btn { display: inline-grid; margin-left: 8px; }
   .brand { width: auto; padding: 0 4px 0 2px; }
-  .brand span { display: none; }
+  .brand > span:not(.owl) { display: none; }
   .last-crawl, .search-trigger span, .search-trigger kbd, .topbar .run-label { display: none; }
   .search-trigger { flex: none; min-width: 0; width: 32px; padding: 0; justify-content: center; }
   .sidebar {
@@ -566,6 +566,11 @@ kbd {
 
 /* Data rows (issues, changes, history) */
 .rows { display: flex; flex-direction: column; }
+.issue-grid { grid-template-columns: 92px minmax(0, 1fr) 70px 110px 16px; }
+@media (max-width: 640px) {
+  .issue-grid { grid-template-columns: 76px minmax(0, 1fr) 40px; padding-left: 14px; padding-right: 14px; }
+  .issue-grid > :nth-child(n + 4) { display: none; }
+}
 .row-head { display: grid; gap: 12px; padding: 8px 18px; font-size: 11px; color: var(--faint-2); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--line-faint); }
 .row-item { display: grid; gap: 12px; align-items: center; padding: 11px 18px; border-bottom: 1px solid var(--line-faint); font-size: 13.5px; transition: background 0.1s; }
 a.row-item:hover, .row-item.clickable:hover { background: var(--surface-hover); }

@@ -987,9 +987,14 @@ fn details_tab(base: &str, p: &PageDetail) -> DetailsTab {
             .collect::<Vec<_>>()
             .join(" → ");
         let n = p.redirect_chain.len();
+        let lands = p
+            .redirect_target
+            .as_deref()
+            .map(|t| format!(" → {t}"))
+            .unwrap_or_default();
         field(
             "Redirect target / chain",
-            format!("{hops} ({n} hop{})", if n == 1 { "" } else { "s" }),
+            format!("{hops}{lands} ({n} hop{})", if n == 1 { "" } else { "s" }),
             if n > 1 { "c-warn" } else { "" },
         )
     };
@@ -1238,9 +1243,13 @@ fn headers_text(p: &PageDetail) -> String {
         lines.push(format!("x-robots-tag: {x}"));
     }
     // Each hop is the URL that answered with that status, so the page's own redirect points
-    // at the next hop.
+    // at the next hop, or at the final target when there is only one hop.
     if (300..400).contains(&p.status)
-        && let Some((_, next)) = p.redirect_chain.get(1)
+        && let Some(next) = p
+            .redirect_chain
+            .get(1)
+            .map(|(_, u)| u.as_str())
+            .or(p.redirect_target.as_deref())
     {
         lines.push(format!("location: {next}"));
     }
@@ -1249,6 +1258,9 @@ fn headers_text(p: &PageDetail) -> String {
         lines.push("# redirect chain".to_owned());
         for (i, (status, url)) in p.redirect_chain.iter().enumerate() {
             lines.push(format!("{}. {status} {url}", i + 1));
+        }
+        if let Some(target) = p.redirect_target.as_deref() {
+            lines.push(format!("→ {target}"));
         }
     }
     lines.join("\n")

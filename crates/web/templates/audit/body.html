@@ -24,10 +24,10 @@
       <div class="empty-sm" style="display:flex;align-items:center;gap:10px"><span class="badge t-ok"><svg class="icon" style="width:13px;height:13px"><use href="#i-check"/></svg>All clear</span>Every check passed on this crawl. Nice work.</div>
       {% else %}
       <div class="rows">
-        <div class="row-head" style="grid-template-columns:92px minmax(0,1fr) 70px 110px 16px"><span>Severity</span><span>Issue</span><span class="r">URLs</span><span>% of crawl</span><span></span></div>
+        <div class="row-head issue-grid"><span>Severity</span><span>Issue</span><span class="r">URLs</span><span>% of crawl</span><span></span></div>
         {% for i in d.issues %}
         {% if let Some(href) = i.href %}
-        <a class="row-item" href="{{ href }}" style="grid-template-columns:92px minmax(0,1fr) 70px 110px 16px">
+        <a class="row-item issue-grid" href="{{ href }}">
           <span><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span></span>
           <span class="trunc">{{ i.title }}</span>
           <span class="r mono num">{{ i.count }}</span>
@@ -35,7 +35,7 @@
           <svg class="icon go"><use href="#i-arrow"/></svg>
         </a>
         {% else %}
-        <div class="row-item" style="grid-template-columns:92px minmax(0,1fr) 70px 110px 16px">
+        <div class="row-item issue-grid">
           <span><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span></span>
           <span style="display:flex;align-items:center;gap:8px;min-width:0"><span class="trunc">{{ i.title }}</span><span class="tag">site-wide</span></span>
           <span class="r mono faint">{{ i.count }}</span>
