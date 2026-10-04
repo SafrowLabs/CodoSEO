@@ -22,7 +22,7 @@
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
   <!-- JSON-LD structured data -->
   <script type="application/ld+json">
@@ -79,917 +79,478 @@
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg: #070b14;
-      --bg-2: #0d1117;
-      --bg-3: #111827;
-      --border: #1f2937;
-      --border-2: #374151;
-      --text: #f9fafb;
-      --text-2: #d1d5db;
-      --text-3: #9ca3af;
-      --green: #10b981;
-      --green-2: #34d399;
-      --green-dim: rgba(16,185,129,0.12);
-      --green-glow: rgba(16,185,129,0.25);
-      --amber: #f59e0b;
-      --red: #ef4444;
-      --purple: #8b5cf6;
-      --blue: #60a5fa;
+      --bg: #FBFBF9; --ink: #111613; --ink-2: #4C544F; --ink-3: #6A726D; --ink-4: #8C948F;
+      --line: #E2E4DE; --line-2: #ECEDE8; --line-3: #F4F5F1; --panel: #FFFFFF; --tint: #F6F7F4;
+      --dark: #0E1A17; --yellow: oklch(0.84 0.16 88); --yellow-h: oklch(0.8 0.16 86);
+      --yellow-ink: oklch(0.5 0.11 78); --yellow-bg: #FBF7E4; --yellow-line: #F1E9C6;
+      --link: #1A0DAB; --red: #C5221F; --amber: #E37400; --grey: #9AA19C; --green: #137333;
+      --mono: 'Geist Mono', ui-monospace, monospace;
     }
-
     html { scroll-behavior: smooth; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Inter', system-ui, sans-serif;
-      font-size: 16px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
+    body { background: var(--bg); color: var(--ink); font-family: 'Geist', system-ui, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
     a { color: inherit; text-decoration: none; }
+    .wrap { max-width: 1240px; margin: 0 auto; padding: 0 28px; }
+    .mono { font-family: var(--mono); }
+    :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
 
-    /* ─── LAYOUT ─── */
-    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-    .section { padding: 96px 0; }
-    .section-sm { padding: 64px 0; }
+    /* header */
+    header { position: sticky; top: 0; z-index: 30; background: rgba(251,251,249,.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line-2); }
+    .bar { display: flex; align-items: center; gap: 36px; padding: 13px 0; }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 17px; letter-spacing: -.02em; }
+    .owl { width: 26px; height: 26px; flex: none; border-radius: 7px 7px 10px 10px; background: var(--dark); display: flex; align-items: center; justify-content: center; gap: 1px; padding-bottom: 3px; }
+    .owl i { width: 10px; height: 10px; border-radius: 50%; background: var(--yellow); display: grid; place-items: center; }
+    .owl i::after { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--dark); }
+    .owl.sm { width: 22px; height: 22px; border-radius: 6px 6px 9px 9px; padding-bottom: 2px; }
+    .owl.sm i { width: 8px; height: 8px; } .owl.sm i::after { width: 3px; height: 3px; }
+    .owl.xs i { width: 9px; height: 9px; } .owl.xs i::after { width: 3px; height: 3px; }
+    nav { display: flex; gap: 24px; font-size: 14px; flex: 1; min-width: 0; }
+    nav a { color: #5B635E; } nav a:hover { color: var(--ink); }
+    .bar-r { margin-left: auto; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .ghost { font-size: 13.5px; padding: 7px 11px; border-radius: 8px; display: flex; align-items: center; gap: 8px; }
+    .ghost:hover { background: #F1F2EE; }
+    .solid { font-size: 13.5px; color: #fff; background: var(--ink); border-radius: 8px; padding: 8px 14px; font-weight: 500; }
+    .solid:hover { background: #2A302C; }
 
-    /* ─── NAV ─── */
-    nav {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: rgba(7,11,20,0.85);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-    }
-    .nav-inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      height: 60px;
-    }
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 700;
-      font-size: 1.15rem;
-      letter-spacing: -0.02em;
-    }
-    .logo-owl { font-size: 1.4rem; }
-    .logo-codo { color: var(--text); }
-    .logo-seo { color: var(--green); }
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .nav-link {
-      color: var(--text-3);
-      font-size: 0.9rem;
-      font-weight: 500;
-      padding: 6px 14px;
-      border-radius: 6px;
-      transition: color 0.15s, background 0.15s;
-    }
-    .nav-link:hover { color: var(--text); background: var(--bg-3); }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      padding: 8px 18px;
-      border-radius: 8px;
-      transition: all 0.15s;
-      cursor: pointer;
-      border: none;
-    }
-    .btn-primary {
-      background: var(--green);
-      color: #000;
-    }
-    .btn-primary:hover { background: var(--green-2); box-shadow: 0 0 20px var(--green-glow); }
-    .btn-outline {
-      background: transparent;
-      color: var(--text-2);
-      border: 1px solid var(--border-2);
-    }
-    .btn-outline:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+    /* hero */
+    .hero { background-image: radial-gradient(#E3E5DF 1px, transparent 1px); background-size: 22px 22px; background-position: -11px -11px; border-bottom: 1px solid var(--line-2); }
+    .hero .wrap { padding-top: 88px; padding-bottom: 96px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 56px; align-items: center; }
+    .pills { display: flex; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; color: #5B635E; }
+    .pills span { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+    .pills .hot { background: var(--yellow); border-color: var(--yellow); color: var(--dark); }
+    h1 { font-size: clamp(44px, 6.2vw, 80px); line-height: .98; letter-spacing: -.045em; font-weight: 600; margin-top: 26px; text-wrap: balance; }
+    mark { background: linear-gradient(transparent 64%, oklch(0.9 0.13 92) 64%); color: inherit; padding: 0 .05em; }
+    .lede { font-size: 19px; line-height: 1.55; color: var(--ink-2); margin-top: 24px; max-width: 46ch; text-wrap: pretty; }
+    .install { display: flex; gap: 6px; margin-top: 34px; max-width: 520px; background: #fff; border: 1px solid #D9DCD5; border-radius: 12px; padding: 5px; box-shadow: 0 1px 2px rgba(17,22,19,.04), 0 12px 32px -18px rgba(17,22,19,.18); }
+    .install code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 14.5px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
+    .install code b { color: var(--ink-4); font-weight: 400; }
+    .btn { border: 0; font: inherit; font-weight: 600; font-size: 14.5px; border-radius: 8px; padding: 10px 18px; cursor: pointer; white-space: nowrap; background: var(--yellow); color: var(--dark); display: inline-flex; align-items: center; justify-content: center; }
+    .btn:hover { background: var(--yellow-h); }
+    .btn.out { background: #fff; color: var(--ink); border: 1px solid #D9DCD5; font-weight: 500; }
+    .btn.out:hover { background: var(--tint); }
+    .notes { display: flex; gap: 10px 20px; flex-wrap: wrap; margin-top: 14px; font-size: 13.5px; color: var(--ink-3); }
+    .notes code { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
 
-    /* ─── HERO ─── */
-    .hero {
-      padding: 100px 0 80px;
-      position: relative;
-      overflow: hidden;
-    }
-    .hero::before {
-      content: '';
-      position: absolute;
-      top: -200px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 800px;
-      height: 600px;
-      background: radial-gradient(ellipse at center, rgba(16,185,129,0.08) 0%, transparent 65%);
-      pointer-events: none;
-    }
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--green-dim);
-      border: 1px solid rgba(16,185,129,0.3);
-      color: var(--green-2);
-      font-size: 0.8rem;
-      font-weight: 600;
-      padding: 5px 14px;
-      border-radius: 100px;
-      margin-bottom: 32px;
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .hero-badge::before { content: '●'; font-size: 0.5rem; }
-    h1 {
-      font-size: clamp(2.5rem, 5vw, 3.75rem);
-      font-weight: 900;
-      letter-spacing: -0.04em;
-      line-height: 1.1;
-      margin-bottom: 24px;
-    }
-    .hero-sub {
-      font-size: 1.2rem;
-      color: var(--text-3);
-      max-width: 560px;
-      margin-bottom: 40px;
-      line-height: 1.7;
-    }
-    .hero-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-bottom: 48px;
-    }
-    .hero-stats {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 24px;
-    }
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.875rem;
-      color: var(--text-3);
-    }
-    .stat-val {
-      color: var(--text-2);
-      font-weight: 600;
-    }
-    .stat-dot {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: var(--border-2);
-    }
+    /* panel */
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0; }
+    .shot { box-shadow: 0 1px 2px rgba(17,22,19,.04), 0 40px 80px -40px rgba(17,22,19,.25); }
+    .ptop { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid #EEEFEA; }
+    .url { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; background: var(--tint); border-radius: 7px; padding: 6px 10px; font-family: var(--mono); font-size: 12.5px; overflow: hidden; white-space: nowrap; }
+    .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--yellow); }
+    .state { font-family: var(--mono); font-size: 12px; color: #5B635E; white-space: nowrap; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #EEEFEA; }
+    .stats div { padding: 12px 14px; border-right: 1px solid var(--line-3); }
+    .stats small { display: block; font-size: 11.5px; color: var(--ink-4); }
+    .stats b { display: block; font-family: var(--mono); font-size: 17px; font-weight: 500; margin-top: 3px; letter-spacing: -.02em; }
+    .prog { height: 3px; background: #F1F2EE; } .prog i { display: block; height: 3px; background: var(--yellow); width: 0; transition: width .3s; }
+    .row { display: grid; grid-template-columns: minmax(0, 1.5fr) 52px 104px 56px; gap: 12px; align-items: center; padding: 0 14px; height: 42px; border-bottom: 1px solid var(--line-3); font-size: 13px; }
+    .row.head { height: auto; padding: 9px 14px; font-size: 11px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #F1F2EE; }
+    .row .p { font-family: var(--mono); font-size: 12.5px; color: var(--link); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .s { font-family: var(--mono); font-size: 11.5px; font-weight: 500; border-radius: 4px; padding: 2px 6px; justify-self: start; }
+    .row .i { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .t { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+    .feed { height: 378px; overflow: hidden; }
+    .feed .row:first-child.fresh { animation: rowin .9s ease-out; }
+    @keyframes rowin { from { background: #EEF6F0; } to { background: transparent; } }
+    .s2 { color: #137333; background: #E6F4EA; } .s3 { color: #9A5B00; background: #FEF3E0; } .s4 { color: #C5221F; background: #FCE8E6; } .s5 { color: #8430CE; background: #F3E8FD; }
 
-    /* ─── INSTALL BOX ─── */
-    .install-box {
-      display: inline-flex;
-      align-items: center;
-      gap: 16px;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 20px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.95rem;
-      margin-bottom: 40px;
-    }
-    .install-prompt { color: var(--green); user-select: none; }
-    .install-cmd { color: var(--text); }
-    .copy-btn {
-      background: var(--bg-3);
-      border: 1px solid var(--border);
-      color: var(--text-3);
-      border-radius: 6px;
-      padding: 4px 10px;
-      font-size: 0.75rem;
-      font-family: 'Inter', sans-serif;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .copy-btn:hover { border-color: var(--green); color: var(--green); }
+    /* sections */
+    section.blk { padding-top: 120px; }
+    .shead { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 24px 56px; align-items: end; }
+    .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; color: var(--yellow-ink); text-transform: uppercase; margin-bottom: 14px; }
+    h2 { font-size: clamp(34px, 4vw, 52px); line-height: 1.02; letter-spacing: -.04em; font-weight: 600; text-wrap: balance; }
+    .shead p { font-size: 17px; line-height: 1.6; color: var(--ink-2); max-width: 52ch; }
+    .mt { margin-top: 44px; }
+    code.k { font-family: var(--mono); font-size: .88em; }
 
-    /* ─── TAGLINE STRIP ─── */
-    .tagline-strip {
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-      padding: 20px 0;
-      text-align: center;
-      background: linear-gradient(90deg, transparent, rgba(16,185,129,0.04), transparent);
-    }
-    .tagline-strip p {
-      font-size: 1.1rem;
-      color: var(--text-3);
-      font-style: italic;
-    }
-    .tagline-strip strong { color: var(--text-2); font-style: normal; }
+    /* terminal */
+    .term { font-family: var(--mono); font-size: 13px; line-height: 1.75; }
+    .term .tabs { display: flex; gap: 18px; padding: 10px 16px; border-bottom: 1px solid #EEEFEA; font-size: 12px; color: var(--ink-4); }
+    .term .tabs span:first-child { color: var(--ink); }
+    .term pre { padding: 18px 20px; overflow-x: auto; font: inherit; color: var(--ink); }
+    .c-dim { color: var(--ink-4); } .c-y { color: var(--yellow-ink); } .c-r { color: var(--red); } .c-a { color: #9A5B00; } .c-g { color: var(--green); } .c-l { color: var(--link); }
+    .cmds { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .cmds code { font-family: var(--mono); font-size: 12.5px; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; color: var(--ink-2); }
 
-    /* ─── SECTION HEADINGS ─── */
-    .section-label {
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--green);
-      margin-bottom: 12px;
-    }
-    h2 {
-      font-size: clamp(1.75rem, 3vw, 2.5rem);
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      line-height: 1.2;
-      margin-bottom: 16px;
-    }
-    .section-desc {
-      font-size: 1.05rem;
-      color: var(--text-3);
-      max-width: 560px;
-      line-height: 1.7;
-    }
+    /* checks */
+    .cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); border-top: 1px solid var(--line); }
+    .cat { padding: 24px 24px 28px 0; border-bottom: 1px solid var(--line); }
+    .cat header { position: static; background: none; border: 0; backdrop-filter: none; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .cat h3 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+    .cat .n { font-family: var(--mono); font-size: 12px; color: var(--ink-4); }
+    .cat ul { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+    .cat li { display: flex; gap: 10px; align-items: baseline; font-size: 14px; color: var(--ink-2); }
+    .cat li::before { content: ''; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--c); transform: translateY(-1px); }
+    .legend { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 18px; font-size: 13px; color: var(--ink-3); }
+    .legend span { display: flex; align-items: center; gap: 7px; }
+    .legend span::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+    .legend a { margin-left: auto; color: var(--link); } .legend a:hover { text-decoration: underline; }
+    .r { --c: var(--red); } .a { --c: var(--amber); } .n0 { --c: var(--grey); }
 
-    /* ─── FEATURES ─── */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      overflow: hidden;
-      margin-top: 56px;
-    }
-    .feature-card {
-      background: var(--bg-2);
-      padding: 32px;
-      transition: background 0.2s;
-    }
-    .feature-card:hover { background: var(--bg-3); }
-    .feature-icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 10px;
-      background: var(--green-dim);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.3rem;
-      margin-bottom: 20px;
-      border: 1px solid rgba(16,185,129,0.2);
-    }
-    .feature-title {
-      font-size: 1rem;
-      font-weight: 700;
-      margin-bottom: 8px;
-      color: var(--text);
-    }
-    .feature-desc {
-      font-size: 0.9rem;
-      color: var(--text-3);
-      line-height: 1.6;
-    }
+    /* diff */
+    .band { background: #F3F6F1; border: 1px solid #E1E7DE; border-radius: 20px; padding: clamp(24px, 4.5vw, 56px); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 48px; align-items: center; }
+    .band h2 { font-size: clamp(32px, 3.6vw, 46px); line-height: 1.04; }
+    .band p { font-size: 17px; line-height: 1.6; color: var(--ink-2); margin-top: 20px; max-width: 46ch; }
+    .dhead { display: flex; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #EEEFEA; font-family: var(--mono); font-size: 12px; color: #5B635E; }
+    .diff { padding: 14px 16px; border-bottom: 1px solid var(--line-3); }
+    .diff:last-child { border-bottom: 0; }
+    .diff .t { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-weight: 500; font-size: 14.5px; }
+    .diff .t::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+    .diff .t em { font-style: normal; margin-left: auto; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--link); }
+    .diff .l { margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.7; overflow-x: auto; white-space: nowrap; }
+    .diff .l div:first-child { color: var(--ink-4); }
 
-    /* ─── TERMINAL ─── */
-    .terminal-wrap {
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-      margin-top: 56px;
-      box-shadow: 0 0 60px rgba(16,185,129,0.08);
-    }
-    .terminal-bar {
-      background: var(--bg-3);
-      padding: 13px 18px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      border-bottom: 1px solid var(--border);
-    }
-    .tdot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
-    .tdot-r { background: #ff5f57; }
-    .tdot-y { background: #febc2e; }
-    .tdot-g { background: #28c840; }
-    .terminal-title {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--text-3);
-      margin-left: 8px;
-    }
-    .terminal-body {
-      padding: 24px 28px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      line-height: 1.75;
-      overflow-x: auto;
-    }
-    .t-prompt { color: var(--green); }
-    .t-cmd { color: var(--text); }
-    .t-dim { color: #4b5563; }
-    .t-green { color: #10b981; }
-    .t-red { color: #ef4444; }
-    .t-amber { color: #f59e0b; }
-    .t-blue { color: #60a5fa; }
-    .t-white { color: #f9fafb; }
-    .t-bold { font-weight: 600; }
+    /* facts */
+    .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 56px; align-items: center; }
+    .split h2 { margin-bottom: 22px; }
+    .split > div > p { font-size: 17px; line-height: 1.6; color: var(--ink-2); max-width: 48ch; }
+    .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 32px; margin-top: 40px; }
+    .facts div { border-top: 1px solid var(--ink); padding-top: 14px; }
+    .facts b { display: block; font-weight: 600; font-size: 15.5px; }
+    .facts span { display: block; font-size: 14.5px; line-height: 1.5; color: #5B635E; margin-top: 6px; }
 
-    /* ─── CHECKS GRID ─── */
-    .checks-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 16px;
-      margin-top: 56px;
-    }
-    .check-category {
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 24px;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    .check-category:hover {
-      border-color: var(--green);
-      background: var(--bg-3);
-    }
-    .cat-icon { font-size: 1.5rem; margin-bottom: 12px; }
-    .cat-name {
-      font-size: 0.875rem;
-      font-weight: 700;
-      color: var(--text-2);
-      margin-bottom: 8px;
-    }
-    .cat-checks {
-      font-size: 0.8rem;
-      color: var(--text-3);
-      line-height: 1.5;
-    }
-    .cat-count {
-      display: inline-block;
-      background: var(--green-dim);
-      color: var(--green-2);
-      font-size: 0.7rem;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 100px;
-      margin-top: 12px;
-      font-family: 'JetBrains Mono', monospace;
-    }
+    /* roadmap */
+    .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; }
+    .card .tag { align-self: flex-start; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; padding: 3px 7px; border-radius: 4px; text-transform: uppercase; }
+    .tag.dev { background: oklch(0.95 0.07 92); color: oklch(0.45 0.1 80); } .tag.plan { background: #ECEFE9; color: #5B635E; }
+    .card h3 { font-size: 22px; letter-spacing: -.02em; font-weight: 600; margin-top: 14px; }
+    .card p { font-size: 15px; line-height: 1.55; color: var(--ink-2); margin-top: 8px; }
+    .card ul { list-style: none; margin-top: 16px; }
+    .card li { font-size: 14px; color: var(--ink-2); padding: 9px 0; border-top: 1px solid #F1F2EE; }
 
-    /* ─── SEVERITY BADGES ─── */
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 0.7rem;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .badge-c { background: rgba(239,68,68,0.15); color: #f87171; }
-    .badge-w { background: rgba(245,158,11,0.15); color: #fbbf24; }
-    .badge-n { background: rgba(96,165,250,0.15); color: #93c5fd; }
+    /* compare */
+    .scroll { overflow-x: auto; }
+    .cmp { min-width: 720px; }
+    .cmp .g { display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); border-bottom: 1px solid #F1F2EE; font-size: 14px; }
+    .cmp .g > * { padding: 13px 22px; display: flex; align-items: center; gap: 10px; }
+    .cmp .g > :nth-child(3), .cmp .g > :nth-child(4) { color: #5B635E; }
+    .cmp .g > :nth-child(2) { background: var(--yellow-bg); box-shadow: inset 1px 0 0 var(--yellow-line), inset -1px 0 0 var(--yellow-line); }
+    .cmp .g.h { border-bottom: 1px solid var(--line); }
+    .cmp .g.h > * { flex-direction: column; align-items: flex-start; gap: 4px; padding: 18px 22px; font-weight: 600; font-size: 15px; }
+    .cmp .g.h > :nth-child(2) { background: var(--dark); color: #F4F5F1; box-shadow: none; }
+    .cmp .g.h small { font-family: var(--mono); font-weight: 400; font-size: 11px; color: var(--ink-4); }
+    .cmp .g.h > :nth-child(2) small { color: #8E9C96; }
+    .cmp .g > :first-child { font-weight: 500; }
+    .ic { flex: none; min-width: 18px; height: 18px; padding: 0 var(--px, 0); border-radius: 9px; display: grid; place-items: center; font-size: 10px; font-weight: 600; font-family: var(--mono); }
+    .ic.y { color: oklch(0.42 0.12 152); background: oklch(0.94 0.05 152); } .ic.p { color: oklch(0.5 0.14 50); background: oklch(0.95 0.045 60); }
+    .ic.n { color: var(--ink-4); background: #ECEFE9; } .ic.s { --px: 6px; font-size: 9.5px; color: oklch(0.45 0.1 80); background: oklch(0.95 0.07 92); }
+    .fine { font-size: 12.5px; color: var(--ink-4); margin-top: 14px; }
 
-    /* ─── COMING SOON ─── */
-    .coming-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-      gap: 24px;
-      margin-top: 56px;
-    }
-    .coming-card {
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 40px;
-      position: relative;
-      overflow: hidden;
-      transition: border-color 0.2s;
-    }
-    .coming-card:hover { border-color: var(--border-2); }
-    .coming-card::after {
-      content: '';
-      position: absolute;
-      top: 0; right: 0;
-      width: 200px; height: 200px;
-      border-radius: 50%;
-      pointer-events: none;
-    }
-    .coming-card.mcp::after { background: radial-gradient(circle, rgba(139,92,246,0.07) 0%, transparent 70%); }
-    .coming-card.webapp::after { background: radial-gradient(circle, rgba(16,185,129,0.07) 0%, transparent 70%); }
-    .coming-pill {
-      display: inline-block;
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      padding: 4px 10px;
-      border-radius: 100px;
-      margin-bottom: 20px;
-    }
-    .coming-pill.green { background: var(--green-dim); color: var(--green-2); border: 1px solid rgba(16,185,129,0.25); }
-    .coming-pill.purple { background: rgba(139,92,246,0.1); color: #a78bfa; border: 1px solid rgba(139,92,246,0.25); }
-    .coming-icon { font-size: 2.5rem; margin-bottom: 16px; }
-    h3 { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
-    .coming-desc { color: var(--text-3); line-height: 1.7; margin-bottom: 24px; }
-    .coming-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .coming-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-size: 0.875rem;
-      color: var(--text-3);
-    }
-    .coming-list li::before { content: '→'; color: var(--green); flex-shrink: 0; font-weight: 600; }
-    .coming-card.mcp .coming-list li::before { color: #a78bfa; }
+    /* crates + cta */
+    .crates { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; }
+    .crates a { font-family: var(--mono); font-size: 13px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+    .crates a:hover { border-color: var(--ink); }
+    .cta { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; justify-content: space-between; border-top: 1px solid var(--ink); padding-top: 40px; margin-top: 140px; }
+    .cta h2 { font-size: clamp(36px, 4.6vw, 60px); line-height: 1; letter-spacing: -.045em; max-width: 16ch; }
+    .cta .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+    .cta .btn { padding: 12px 20px; font-size: 15px; border-radius: 9px; }
+    .cta .btn.out { font-family: var(--mono); }
+    footer { padding: 96px 0 44px; }
+    footer .in { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; font-size: 13.5px; color: var(--ink-3); }
+    footer .in > span { display: flex; align-items: center; gap: 10px; }
+    footer .links { display: flex; gap: 20px; flex-wrap: wrap; }
+    footer a:hover { color: var(--ink); text-decoration: underline; }
 
-    /* ─── OPEN SOURCE ─── */
-    .oss-section {
-      text-align: center;
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-      background: linear-gradient(180deg, transparent, rgba(16,185,129,0.03), transparent);
+    @media (max-width: 860px) {
+      nav { display: none; } .bar { gap: 12px; } .hero .wrap { padding-top: 56px; padding-bottom: 64px; }
+      section.blk { padding-top: 88px; } .wrap { padding: 0 16px; } .stats b { font-size: 15px; }
+      .row { grid-template-columns: minmax(0, 1fr) 52px 56px; } .row .i { display: none; }
+      .legend a { margin-left: 0; } .facts { grid-template-columns: 1fr; }
     }
-    .oss-badges {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 12px;
-      margin: 32px 0;
-    }
-    .oss-badge {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 18px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: var(--text-2);
-      transition: all 0.15s;
-    }
-    .oss-badge:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
-    .oss-badge-icon { font-size: 1.1rem; }
-
-    /* ─── FINAL CTA ─── */
-    .cta-section { text-align: center; }
-    .cta-section h2 { margin-bottom: 12px; }
-    .cta-desc { color: var(--text-3); margin-bottom: 32px; font-size: 1.05rem; }
-    .cta-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 24px; }
-    .cta-note { font-size: 0.8rem; color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
-    .cta-note a { color: var(--green-2); }
-    .cta-note a:hover { text-decoration: underline; }
-
-    /* ─── FOOTER ─── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 32px 0;
-    }
-    .footer-inner {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-    }
-    .footer-left { font-size: 0.875rem; color: var(--text-3); }
-    .footer-left a { color: var(--text-3); transition: color 0.15s; }
-    .footer-left a:hover { color: var(--green); }
-    .footer-links { display: flex; gap: 20px; }
-    .footer-link { font-size: 0.875rem; color: var(--text-3); transition: color 0.15s; }
-    .footer-link:hover { color: var(--text-2); }
-
-    /* ─── RESPONSIVE ─── */
-    @media (max-width: 640px) {
-      .nav-link { display: none; }
-      .hero { padding: 72px 0 60px; }
-      .install-box { flex-wrap: wrap; }
-      .coming-grid { grid-template-columns: 1fr; }
-    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .prog i { transition: none; } .feed .row.fresh { animation: none !important; } }
   </style>
 </head>
-
 <body>
 
-<!-- ═══ NAV ═══ -->
-<nav>
-  <div class="container">
-    <div class="nav-inner">
-      <a href="/" class="logo">
-        <span class="logo-owl">🦉</span>
-        <span><span class="logo-codo">Codo</span><span class="logo-seo">SEO</span></span>
-      </a>
-      <div class="nav-links">
-        <a href="https://github.com/SafrowLabs/codoSEO" class="nav-link" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/SafrowLabs/codoSEO#readme" class="nav-link" target="_blank" rel="noopener">Docs</a>
-        <a href="https://crates.io/crates/codoseo" class="btn btn-outline" target="_blank" rel="noopener">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-          crates.io
-        </a>
-      </div>
+<header>
+  <div class="wrap bar">
+    <a href="/" class="brand" aria-label="CodoSEO home"><span class="owl"><i></i><i></i></span>CodoSEO</a>
+    <nav aria-label="Primary">
+      <a href="#checks">Checks</a>
+      <a href="#diff">Diff</a>
+      <a href="#ci">CI</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#compare">Compare</a>
+    </nav>
+    <div class="bar-r">
+      <a class="ghost" href="https://github.com/SafrowLabs/codoSEO" target="_blank" rel="noopener">GitHub</a>
+      <a class="solid" href="#install">Install</a>
     </div>
   </div>
-</nav>
+</header>
 
-<!-- ═══ HERO ═══ -->
+<main>
 <section class="hero">
-  <div class="container">
-    <div class="hero-badge">v0.0.1 now on crates.io</div>
-    <h1>Know the moment<br>your <span style="color:var(--green)">SEO breaks.</span></h1>
-    <p class="hero-sub">
-      Open-source SEO crawler and monitor built in Rust.
-      Runs 44 checks, scores your site 0–100, diffs audits and
-      integrates with CI — in a single static binary.
-    </p>
-
-    <div class="install-box">
-      <span class="install-prompt">$</span>
-      <span class="install-cmd" id="install-cmd">cargo install codoseo</span>
-      <button class="copy-btn" onclick="copyInstall(this)" aria-label="Copy install command">copy</button>
+  <div class="wrap">
+    <div>
+      <div class="pills"><span class="hot">Open source</span><span>Written in Rust</span><span>AGPL-3.0</span><span>v0.0.1 on crates.io</span></div>
+      <h1>Know the moment your <mark>SEO breaks.</mark></h1>
+      <p class="lede">An open-source SEO crawler and monitor in a single Rust binary. It runs 44 checks, scores your site from 0 to 100, diffs two audits and fails your CI build before rankings drop.</p>
+      <div class="install" id="install">
+        <code><b>$</b><span id="cmd">cargo install codoseo</span></code>
+        <button class="btn" id="copy" type="button" aria-label="Copy install command">Copy</button>
+      </div>
+      <div class="notes"><span>No account, no API key</span><span>Requires Rust 1.88+</span><span>Binaries on <a href="https://github.com/SafrowLabs/codoSEO/releases" target="_blank" rel="noopener" style="color:var(--link)">GitHub releases</a></span></div>
     </div>
 
-    <div class="hero-actions">
-      <a href="https://github.com/SafrowLabs/codoSEO" class="btn btn-primary" target="_blank" rel="noopener">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
-        View on GitHub
-      </a>
-      <a href="https://crates.io/crates/codoseo" class="btn btn-outline" target="_blank" rel="noopener">
-        crates.io / codoseo
-      </a>
-    </div>
-
-    <div class="hero-stats">
-      <span class="stat"><span class="stat-val">44</span> SEO checks</span>
-      <span class="stat-dot"></span>
-      <span class="stat"><span class="stat-val">299</span> tests</span>
-      <span class="stat-dot"></span>
-      <span class="stat"><span class="stat-val">Rust</span> 1.88+</span>
-      <span class="stat-dot"></span>
-      <span class="stat"><span class="stat-val">AGPL-3.0</span></span>
-      <span class="stat-dot"></span>
-      <span class="stat"><span class="stat-val">v0.0.1</span> published</span>
+    <div class="panel shot" aria-label="Sample crawl in progress">
+      <div class="ptop">
+        <span class="url"><i class="dot" id="dot"></i>https://northwind-outdoor.com</span>
+        <span class="state" id="state">Crawling…</span>
+      </div>
+      <div class="stats">
+        <div><small>Crawled</small><b id="s-crawled">0</b></div>
+        <div><small>Queue</small><b id="s-queue">0</b></div>
+        <div><small>URL/s</small><b id="s-rate">0</b></div>
+        <div><small>Issues</small><b id="s-issues">0</b></div>
+      </div>
+      <div class="prog"><i id="prog"></i></div>
+      <div class="row head"><span>Address</span><span>Status</span><span class="i">Indexability</span><span style="text-align:right">Time</span></div>
+      <div class="feed" id="feed"></div>
     </div>
   </div>
 </section>
 
-<!-- ═══ TAGLINE ═══ -->
-<div class="tagline-strip">
-  <div class="container">
-    <p><strong>"Uptime monitoring, but for your SEO."</strong> — An open-source alternative to Screaming Frog and an affordable alternative to ContentKing.</p>
+<section class="blk wrap" id="run">
+  <div class="shead">
+    <div><div class="eyebrow">The CLI</div><h2>Point it at a URL. Read what's broken.</h2></div>
+    <p>One command crawls the site, runs every check and prints a report. Output is a table, JSON, Markdown or CSV, so you can read it, pipe it into <code class="k">jq</code> or save it as a file.</p>
   </div>
-</div>
+  <div class="panel term mt">
+    <div class="tabs"><span>codoseo crawl https://example.com --format md</span></div>
+<pre><span class="c-dim">Preflight … ok
+Crawling  ━━━━━━━━━━━━━━━━━━━━  142 pages  28s</span>
 
-<!-- ═══ FEATURES ═══ -->
-<section class="section">
-  <div class="container">
-    <div class="section-label">Why CodoSEO</div>
-    <h2>Everything you need<br>to audit a site.</h2>
-    <p class="section-desc">A single binary that crawls, checks, scores and diffs — with no browser, no headless Chrome, no configuration files.</p>
+<b># CodoSEO report for https://example.com/</b>
 
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon">🦀</div>
-        <div class="feature-title">Fast Rust crawler</div>
-        <div class="feature-desc">Async, polite and memory-flat. Crawls 500 pages in seconds. Respects <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">robots.txt</code>, <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">Crawl-delay</code> and backs off on 429/503.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">✅</div>
-        <div class="feature-title">44 SEO checks</div>
-        <div class="feature-desc">Across 9 categories: response, indexability, on-page, content, links, technical, sitemap, social and schema. Critical · Warning · Notice severities.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">📊</div>
-        <div class="feature-title">Health score 0–100</div>
-        <div class="feature-desc">Weighted by severity and the fraction of affected pages. A site where every page fails every check scores 0. No failures scores 100.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🔄</div>
-        <div class="feature-title">Audit diff</div>
-        <div class="feature-desc">Compare two saved JSON audits. Surfaces new issues, resolved issues, score changes, status changes, title changes and redirect regressions.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🚀</div>
-        <div class="feature-title">CI-ready</div>
-        <div class="feature-desc"><code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">--fail-on critical</code> exits 1. Pipe into GitHub Actions, GitLab CI or any shell script. Fail the build before rankings drop.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">📄</div>
-        <div class="feature-title">Multiple output formats</div>
-        <div class="feature-desc">Table, JSON, Markdown and CSV. Pipe JSON into <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">jq</code>, export CSV to a spreadsheet, or save Markdown as a report.</div>
-      </div>
+- <b>Health score:</b> <span class="c-g"><b>84 / 100</b></span>
+- <b>Checks:</b> 37 of 44 checks passed
+
+<span class="c-r"><b>## Critical (1)</b></span>
+<span class="c-dim">| Check                      | Slug                 | Affected | Examples                   |</span>
+| <span class="c-r">Page returns a 4xx error</span>   | <span class="c-l">http_4xx</span>             | 1 page   | /old-page                  |
+
+<span class="c-a"><b>## Warning (2)</b></span>
+| <span class="c-a">Page links to a broken URL</span> | <span class="c-l">links_to_broken</span>      | 1 page   | /contact                   |
+| <span class="c-a">Meta description is missing</span> | <span class="c-l">description_missing</span>  | 6 pages  | /blog/…                    |
+
+<b>## Summary</b>
+- Pages: <span class="c-g"><b>142</b></span> <span class="c-dim">(138 indexable)</span>
+- Status: <span class="c-g">2xx 138</span> <span class="c-dim">· 3xx 3 ·</span> <span class="c-r">4xx 1</span> <span class="c-dim">· 5xx 0</span>
+- Avg response: <span class="c-g">210 ms</span></pre>
+  </div>
+  <div class="cmds">
+    <code>codoseo check &lt;URL&gt;</code><code>codoseo robots &lt;URL&gt;</code><code>codoseo redirects &lt;URL&gt;</code><code>codoseo diff before.json after.json</code>
+  </div>
+</section>
+
+<section class="blk wrap" id="checks">
+  <div class="shead">
+    <h2>44 checks after every crawl.</h2>
+    <p>Each check passes or fails and names the pages behind it. Results roll up into a health score from 0 to 100, weighted by severity and by how many pages are affected.</p>
+  </div>
+  <div class="cats mt" id="cats"></div>
+  <div class="legend"><span class="r">Critical</span><span class="a">Warning</span><span class="n0">Notice</span><a href="https://github.com/SafrowLabs/codoSEO#the-44-seo-checks" target="_blank" rel="noopener">Full check reference →</a></div>
+</section>
+
+<section class="blk wrap" id="diff">
+  <div class="band">
+    <div>
+      <h2>Crawl again tomorrow and see the diff.</h2>
+      <p>Save each audit as JSON and compare any two. <code class="k">codoseo diff</code> lists new issues, resolved issues, score changes, status changes, title changes and redirect regressions.</p>
+    </div>
+    <div class="panel">
+      <div class="dhead"><span>before.json → after.json</span><span>Score 84 → 79</span></div>
+      <div class="diff r"><div class="t">Became noindex <em>/pricing</em></div><div class="l"><div>− meta robots: index, follow</div><div class="c-r">+ meta robots: noindex</div></div></div>
+      <div class="diff r"><div class="t">Status changed <em>/journal/old-trail-guide</em></div><div class="l"><div>− 200 OK</div><div class="c-r">+ 404 Not Found</div></div></div>
+      <div class="diff a"><div class="t">Title changed <em>/tents</em></div><div class="l"><div>− Tents &amp; Shelters | Northwind Outdoor</div><div class="c-a">+ Tents</div></div></div>
+      <div class="diff a"><div class="t">Redirect chain grew <em>/sale</em></div><div class="l"><div>− /sale → /deals</div><div class="c-a">+ /sale → /deals → /offers → /</div></div></div>
     </div>
   </div>
 </section>
 
-<!-- ═══ TERMINAL DEMO ═══ -->
-<section class="section-sm">
-  <div class="container">
-    <div class="section-label">See it in action</div>
-    <h2>Runs in seconds.<br>Tells you what's broken.</h2>
-    <p class="section-desc">Point it at any URL. No API key, no account, no configuration.</p>
-
-    <div class="terminal-wrap">
-      <div class="terminal-bar">
-        <span class="tdot tdot-r"></span>
-        <span class="tdot tdot-y"></span>
-        <span class="tdot tdot-g"></span>
-        <span class="terminal-title">codoseo crawl https://example.com</span>
-      </div>
-      <div class="terminal-body">
-        <div><span class="t-prompt">$</span> <span class="t-cmd">codoseo crawl https://example.com --format md</span></div>
-        <div class="t-dim" style="margin-top:8px">Preflight … ok</div>
-        <div class="t-dim">Crawling  ━━━━━━━━━━━━━━━━━━━━  142 pages  28s</div>
-        <br>
-        <div class="t-white t-bold"># CodoSEO report for https://example.com/</div>
-        <br>
-        <div><span class="t-white">- </span><span class="t-bold t-white">Health score:</span><span class="t-green t-bold"> 84 / 100</span></div>
-        <div><span class="t-white">- </span><span class="t-bold t-white">Checks:</span><span class="t-white"> 37 of 44 checks passed</span></div>
-        <div><span class="t-white">- </span><span class="t-bold t-white">Stop reason:</span><span class="t-green"> Completed</span></div>
-        <br>
-        <div class="t-red t-bold">## Critical (1)</div>
-        <br>
-        <div class="t-dim">| Check                         | Slug      | Affected | Examples                          |</div>
-        <div class="t-dim">|-------------------------------|-----------|----------|-----------------------------------|</div>
-        <div>| <span class="t-red">Page returns a 4xx error</span>      | <span class="t-blue">http_4xx</span>  | 1 page   | <span class="t-white">https://example.com/old-page</span>  |</div>
-        <br>
-        <div class="t-amber t-bold">## Warning (2)</div>
-        <br>
-        <div class="t-dim">| Check                         | Slug             | Affected | Examples                          |</div>
-        <div class="t-dim">|-------------------------------|------------------|----------|-----------------------------------|</div>
-        <div>| <span class="t-amber">Page links to a broken URL</span>    | <span class="t-blue">links_to_broken</span> | 1 page  | <span class="t-white">https://example.com/contact</span>  |</div>
-        <div>| <span class="t-amber">Meta description is missing</span>   | <span class="t-blue">description_missing</span> | 6 pages | <span class="t-white">https://example.com/blog/…</span> |</div>
-        <br>
-        <div class="t-bold" style="color:#93c5fd">## Summary</div>
-        <br>
-        <div><span class="t-white">- Pages: </span><span class="t-green t-bold">142</span><span class="t-dim"> (138 indexable)</span></div>
-        <div><span class="t-white">- Status: </span><span class="t-green">2xx 138</span><span class="t-dim"> · </span><span class="t-dim">3xx 3</span><span class="t-dim"> · </span><span class="t-red">4xx 1</span><span class="t-dim"> · 5xx 0</span></div>
-        <div><span class="t-white">- Avg response: </span><span class="t-green">210 ms</span></div>
-        <div><span class="t-white">- Duration: </span><span class="t-dim">28 s</span></div>
+<section class="blk wrap" id="ci">
+  <div class="split">
+    <div>
+      <h2>Fail the build before rankings drop.</h2>
+      <p>CodoSEO is one static binary with no browser and no config file, so it drops into any pipeline. <code class="k">--fail-on critical</code> exits with code 1 when the threshold is reached.</p>
+      <div class="facts">
+        <div><b>Async and polite</b><span>Built on Tokio. Respects robots.txt and Crawl-delay, and backs off on 429 and 503.</span></div>
+        <div><b>Exit codes for CI</b><span>Gate a deploy on <code class="k">critical</code> or <code class="k">warning</code> findings, for crawls and for diffs.</span></div>
+        <div><b>Plain output</b><span>Table, JSON, Markdown and CSV. Audit files are portable and diffable.</span></div>
+        <div><b>Embed the crates</b><span>Core, crawler, checks and diff are published separately for your own Rust projects.</span></div>
       </div>
     </div>
+    <div class="panel term">
+      <div class="tabs"><span>.github/workflows/seo.yml</span></div>
+<pre><span class="c-y">- name:</span> SEO audit
+  <span class="c-y">run:</span> |
+    cargo install codoseo
+    codoseo crawl ${{ env.SITE_URL }} \
+      --format json -o audit.json \
+      --fail-on critical
 
-    <div style="margin-top:20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo check &lt;URL&gt;</code>
-      <span style="color:var(--border-2)">·</span>
-      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo robots &lt;URL&gt;</code>
-      <span style="color:var(--border-2)">·</span>
-      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo redirects &lt;URL&gt;</code>
-      <span style="color:var(--border-2)">·</span>
-      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo diff before.json after.json</code>
-      <a href="https://github.com/SafrowLabs/codoSEO#readme" target="_blank" rel="noopener" style="color:var(--green-2);font-size:0.8rem;margin-left:4px">full docs →</a>
+<span class="c-dim"># later: compare against the last release</span>
+<span class="c-y">- name:</span> SEO diff
+  <span class="c-y">run:</span> codoseo diff before.json audit.json --fail-on critical</pre>
     </div>
   </div>
 </section>
 
-<!-- ═══ 44 CHECKS ═══ -->
-<section class="section">
-  <div class="container">
-    <div class="section-label">44 checks across 9 categories</div>
-    <h2>Nothing slips through.</h2>
-    <p class="section-desc">Every crawled page is evaluated for response health, indexability, on-page quality, content issues, link problems and more.</p>
-
-    <div class="checks-grid">
-      <div class="check-category">
-        <div class="cat-icon">🔴</div>
-        <div class="cat-name">Response</div>
-        <div class="cat-checks">4xx errors, 5xx errors, fetch failures, redirect loops, redirect chains</div>
-        <div><span class="badge badge-c">C</span> <span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">6 checks</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">🔍</div>
-        <div class="cat-name">Indexability</div>
-        <div class="cat-checks">Noindex, canonical issues, robots.txt blocking, canonical to non-200</div>
-        <div><span class="badge badge-c">C</span> <span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">6 checks</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">📝</div>
-        <div class="cat-name">On-Page</div>
-        <div class="cat-checks">Missing/duplicate titles, meta descriptions, H1s; length violations</div>
-        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">12 checks</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">📄</div>
-        <div class="cat-name">Content</div>
-        <div class="cat-checks">Thin pages (under 200 words), duplicate content, missing image alt text</div>
-        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">3 checks</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">🔗</div>
-        <div class="cat-name">Links</div>
-        <div class="cat-checks">Broken links, redirect links, orphan pages, nofollow internal links, deep pages</div>
-        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">6 checks</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">⚙️</div>
-        <div class="cat-name">Technical</div>
-        <div class="cat-checks">HTTP instead of HTTPS, mixed content on HTTPS pages, slow response times</div>
-        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">3 checks</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">🗺️</div>
-        <div class="cat-name">Sitemap</div>
-        <div class="cat-checks">Pages missing from sitemap, sitemap pages that are noindex or non-200</div>
-        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">5 checks</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">📣</div>
-        <div class="cat-name">Social</div>
-        <div class="cat-checks">Missing Open Graph title or image</div>
-        <div><span class="badge badge-n">N</span> <span class="cat-count">1 check</span></div>
-      </div>
-      <div class="check-category">
-        <div class="cat-icon">🧩</div>
-        <div class="cat-name">Schema</div>
-        <div class="cat-checks">Invalid JSON-LD, hreflang missing self-reference</div>
-        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">2 checks</span></div>
-      </div>
+<section class="blk wrap" id="roadmap">
+  <div class="shead">
+    <div><div class="eyebrow">Roadmap</div><h2>The CLI is the first piece.</h2></div>
+    <p>The crawler, checks and diff engine are shipped. The hosted and assistant-facing parts are not, and the dates are not fixed. Watch the repo for releases.</p>
+  </div>
+  <div class="road mt">
+    <div class="card">
+      <span class="tag dev">In development</span>
+      <h3>Web app</h3>
+      <p>A dashboard for continuous monitoring. Add a URL and get your first report without touching a terminal.</p>
+      <ul><li>Scheduled crawls with change detection between runs</li><li>Alerts to Slack, Discord, email and webhooks</li><li>Health score trend and issue history</li><li>Self-host with <code class="k">docker compose up</code>, or use a hosted plan</li></ul>
     </div>
-
-    <p style="margin-top:24px;font-size:0.8rem;color:var(--text-3)">
-      <span class="badge badge-c">C</span> Critical &nbsp;
-      <span class="badge badge-w">W</span> Warning &nbsp;
-      <span class="badge badge-n">N</span> Notice &nbsp;&mdash;&nbsp;
-      <a href="https://github.com/SafrowLabs/codoSEO#the-44-seo-checks" target="_blank" rel="noopener" style="color:var(--green-2)">Full check reference →</a>
-    </p>
+    <div class="card">
+      <span class="tag plan">Planned</span>
+      <h3>MCP server</h3>
+      <p>Ask Claude, Cursor or any MCP client to audit a page, check a canonical or diff two crawls from your editor.</p>
+      <ul><li>Crawl and audit a site from a chat prompt</li><li>Natural-language questions about issues</li><li>Suggested fixes for failing checks</li><li>Shares the engine with the CLI and web app</li></ul>
+    </div>
+    <div class="card">
+      <span class="tag plan">Planned</span>
+      <h3>GEO checks</h3>
+      <p>Visibility for AI answer engines, next to the classic SEO checks.</p>
+      <ul><li>AI crawler rules in robots.txt, per user agent</li><li>llms.txt and llms-full.txt validation</li><li>Key content present in the raw HTML</li><li>Alert when a deploy blocks an AI bot</li></ul>
+    </div>
   </div>
 </section>
 
-<!-- ═══ COMING SOON ═══ -->
-<section class="section" style="background:linear-gradient(180deg,transparent,rgba(16,185,129,0.02),transparent)">
-  <div class="container">
-    <div class="section-label">Coming soon</div>
-    <h2>The CLI is just the start.</h2>
-    <p class="section-desc">CodoSEO is growing into a full SEO monitoring platform. The web app and MCP server are in development.</p>
-
-    <div class="coming-grid">
-      <!-- Web App -->
-      <div class="coming-card webapp">
-        <div class="coming-pill green">In development</div>
-        <div class="coming-icon">🌐</div>
-        <h3>Web App</h3>
-        <p class="coming-desc">A hosted dashboard for continuous SEO monitoring. No CLI needed — add a URL, get your first report in under 2 minutes.</p>
-        <ul class="coming-list">
-          <li>Scheduled crawls — weekly (free), daily (paid)</li>
-          <li>Change detection between crawls</li>
-          <li>Alerts via Slack, Discord, email and webhook</li>
-          <li>Health score trend and issue history</li>
-          <li>Free tier · Pro $9–19/mo · Agency $49+/mo</li>
-          <li>Self-host with one <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">docker compose up</code></li>
-        </ul>
-      </div>
-
-      <!-- MCP Server -->
-      <div class="coming-card mcp">
-        <div class="coming-pill purple">Planned</div>
-        <div class="coming-icon">🤖</div>
-        <h3>MCP Server</h3>
-        <p class="coming-desc">Connect CodoSEO to your AI assistant. Ask Claude or Cursor to audit a page, check a canonical, or diff two crawls — without leaving your editor.</p>
-        <ul class="coming-list">
-          <li>Works with Claude, Cursor, Windsurf and any MCP client</li>
-          <li>Crawl and audit a site from a chat prompt</li>
-          <li>Ask natural-language questions about SEO issues</li>
-          <li>AI-suggested fixes for failing checks</li>
-          <li>Integrates with the CLI and web app</li>
-        </ul>
-      </div>
-    </div>
-
-    <p style="margin-top:32px;font-size:0.875rem;color:var(--text-3);text-align:center">
-      Want early access? Watch the
-      <a href="https://github.com/SafrowLabs/codoSEO" target="_blank" rel="noopener" style="color:var(--green-2)">GitHub repo</a>
-      for updates.
-    </p>
+<section class="blk wrap" id="compare">
+  <div class="shead">
+    <h2>Open source, scriptable, free to run.</h2>
+    <p>How the CLI compares today. Web app and GEO rows are marked as soon because they are not shipped yet.</p>
   </div>
+  <div class="panel scroll mt"><div class="cmp" id="cmp"></div></div>
+  <p class="fine">Competitor details are from their public product pages and may be out of date. Corrections welcome on GitHub.</p>
 </section>
 
-<!-- ═══ OPEN SOURCE ═══ -->
-<section class="section-sm oss-section">
-  <div class="container" style="text-align:center">
-    <div class="section-label">Free & Open Source</div>
-    <h2>Use it. Self-host it.<br>Contribute to it.</h2>
-    <p class="section-desc" style="margin:0 auto 0">Licensed under AGPL-3.0. The source is on GitHub and the CLI is published to crates.io. No account required.</p>
+<section class="blk wrap">
+  <div class="shead">
+    <div><div class="eyebrow">Free and open source</div><h2>Use it. Self-host it. Contribute to it.</h2></div>
+    <p>Licensed under AGPL-3.0. The source is on GitHub and every crate is published to crates.io, so you can embed the crawler or the checks in your own project.</p>
+  </div>
+  <div class="crates">
+    <a href="https://github.com/SafrowLabs/codoSEO" target="_blank" rel="noopener">github.com/SafrowLabs/codoSEO</a>
+    <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">codoseo</a>
+    <a href="https://crates.io/crates/codoseo-core" target="_blank" rel="noopener">codoseo-core</a>
+    <a href="https://crates.io/crates/codoseo-crawler" target="_blank" rel="noopener">codoseo-crawler</a>
+  </div>
 
-    <div class="oss-badges">
-      <a href="https://github.com/SafrowLabs/codoSEO" class="oss-badge" target="_blank" rel="noopener">
-        <span class="oss-badge-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
-        </span>
-        GitHub
-      </a>
-      <a href="https://crates.io/crates/codoseo" class="oss-badge" target="_blank" rel="noopener">
-        <span class="oss-badge-icon">📦</span>
-        crates.io/codoseo
-      </a>
-      <a href="https://crates.io/crates/codoseo-core" class="oss-badge" target="_blank" rel="noopener">
-        <span class="oss-badge-icon">🔩</span>
-        codoseo-core
-      </a>
-      <a href="https://crates.io/crates/codoseo-crawler" class="oss-badge" target="_blank" rel="noopener">
-        <span class="oss-badge-icon">🕷️</span>
-        codoseo-crawler
-      </a>
-      <a href="https://www.gnu.org/licenses/agpl-3.0.html" class="oss-badge" target="_blank" rel="noopener">
-        <span class="oss-badge-icon">⚖️</span>
-        AGPL-3.0
-      </a>
+  <div class="cta">
+    <h2>Run your first audit in a minute.</h2>
+    <div class="acts">
+      <a class="btn" href="#install">Install CodoSEO</a>
+      <a class="btn out" href="https://github.com/SafrowLabs/codoSEO#readme" target="_blank" rel="noopener">Read the docs</a>
     </div>
-
-    <p style="font-size:0.875rem;color:var(--text-3)">
-      Each crate is published independently — embed the crawler or checks in your own Rust project.
-    </p>
   </div>
 </section>
+</main>
 
-<!-- ═══ FINAL CTA ═══ -->
-<section class="section cta-section">
-  <div class="container">
-    <div class="section-label">Get started</div>
-    <h2>One command.<br>Your first audit in seconds.</h2>
-    <p class="cta-desc">No account. No config. No browser runtime required.</p>
-
-    <div class="install-box" style="display:inline-flex;margin-bottom:32px">
-      <span class="install-prompt">$</span>
-      <span class="install-cmd" id="install-cmd-2">cargo install codoseo && codoseo crawl https://yoursite.com</span>
-      <button class="copy-btn" onclick="copyInstall2(this)" aria-label="Copy command">copy</button>
-    </div>
-
-    <div class="cta-actions">
-      <a href="https://github.com/SafrowLabs/codoSEO" class="btn btn-primary" target="_blank" rel="noopener">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
-        Star on GitHub
-      </a>
-      <a href="https://github.com/SafrowLabs/codoSEO#readme" class="btn btn-outline" target="_blank" rel="noopener">Read the docs</a>
-    </div>
-
-    <p class="cta-note">
-      Requires Rust 1.88+ &nbsp;·&nbsp;
-      <a href="https://rustup.rs" target="_blank" rel="noopener">Install Rust via rustup.rs</a>
-      &nbsp;·&nbsp; Binaries on the
-      <a href="https://github.com/SafrowLabs/codoSEO/releases" target="_blank" rel="noopener">releases page</a>
-    </p>
-  </div>
-</section>
-
-<!-- ═══ FOOTER ═══ -->
 <footer>
-  <div class="container">
-    <div class="footer-inner">
-      <div class="footer-left">
-        <a href="/" class="logo" style="display:inline-flex;gap:8px;align-items:center;margin-bottom:6px">
-          <span>🦉</span>
-          <span><strong>Codo</strong><span style="color:var(--green)">SEO</span></span>
-        </a>
-        <div>Built by <a href="https://github.com/SafrowLabs" target="_blank" rel="noopener">SafrowLabs</a> · <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0</a></div>
-      </div>
-      <div class="footer-links">
-        <a href="https://github.com/SafrowLabs/codoSEO" class="footer-link" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://crates.io/crates/codoseo" class="footer-link" target="_blank" rel="noopener">crates.io</a>
-        <a href="https://github.com/SafrowLabs/codoSEO#readme" class="footer-link" target="_blank" rel="noopener">Docs</a>
-        <a href="https://github.com/SafrowLabs/codoSEO/issues" class="footer-link" target="_blank" rel="noopener">Issues</a>
-      </div>
-    </div>
+  <div class="wrap in">
+    <span><span class="owl sm"><i></i><i></i></span>CodoSEO by <a href="https://github.com/SafrowLabs" target="_blank" rel="noopener" style="text-decoration:underline">SafrowLabs</a> · AGPL-3.0</span>
+    <span class="links">
+      <a href="https://github.com/SafrowLabs/codoSEO" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">crates.io</a>
+      <a href="https://github.com/SafrowLabs/codoSEO#readme" target="_blank" rel="noopener">Docs</a>
+      <a href="https://github.com/SafrowLabs/codoSEO/issues" target="_blank" rel="noopener">Issues</a>
+    </span>
   </div>
 </footer>
 
 <script>
-  function copyInstall(btn) {
-    const cmd = document.getElementById('install-cmd').textContent;
-    navigator.clipboard.writeText(cmd).then(() => {
-      btn.textContent = 'copied!';
-      btn.style.color = 'var(--green)';
-      setTimeout(() => { btn.textContent = 'copy'; btn.style.color = ''; }, 2000);
-    });
-  }
-  function copyInstall2(btn) {
-    const cmd = 'cargo install codoseo';
-    navigator.clipboard.writeText(cmd).then(() => {
-      btn.textContent = 'copied!';
-      btn.style.color = 'var(--green)';
-      setTimeout(() => { btn.textContent = 'copy'; btn.style.color = ''; }, 2000);
-    });
-  }
-</script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
 
+  // copy install command
+  $('copy').addEventListener('click', function () {
+    var b = this;
+    var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1800); };
+    if (navigator.clipboard) navigator.clipboard.writeText($('cmd').textContent).then(done, function () {});
+  });
+
+  // sample crawl feed
+  var POOL = [
+    ['/', 200, 'Indexable', 112], ['/tents', 200, 'Indexable', 98], ['/tents/ridgeline-2p', 200, 'Indexable', 141],
+    ['/sale', 301, 'Redirect → /deals', 34], ['/blog/winter-camping-checklist', 200, 'Indexable', 176],
+    ['/journal/old-trail-guide', 404, 'Not found', 61], ['/sleeping-bags', 200, 'Indexable', 104],
+    ['/pricing', 200, 'Noindex', 88], ['/stoves/alpine-mini', 200, 'Indexable', 122],
+    ['/tents?sort=price', 200, 'Canonicalised', 96], ['/api/stock-check', 503, 'Server error', 1204],
+    ['/deals', 301, 'Redirect → /offers', 41], ['/about', 200, 'Indexable', 79], ['/journal/tag/hiking', 200, 'Indexable', 133],
+    ['/packs/trail-35l', 200, 'Indexable', 117], ['/cart', 200, 'Blocked by robots.txt', 0],
+    ['/returns', 200, 'Indexable', 72], ['/journal/gear-list-2019', 410, 'Gone', 58], ['/contact', 200, 'Indexable', 69]
+  ];
+  var TOTAL = 1284, tick = 0;
+  var cls = function (s) { return s >= 500 ? 's5' : s >= 400 ? 's4' : s >= 300 ? 's3' : 's2'; };
+  var col = function (r) { return r[2] === 'Indexable' ? '#4C544F' : r[1] >= 400 ? '#C5221F' : '#9A5B00'; };
+  var esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+
+  function render(t, animate) {
+    var crawled = Math.min(TOTAL, 180 + t * 13), done = crawled >= TOTAL, html = '';
+    for (var i = 0; i < 9; i++) {
+      var r = POOL[(((t - i) % POOL.length) + POOL.length) % POOL.length];
+      html += '<div class="row' + (i === 0 && !done && animate ? ' fresh' : '') + '"><span class="p">' + esc(r[0]) +
+        '</span><span class="s ' + cls(r[1]) + '">' + r[1] + '</span><span class="i" style="color:' + col(r) + '">' + esc(r[2]) +
+        '</span><span class="t">' + (r[3] ? r[3] + ' ms' : '—') + '</span></div>';
+    }
+    $('feed').innerHTML = html;
+    $('s-crawled').textContent = crawled.toLocaleString('en-US');
+    $('s-queue').textContent = done ? '0' : Math.max(0, 1300 - crawled);
+    $('s-rate').textContent = done ? '—' : 12 + (tick * 7) % 6;
+    $('s-issues').textContent = Math.round(crawled / TOTAL * 96);
+    $('prog').style.width = (crawled / TOTAL * 100).toFixed(1) + '%';
+    $('dot').style.background = done ? '#137333' : '';
+    $('state').textContent = done ? 'Sample · complete in 1m 42s' : 'Sample crawl…';
+  }
+  var still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (still) { render(109, false); }
+  else { render(0, false); setInterval(function () { tick++; render(tick % 110, true); }, 420); }
+
+  // checks grid: [name, count, [[label, severity]]]
+  var CATS = [
+    ['Response', 6, [['4xx and 5xx errors', 0], ['Fetch failures', 0], ['Redirect loops', 0], ['Redirect chains', 1]]],
+    ['Indexability', 6, [['Noindex on key pages', 0], ['Blocked by robots.txt', 0], ['Canonical to non-200', 1], ['Canonical issues', 2]]],
+    ['On-page', 12, [['Missing or duplicate titles', 1], ['Missing or duplicate descriptions', 1], ['Missing or multiple H1s', 1], ['Length violations', 2]]],
+    ['Content', 3, [['Thin pages under 200 words', 1], ['Duplicate content', 1], ['Missing image alt text', 2]]],
+    ['Links', 6, [['Broken links', 1], ['Links to redirects', 2], ['Orphan pages', 1], ['Deep pages', 2]]],
+    ['Technical', 3, [['HTTP instead of HTTPS', 1], ['Mixed content', 1], ['Slow responses', 2]]],
+    ['Sitemap', 5, [['Pages missing from sitemap', 1], ['Sitemap pages that are noindex', 1], ['Sitemap pages not 200', 1]]],
+    ['Social', 1, [['Missing Open Graph title or image', 2]]],
+    ['Schema', 2, [['Invalid JSON-LD', 1], ['hreflang missing self-reference', 2]]]
+  ];
+  var SEV = ['r', 'a', 'n0'];
+  $('cats').innerHTML = CATS.map(function (c) {
+    return '<div class="cat"><header><h3>' + c[0] + '</h3><span class="n">' + c[1] + ' checks</span></header><ul>' +
+      c[2].map(function (i) { return '<li class="' + SEV[i[1]] + '">' + i[0] + '</li>'; }).join('') + '</ul></div>';
+  }).join('');
+
+  // comparison table: [label, [state, text] x3]
+  var G = [
+    ['License', ['y', 'AGPL-3.0, open source'], ['n', 'Proprietary'], ['n', 'Proprietary']],
+    ['Runs on your own machine or CI', ['y', 'Single static binary'], ['p', 'Desktop app or CLI'], ['n', 'Cloud only']],
+    ['Price to start', ['y', 'Free, no URL limit'], ['p', 'Free up to 500 URLs'], ['p', 'Paid plans']],
+    ['Exit codes for CI', ['y', '--fail-on critical'], ['p', 'Via CLI, licensed'], ['n', '']],
+    ['Diff between two audits', ['y', 'JSON audit files'], ['p', 'Crawl comparison'], ['p', 'Crawl comparison']],
+    ['JavaScript rendering', ['s', ''], ['y', ''], ['y', '']],
+    ['Scheduled monitoring and alerts', ['s', 'Web app'], ['p', 'Machine must be on'], ['y', '']],
+    ['llms.txt and AI crawler checks', ['s', 'GEO checks'], ['n', ''], ['n', '']]
+  ];
+  var IC = { y: '✓', p: '◐', n: '–', s: 'SOON' };
+  var cell = function (c) { return '<span><i class="ic ' + c[0] + '">' + IC[c[0]] + '</i>' + (c[1] ? '<span>' + esc(c[1]) + '</span>' : '') + '</span>'; };
+  $('cmp').innerHTML =
+    '<div class="g h"><span></span><span><span style="display:flex;gap:8px;align-items:center"><span class="owl xs" style="width:20px;height:20px;border-radius:6px 6px 8px 8px"><i></i><i></i></span>CodoSEO</span><small>open-source CLI</small></span><span>Screaming Frog<small>desktop SEO Spider</small></span><span>Ahrefs Site Audit<small>cloud SaaS</small></span></div>' +
+    G.map(function (r) { return '<div class="g"><span>' + r[0] + '</span>' + cell(r[1]) + cell(r[2]) + cell(r[3]) + '</div>'; }).join('');
+})();
+</script>
 </body>
 </html>
