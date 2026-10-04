@@ -43,6 +43,9 @@ pub enum AuditStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditHandle {
     pub id: AuditId,
+    /// Flattened, so the wire shape is `"status": "running"` rather than nesting
+    /// `AuditStatus`'s own tag under a second `status` key.
+    #[serde(flatten)]
     pub status: AuditStatus,
 }
 
@@ -50,6 +53,7 @@ pub struct AuditHandle {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuditState {
     pub id: AuditId,
+    #[serde(flatten)]
     pub status: AuditStatus,
     /// Set while `status` is `Running`.
     pub progress: Option<Progress>,
