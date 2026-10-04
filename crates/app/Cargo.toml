@@ -21,7 +21,10 @@ codoseo-crawler.workspace = true
 codoseo-checks.workspace = true
 codoseo-diff.workspace = true
 codoseo-mcp.workspace = true
+codoseo-store.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -30,6 +33,8 @@ thiserror.workspace = true
 url.workspace = true
 rmcp.workspace = true
 dirs.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true

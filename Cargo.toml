@@ -16,6 +16,7 @@ codoseo-crawler = { path = "crates/crawler", version = "0.0.1" }
 codoseo-checks = { path = "crates/checks", version = "0.0.1" }
 codoseo-diff = { path = "crates/diff", version = "0.0.1" }
 codoseo-mcp = { path = "crates/mcp", version = "0.0.1" }
+codoseo-store = { path = "crates/store", version = "0.0.1" }
 codoseo-testkit = { path = "crates/testkit" }
 url = { version = "2.5.8", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -23,7 +24,9 @@ serde_json = "1.0.151"
 thiserror = "2.0.21"
 xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
 proptest = "1.11.0"
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+tokio-util = "0.7.19"
+tracing = "0.1.44"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "gzip", "brotli", "stream"] }
 bytes = "1.12.1"
 futures-util = "0.3.34"
@@ -43,8 +46,10 @@ tempfile = "3.27.0"
 insta = { version = "1.49.0", features = ["yaml"] }
 rmcp = { version = "3.5.0", features = ["transport-io"] }
 schemars = "1.1.0"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "7.0.0"
+sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "tls-rustls", "migrate", "time", "uuid"] }
+time = { version = "0.3.55", features = ["serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
