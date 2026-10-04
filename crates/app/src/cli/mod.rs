@@ -4,6 +4,7 @@ mod check;
 mod crawl;
 mod diff;
 mod mcp;
+mod migrate;
 mod output;
 mod redirects;
 mod robots;
@@ -83,6 +84,8 @@ enum Command {
     Diff(diff::DiffArgs),
     /// Run the local MCP server over stdio
     Mcp(mcp::McpArgs),
+    /// Apply every pending Postgres migration from DATABASE_URL
+    Migrate(migrate::MigrateArgs),
 }
 
 pub async fn run(cli: Cli) -> Outcome {
@@ -93,6 +96,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Redirects(args) => redirects::run(args).await,
         Command::Diff(args) => diff::run(args),
         Command::Mcp(args) => mcp::run(args).await,
+        Command::Migrate(args) => migrate::run(args).await,
     }
 }
 

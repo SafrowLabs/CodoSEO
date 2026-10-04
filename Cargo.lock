@@ -428,6 +428,7 @@ dependencies = [
  "codoseo-crawler",
  "codoseo-diff",
  "codoseo-mcp",
+ "codoseo-store",
  "codoseo-testkit",
  "csv",
  "dirs",
@@ -436,10 +437,12 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "sqlx",
  "tempfile",
  "thiserror",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]
