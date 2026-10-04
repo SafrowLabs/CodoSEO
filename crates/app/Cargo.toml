@@ -2,10 +2,11 @@
 name = "codoseo"
 description = "CodoSEO: a fast, polite SEO crawler and site auditor for the command line."
 readme = "../../README.md"
-keywords = ["seo", "crawler", "audit", "cli", "mcp"]
+keywords = ["seo", "crawler", "audit", "cli"]
 categories = ["command-line-utilities", "web-programming"]
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

@@ -3,6 +3,7 @@ name = "codoseo-crawler"
 description = "The CodoSEO crawler: fetching, robots.txt, sitemaps and streaming field extraction."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
