@@ -1,0 +1,13 @@
+{% extends "solo_base.html" %}
+{% block title %}Signing in — CodoSEO{% endblock %}
+{% block body %}
+<div class="solo-page">
+  <form class="solo-card" method="post" action="/auth/magic/{{ token }}" id="confirm">
+    <div style="display:flex;justify-content:center;margin-bottom:18px"><span class="owl" style="width:44px;height:44px;border-radius:12px 12px 16px 16px;gap:3px;padding-bottom:6px"><i style="width:16px;height:16px"></i><i style="width:16px;height:16px"></i></span></div>
+    <h1>Signing you in…</h1>
+    <p>One moment. If nothing happens, press the button.</p>
+    <div class="actions"><button class="btn btn-primary btn-lg" type="submit"><span class="spinner on"></span>Continue to CodoSEO</button></div>
+  </form>
+</div>
+<script>setTimeout(function(){document.getElementById("confirm").requestSubmit()},350)</script>
+{% endblock %}

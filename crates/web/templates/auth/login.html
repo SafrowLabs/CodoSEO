@@ -1,0 +1,30 @@
+{% extends "solo_base.html" %}
+{% block title %}Sign in — CodoSEO{% endblock %}
+{% block body %}
+<div class="auth">
+  <div class="auth-side">
+    <a class="brand" href="/" style="width:auto;padding:0;height:auto"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+    <div class="auth-form">{% include "auth/_card.html" %}</div>
+    <div class="auth-foot">Open source under AGPL-3.0 · <a href="https://codoseo.com" style="text-decoration:underline">codoseo.com</a></div>
+  </div>
+  <div class="auth-show" aria-hidden="true">
+    <div class="ticker"><div>
+      {% for _ in 0..2 %}
+      <div><span class="s2">200</span>  /                              112 ms</div>
+      <div><span class="s2">200</span>  /tents                          98 ms</div>
+      <div><span class="s3">301</span>  /sale → /deals                  34 ms</div>
+      <div><span class="s2">200</span>  /tents/ridgeline-2p            141 ms</div>
+      <div><span class="s4">404</span>  /journal/old-trail-guide        61 ms</div>
+      <div><span class="s2">200</span>  /sleeping-bags                 104 ms</div>
+      <div><span class="s2">200</span>  /guides/how-to-choose          188 ms</div>
+      <div><span class="s3">302</span>  /deals → /offers                41 ms</div>
+      <div><span class="s2">200</span>  /packs/trail-35l               117 ms</div>
+      <div><span class="s2">200</span>  /about                          79 ms</div>
+      {% endfor %}
+    </div></div>
+    <div class="score-ring"><div class="ring"><b>86</b></div><div class="mono" style="font-size:12px;color:#9aa39d;line-height:1.7">37 of 40 checks passed<br><span style="color:#ff7b72">1 key page became noindex</span></div></div>
+    <h2>See what changed on your site before Google does.</h2>
+    <p>CodoSEO crawls your site on a schedule, runs 44 checks, and tells you the moment something important breaks.</p>
+  </div>
+</div>
+{% endblock %}
