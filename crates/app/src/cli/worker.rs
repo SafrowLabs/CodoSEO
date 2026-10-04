@@ -5,7 +5,7 @@ use codoseo_store::crawl_queue::CrawlQueue;
 use codoseo_store::jobs::JobQueue;
 use tokio_util::sync::CancellationToken;
 
-use crate::worker::worker_loop;
+use crate::worker::{DEFAULT_MEMORY_BUDGET, requeue_stale_sweep, worker_loop};
 
 use super::{CliError, EXIT_OK, Outcome};
 
@@ -39,7 +39,17 @@ pub async fn run(_args: WorkerArgs) -> Outcome {
     }
 
     println!("worker {worker_id} started");
-    worker_loop(&pool, &crawl_queue, &job_queue, &worker_id, shutdown).await;
+    let sweep = tokio::spawn(requeue_stale_sweep(crawl_queue.clone(), shutdown.clone()));
+    worker_loop(
+        &pool,
+        &crawl_queue,
+        &job_queue,
+        &worker_id,
+        DEFAULT_MEMORY_BUDGET,
+        shutdown,
+    )
+    .await;
+    sweep.abort();
     Ok(EXIT_OK)
 }
 

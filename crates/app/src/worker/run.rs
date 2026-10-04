@@ -1,6 +1,7 @@
 //! The worker loop: one claim-and-run cycle ([`worker_loop_once`]), and the real poll loop
 //! around it ([`worker_loop`]) with Postgres-down backoff and a graceful-shutdown drain.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -9,8 +10,9 @@ use std::time::Duration;
 use codoseo_checks::run_checks;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
 use codoseo_core::output::{Progress, StopReason};
+use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_crawler::crawl::crawl;
-use codoseo_diff::diff;
+use codoseo_diff::{diff, key_pages};
 use codoseo_store::crawl_queue::{ClaimedCrawl, CrawlQueue};
 use codoseo_store::finalize::finalize;
 use codoseo_store::jobs::JobQueue;
@@ -30,6 +32,17 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// The cap on Postgres-down backoff.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// Default memory budget (`budget::memory_budget_bytes`'s fallback) when no cgroup limit is
+/// readable — 1 GB, generous for a dev machine or an unrestricted CI runner.
+pub const DEFAULT_MEMORY_BUDGET: u64 = 1_000_000_000;
+/// A `running` crawl whose heartbeat is older than this is considered dead and eligible for
+/// [`requeue_stale_sweep`] — comfortably past [`LIVENESS_INTERVAL`] so a merely slow (not dead)
+/// worker's own liveness heartbeat has time to land first.
+pub const STALE_AFTER: Duration = Duration::from_secs(45);
+/// How often [`requeue_stale_sweep`] checks for stale crawls.
+pub const SWEEP_PERIOD: Duration = Duration::from_secs(30);
+/// Postgres's SQLSTATE for a unique-constraint violation.
+const UNIQUE_VIOLATION: &str = "23505";
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -46,32 +59,63 @@ pub async fn worker_loop_once(
     crawl_queue: &CrawlQueue,
     job_queue: &JobQueue,
     worker_id: &str,
+    default_budget: u64,
 ) -> Result<bool, WorkerError> {
-    let Some((crawl_id, handle)) = claim_and_spawn(pool, crawl_queue, job_queue, worker_id).await?
+    let Some((crawl_id, handle)) =
+        claim_and_spawn(pool, crawl_queue, job_queue, worker_id, default_budget).await?
     else {
         return Ok(false);
     };
-    handle_outcome(crawl_queue, crawl_id, handle.await).await?;
+    handle_outcome(crawl_queue, crawl_id, worker_id, handle.await).await?;
     Ok(true)
 }
 
 /// Claims the next eligible crawl (if any) and spawns a task that runs it end to end. Returns
 /// the crawl's id and the task's handle, so callers can either await it immediately
 /// ([`worker_loop_once`]) or race it against a shutdown signal ([`worker_loop`]).
+///
+/// A claim that fails on a Postgres unique-violation (two workers racing the same domain's
+/// `NOT EXISTS` guard — see `CrawlQueue::claim`'s doc comment) is reported as `Ok(None)`, the
+/// same as an empty queue, rather than as an error: it is a benign scheduling race, not a
+/// Postgres outage, and `worker_loop` must not back off for it.
 async fn claim_and_spawn(
     pool: &PgPool,
     crawl_queue: &CrawlQueue,
     _job_queue: &JobQueue,
     worker_id: &str,
+    default_budget: u64,
 ) -> Result<Option<(uuid::Uuid, JoinHandle<Result<(), String>>)>, WorkerError> {
-    let Some(claimed) = crawl_queue.claim(worker_id).await? else {
-        return Ok(None);
+    let claimed = match crawl_queue.claim(worker_id).await {
+        Ok(Some(claimed)) => claimed,
+        Ok(None) => return Ok(None),
+        Err(e) if is_benign_claim_race(&e) => return Ok(None),
+        Err(e) => return Err(e.into()),
     };
     let crawl_id = claimed.id;
-    let pool = pool.clone();
-    let crawl_queue = crawl_queue.clone();
-    let handle = tokio::spawn(async move { run_one_crawl(&pool, &crawl_queue, claimed).await });
+    let pool_for_task = pool.clone();
+    let crawl_queue_for_task = crawl_queue.clone();
+    let worker_id = worker_id.to_owned();
+    let handle = tokio::spawn(async move {
+        run_one_crawl(
+            &pool_for_task,
+            &crawl_queue_for_task,
+            &worker_id,
+            default_budget,
+            claimed,
+        )
+        .await
+    });
     Ok(Some((crawl_id, handle)))
+}
+
+/// True for a Postgres unique-constraint violation — the shape `claim()`'s domain guard can hit
+/// when two workers race the same domain's queued rows (see `CrawlQueue::claim`).
+fn is_benign_claim_race(e: &sqlx::Error) -> bool {
+    matches!(
+        e,
+        sqlx::Error::Database(db_err)
+            if db_err.code() == Some(Cow::Borrowed(UNIQUE_VIOLATION))
+    )
 }
 
 /// Turns a finished (or panicked) crawl task's result into a `finish_failed` call when needed.
@@ -80,22 +124,66 @@ async fn claim_and_spawn(
 async fn handle_outcome(
     crawl_queue: &CrawlQueue,
     crawl_id: uuid::Uuid,
+    worker_id: &str,
     result: Result<Result<(), String>, tokio::task::JoinError>,
 ) -> Result<(), WorkerError> {
     match result {
         Ok(Ok(())) => Ok(()),
         Ok(Err(reason)) => {
-            crawl_queue.finish_failed(crawl_id, &reason).await?;
+            crawl_queue
+                .finish_failed(crawl_id, &reason, worker_id)
+                .await?;
             Ok(())
         }
         Err(_join_error) => {
             tracing::error!(%crawl_id, "crawl task panicked");
             crawl_queue
-                .finish_failed(crawl_id, "internal error")
+                .finish_failed(crawl_id, "internal error", worker_id)
                 .await?;
             Ok(())
         }
     }
+}
+
+/// Resolves the crawl limits that actually govern this run: a quick (unclaimed) audit uses
+/// `PlanLimits::quick_audit()`; otherwise the site's account's plan via `PlanLimits::for_plan`.
+/// `crawl_settings.max_pages`, if present, may only narrow the plan's cap, never exceed it.
+pub async fn resolve_limits(
+    pool: &PgPool,
+    site_id: uuid::Uuid,
+    crawl_settings: &serde_json::Value,
+) -> Result<PlanLimits, String> {
+    let plan_text: Option<String> =
+        sqlx::query_scalar("SELECT a.plan::text FROM sites s LEFT JOIN accounts a ON a.id = s.account_id WHERE s.id = $1")
+            .bind(site_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("could not resolve plan for site: {e}"))?
+            .flatten();
+    let limits = match plan_text {
+        None => PlanLimits::quick_audit(),
+        Some(text) => {
+            let plan: Plan = serde_json::from_value(serde_json::Value::String(text.clone()))
+                .map_err(|e| format!("unknown plan '{text}': {e}"))?;
+            PlanLimits::for_plan(plan)
+        }
+    };
+
+    let override_max_pages = crawl_settings
+        .get("max_pages")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok());
+    let max_pages = match (override_max_pages, limits.max_pages) {
+        (Some(o), Some(plan_cap)) => o.min(plan_cap),
+        (Some(o), None) => o,
+        (None, Some(plan_cap)) => plan_cap,
+        (None, None) => CrawlLimits::default().max_pages,
+    };
+
+    Ok(PlanLimits {
+        max_pages: Some(max_pages),
+        ..limits
+    })
 }
 
 /// Runs one claimed crawl end to end: crawl → checks → diff → finalize. Returns a human-sized
@@ -104,6 +192,8 @@ async fn handle_outcome(
 async fn run_one_crawl(
     pool: &PgPool,
     crawl_queue: &CrawlQueue,
+    worker_id: &str,
+    default_budget: u64,
     claimed: ClaimedCrawl,
 ) -> Result<(), String> {
     // Test-only panic seam: lets integration tests prove a panicking crawl is isolated to its
@@ -118,16 +208,24 @@ async fn run_one_crawl(
     }
 
     let start_url = Url::parse(&claimed.start_url).map_err(|e| format!("bad start URL: {e}"))?;
-    let max_pages = claimed
-        .crawl_settings
-        .get("max_pages")
-        .and_then(|v| v.as_u64())
-        .and_then(|n| u32::try_from(n).ok());
+    let limits = resolve_limits(pool, claimed.site_id, &claimed.crawl_settings).await?;
+    let max_pages = limits.max_pages.unwrap_or(CrawlLimits::default().max_pages);
+    let max_duration = limits
+        .max_duration
+        .unwrap_or(CrawlLimits::default().max_duration);
+
+    let budget = crate::worker::budget::memory_budget_bytes(default_budget);
+    if !crate::worker::budget::fits(max_pages, budget) {
+        return Err(format!(
+            "exceeds worker memory budget: {max_pages} pages needs more than the {budget}-byte budget"
+        ));
+    }
 
     let cfg = CrawlConfig {
         start_url,
         limits: CrawlLimits {
-            max_pages: max_pages.unwrap_or(CrawlLimits::default().max_pages),
+            max_pages,
+            max_duration,
             ..CrawlLimits::default()
         },
         politeness: Politeness::default(),
@@ -206,14 +304,26 @@ async fn run_one_crawl(
     let changes = match previous {
         Some(prev) => {
             let curr = codoseo_core::snapshot::Snapshot::from_output(&out);
-            diff(&prev, &curr, &HashSet::new())
+            // Starred key pages (`sites.key_pages`) aren't wired up yet; `key_pages` still
+            // promotes the origin and top-20-by-inlinks pages, matching every other caller
+            // (`cli/diff.rs`, `mcp/local.rs`).
+            let key = key_pages(&curr, &HashSet::new());
+            diff(&prev, &curr, &key)
         }
         None => Vec::new(),
     };
 
-    finalize(pool, claimed.id, claimed.site_id, &out, &report, &changes)
-        .await
-        .map_err(|e| format!("finalize failed: {e}"))?;
+    finalize(
+        pool,
+        claimed.id,
+        claimed.site_id,
+        worker_id,
+        &out,
+        &report,
+        &changes,
+    )
+    .await
+    .map_err(|e| format!("finalize failed: {e}"))?;
 
     Ok(())
 }
@@ -243,6 +353,7 @@ pub async fn worker_loop(
     crawl_queue: &CrawlQueue,
     job_queue: &JobQueue,
     worker_id: &str,
+    default_budget: u64,
     shutdown: CancellationToken,
 ) {
     let mut backoff = Duration::from_secs(1);
@@ -252,13 +363,14 @@ pub async fn worker_loop(
             break;
         }
 
-        let claimed = claim_and_spawn(pool, crawl_queue, job_queue, worker_id).await;
+        let claimed =
+            claim_and_spawn(pool, crawl_queue, job_queue, worker_id, default_budget).await;
         match claimed {
             Ok(Some((crawl_id, mut handle))) => {
                 backoff = Duration::from_secs(1);
                 tokio::select! {
                     result = &mut handle => {
-                        let _ = handle_outcome(crawl_queue, crawl_id, result).await;
+                        let _ = handle_outcome(crawl_queue, crawl_id, worker_id, result).await;
                     }
                     _ = shutdown.cancelled() => {
                         // Give the in-flight crawl up to SHUTDOWN_GRACE to finish before
@@ -267,7 +379,7 @@ pub async fn worker_loop(
                         // the queue for another worker.
                         match tokio::time::timeout(SHUTDOWN_GRACE, &mut handle).await {
                             Ok(result) => {
-                                let _ = handle_outcome(crawl_queue, crawl_id, result).await;
+                                let _ = handle_outcome(crawl_queue, crawl_id, worker_id, result).await;
                             }
                             Err(_elapsed) => {
                                 tracing::warn!(
@@ -300,6 +412,25 @@ pub async fn worker_loop(
                 }
                 backoff = (backoff * 2).min(MAX_BACKOFF);
             }
+        }
+    }
+}
+
+/// A sibling background task to [`worker_loop`]: every [`SWEEP_PERIOD`], moves `running` crawls
+/// whose heartbeat is older than [`STALE_AFTER`] back to `queued`, rescuing crawls left behind
+/// by a worker that died without a graceful shutdown (SIGKILL, not SIGTERM — `worker_loop`
+/// itself already handles the graceful case via `SHUTDOWN_GRACE`). Runs until `shutdown` fires.
+pub async fn requeue_stale_sweep(crawl_queue: CrawlQueue, shutdown: CancellationToken) {
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(SWEEP_PERIOD) => {
+                match crawl_queue.requeue_stale(STALE_AFTER).await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::warn!(count = n, "worker: requeued stale crawl(s)"),
+                    Err(e) => tracing::error!(error = %e, "worker: requeue_stale sweep failed"),
+                }
+            }
+            _ = shutdown.cancelled() => break,
         }
     }
 }

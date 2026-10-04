@@ -4,4 +4,7 @@
 pub mod budget;
 pub mod run;
 
-pub use run::{WorkerError, worker_loop, worker_loop_once};
+pub use run::{
+    DEFAULT_MEMORY_BUDGET, WorkerError, requeue_stale_sweep, resolve_limits, worker_loop,
+    worker_loop_once,
+};
