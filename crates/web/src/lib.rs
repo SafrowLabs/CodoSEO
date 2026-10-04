@@ -10,6 +10,7 @@ pub mod health;
 pub mod layout;
 pub mod render;
 pub mod routes;
+pub mod serp;
 pub mod state;
 
 use axum::Router;

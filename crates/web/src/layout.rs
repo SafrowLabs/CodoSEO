@@ -224,6 +224,22 @@ impl Shell {
     }
 }
 
+/// The sidebar crawler card for one site, on its own (the `/s/{site}/status` poll).
+pub async fn crawler_for(
+    state: &AppState,
+    site: &Site,
+    plan: Plan,
+) -> Result<CrawlerView, AppError> {
+    let latest = codoseo_store::crawls::latest_done(&state.pool, site.id).await?;
+    let active = codoseo_store::crawls::active(&state.pool, site.id).await?;
+    Ok(crawler_view(
+        &format!("/s/{}", site.id),
+        latest.as_ref(),
+        active.as_ref(),
+        plan,
+    ))
+}
+
 fn workspace_item(
     label: &'static str,
     href: &str,
