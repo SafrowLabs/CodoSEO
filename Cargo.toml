@@ -15,6 +15,7 @@ codoseo-core = { path = "crates/core", version = "0.0.1" }
 codoseo-crawler = { path = "crates/crawler", version = "0.0.1" }
 codoseo-checks = { path = "crates/checks", version = "0.0.1" }
 codoseo-diff = { path = "crates/diff", version = "0.0.1" }
+codoseo-mcp = { path = "crates/mcp", version = "0.0.1" }
 codoseo-testkit = { path = "crates/testkit" }
 url = { version = "2.5.8", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -40,6 +41,10 @@ assert_cmd = "2.2.0"
 predicates = "3.1.0"
 tempfile = "3.27.0"
 insta = { version = "1.49.0", features = ["yaml"] }
+rmcp = { version = "3.5.0", features = ["transport-io"] }
+schemars = "1.1.0"
+uuid = { version = "1", features = ["v4"] }
+dirs = "7.0.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
