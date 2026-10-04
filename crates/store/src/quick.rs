@@ -13,6 +13,34 @@ use crate::sites::{COLUMNS, Site, SiteRow};
 /// A finished quick audit of a domain is reused for this long.
 pub const REUSE_WINDOW: &str = "24 hours";
 
+/// How many fresh audits one IP may start (spec section 8). Audits that join a running one or
+/// reuse a cached report cost nothing and aren't counted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub per_hour: i64,
+    pub per_day: i64,
+}
+
+impl Limits {
+    /// 3 an hour, 10 a day.
+    pub const DEFAULT: Limits = Limits {
+        per_hour: 3,
+        per_day: 10,
+    };
+    /// No limit, for tests of everything else.
+    pub const NONE: Limits = Limits {
+        per_hour: i64::MAX,
+        per_day: i64::MAX,
+    };
+}
+
+/// Which limit turned a visitor away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitWindow {
+    Hour,
+    Day,
+}
+
 #[derive(Debug, Clone)]
 pub struct StartRequest<'a> {
     /// The lowercase host the audit is about (`www.example.com` and `example.com` differ).
@@ -22,6 +50,8 @@ pub struct StartRequest<'a> {
     pub claim_hash: &'a [u8],
     /// The visitor's IP hash (daily salt), kept on the crawl for the per-IP limits.
     pub ip_hash: Option<&'a [u8]>,
+    /// Per-IP limits; they only apply when there is an `ip_hash`.
+    pub limits: Limits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +62,12 @@ pub enum StartOutcome {
     Cached { crawl_id: Uuid },
     /// An audit of this domain is queued or running: watch that one.
     Joined { crawl_id: Uuid },
+    /// This IP has used up its audits for the hour or the day. Nothing was started.
+    Limited {
+        window: LimitWindow,
+        /// Seconds until the oldest audit in the window ages out.
+        retry_after_secs: i64,
+    },
 }
 
 /// Starts an audit unless the domain was audited in the last 24 h or is being audited now.
@@ -63,6 +99,44 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
         });
     }
 
+    if let Some(ip) = req.ip_hash {
+        // Always taken after the domain lock, so two submits from one IP for different domains
+        // can't both pass the counts.
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtext('codoseo.quick.ip:' || encode($1, 'hex')))",
+        )
+        .bind(ip)
+        .execute(&mut *tx)
+        .await?;
+        let (hour, day, hour_retry, day_retry): (i64, i64, Option<f64>, Option<f64>) =
+            sqlx::query_as(
+                "SELECT count(*) FILTER (WHERE created_at > now() - interval '1 hour'), \
+                        count(*), \
+                        EXTRACT(EPOCH FROM min(created_at) FILTER (WHERE created_at > now() - interval '1 hour') \
+                                           + interval '1 hour' - now())::float8, \
+                        EXTRACT(EPOCH FROM min(created_at) + interval '1 day' - now())::float8 \
+                 FROM crawls \
+                 WHERE trigger = 'quick' AND requester_ip_hash = $1 \
+                   AND created_at > now() - interval '1 day'",
+            )
+            .bind(ip)
+            .fetch_one(&mut *tx)
+            .await?;
+        let secs = |s: Option<f64>| s.map_or(1, |s| s.ceil().max(1.0) as i64);
+        if day >= req.limits.per_day {
+            return Ok(StartOutcome::Limited {
+                window: LimitWindow::Day,
+                retry_after_secs: secs(day_retry),
+            });
+        }
+        if hour >= req.limits.per_hour {
+            return Ok(StartOutcome::Limited {
+                window: LimitWindow::Hour,
+                retry_after_secs: secs(hour_retry),
+            });
+        }
+    }
+
     let site_id: Uuid = sqlx::query_scalar(
         "INSERT INTO sites (domain, start_url, claim_token_hash) VALUES ($1, $2, $3) RETURNING id",
     )
@@ -83,6 +157,35 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
     .await?;
     tx.commit().await?;
     Ok(StartOutcome::Started { crawl_id })
+}
+
+/// Where a waiting audit is in line: 1 means next. `None` when it isn't queued (running,
+/// finished, failed) or isn't a quick audit.
+pub async fn queue_position(pool: &PgPool, crawl_id: Uuid) -> Result<Option<i64>, sqlx::Error> {
+    let position: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT CASE WHEN c.status = 'queued' THEN ( \
+                  SELECT count(*) FROM crawls q \
+                  WHERE q.trigger = 'quick' AND q.status = 'queued' \
+                    AND (q.queued_at, q.id) <= (c.queued_at, c.id)) END \
+         FROM crawls c WHERE c.id = $1 AND c.trigger = 'quick'",
+    )
+    .bind(crawl_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(position.flatten())
+}
+
+/// How many sign-in emails were sent for this audit in the last hour (the cap on mail sent to
+/// arbitrary addresses).
+pub async fn unlock_emails_last_hour(pool: &PgPool, crawl_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM login_tokens \
+         WHERE purpose = 'magic_link' AND payload->>'audit' = $1 \
+           AND created_at > now() - interval '1 hour'",
+    )
+    .bind(crawl_id.to_string())
+    .fetch_one(pool)
+    .await
 }
 
 /// A quick audit as the public report page reads it.

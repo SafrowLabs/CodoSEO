@@ -38,6 +38,9 @@ pub struct ClaimedCrawl {
     pub crawl_settings: serde_json::Value,
 }
 
+/// No-signup audits running at once, across all workers.
+pub const MAX_CONCURRENT_QUICK: i64 = 8;
+
 #[derive(Clone)]
 pub struct CrawlQueue {
     pool: PgPool,
@@ -77,8 +80,17 @@ impl CrawlQueue {
     /// hour waited. A `NOT EXISTS` guard against another `running` row on the same domain keeps
     /// this from even attempting a row the partial unique index would reject; `FOR UPDATE SKIP
     /// LOCKED` is what makes concurrent claimers safe.
+    ///
+    /// At most [`MAX_CONCURRENT_QUICK`] no-signup audits run at once (spec section 8): while
+    /// that many are running, queued quick crawls are skipped and the next crawl of any other
+    /// kind is claimed instead. The count and the claim happen under one advisory lock, so two
+    /// workers can't both see 7 running and start two more.
     pub async fn claim(&self, worker_id: &str) -> Result<Option<ClaimedCrawl>, sqlx::Error> {
-        sqlx::query_as(
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.crawl_queue.claim'))")
+            .execute(&mut *tx)
+            .await?;
+        let claimed = sqlx::query_as(
             "UPDATE crawls c \
              SET status = 'running', started_at = now(), heartbeat_at = now(), worker_id = $1 \
              FROM sites s \
@@ -91,6 +103,9 @@ impl CrawlQueue {
                      SELECT 1 FROM crawls c2 \
                      WHERE c2.domain = crawls.domain AND c2.status = 'running' \
                    ) \
+                   AND (trigger <> 'quick' OR ( \
+                     SELECT count(*) FROM crawls r WHERE r.trigger = 'quick' AND r.status = 'running' \
+                   ) < $2) \
                  ORDER BY (priority - EXTRACT(EPOCH FROM (now() - queued_at)) / 3600.0), queued_at \
                  FOR UPDATE SKIP LOCKED \
                  LIMIT 1 \
@@ -99,8 +114,11 @@ impl CrawlQueue {
                        s.start_url, s.crawl_settings",
         )
         .bind(worker_id)
-        .fetch_optional(&self.pool)
-        .await
+        .bind(MAX_CONCURRENT_QUICK)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(claimed)
     }
 
     /// Records progress on a still-`running` crawl. A crawl that has already been requeued by

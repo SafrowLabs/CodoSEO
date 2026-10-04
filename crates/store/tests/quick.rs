@@ -4,7 +4,7 @@
 mod support;
 
 use codoseo_store::crawl_queue::CrawlQueue;
-use codoseo_store::quick::{self, ClaimOutcome, StartOutcome, StartRequest};
+use codoseo_store::quick::{self, ClaimOutcome, LimitWindow, Limits, StartOutcome, StartRequest};
 use sqlx::PgPool;
 use support::TestDb;
 use uuid::Uuid;
@@ -15,6 +15,7 @@ fn request<'a>(domain: &'a str, start_url: &'a str, claim: &'a [u8]) -> StartReq
         start_url,
         claim_hash: claim,
         ip_hash: Some(b"ip-hash-1"),
+        limits: Limits::NONE,
     }
 }
 
@@ -30,6 +31,7 @@ fn crawl_id(outcome: &StartOutcome) -> Uuid {
         StartOutcome::Started { crawl_id }
         | StartOutcome::Cached { crawl_id }
         | StartOutcome::Joined { crawl_id } => *crawl_id,
+        StartOutcome::Limited { .. } => panic!("limited: {outcome:?}"),
     }
 }
 
@@ -383,5 +385,240 @@ async fn a_failed_quick_crawl_is_not_retried_but_other_crawls_still_are() {
     assert_eq!(
         status, "queued",
         "a first failure of a normal crawl still requeues"
+    );
+}
+
+async fn start_from(pool: &PgPool, domain: &str, ip: &[u8], limits: Limits) -> StartOutcome {
+    let url = format!("https://{domain}/");
+    quick::start(
+        pool,
+        &StartRequest {
+            domain,
+            start_url: &url,
+            claim_hash: domain.as_bytes(),
+            ip_hash: Some(ip),
+            limits,
+        },
+    )
+    .await
+    .expect("start")
+}
+
+async fn age_all(pool: &PgPool, age: &str) {
+    sqlx::query(
+        "UPDATE crawls SET created_at = now() - $1::interval, queued_at = now() - $1::interval",
+    )
+    .bind(age)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn an_ip_gets_three_audits_an_hour_and_ten_a_day() {
+    let db = TestDb::new().await;
+    let limits = Limits::DEFAULT;
+    assert_eq!((limits.per_hour, limits.per_day), (3, 10));
+
+    for i in 0..3 {
+        let outcome = start_from(&db.pool, &format!("site{i}.com"), b"ip-a", limits).await;
+        assert!(
+            matches!(outcome, StartOutcome::Started { .. }),
+            "{i}: {outcome:?}"
+        );
+    }
+    // The fourth in the hour is turned away, told when the oldest one ages out.
+    let outcome = start_from(&db.pool, "site3.com", b"ip-a", limits).await;
+    let StartOutcome::Limited {
+        window,
+        retry_after_secs,
+    } = outcome
+    else {
+        panic!("expected Limited, got {outcome:?}");
+    };
+    assert_eq!(window, LimitWindow::Hour);
+    assert!(
+        (3590..=3600).contains(&retry_after_secs),
+        "{retry_after_secs}"
+    );
+    assert_eq!(
+        crawl_count(&db.pool).await,
+        3,
+        "a refused audit starts nothing"
+    );
+
+    // Another visitor is unaffected.
+    let outcome = start_from(&db.pool, "site3.com", b"ip-b", limits).await;
+    assert!(
+        matches!(outcome, StartOutcome::Started { .. }),
+        "{outcome:?}"
+    );
+
+    // Audits that are already running or cached cost nothing and are never refused.
+    let outcome = start_from(&db.pool, "site0.com", b"ip-a", limits).await;
+    assert!(
+        matches!(outcome, StartOutcome::Joined { .. }),
+        "{outcome:?}"
+    );
+
+    // Ten in a day: age the hour-long window away between rounds.
+    let db = TestDb::new().await;
+    for round in 0..3 {
+        for i in 0..3 {
+            let outcome = start_from(&db.pool, &format!("r{round}s{i}.com"), b"ip-a", limits).await;
+            assert!(
+                matches!(outcome, StartOutcome::Started { .. }),
+                "{round}/{i}: {outcome:?}"
+            );
+        }
+        age_all(&db.pool, "2 hours").await;
+    }
+    let tenth = start_from(&db.pool, "tenth.com", b"ip-a", limits).await;
+    assert!(matches!(tenth, StartOutcome::Started { .. }), "{tenth:?}");
+    let eleventh = start_from(&db.pool, "eleventh.com", b"ip-a", limits).await;
+    let StartOutcome::Limited {
+        window,
+        retry_after_secs,
+    } = eleventh
+    else {
+        panic!("expected Limited, got {eleventh:?}");
+    };
+    assert_eq!(window, LimitWindow::Day);
+    assert!(
+        retry_after_secs > 3600,
+        "a day limit isn't lifted within the hour: {retry_after_secs}"
+    );
+}
+
+#[tokio::test]
+async fn a_visitor_with_no_ip_hash_is_not_limited_per_ip() {
+    let db = TestDb::new().await;
+    for i in 0..5 {
+        let url = format!("https://site{i}.com/");
+        let outcome = quick::start(
+            &db.pool,
+            &StartRequest {
+                domain: &format!("site{i}.com"),
+                start_url: &url,
+                claim_hash: format!("site{i}.com").as_bytes(),
+                ip_hash: None,
+                limits: Limits::DEFAULT,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(outcome, StartOutcome::Started { .. }));
+    }
+}
+
+#[tokio::test]
+async fn at_most_eight_quick_crawls_run_at_once_and_the_ninth_waits_its_turn() {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let mut ids = Vec::new();
+    for i in 0..9 {
+        let domain = format!("site{i}.com");
+        ids.push(crawl_id(&start(&db.pool, &domain, domain.as_bytes()).await));
+        // Distinct queue times, oldest first.
+        sqlx::query(
+            "UPDATE crawls SET queued_at = now() - ($2 || ' seconds')::interval WHERE id = $1",
+        )
+        .bind(ids[i])
+        .bind((100 - i).to_string())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+
+    // The queue position counts the quick crawls ahead, from 1.
+    assert_eq!(
+        quick::queue_position(&db.pool, ids[0]).await.unwrap(),
+        Some(1)
+    );
+    assert_eq!(
+        quick::queue_position(&db.pool, ids[8]).await.unwrap(),
+        Some(9)
+    );
+
+    for _ in 0..8 {
+        assert!(queue.claim("w").await.unwrap().is_some());
+    }
+    assert!(
+        queue.claim("w").await.unwrap().is_none(),
+        "the ninth quick crawl waits while eight are running"
+    );
+    assert_eq!(
+        quick::queue_position(&db.pool, ids[8]).await.unwrap(),
+        Some(1)
+    );
+    assert_eq!(
+        quick::queue_position(&db.pool, ids[0]).await.unwrap(),
+        None,
+        "running isn't queued"
+    );
+
+    // An ordinary crawl is not held up by the quick cap.
+    let owner = account(&db.pool, "owner@example.com").await;
+    let site: Uuid = sqlx::query_scalar(
+        "INSERT INTO sites (account_id, domain, start_url) VALUES ($1, 'mine.com', 'https://mine.com/') RETURNING id",
+    )
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    queue
+        .enqueue(
+            site,
+            "mine.com",
+            codoseo_store::crawl_queue::CrawlTrigger::Manual,
+            2,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let claimed = queue
+        .claim("w")
+        .await
+        .unwrap()
+        .expect("the manual crawl runs");
+    assert_eq!(claimed.domain, "mine.com");
+
+    // One quick crawl finishing frees a slot for the ninth.
+    set_status(&db.pool, ids[0], "done", "1 minute").await;
+    let claimed = queue.claim("w").await.unwrap().expect("the ninth now runs");
+    assert_eq!(claimed.id, ids[8]);
+}
+
+#[tokio::test]
+async fn unlock_emails_are_counted_per_audit_and_hour() {
+    let db = TestDb::new().await;
+    let one = crawl_id(&start(&db.pool, "one.com", b"one").await);
+    let two = crawl_id(&start(&db.pool, "two.com", b"two").await);
+    for _ in 0..3 {
+        sqlx::query(
+            "INSERT INTO login_tokens (purpose, token_hash, payload, expires_at) \
+             VALUES ('magic_link', sha256(gen_random_uuid()::text::bytea), jsonb_build_object('email', 'a@b.co', 'audit', $1::text), now() + interval '15 minutes')",
+        )
+        .bind(one.to_string())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        quick::unlock_emails_last_hour(&db.pool, one).await.unwrap(),
+        3
+    );
+    assert_eq!(
+        quick::unlock_emails_last_hour(&db.pool, two).await.unwrap(),
+        0
+    );
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        quick::unlock_emails_last_hour(&db.pool, one).await.unwrap(),
+        0
     );
 }
