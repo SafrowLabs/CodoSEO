@@ -9,7 +9,7 @@ use xxhash_rust::xxh3::xxh3_64;
 /// On top of what the URL parser already does (lowercase scheme and host, punycode,
 /// default ports, dot segments), this drops the fragment and a trailing dot on the
 /// host, upper-cases percent-escapes and decodes escaped unreserved characters.
-/// Query strings are kept as written.
+/// An empty query (`/a?`) is dropped; other query strings are kept as written.
 pub fn normalize(base: &Url, href: &str) -> Option<Url> {
     let href = href.trim();
     if href.is_empty() || href.starts_with('#') {
@@ -42,6 +42,9 @@ pub fn normalize(base: &Url, href: &str) -> Option<Url> {
         if Some(query.as_str()) != url.query() {
             url.set_query(Some(&query));
         }
+    }
+    if url.query() == Some("") {
+        url.set_query(None);
     }
     Some(url)
 }

@@ -5,12 +5,17 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.0.1"
 edition = "2024"
+rust-version = "1.88"
 license = "AGPL-3.0-only"
 repository = "https://github.com/SafrowLabs/codoSEO"
 homepage = "https://codoseo.com"
 
 [workspace.dependencies]
 codoseo-core = { path = "crates/core", version = "0.0.1" }
+codoseo-crawler = { path = "crates/crawler", version = "0.0.1" }
+codoseo-checks = { path = "crates/checks", version = "0.0.1" }
+codoseo-diff = { path = "crates/diff", version = "0.0.1" }
+codoseo-testkit = { path = "crates/testkit" }
 url = { version = "2.5.8", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -21,6 +26,7 @@ tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "t
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "gzip", "brotli", "stream"] }
 bytes = "1.12.1"
 futures-util = "0.3.34"
+httpdate = "1.0.3"
 axum = "0.8.9"
 flate2 = "1.1.10"
 lol_html = "3.0.1"
@@ -28,6 +34,11 @@ encoding_rs = "0.8.42"
 htmlize = { version = "1.1.0", features = ["unescape"] }
 quick-xml = "0.42.0"
 peak_alloc = "0.3.0"
+clap = { version = "4.6.0", features = ["derive"] }
+csv = "1.4.0"
+assert_cmd = "2.2.0"
+predicates = "3.1.0"
+tempfile = "3.27.0"
 insta = { version = "1.49.0", features = ["yaml"] }
 
 [workspace.lints.rust]

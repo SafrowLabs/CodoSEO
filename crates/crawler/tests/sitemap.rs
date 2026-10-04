@@ -141,7 +141,7 @@ fn fetcher() -> Fetcher {
 #[tokio::test]
 async fn follows_indexes_to_depth_2_and_dedupes() {
     let srv = TestServer::start(routes()).await;
-    let found = discover(&fetcher(), &[srv.url("/index.xml")], 50_000, far()).await;
+    let found = discover(&fetcher(), None, &[srv.url("/index.xml")], 50_000, far()).await;
     let mut paths: Vec<&str> = found.urls.iter().map(|u| u.path()).collect();
     paths.sort();
     assert_eq!(paths, ["/a", "/b", "/d", "/e"]);
@@ -159,7 +159,7 @@ async fn follows_indexes_to_depth_2_and_dedupes() {
 #[tokio::test]
 async fn stops_at_the_url_cap() {
     let srv = TestServer::start(routes()).await;
-    let found = discover(&fetcher(), &[srv.url("/huge.xml")], 50_000, far()).await;
+    let found = discover(&fetcher(), None, &[srv.url("/huge.xml")], 50_000, far()).await;
     assert_eq!(found.urls.len(), 50_000);
     assert!(found.summary.truncated);
 }
@@ -167,7 +167,7 @@ async fn stops_at_the_url_cap() {
 #[tokio::test]
 async fn missing_sitemaps_give_nothing() {
     let srv = TestServer::start(routes()).await;
-    let found = discover(&fetcher(), &[srv.url("/missing.xml")], 50_000, far()).await;
+    let found = discover(&fetcher(), None, &[srv.url("/missing.xml")], 50_000, far()).await;
     assert!(found.urls.is_empty());
     assert!(found.summary.files.is_empty());
 }
@@ -204,7 +204,7 @@ async fn failed_children_count_toward_the_file_cap() {
             }),
         );
     let srv = TestServer::start(router).await;
-    let found = discover(&fetcher(), &[srv.url("/fan.xml")], 50_000, far()).await;
+    let found = discover(&fetcher(), None, &[srv.url("/fan.xml")], 50_000, far()).await;
     assert!(
         requests.load(Ordering::SeqCst) < 100,
         "{} child requests",
@@ -231,7 +231,14 @@ async fn a_deadline_returns_partial_results() {
     let srv = TestServer::start(router).await;
     let started = std::time::Instant::now();
     let deadline = tokio::time::Instant::now() + Duration::from_millis(800);
-    let found = discover(&fetcher(), &[srv.url("/slow-index.xml")], 50_000, deadline).await;
+    let found = discover(
+        &fetcher(),
+        None,
+        &[srv.url("/slow-index.xml")],
+        50_000,
+        deadline,
+    )
+    .await;
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "took {:?}",
@@ -255,7 +262,7 @@ async fn non_utf8_sitemaps_still_yield_urls() {
         }),
     );
     let srv = TestServer::start(router).await;
-    let found = discover(&fetcher(), &[srv.url("/latin1.xml")], 50_000, far()).await;
+    let found = discover(&fetcher(), None, &[srv.url("/latin1.xml")], 50_000, far()).await;
     let paths: Vec<&str> = found.urls.iter().map(|u| u.path()).collect();
     assert!(paths.contains(&"/a") && paths.contains(&"/b"), "{paths:?}");
 }

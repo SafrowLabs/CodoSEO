@@ -1,0 +1,17 @@
+[package]
+name = "codoseo-diff"
+description = "Change detection between two CodoSEO crawl snapshots."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+codoseo-core.workspace = true
+url.workspace = true
+xxhash-rust.workspace = true
+
+[lints]
+workspace = true

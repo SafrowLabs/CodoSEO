@@ -3,6 +3,7 @@ name = "codoseo-crawler"
 description = "The CodoSEO crawler: fetching, robots.txt, sitemaps and streaming field extraction."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -22,11 +23,14 @@ serde_json.workspace = true
 xxhash-rust.workspace = true
 quick-xml.workspace = true
 flate2.workspace = true
+httpdate.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
+codoseo-testkit.workspace = true
 insta.workspace = true
 peak_alloc.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 axum.workspace = true
 flate2.workspace = true
 

@@ -1,0 +1,18 @@
+[package]
+name = "codoseo-testkit"
+description = "Test-only helpers for CodoSEO: a local HTTP server and generated fake sites."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+codoseo-core.workspace = true
+axum.workspace = true
+tokio.workspace = true
+flate2.workspace = true
+
+[lints]
+workspace = true
