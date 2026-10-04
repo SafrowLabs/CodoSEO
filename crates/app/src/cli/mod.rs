@@ -3,6 +3,7 @@
 mod check;
 mod crawl;
 mod diff;
+mod mcp;
 mod output;
 mod redirects;
 mod robots;
@@ -80,6 +81,8 @@ enum Command {
     Redirects(redirects::RedirectsArgs),
     /// Compare two saved audits (`crawl --format json`)
     Diff(diff::DiffArgs),
+    /// Run the local MCP server over stdio
+    Mcp(mcp::McpArgs),
 }
 
 pub async fn run(cli: Cli) -> Outcome {
@@ -89,6 +92,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Robots(args) => robots::run(args).await,
         Command::Redirects(args) => redirects::run(args).await,
         Command::Diff(args) => diff::run(args),
+        Command::Mcp(args) => mcp::run(args).await,
     }
 }
 

@@ -1,9 +1,6 @@
 [package]
-name = "codoseo"
-description = "CodoSEO: a fast, polite SEO crawler and site auditor for the command line."
-readme = "../../README.md"
-keywords = ["seo", "crawler", "audit", "cli"]
-categories = ["command-line-utilities", "web-programming"]
+name = "codoseo-mcp"
+description = "CodoSEO's local MCP server: audit and inspection tools over stdio, no database."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,32 +8,26 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
-[[bin]]
-name = "codoseo"
-path = "src/main.rs"
-
 [dependencies]
 codoseo-core.workspace = true
 codoseo-crawler.workspace = true
 codoseo-checks.workspace = true
 codoseo-diff.workspace = true
-codoseo-mcp.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+uuid.workspace = true
+dirs.workspace = true
 tokio.workspace = true
-clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-csv.workspace = true
 thiserror.workspace = true
 url.workspace = true
-rmcp.workspace = true
-dirs.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true
-assert_cmd.workspace = true
-predicates.workspace = true
 tempfile.workspace = true
-insta = { workspace = true, features = ["filters"] }
+tokio = { workspace = true, features = ["test-util", "io-util"] }
+rmcp = { workspace = true, features = ["client"] }
 
 [lints]
 workspace = true

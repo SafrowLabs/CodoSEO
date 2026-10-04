@@ -10,6 +10,7 @@
 - Crawls up to 500 pages by default; configurable to any limit
 - Respects `robots.txt`, `Crawl-delay`, and backs off on `429`/`503`
 - Outputs table, JSON, Markdown or CSV — pipe-friendly and CI-ready
+- Ships a local [MCP](https://modelcontextprotocol.io) server (`codoseo mcp`) for AI agents like Claude Code
 - Single static binary; no runtime dependencies
 - AGPL-3.0 — free to self-host, source-available
 
@@ -83,6 +84,7 @@ codoseo diff baseline.json audit.json
 | `codoseo robots <URL>` | Show the site's `robots.txt` and test whether CodoSEObot may fetch a path |
 | `codoseo redirects <URL>` | Follow a URL's redirect chain hop by hop |
 | `codoseo diff <BEFORE> <AFTER>` | Compare two saved JSON audits; surface new issues and regressions |
+| `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [Local MCP](#local-mcp)) |
 
 ### Flags
 
@@ -278,6 +280,35 @@ CodoSEO identifies itself as `CodoSEObot/0.1 (+https://codoseo.com/bot)`. It:
 
 ---
 
+## Local MCP
+
+`codoseo mcp` runs a local [MCP](https://modelcontextprotocol.io) server over stdio, so an AI agent can crawl and audit sites directly from your machine — no account, no cloud calls, and (unlike the hosted version) private and internal addresses are allowed.
+
+Add it to Claude Code:
+
+```sh
+claude mcp add codoseo -- codoseo mcp
+```
+
+Or in any MCP-compatible client, point it at `codoseo mcp` as a stdio server.
+
+**Tools:**
+
+| Tool | Description |
+|---|---|
+| `audit_site` | Crawl a site and run the checks; returns the summary if it finishes quickly, otherwise a running `audit_id` to poll |
+| `get_audit` | Check an audit's progress or summary by id |
+| `get_issue_urls` | List the URLs affected by one failing check, paginated |
+| `get_page` | Get one page's full record from a finished audit |
+| `check_page` | Fetch and check one page right now, without a full crawl |
+| `check_robots` | Show a site's `robots.txt` and whether CodoSEObot may fetch a path |
+| `check_redirects` | Follow a URL's redirects hop by hop |
+| `compare_audits` | Compare two finished audits and list what changed |
+
+Audits are cached as JSON under your user cache directory (`~/Library/Caches/codoseo/audits/` on macOS, `~/.cache/codoseo/audits/` on Linux) so `get_audit`, `get_issue_urls`, `get_page` and `compare_audits` can be called after `audit_site` returns.
+
+---
+
 ## Project layout
 
 The project is a Cargo workspace:
@@ -288,6 +319,7 @@ crates/
   crawler/    — fetcher, robots.txt, sitemaps, politeness, crawl loop
   checks/     — the 44 check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
+  mcp/        — local MCP server: the 8 tools above, over rmcp
   app/        — CLI (the `codoseo` binary)
   testkit/    — shared test helpers (not published to crates.io)
 ```
