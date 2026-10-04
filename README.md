@@ -85,6 +85,10 @@ codoseo diff baseline.json audit.json
 | `codoseo redirects <URL>` | Follow a URL's redirect chain hop by hop |
 | `codoseo diff <BEFORE> <AFTER>` | Compare two saved JSON audits; surface new issues and regressions |
 | `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [Local MCP](#local-mcp)) |
+| `codoseo web` | Serve the web app (see [Web app and self-hosting](#web-app-and-self-hosting)) |
+| `codoseo worker` | Claim and run crawls from the Postgres queue |
+| `codoseo all` | Self-hosting in one process: apply migrations, then run the web app and a worker |
+| `codoseo migrate` | Apply pending Postgres migrations |
 
 ### Flags
 
@@ -309,6 +313,35 @@ Audits are cached as JSON under your user cache directory (`~/Library/Caches/cod
 
 ---
 
+## Web app and self-hosting
+
+The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview with pixel-width meters; inlinks; reconstructed headers), a site audit with your health score and issues, and a changes view that compares each crawl with the one before. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
+
+Run everything in one process:
+
+```sh
+createdb codoseo
+DATABASE_URL=postgres://localhost/codoseo codoseo all
+# open http://localhost:8080 — the first account to sign in becomes the owner
+```
+
+Sign-in uses magic links. Without an email server the link is printed to the server log; set `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` to add "Continue with GitHub". The owner can close signups from **Account**.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DATABASE_URL` | — | Postgres connection string (required) |
+| `CODOSEO_MODE` | `selfhost` | `selfhost` or `cloud` (cloud turns on plan limits) |
+| `BASE_URL` | `http://localhost:<port>` | Public address, used for links, cookies and the `Origin` check on every form post |
+| `CODOSEO_BIND` | `0.0.0.0:8080` | Listen address (`--bind` overrides it) |
+| `SECRET_KEY` | dev key | Required in cloud mode |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | — | Optional GitHub sign-in (callback: `<BASE_URL>/auth/github/callback`) |
+
+For larger setups run `codoseo web` and one or more `codoseo worker` processes against the same database, after `codoseo migrate`. Health checks: `/healthz` (process up) and `/readyz` (database reachable).
+
+Keyboard: <kbd>⌘K</kbd> command palette and URL search, <kbd>G</kbd> then <kbd>E</kbd>/<kbd>A</kbd>/<kbd>C</kbd>/<kbd>H</kbd> to switch screens, <kbd>J</kbd>/<kbd>K</kbd> to move through rows, <kbd>/</kbd> to filter, <kbd>[</kbd> to collapse the sidebar, <kbd>?</kbd> for the full list.
+
+---
+
 ## Project layout
 
 The project is a Cargo workspace:
@@ -320,6 +353,8 @@ crates/
   checks/     — the 44 check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
   mcp/        — local MCP server: the 8 tools above, over rmcp
+  store/      — Postgres: migrations, crawl and jobs queues, queries for the web app
+  web/        — the web app: axum routes, askama templates, htmx, bundled assets
   app/        — CLI (the `codoseo` binary)
   testkit/    — shared test helpers (not published to crates.io)
 ```

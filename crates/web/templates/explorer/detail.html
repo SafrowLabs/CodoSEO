@@ -1,0 +1,55 @@
+<section id="detail" class="detail" aria-label="URL details">
+{% if let Some(p) = page %}
+  <input type="hidden" id="ex-sel" name="sel" value="{{ p.hex }}">
+  <input type="hidden" id="ex-tab" name="tab" value="{{ p.tab }}">
+  <div class="detail-tabs" role="tablist">
+    {% for t in p.tabs %}<button type="button" class="tab" role="tab" aria-selected="{{ t.active }}" hx-get="{{ t.href }}" hx-target="#detail" hx-swap="outerHTML" hx-include="#ex-filter, #ex-q">{{ t.label }}{% if let Some(n) = t.count %}<span class="n">{{ n }}</span>{% endif %}</button>{% endfor %}
+    <span class="sel-url" title="{{ p.url }}">{{ p.url }}</span>
+    <button type="button" class="icon-btn" style="width:26px;height:26px;flex:none" data-copy="{{ p.url }}" aria-label="Copy URL" data-tip="Copy URL"><svg class="icon" style="width:14px;height:14px"><use href="#i-copy"/></svg></button>
+    {{ p.star|safe }}
+  </div>
+  <div class="detail-body" role="tabpanel">
+  {% if let Some(d) = p.details %}
+    <div class="fields">
+      {% for f in d.fields %}<div class="field-row"><span class="k">{{ f.k }}</span><span class="v {{ f.class }}" title="{{ f.v }}">{% if let Some(h) = f.href %}<a class="url" href="{{ h }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ f.v }}</a>{% else %}{{ f.v }}{% endif %}</span></div>
+      {% endfor %}
+      <div class="field-row" style="grid-column:1/-1"><span class="k">Issues</span><span class="v" style="white-space:normal;display:flex;flex-wrap:wrap;gap:6px">{% for i in d.issues %}<a class="badge {{ i.sev }}" href="{{ i.href }}">{{ i.title }}</a>{% else %}<span class="c-ok">No issues on this URL</span>{% endfor %}</span></div>
+    </div>
+  {% endif %}
+  {% if let Some(s) = p.serp %}
+    <div class="serp-wrap">
+      <div class="serp">
+        <div class="crumb">{{ s.crumb_host }}<span>{{ s.crumb_path }}</span></div>
+        {% if let Some(t) = s.title %}<div class="t">{{ t }}</div>{% else %}<div class="t c-muted">No title. Google will write one from the page.</div>{% endif %}
+        {% if let Some(d) = s.description %}<div class="d">{{ d }}</div>{% else %}<div class="d c-muted">No meta description. Google will pick text from the page.</div>{% endif %}
+      </div>
+      <div class="stack" style="gap:18px">
+        {% for m in s.meters %}<div>
+          <div style="display:flex;justify-content:space-between;gap:12px;font-size:12.5px"><span class="muted">{{ m.label }}</span><span class="mono {{ m.value_class }}">{{ m.value }}</span></div>
+          <div class="meter"><span class="{{ m.bar }}" style="width:{{ m.pct }}%"></span><i class="limit" style="left:{{ m.limit_pct }}%"></i></div>
+          <div class="hint" style="margin-top:6px">{{ m.note }}</div>
+        </div>{% endfor %}
+      </div>
+    </div>
+  {% endif %}
+  {% if let Some(l) = p.inlinks %}
+    {% if l.rows.is_empty() %}
+    <div class="empty-sm" style="padding:8px 0">No inlinks were kept for this URL.</div>
+    {% else %}
+    <div class="rows">
+      <div class="row-head" style="grid-template-columns:minmax(0,2fr) minmax(0,1.4fr) 80px;padding:0 0 8px"><span>From</span><span>Anchor text</span><span>Type</span></div>
+      {% for r in l.rows %}<div class="row-item" style="grid-template-columns:minmax(0,2fr) minmax(0,1.4fr) 80px;padding:7px 0;font-size:13px"><a class="url trunc" href="{{ r.href }}" title="{{ r.from }}">{{ r.from }}</a><span class="trunc {{ r.anchor_class }}" title="{{ r.anchor }}">{{ r.anchor }}</span><span class="{{ r.kind_class }}">{{ r.kind }}</span></div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <p class="hint" style="margin-top:10px">{{ l.note }}</p>
+  {% endif %}
+  {% if let Some(h) = p.headers %}
+    <pre class="headers-pre">{{ h }}</pre>
+    <p class="hint" style="margin-top:10px">Rebuilt from crawl data. CodoSEO doesn't store raw headers.</p>
+  {% endif %}
+  </div>
+{% else %}
+  <div class="detail-body"><div class="empty-sm" style="text-align:center">Select a URL to see its details.</div></div>
+{% endif %}
+</section>

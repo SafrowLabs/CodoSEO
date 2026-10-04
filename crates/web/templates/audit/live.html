@@ -1,0 +1,19 @@
+{% if banner %}
+{% if active %}
+<div id="audit-live" class="chip-outline" role="status" style="display:inline-flex;align-items:center;gap:8px;margin-bottom:12px" hx-get="{{ base }}/audit/live?view=banner" hx-trigger="every 2s, crawlQueued from:body" hx-target="this" hx-swap="outerHTML" data-quiet><i class="dot {{ state }}"></i><span class="shimmer">{{ line }}</span></div>
+{% else %}
+<div id="audit-live" hidden hx-get="{{ base }}/audit/live?view=banner" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" data-quiet></div>
+{% endif %}
+{% else %}
+{% if active %}
+<div id="audit-live" role="status" hx-get="{{ base }}/audit/live" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML" data-quiet>
+  <div style="display:flex;align-items:center;gap:10px"><i class="dot {{ state }}"></i><span class="shimmer" style="font-size:20px;font-weight:600;letter-spacing:-0.02em">{{ line }}</span></div>
+  <p class="muted" style="margin-top:6px">{{ sub }}</p>
+</div>
+{% else %}
+<div id="audit-live" role="status" hx-get="{{ base }}/audit" hx-trigger="load delay:3s" hx-target="#audit-body" hx-swap="outerHTML" data-quiet>
+  <div style="font-size:20px;font-weight:600;letter-spacing:-0.02em">{{ line }}</div>
+  <p class="muted" style="margin-top:6px">{{ sub }}</p>
+</div>
+{% endif %}
+{% endif %}

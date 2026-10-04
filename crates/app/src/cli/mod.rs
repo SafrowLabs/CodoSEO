@@ -1,5 +1,6 @@
 //! Argument definitions and dispatch.
 
+mod all;
 mod check;
 mod crawl;
 mod diff;
@@ -8,6 +9,7 @@ mod migrate;
 mod output;
 mod redirects;
 mod robots;
+mod web;
 mod worker;
 
 use std::fs::File;
@@ -89,6 +91,10 @@ enum Command {
     Migrate(migrate::MigrateArgs),
     /// Claim and run crawls from the Postgres queue until SIGTERM
     Worker(worker::WorkerArgs),
+    /// Serve the web app (CODOSEO_MODE, DATABASE_URL, BASE_URL, ...)
+    Web(web::WebArgs),
+    /// Self-hosting in one process: migrate, then run the web app and a worker together
+    All(all::AllArgs),
 }
 
 pub async fn run(cli: Cli) -> Outcome {
@@ -101,6 +107,8 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Mcp(args) => mcp::run(args).await,
         Command::Migrate(args) => migrate::run(args).await,
         Command::Worker(args) => worker::run(args).await,
+        Command::Web(args) => web::run(args).await,
+        Command::All(args) => all::run(args).await,
     }
 }
 

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ shell.title() }}</title>
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}],"scrollIntoViewOnBoost":false,"historyCacheSize":20,"defaultFocusScroll":false}'>
+<link rel="icon" href="{{ crate::assets::url("favicon.svg") }}" type="image/svg+xml">
+<link rel="preload" href="{{ crate::assets::url("Geist-Variable.woff2") }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ crate::assets::url("app.css") }}">
+<script>(function(){try{var t=localStorage.getItem("codoseo-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;if(localStorage.getItem("codoseo-rail")==="1")document.documentElement.classList.add("rail")}catch(e){}})()</script>
+<script src="{{ crate::assets::url("htmx.min.js") }}" defer></script>
+<script src="{{ crate::assets::url("app.js") }}" defer></script>
+</head>
+<body hx-boost="true" data-site="{% if let Some(site) = shell.site %}{{ site.base }}{% endif %}">
+{% include "partials/icons.html" %}
+<div class="progress" aria-hidden="true"></div>
+<div class="shell">
+  <header class="topbar">
+    <button class="icon-btn menu-btn" data-action="drawer" aria-label="Open menu"><svg class="icon"><use href="#i-menu"/></svg></button>
+    <a class="brand" href="/" aria-label="CodoSEO home"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+    <div class="crumbs" id="crumbs">
+      {% if let Some(site) = shell.site %}
+        <a class="site" href="{{ site.base }}/audit">{{ site.domain }}</a><span class="sep">/</span>
+      {% endif %}
+      <span class="here">{{ shell.screen.title() }}</span>
+    </div>
+    <button class="search-trigger" data-action="palette" aria-label="Search">
+      <svg class="icon"><use href="#i-search"/></svg><span>{% if shell.site.is_some() %}Search URLs{% else %}Jump to…{% endif %}</span><kbd>⌘K</kbd>
+    </button>
+    <div id="header-actions" style="display:flex;align-items:center;gap:12px">
+      {% if let Some(site) = shell.site %}
+        {% if let Some(last) = site.last_crawl %}<span class="last-crawl">{{ last }}</span>{% endif %}
+        <button id="run-crawl" class="btn btn-primary" hx-post="{{ site.base }}/crawls" hx-swap="none" hx-disabled-elt="this" data-tip="Queue a manual crawl">
+          <span class="play"></span><span class="run-label">Run crawl</span>
+        </button>
+      {% endif %}
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <details class="switcher" id="switcher">
+      <summary class="site-pill" aria-label="Switch site">
+        {% if let Some(site) = shell.site %}
+          <span class="avatar">{{ site.initial }}</span>
+          <span class="meta"><span class="name" style="display:block">{{ site.domain }}</span><span class="sub">{{ site.urls_label }}</span></span>
+        {% else %}
+          <span class="avatar" style="background:var(--line);color:var(--ink-2)"><svg class="icon" style="width:14px;height:14px"><use href="#i-globe"/></svg></span>
+          <span class="meta"><span class="name" style="display:block">All sites</span><span class="sub">{{ shell.sites.len() }} site{% if shell.sites.len() != 1 %}s{% endif %}</span></span>
+        {% endif %}
+        <svg class="icon chev" style="width:14px;height:14px"><use href="#i-chev"/></svg>
+      </summary>
+      <div class="menu" role="menu">
+        {% for s in shell.sites %}
+          <a href="{{ s.href }}" role="menuitem"{% if s.active %} class="is-active"{% endif %}><span class="avatar">{{ s.initial }}</span><span class="trunc">{{ s.domain }}</span></a>
+        {% endfor %}
+        {% if !shell.sites.is_empty() %}<hr>{% endif %}
+        <a href="/sites" role="menuitem"><svg class="icon"><use href="#i-globe"/></svg>All sites</a>
+        {% if shell.can_add_site %}<a href="/sites#add" role="menuitem"><svg class="icon"><use href="#i-plus"/></svg>Add a site</a>{% endif %}
+      </div>
+    </details>
+
+    {% if let Some(crawler) = shell.crawler %}{% include "partials/crawler.html" %}{% endif %}
+
+    <nav class="nav" id="nav" aria-label="Main">
+      {% for g in shell.nav %}
+        <div class="nav-group">
+          <div class="nav-title">{{ g.title }}</div>
+          {% for it in g.items %}
+            <a class="nav-item{% if it.active %} is-active{% endif %}{% if it.soon %} soon{% endif %}" href="{{ it.href }}" data-tip="{{ it.label }}{% if !it.keys.is_empty() %} · {{ it.keys }}{% endif %}"{% if it.active %} aria-current="page"{% endif %}>
+              <svg class="icon"><use href="#{{ it.icon }}"/></svg>
+              <span class="label">{{ it.label }}</span>
+              {% if it.soon %}<span class="tag">soon</span>{% else %}<span class="count{% if it.alert %} alert{% endif %}">{{ it.count }}</span>{% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </nav>
+
+    <details class="user">
+      <summary>
+        <span class="avatar-round">{{ shell.user.initials }}</span>
+        <span class="who"><b>{{ shell.user.email }}</b><span>{{ shell.user.plan_label }}</span></span>
+      </summary>
+      <div class="menu" role="menu">
+        <a href="/account" role="menuitem"><svg class="icon"><use href="#i-settings"/></svg>Account</a>
+        <button type="button" data-action="theme" role="menuitem"><svg class="icon"><use href="#i-moon"/></svg>Theme<span class="grow"></span><span class="faint" data-theme-label>System</span></button>
+        <button type="button" data-action="rail" role="menuitem"><svg class="icon"><use href="#i-sidebar"/></svg>Collapse sidebar<span class="grow"></span><kbd>[</kbd></button>
+        <button type="button" data-action="shortcuts" role="menuitem"><svg class="icon"><use href="#i-keyboard"/></svg>Shortcuts<span class="grow"></span><kbd>?</kbd></button>
+        <hr>
+        <form method="post" action="/logout" hx-boost="false"><button type="submit" role="menuitem"><svg class="icon"><use href="#i-logout"/></svg>Sign out</button></form>
+        <hr>
+        <span class="faint mono" style="display:block;padding:4px 8px;font-size:11px">CodoSEO v{{ shell.version }}</span>
+      </div>
+    </details>
+  </aside>
+
+  <main id="main" class="panel{% block panel_class %}{% endblock %}">
+{% block main %}{% endblock %}
+  </main>
+</div>
+<div class="scrim" data-action="drawer-close"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<dialog id="palette" class="palette" aria-label="Command palette">
+  <div class="palette-box">
+    <div class="palette-input"><svg class="icon"><use href="#i-search"/></svg><input id="palette-input" type="text" placeholder="{% if shell.site.is_some() %}Search URLs and titles, or type a command…{% else %}Type a command…{% endif %}" autocomplete="off" spellcheck="false" aria-label="Search"><kbd>esc</kbd></div>
+    <div id="palette-list" class="palette-list" role="listbox"></div>
+    <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></div>
+  </div>
+</dialog>
+
+<dialog id="shortcuts" class="sheet" aria-label="Keyboard shortcuts">
+  <div class="sheet-box">
+    <h2>Keyboard shortcuts<span class="grow"></span><button class="icon-btn" data-action="close-dialog" aria-label="Close">✕</button></h2>
+    <div class="keys">
+      <div>Command palette<span><kbd>⌘</kbd><kbd>K</kbd></span></div>
+      <div>Show shortcuts<span><kbd>?</kbd></span></div>
+      <div>URL explorer<span><kbd>G</kbd><kbd>E</kbd></span></div>
+      <div>Site audit<span><kbd>G</kbd><kbd>A</kbd></span></div>
+      <div>Changes<span><kbd>G</kbd><kbd>C</kbd></span></div>
+      <div>Crawl history<span><kbd>G</kbd><kbd>H</kbd></span></div>
+      <div>Account<span><kbd>G</kbd><kbd>S</kbd></span></div>
+      <div>Filter URLs<span><kbd>/</kbd></span></div>
+      <div>Next / previous row<span><kbd>J</kbd><kbd>K</kbd></span></div>
+      <div>Collapse sidebar<span><kbd>[</kbd></span></div>
+    </div>
+  </div>
+</dialog>
+</body>
+</html>

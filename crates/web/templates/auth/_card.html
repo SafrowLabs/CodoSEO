@@ -1,0 +1,30 @@
+<div class="auth-card" id="auth-card">
+{% if card.sent %}
+  <div class="sent">
+    <div class="mail"><svg class="icon" style="width:22px;height:22px"><use href="#i-mail"/></svg></div>
+    <h1>Check your email</h1>
+    <p class="lead">We sent a sign-in link to <b style="color:var(--ink)">{{ card.email }}</b>. It works once and expires in 15 minutes.</p>
+    {% if card.dev_hint %}<p class="hint" style="margin-bottom:16px">No email server set up? The link is printed in the CodoSEO server log.</p>{% endif %}
+    <form hx-post="/login" hx-target="#auth-card" hx-swap="outerHTML">
+      <input type="hidden" name="email" value="{{ card.email }}"><input type="hidden" name="next" value="{{ card.next }}">
+      <button class="btn btn-ghost" type="submit" style="align-self:flex-start;padding:0">Send it again<span class="spinner"></span></button>
+    </form>
+  </div>
+{% else %}
+  <h1>Sign in to CodoSEO</h1>
+  <p class="lead">Use your email and we'll send you a magic link. No password needed.</p>
+  {% if card.github %}
+    <a class="btn btn-lg btn-block" href="/auth/github?next={{ card.next|urlencode }}" hx-boost="false"><svg class="icon"><use href="#i-github"/></svg>Continue with GitHub</a>
+    <div class="or">or</div>
+  {% endif %}
+  <form method="post" action="/login" hx-post="/login" hx-target="#auth-card" hx-swap="outerHTML" hx-disabled-elt="find button">
+    <div class="field">
+      <label class="label" for="email">Email</label>
+      <input class="input input-lg" id="email" name="email" type="email" value="{{ card.email }}" placeholder="you@company.com" autocomplete="email" autofocus required>
+      {% if let Some(err) = card.error %}<span class="error-text"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</span>{% endif %}
+    </div>
+    <input type="hidden" name="next" value="{{ card.next }}">
+    <button class="btn btn-primary btn-lg btn-block" type="submit">Email me a sign-in link<span class="spinner"></span></button>
+  </form>
+{% endif %}
+</div>

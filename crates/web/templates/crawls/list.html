@@ -1,0 +1,36 @@
+<div id="crawl-list" class="card">
+  <i hidden hx-get="{{ base }}/crawls" hx-trigger="crawlQueued from:body, crawlFinished from:body{% if live %}, every 3s{% endif %}" hx-target="#crawl-list" hx-swap="outerHTML" data-quiet></i>
+  {% if rows.is_empty() %}
+  <div class="empty">
+    <div class="art"><svg class="icon"><use href="#i-crawls"/></svg></div>
+    <h2>No crawls yet</h2>
+    <p>Run a crawl to audit {{ domain }}. Each crawl is compared with the one before, so you'll see what changed.</p>
+    <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>
+  </div>
+  {% else %}
+  <div style="overflow-x:auto">
+    <div class="rows" style="min-width:760px">
+      <div class="row-head" style="grid-template-columns:{{ cols }}"><span>#</span><span>Status</span><span>Trigger</span><span class="r">Health</span><span class="r">Pages</span><span class="r">Duration</span><span class="r">When</span><span></span></div>
+      {% for r in rows %}
+      <{{ r.tag }} class="row-item"{% if let Some(href) = r.href %} href="{{ href }}"{% endif %} style="grid-template-columns:{{ cols }}{% if loop.last %};border-bottom:0{% endif %}">
+        <span class="mono faint">{{ r.number }}</span>
+        <span style="display:flex;align-items:center;gap:8px;min-width:0">
+          <span class="badge {{ r.badge_class }}"><i class="dot {{ r.state }}"></i><span{% if r.state == "running" %} class="shimmer"{% endif %}>{{ r.label }}</span></span>
+          {% if let Some(d) = r.detail %}<span class="trunc {{ r.detail_class }}" style="font-size:12.5px"{% if let Some(t) = r.detail_title %} title="{{ t }}"{% endif %}>{{ d }}</span>{% endif %}
+        </span>
+        <span class="muted">{{ r.trigger }}</span>
+        <span class="r num">{% if let Some((score, tone)) = r.health %}<b class="{{ tone }}" style="font-weight:600">{{ score }}</b><span class="faint">/100</span>{% else %}<span class="c-ghost">—</span>{% endif %}</span>
+        <span class="r num">{{ r.pages }}</span>
+        <span class="r num muted">{{ r.duration }}</span>
+        <span class="r muted" title="{{ r.when_full }}">{{ r.when }}</span>
+        {% if r.href.is_some() %}<svg class="icon go"><use href="#i-arrow"/></svg>{% else %}<span></span>{% endif %}
+      </{{ r.tag }}>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% if let Some((total, allowance)) = oob %}
+<span class="chip" id="crawl-total" hx-swap-oob="true">{{ total }}</span>
+{% if let Some(note) = allowance %}<p class="page-sub" id="crawl-allowance" hx-swap-oob="true">{{ note }}</p>{% endif %}
+{% endif %}

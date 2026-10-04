@@ -22,6 +22,7 @@ codoseo-checks.workspace = true
 codoseo-diff.workspace = true
 codoseo-mcp.workspace = true
 codoseo-store.workspace = true
+codoseo-web.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

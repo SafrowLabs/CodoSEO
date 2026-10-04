@@ -1,0 +1,16 @@
+{% extends "solo_base.html" %}
+{% block title %}{{ info.title }} — CodoSEO{% endblock %}
+{% block head %}{% if retry %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
+{% block body %}
+<div class="solo-page">
+  <div class="solo-card">
+    <div class="status">{{ info.status.as_u16() }}</div>
+    <h1>{{ info.title }}</h1>
+    <p data-error-message>{{ info.message }}</p>
+    <div class="actions">
+      {% if retry %}<button class="btn btn-primary" onclick="location.reload()"><span class="spinner on"></span>Retrying…</button>{% else %}
+      <a class="btn btn-primary" href="/">Go to CodoSEO</a><button class="btn" onclick="history.back()">Go back</button>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
