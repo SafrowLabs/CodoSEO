@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block panel_class %} fill{% endblock %}
+{% block main %}
+{% if let Some(ex) = view %}
+<div class="explorer" hx-on:keypage="this.querySelectorAll('[data-star=\'' + event.detail.hash + '\']').forEach(b => { b.classList.toggle('on', event.detail.on); b.setAttribute('aria-pressed', event.detail.on); b.setAttribute('aria-label', event.detail.on ? 'Remove from key pages' : 'Mark as a key page') })">
+  <nav class="filters" aria-label="Filters">
+    {% for g in ex.groups %}
+    <div class="filter-group">
+      <div class="filter-title">{{ g.title }}</div>
+      {% for f in g.items %}<a class="filter{% if f.active %} is-active{% endif %}" href="{{ f.href }}"{% if f.active %} aria-current="page"{% endif %}><span class="swatch {{ f.swatch }}"></span><span class="lbl" title="{{ f.label }}">{{ f.label }}</span><span class="n{% if f.zero %} zero{% endif %}">{{ f.count }}</span></a>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </nav>
+  <div class="ex-main">
+    <div class="toolbar">
+      <label class="search">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input class="input" style="padding-right:34px" id="ex-q" type="search" name="q" value="{{ ex.q }}" placeholder="Filter by URL or title" aria-label="Filter by URL or title" autocomplete="off" spellcheck="false" data-search-input hx-get="{{ ex.rows_url }}" hx-trigger="input changed delay:250ms, search" hx-target="#rows" hx-swap="innerHTML" hx-include="#ex-filter, #ex-sel, #ex-tab">
+        <kbd>/</kbd>
+      </label>
+      <input type="hidden" id="ex-filter" name="filter" value="{{ ex.filter_key }}">
+      {{ ex.info|safe }}
+    </div>
+    <div class="grid-scroll">
+      <div class="grid" role="grid" aria-label="Crawled URLs">
+        <div class="grid-head grid-cols" role="row"><span role="columnheader"><span class="sr-only">Key page</span></span><span role="columnheader">Address</span><span role="columnheader">Status</span><span role="columnheader">Indexability</span><span role="columnheader">Title 1</span><span class="r" role="columnheader" title="Title length (characters)">Len</span><span class="r" role="columnheader">Words</span><span class="r" role="columnheader">Depth</span><span class="r" role="columnheader">Inlinks</span><span class="r" role="columnheader">Response</span></div>
+        <div id="rows" hx-on:click="const r = event.target.closest('[data-row]'); if (r) { this.querySelectorAll('[data-row][aria-selected]').forEach(e => e.removeAttribute('aria-selected')); r.setAttribute('aria-selected', 'true') }">
+{{ ex.rows|safe }}
+        </div>
+      </div>
+    </div>
+    {{ ex.detail|safe }}
+  </div>
+</div>
+{% else %}
+<div class="empty" style="flex:1;justify-content:center">
+  <div class="art"><svg class="icon"><use href="#i-explorer"/></svg></div>
+  {% if crawl_active %}
+  <h2>Your first crawl is on its way</h2>
+  <p>Every URL CodoSEO finds will be listed here with its status, indexability, title and more. This page fills in as soon as the crawl finishes.</p>
+  {% else %}
+  <h2>Run your first crawl</h2>
+  <p>Every URL CodoSEO finds will be listed here with its status, indexability, title and more, like a desktop crawler in your browser.</p>
+  <button type="button" class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
