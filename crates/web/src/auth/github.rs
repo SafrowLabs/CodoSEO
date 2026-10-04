@@ -4,7 +4,7 @@
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use codoseo_store::accounts::{SignIn, SignInOutcome};
 use serde::Deserialize;
 
@@ -179,11 +179,12 @@ pub async fn callback(
     };
     let session_cookie = session::start(&state, account.id).await?;
     let clear = session::set_cookie(STATE_COOKIE, "", 0, state.config.secure_cookies());
+    // Two Set-Cookie headers: an array of pairs would insert, keeping only the last one.
     Ok((
-        [
+        AppendHeaders([
             (header::SET_COOKIE, session_cookie),
             (header::SET_COOKIE, clear),
-        ],
+        ]),
         Redirect::to(safe_next(Some(&next))),
     )
         .into_response())

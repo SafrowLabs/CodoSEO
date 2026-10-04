@@ -669,6 +669,7 @@ dependencies = [
  "codoseo-checks",
  "codoseo-core",
  "codoseo-store",
+ "codoseo-testkit",
  "csv",
  "flate2",
  "futures-util",

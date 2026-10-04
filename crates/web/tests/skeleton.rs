@@ -175,5 +175,9 @@ async fn signed_out_visitors_are_sent_to_login() {
     // htmx requests get HX-Redirect instead of a redirect htmx would follow inline.
     let res = app.get_hx("/sites", None).await;
     assert_eq!(res.status, StatusCode::OK);
-    assert!(res.header("hx-redirect").unwrap().starts_with("/login?next="));
+    assert!(
+        res.header("hx-redirect")
+            .unwrap()
+            .starts_with("/login?next=")
+    );
 }

@@ -114,6 +114,9 @@ mod tests {
     #[test]
     fn unknown_filters_fall_back_to_all() {
         assert_eq!(PageFilter::parse("check:nope"), PageFilter::All);
-        assert_eq!(PageFilter::parse("'; DROP TABLE pages; --"), PageFilter::All);
+        assert_eq!(
+            PageFilter::parse("'; DROP TABLE pages; --"),
+            PageFilter::All
+        );
     }
 }

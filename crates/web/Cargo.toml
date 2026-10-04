@@ -36,6 +36,7 @@ bytes.workspace = true
 csv.workspace = true
 
 [dev-dependencies]
+codoseo-testkit.workspace = true
 tower.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 

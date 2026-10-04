@@ -167,12 +167,14 @@ impl TestApp {
     }
 
     pub async fn get(&self, path: &str, cookie: Option<&str>) -> TestResponse {
-        self.send(build(Method::GET, path, cookie, None, false)).await
+        self.send(build(Method::GET, path, cookie, None, false))
+            .await
     }
 
     /// A GET as htmx sends it (`HX-Request: true`, not boosted): wants a fragment.
     pub async fn get_hx(&self, path: &str, cookie: Option<&str>) -> TestResponse {
-        self.send(build(Method::GET, path, cookie, None, true)).await
+        self.send(build(Method::GET, path, cookie, None, true))
+            .await
     }
 
     /// A form POST (`application/x-www-form-urlencoded`).
