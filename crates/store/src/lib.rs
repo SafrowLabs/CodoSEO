@@ -5,3 +5,4 @@ pub mod finalize;
 pub mod hash;
 pub mod jobs;
 pub mod pool;
+pub mod retention;
