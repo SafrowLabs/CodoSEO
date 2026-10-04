@@ -120,6 +120,28 @@ fn orphan_is_a_sitemap_page_with_no_inlinks() {
 }
 
 #[test]
+fn redirect_target_reached_by_a_link_is_not_an_orphan() {
+    // Home links `/p0`, which 301s to the sitemap-listed `/p0/`. Nothing links `/p0/`
+    // directly, but the crawl reached it (it has a depth), so it is not an orphan.
+    let mut hop = pg("/p0");
+    hop.status = 301;
+    hop.indexability = Indexability::Redirected;
+    hop.in_sitemap = false;
+    hop.redirect_target = Some(u("https://e.com/p0/"));
+    let target = pg("/p0/");
+    let mut only_in_sitemap = pg("/lost");
+    only_in_sitemap.depth = None;
+    let mut o = out(vec![home(), hop, target, only_in_sitemap], &[(0, 1)]);
+    run_checks(&mut o);
+    assert_eq!(o.pages[2].inlinks, 0);
+    assert!(
+        !o.pages[2].issues.has_check(CheckId::Orphan),
+        "a redirect target the crawl reached is not an orphan"
+    );
+    assert!(o.pages[3].issues.has_check(CheckId::Orphan));
+}
+
+#[test]
 fn page_outside_the_sitemap_is_not_an_orphan() {
     let mut p = pg("/a");
     p.in_sitemap = false;

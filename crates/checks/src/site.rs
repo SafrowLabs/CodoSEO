@@ -42,12 +42,13 @@ pub(crate) fn site_issues(out: &CrawlOutput) -> Vec<IssueBits> {
     }
 
     let by_url: HashMap<&Url, &PageRecord> = pages.iter().map(|p| (&p.url, p)).collect();
-    let origin_page = pages.iter().position(|p| p.url == out.origin);
     let sitemap_has_urls = out.sitemap.url_count > 0;
 
     for (i, p) in pages.iter().enumerate() {
         let b = &mut bits[i];
-        if p.in_sitemap && p.inlinks == 0 && origin_page != Some(i) {
+        // Listed in the sitemap but never reached by links: a page with a depth was found
+        // by following links (the origin, or a redirect target), so it isn't an orphan.
+        if p.in_sitemap && p.depth.is_none() && p.inlinks == 0 {
             b.set_check(CheckId::Orphan);
         }
         if let Some(target) = p.fields.canonical.as_ref().filter(|c| **c != p.url)
