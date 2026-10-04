@@ -135,7 +135,9 @@ impl CrawlQueue {
 
     /// First failure (`attempt = 0`): requeue once, gated 15 minutes out via `queued_at` (which
     /// `claim`'s `queued_at <= now()` filter already honours). Second failure: fail for good.
-    /// One statement, so there's no read-then-write race against a concurrent call.
+    /// A quick (no-signup) audit is never retried: the visitor is watching it, and a retry 15
+    /// minutes later would leave them on a spinner. One statement, so there's no read-then-write
+    /// race against a concurrent call.
     ///
     /// Guarded by `status = 'running' AND worker_id = $3`: a worker that was requeued (by
     /// `requeue_stale`) and reclaimed by someone else before this call lands is a no-op here,
@@ -148,11 +150,11 @@ impl CrawlQueue {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE crawls SET \
-               status = CASE WHEN attempt = 0 THEN 'queued'::crawl_status ELSE 'failed'::crawl_status END, \
-               attempt = CASE WHEN attempt = 0 THEN 1 ELSE attempt END, \
-               queued_at = CASE WHEN attempt = 0 THEN now() + interval '15 minutes' ELSE queued_at END, \
-               worker_id = CASE WHEN attempt = 0 THEN NULL ELSE worker_id END, \
-               heartbeat_at = CASE WHEN attempt = 0 THEN NULL ELSE heartbeat_at END, \
+               status = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN 'queued'::crawl_status ELSE 'failed'::crawl_status END, \
+               attempt = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN 1 ELSE attempt END, \
+               queued_at = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN now() + interval '15 minutes' ELSE queued_at END, \
+               worker_id = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN NULL ELSE worker_id END, \
+               heartbeat_at = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN NULL ELSE heartbeat_at END, \
                failure_reason = $2 \
              WHERE id = $1 AND status = 'running' AND worker_id = $3",
         )

@@ -22,15 +22,15 @@ pub struct Site {
 }
 
 #[derive(FromRow)]
-struct SiteRow {
-    id: Uuid,
-    account_id: Option<Uuid>,
-    domain: String,
-    start_url: String,
-    schedule: Option<String>,
-    monitoring_active: bool,
-    key_pages: Vec<i64>,
-    created_at: OffsetDateTime,
+pub(crate) struct SiteRow {
+    pub(crate) id: Uuid,
+    pub(crate) account_id: Option<Uuid>,
+    pub(crate) domain: String,
+    pub(crate) start_url: String,
+    pub(crate) schedule: Option<String>,
+    pub(crate) monitoring_active: bool,
+    pub(crate) key_pages: Vec<i64>,
+    pub(crate) created_at: OffsetDateTime,
 }
 
 impl From<SiteRow> for Site {
@@ -48,7 +48,7 @@ impl From<SiteRow> for Site {
     }
 }
 
-const COLUMNS: &str =
+pub(crate) const COLUMNS: &str =
     "id, account_id, domain, start_url, schedule, monitoring_active, key_pages, created_at";
 
 /// The account's sites, oldest first (the first one is the default after login).

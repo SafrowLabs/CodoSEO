@@ -409,3 +409,92 @@ async fn finalize_by_a_stale_worker_rolls_back_and_does_not_touch_the_new_owners
         "the rolled-back transaction must not leave pages behind"
     );
 }
+
+async fn make_crawl_with_trigger(
+    pool: &sqlx::PgPool,
+    site_id: Uuid,
+    domain: &str,
+    trigger: &str,
+) -> Uuid {
+    sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id) \
+         VALUES ($1, $2, $3::crawl_trigger, 1, 'running', $4) RETURNING id",
+    )
+    .bind(site_id)
+    .bind(domain)
+    .bind(trigger)
+    .bind(WORKER_ID)
+    .fetch_one(pool)
+    .await
+    .expect("insert crawl")
+    .get(0)
+}
+
+#[tokio::test]
+async fn finalize_records_the_funnel_events_for_quick_and_first_crawls_only() {
+    let db = TestDb::new().await;
+    for (trigger, expected) in [
+        ("quick", Some("audit_finished")),
+        ("first", Some("first_full_crawl")),
+        ("manual", None),
+        ("schedule", None),
+    ] {
+        let domain = format!("{trigger}.example");
+        let site_id = make_site(&db.pool, &domain).await;
+        let crawl_id = make_crawl_with_trigger(&db.pool, site_id, &domain, trigger).await;
+        let out = empty_output(vec![sample_page(1)], StopReason::Completed);
+        finalize(
+            &db.pool,
+            crawl_id,
+            site_id,
+            WORKER_ID,
+            &out,
+            &empty_report(),
+            &[],
+        )
+        .await
+        .expect("finalize");
+
+        let events: Vec<(String, Option<Uuid>, serde_json::Value)> = sqlx::query_as(
+            "SELECT kind, site_id, payload FROM events WHERE site_id = $1 ORDER BY id",
+        )
+        .bind(site_id)
+        .fetch_all(&db.pool)
+        .await
+        .expect("events");
+        match expected {
+            Some(kind) => {
+                assert_eq!(events.len(), 1, "{trigger}: {events:?}");
+                assert_eq!(events[0].0, kind);
+                assert_eq!(events[0].2["crawl_id"], crawl_id.to_string());
+                assert_eq!(events[0].2["score"], 95);
+            }
+            None => assert!(events.is_empty(), "{trigger}: {events:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_failed_finalize_leaves_no_funnel_event() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "stolen.example").await;
+    let crawl_id = make_crawl_with_trigger(&db.pool, site_id, "stolen.example", "quick").await;
+    let out = empty_output(vec![sample_page(1)], StopReason::Completed);
+    // Another worker owns the crawl, so finalize rolls back.
+    let result = finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        "someone-else",
+        &out,
+        &empty_report(),
+        &[],
+    )
+    .await;
+    assert!(result.is_err());
+    let events: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(events, 0);
+}

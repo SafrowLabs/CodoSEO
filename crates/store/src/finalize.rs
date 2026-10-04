@@ -15,6 +15,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::dbenum::enum_slug;
+use crate::events::{self, EventKind};
 use crate::hash;
 
 /// Rows per `COPY` chunk, per spec ("COPY in batches of 500").
@@ -72,9 +73,42 @@ pub async fn finalize(
     }
 
     enqueue_alert_jobs(&mut tx, crawl_id, changes).await?;
+    record_funnel_event(&mut tx, crawl_id, site_id, report).await?;
 
     tx.commit().await?;
     Ok(())
+}
+
+/// Funnel steps the crawl itself marks (spec section 11): a no-signup audit finishing, and a
+/// site's first full crawl finishing. Written in the finalize transaction, so each happens
+/// exactly once, and not at all when finalize rolls back.
+async fn record_funnel_event(
+    tx: &mut Transaction<'_, Postgres>,
+    crawl_id: Uuid,
+    site_id: Uuid,
+    report: &CrawlReport,
+) -> Result<(), sqlx::Error> {
+    let trigger: String = sqlx::query_scalar("SELECT trigger::text FROM crawls WHERE id = $1")
+        .bind(crawl_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    let kind = match trigger.as_str() {
+        "quick" => EventKind::AuditFinished,
+        "first" => EventKind::FirstFullCrawl,
+        _ => return Ok(()),
+    };
+    let account_id: Option<Uuid> = sqlx::query_scalar("SELECT account_id FROM sites WHERE id = $1")
+        .bind(site_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    events::record(
+        &mut **tx,
+        kind,
+        account_id,
+        Some(site_id),
+        Some(json!({ "crawl_id": crawl_id, "score": report.health_score })),
+    )
+    .await
 }
 
 fn build_summary(out: &CrawlOutput, report: &CrawlReport) -> serde_json::Value {
