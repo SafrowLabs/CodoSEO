@@ -34,8 +34,7 @@ pub struct ExportRow {
     pub response_ms: Option<u32>,
     pub size_bytes: Option<u64>,
     pub in_sitemap: bool,
-    /// The next hop of a multi-hop redirect chain. `pages` stores each hop's own URL but not
-    /// where the last one lands, so a single-hop redirect has no target here.
+    /// Where a redirecting URL finally lands.
     pub redirect_target: Option<String>,
     pub issues: IssueBits,
 }
@@ -117,7 +116,7 @@ pub async fn batch(
                 p.title, p.meta_description, p.h1->>0 AS h1, p.canonical, p.meta_robots, \
                 p.x_robots_tag, p.word_count, p.depth, p.inlinks, p.outlinks_internal, \
                 p.outlinks_external, p.response_ms, p.size_bytes, p.in_sitemap, \
-                p.redirect_chain->1->>1 AS redirect_target, p.issues \
+                p.redirect_target, p.issues \
          FROM pages p \
          WHERE p.crawl_id = $1 AND p.id > $2 AND ({}) \
            AND ($3::text IS NULL OR p.url ILIKE $3 OR p.title ILIKE $3) \

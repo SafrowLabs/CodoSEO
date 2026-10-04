@@ -70,7 +70,7 @@ fn with_key(mut p: PageRecord) -> PageRecord {
     p
 }
 
-/// `/`, `/about`, a 404 at `/gone`, and a two-hop redirect at `/old`.
+/// `/`, `/about`, a 404 at `/gone`, and a two-hop redirect at `/old` that lands on `/about`.
 async fn small_crawl(app: &TestApp, site: &Site) -> uuid::Uuid {
     let gone = with_key(PageRecord {
         status: 404,
@@ -84,6 +84,7 @@ async fn small_crawl(app: &TestApp, site: &Site) -> uuid::Uuid {
             (301, Url::parse("https://example.com/old").unwrap()),
             (302, Url::parse("https://example.com/mid").unwrap()),
         ],
+        redirect_target: Some(Url::parse("https://example.com/about").unwrap()),
         ..page("example.com", "/old")
     });
     app.finished_crawl(
@@ -164,7 +165,7 @@ async fn export_has_header_and_one_row_per_page() {
 
     let old = &rows[3];
     assert_eq!(old["Indexability"], "Redirected");
-    assert_eq!(old["Redirect target"], "https://example.com/mid");
+    assert_eq!(old["Redirect target"], "https://example.com/about");
 }
 
 #[tokio::test]

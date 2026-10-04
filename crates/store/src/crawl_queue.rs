@@ -195,7 +195,7 @@ impl CrawlQueue {
                     size_bytes, content_type, depth, in_sitemap, indexability::text AS indexability, \
                     title, meta_description, meta_robots, x_robots_tag, canonical, hreflang, h1, h2, \
                     word_count, content_hash, images_missing_alt, og, jsonld_status, mixed_content, \
-                    inlinks, outlinks_internal, outlinks_external, issues, key_hash \
+                    inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target \
              FROM pages WHERE crawl_id = $1",
         )
         .bind(crawl_id)
@@ -244,7 +244,12 @@ fn page_record_from_row(row: sqlx::postgres::PgRow) -> PageRecord {
     let redirect_chain: serde_json::Value = row.get("redirect_chain");
     let redirect_chain: Vec<(u16, Url)> =
         serde_json::from_value(redirect_chain).unwrap_or_default();
-    let redirect_target = redirect_chain.last().map(|(_, url)| url.clone());
+    // Rows written before migration 0003 have no stored target; the last hop is the closest
+    // approximation available for them.
+    let stored_target: Option<String> = row.get("redirect_target");
+    let redirect_target = stored_target
+        .and_then(|t| Url::parse(&t).ok())
+        .or_else(|| redirect_chain.last().map(|(_, url)| url.clone()));
 
     let hreflang: serde_json::Value = row.get("hreflang");
     let hreflang: Vec<(String, Url)> = serde_json::from_value(hreflang).unwrap_or_default();

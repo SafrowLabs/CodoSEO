@@ -183,7 +183,7 @@ async fn copy_pages(
              size_bytes, content_type, depth, in_sitemap, indexability, title, \
              meta_description, meta_robots, x_robots_tag, canonical, hreflang, h1, h2, \
              word_count, content_hash, images_missing_alt, og, jsonld_status, mixed_content, \
-             inlinks, outlinks_internal, outlinks_external, issues, key_hash) \
+             inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target) \
              FROM STDIN WITH (FORMAT text)",
         )
         .await?;
@@ -287,7 +287,7 @@ async fn copy_inlinks(
 
 fn write_page_row(buf: &mut String, crawl_id: Uuid, site_id: Uuid, p: &PageRecord) {
     let fields = &p.fields;
-    let cols: [String; 31] = [
+    let cols: [String; 32] = [
         crawl_id.to_string(),
         site_id.to_string(),
         escape(p.url.as_str()),
@@ -319,6 +319,7 @@ fn write_page_row(buf: &mut String, crawl_id: Uuid, site_id: Uuid, p: &PageRecor
         p.outlinks_external.to_string(),
         hash::to_db(p.issues.0).to_string(),
         hash::to_db(p.key_hash).to_string(),
+        field_opt(p.redirect_target.as_ref().map(|u| u.as_str())),
     ];
     buf.push_str(&cols.join("\t"));
     buf.push('\n');
