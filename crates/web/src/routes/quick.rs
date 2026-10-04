@@ -213,6 +213,8 @@ pub struct DoneView {
     /// `3 more issues`, when there are more than the preview shows.
     pub locked: Option<String>,
     pub all_clear: bool,
+    /// The counted link to RankOrg.
+    pub rankorg: String,
 }
 
 /// A report that can't show a score, and why.
@@ -315,6 +317,7 @@ fn build_main(audit: &Audit) -> MainView {
         CrawlStatus::Done => match (crawl.summary(), crawl.health_score) {
             (Some(summary), Some(score)) if summary.report_summary.pages > 0 => {
                 view.done = Some(done_view(
+                    crawl.id,
                     score,
                     crawl.checks_passed.unwrap_or(0),
                     crawl.checks_total.unwrap_or(0),
@@ -374,6 +377,7 @@ fn failure_notice(reason: Option<&str>) -> Notice {
 }
 
 fn done_view(
+    crawl_id: Uuid,
     score: i16,
     passed: i16,
     total: i16,
@@ -432,6 +436,7 @@ fn done_view(
         locked: (more > 0)
             .then(|| format!("{more} more issue{}", if more == 1 { "" } else { "s" })),
         all_clear: failing.is_empty(),
+        rankorg: format!("/go/rankorg?src=audit&audit={crawl_id}"),
     }
 }
 

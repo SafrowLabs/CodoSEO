@@ -75,3 +75,6 @@
 .prose code, .prose pre { font: 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; overflow-wrap: anywhere; }
 .prose pre { padding: 12px 14px; overflow-x: auto; }
 @media (prefers-reduced-motion: reduce) { .l-wrap * { animation: none !important; } }
+
+.q-rankorg { margin-top: 18px; font-size: 13.5px; }
+.q-rankorg a { text-decoration: underline; text-underline-offset: 2px; }

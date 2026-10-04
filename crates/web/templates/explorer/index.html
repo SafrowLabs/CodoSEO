@@ -21,6 +21,7 @@
       </label>
       <input type="hidden" id="ex-filter" name="filter" value="{{ ex.filter_key }}">
       {{ ex.info|safe }}
+      {% if let Some(link) = ex.rankorg %}<a class="btn btn-sm btn-ghost" href="{{ link }}" target="_blank" rel="noopener" hx-boost="false" title="Open this site in RankOrg with its top pages">Open in RankOrg ↗</a>{% endif %}
     </div>
     <div class="grid-scroll">
       <div class="grid" role="grid" aria-label="Crawled URLs">

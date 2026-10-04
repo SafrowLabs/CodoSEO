@@ -15,6 +15,18 @@ pub enum JobKind {
     Cleanup,
 }
 
+impl JobKind {
+    /// The `job_kind` label.
+    pub fn slug(self) -> &'static str {
+        match self {
+            JobKind::SendAlert => "send_alert",
+            JobKind::SendDigest => "send_digest",
+            JobKind::SendEmail => "send_email",
+            JobKind::Cleanup => "cleanup",
+        }
+    }
+}
+
 #[derive(Debug, FromRow)]
 pub struct ClaimedJob {
     pub id: Uuid,

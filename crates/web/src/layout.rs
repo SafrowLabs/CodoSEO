@@ -25,6 +25,7 @@ pub enum Screen {
     Crawls,
     Sites,
     Account,
+    Admin,
 }
 
 impl Screen {
@@ -36,6 +37,7 @@ impl Screen {
             Screen::Crawls => "Crawls",
             Screen::Sites => "Sites",
             Screen::Account => "Account",
+            Screen::Admin => "Admin",
         }
     }
 }

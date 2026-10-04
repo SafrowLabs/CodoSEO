@@ -186,6 +186,8 @@ pub struct ExplorerView {
     pub q: String,
     pub rows_url: String,
     pub info: InfoSpan,
+    /// The counted RankOrg link (cloud only).
+    pub rankorg: Option<String>,
     pub rows: RowsFragment,
     pub detail: DetailPanel,
 }
@@ -408,6 +410,8 @@ async fn page(
             text: info_text(filter, shown, total),
             oob: false,
         },
+        rankorg: (state.config.mode == crate::config::Mode::Cloud)
+            .then(|| format!("/go/rankorg?src=explorer&site={}", site.id)),
         rows,
         detail,
     };

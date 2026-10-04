@@ -734,3 +734,58 @@ async fn the_bot_page_robots_and_llms_txt_are_served_in_the_cloud() {
     assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("CodoSEO"));
 }
+
+#[tokio::test]
+async fn one_visitor_leaves_every_funnel_step_in_order() {
+    let app = TestApp::with_config(cloud_config_with(&[(
+        "RANKORG_URL",
+        "https://rankorg.example/",
+    )]))
+    .await;
+    let started = submit(&app, "example.com").await;
+    let crawl = crawl_id(&started);
+    finish(&app, crawl, messy_pages("example.com")).await;
+    unlock(&app, crawl, "ana@example.com").await;
+    let link = emailed_token(&app);
+    let res = app
+        .post(
+            &format!("/auth/magic/{link}"),
+            "",
+            Some(&format!("{CLAIM_COOKIE}={}", claim_token(&started))),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+
+    // The full 500-page crawl finishes, and the visitor follows the RankOrg link.
+    let first: Uuid = sqlx::query_scalar("SELECT id FROM crawls WHERE trigger = 'first'")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    app.finalize_crawl(
+        first,
+        messy_pages("example.com"),
+        Vec::new(),
+        StopReason::Completed,
+    )
+    .await;
+    let go = app
+        .get(&format!("/go/rankorg?src=audit&audit={crawl}"), None)
+        .await;
+    assert_eq!(go.status, StatusCode::SEE_OTHER);
+
+    let kinds: Vec<String> = sqlx::query_scalar("SELECT kind FROM events ORDER BY id")
+        .fetch_all(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        kinds,
+        [
+            "audit_started",
+            "audit_finished",
+            "email_given",
+            "link_clicked",
+            "first_full_crawl",
+            "rankorg_click"
+        ]
+    );
+}

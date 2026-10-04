@@ -1,6 +1,7 @@
 //! Signed-in screens. Each module owns its routes and merges them in here.
 
 pub mod account;
+pub mod admin;
 pub mod audit;
 pub mod bot;
 pub mod changes;
@@ -9,6 +10,7 @@ pub mod explorer;
 pub mod export;
 pub mod landing;
 pub mod quick;
+pub mod rankorg;
 pub mod search;
 pub mod seo;
 pub mod sites;
@@ -35,6 +37,8 @@ pub fn router() -> Router<AppState> {
         .merge(export::routes())
         .merge(search::routes())
         .merge(quick::routes())
+        .merge(admin::routes())
+        .merge(rankorg::routes())
         .route("/bot", get(bot::page))
         .route("/robots.txt", get(seo::robots))
         .route("/llms.txt", get(seo::llms))

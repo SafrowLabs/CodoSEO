@@ -30,6 +30,7 @@ pub struct AccountPage {
     pub self_hosted: bool,
     pub is_owner: bool,
     pub signups_open: bool,
+    pub is_admin: bool,
 }
 
 async fn page(State(state): State<AppState>, user: CurrentUser) -> Result<Response, AppError> {
@@ -42,6 +43,7 @@ async fn page(State(state): State<AppState>, user: CurrentUser) -> Result<Respon
         self_hosted: state.config.mode == Mode::SelfHost,
         is_owner: user.account.is_owner,
         signups_open,
+        is_admin: super::admin::is_admin(&state, &user.account),
     })?
     .into_response())
 }

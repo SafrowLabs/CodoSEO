@@ -47,6 +47,10 @@ pub struct Config {
     /// The request header carrying the visitor's address behind the cloud's proxy
     /// (`CLIENT_IP_HEADER`, default `CF-Connecting-IP`). Read in cloud mode only.
     pub client_ip_header: String,
+    /// Who may open `/admin` in the cloud: canonical emails from `ADMIN_EMAILS`.
+    pub admin_emails: Vec<String>,
+    /// Where RankOrg links go (`RANKORG_URL`).
+    pub rankorg_url: Url,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -132,6 +136,20 @@ impl Config {
             _ => None,
         };
 
+        let admin_emails = get("ADMIN_EMAILS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(crate::auth::email::canonical)
+            .collect();
+        let rankorg_url =
+            Url::parse(&get("RANKORG_URL").unwrap_or_else(|| "https://rankorg.com".to_owned()))
+                .map_err(|e| ConfigError::Invalid {
+                    name: "RANKORG_URL",
+                    reason: e.to_string(),
+                })?;
+
         Ok(Config {
             mode,
             base_url,
@@ -143,6 +161,8 @@ impl Config {
             turnstile,
             client_ip_header: get("CLIENT_IP_HEADER")
                 .unwrap_or_else(|| "CF-Connecting-IP".to_owned()),
+            admin_emails,
+            rankorg_url,
         })
     }
 
@@ -228,6 +248,22 @@ mod tests {
         assert!(cfg(&one).unwrap().turnstile.is_none());
         // Self-hosted never shows Turnstile, even with keys set.
         assert!(cfg(&keys).unwrap().turnstile.is_none());
+    }
+
+    #[test]
+    fn admins_are_matched_on_canonical_emails() {
+        let c = cfg(&[("ADMIN_EMAILS", " Boss@Example.com , o.ther+x@gmail.com ,, ")]).unwrap();
+        assert_eq!(c.admin_emails, ["boss@example.com", "other@gmail.com"]);
+        assert!(cfg(&[]).unwrap().admin_emails.is_empty());
+    }
+
+    #[test]
+    fn rankorg_has_a_default_and_rejects_nonsense() {
+        assert_eq!(
+            cfg(&[]).unwrap().rankorg_url.as_str(),
+            "https://rankorg.com/"
+        );
+        assert!(cfg(&[("RANKORG_URL", "not a url")]).is_err());
     }
 
     #[test]
