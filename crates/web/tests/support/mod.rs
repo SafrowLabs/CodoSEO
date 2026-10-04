@@ -301,6 +301,29 @@ impl TestApp {
     }
 }
 
+/// A cloud-mode config: https base URL, plan limits and signup rules of codoseo.com.
+pub fn cloud_config() -> Config {
+    cloud_config_with(&[])
+}
+
+/// A cloud config with extra environment values (`TURNSTILE_SECRET`, `ADMIN_EMAILS`, ...).
+pub fn cloud_config_with(extra: &[(&str, &str)]) -> Config {
+    let extra: Vec<(String, String)> = extra
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    Config::from_lookup(|k| match k {
+        "CODOSEO_MODE" => Some("cloud".into()),
+        "BASE_URL" => Some("https://codoseo.com".into()),
+        "SECRET_KEY" => Some("test-secret".into()),
+        other => extra
+            .iter()
+            .find(|(n, _)| n == other)
+            .map(|(_, v)| v.clone()),
+    })
+    .expect("cloud config is valid")
+}
+
 pub async fn set_plan(pool: &PgPool, account_id: Uuid, plan: Plan) {
     let slug = serde_json::to_value(plan).unwrap();
     sqlx::query("UPDATE accounts SET plan = $2::plan WHERE id = $1")

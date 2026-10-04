@@ -668,6 +668,7 @@ dependencies = [
  "bytes",
  "codoseo-checks",
  "codoseo-core",
+ "codoseo-crawler",
  "codoseo-store",
  "codoseo-testkit",
  "csv",
