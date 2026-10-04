@@ -177,6 +177,24 @@ impl TestApp {
             .await
     }
 
+    /// A form POST with extra request headers (`CF-Connecting-IP`, ...).
+    pub async fn post_with_headers(
+        &self,
+        path: &str,
+        form: &str,
+        cookie: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> TestResponse {
+        let mut req = build(Method::POST, path, cookie, Some(form), false);
+        for (name, value) in headers {
+            req.headers_mut().insert(
+                header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        self.send(req).await
+    }
+
     /// A form POST (`application/x-www-form-urlencoded`).
     pub async fn post(&self, path: &str, form: &str, cookie: Option<&str>) -> TestResponse {
         self.send(build(Method::POST, path, cookie, Some(form), false))

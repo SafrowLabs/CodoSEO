@@ -5,7 +5,7 @@
     {% if main.running %}
       <div><b class="shimmer">Crawling {{ main.domain }}</b><p class="muted"><span class="q-count">{{ main.pages_done }}</span> pages checked so far. This takes about a minute.</p></div>
     {% else %}
-      <div><b class="shimmer">Waiting for a crawler</b><p class="muted">Your audit starts in a moment. This page updates by itself.</p></div>
+      <div><b class="shimmer">Waiting for a crawler</b><p class="muted">{% if let Some(line) = main.line %}{{ line }} {% endif %}Your audit starts in a moment. This page updates by itself.</p></div>
     {% endif %}
   </div>
 {% else if let Some(done) = main.done %}

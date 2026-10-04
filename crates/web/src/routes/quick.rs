@@ -8,7 +8,7 @@
 
 use askama::Template;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
@@ -19,12 +19,15 @@ use codoseo_core::plan::PlanLimits;
 use codoseo_store::accounts::Account;
 use codoseo_store::crawls::CrawlStatus;
 use codoseo_store::events::{self, EventKind};
-use codoseo_store::quick::{self, Audit, ClaimOutcome, StartOutcome, StartRequest};
+use codoseo_store::quick::{
+    self, Audit, ClaimOutcome, LimitWindow, Limits, StartOutcome, StartRequest,
+};
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
 use super::sites::{FIRST_CRAWL_PRIORITY, check_public_target, parse_start_url, schedule_for};
+use crate::abuse::{self, ClientIp};
 use crate::auth::magic::{self, AuditLink};
 use crate::auth::{email, session};
 use crate::config::Mode;
@@ -32,12 +35,16 @@ use crate::error::AppError;
 use crate::fmt;
 use crate::render::{Hx, html, hx_redirect};
 use crate::state::AppState;
+use crate::turnstile::{self, Verdict};
 
 pub const CLAIM_COOKIE: &str = "codoseo_audit";
 /// Unclaimed audits live 7 days (spec section 6), and so does the cookie.
 const CLAIM_TTL_SECS: i64 = 7 * 24 * 3600;
 /// How many issues the preview shows; the rest are counted and locked.
 const PREVIEW_ISSUES: usize = 5;
+/// Sign-in emails one audit may trigger per hour, so the unlock form can't be used to mail
+/// arbitrary addresses.
+const UNLOCK_EMAILS_PER_HOUR: i64 = 3;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -63,20 +70,52 @@ pub fn clear_claim_cookie(state: &AppState) -> HeaderValue {
 #[derive(Deserialize)]
 pub struct StartForm {
     url: String,
+    /// Added to the form by Cloudflare's Turnstile script.
+    #[serde(rename = "cf-turnstile-response", default)]
+    turnstile: Option<String>,
 }
 
 async fn start(
     State(state): State<AppState>,
     hx: Hx,
+    ClientIp(ip): ClientIp,
     Form(form): Form<StartForm>,
 ) -> Result<Response, AppError> {
     require_cloud(&state)?;
     let target = parse_start_url(&form.url).and_then(|u| check_public_target(&u).map(|()| u));
     let url = match target {
         Ok(u) => u,
-        Err(message) => return super::landing::refuse(&state, &form.url, message),
+        Err(message) => {
+            return super::landing::refuse(&state, &form.url, StatusCode::BAD_REQUEST, message);
+        }
     };
+    match turnstile::verify(&state, form.turnstile.as_deref(), ip).await {
+        Verdict::Passed => {}
+        Verdict::Failed => {
+            return super::landing::refuse(
+                &state,
+                &form.url,
+                StatusCode::FORBIDDEN,
+                "We couldn't confirm you're a human. Reload the page and try again.".to_owned(),
+            );
+        }
+        Verdict::Unavailable => {
+            return super::landing::refuse(
+                &state,
+                &form.url,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Verification is unavailable right now. Please try again in a minute.".to_owned(),
+            );
+        }
+    }
     let domain = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    let ip_hash = ip.map(|ip| {
+        abuse::ip_hash(
+            &state.config.secret_key,
+            ip,
+            time::OffsetDateTime::now_utc().date(),
+        )
+    });
 
     let claim_token = session::random_token();
     let outcome = quick::start(
@@ -85,7 +124,8 @@ async fn start(
             domain: &domain,
             start_url: url.as_str(),
             claim_hash: &session::hash(&claim_token),
-            ip_hash: None,
+            ip_hash: ip_hash.as_deref(),
+            limits: Limits::DEFAULT,
         },
     )
     .await?;
@@ -93,6 +133,27 @@ async fn start(
         StartOutcome::Started { crawl_id } => (crawl_id, "started", true),
         StartOutcome::Cached { crawl_id } => (crawl_id, "cached", false),
         StartOutcome::Joined { crawl_id } => (crawl_id, "joined", false),
+        StartOutcome::Limited {
+            window,
+            retry_after_secs,
+        } => {
+            let (limit, per) = match window {
+                LimitWindow::Hour => (Limits::DEFAULT.per_hour, "an hour"),
+                LimitWindow::Day => (Limits::DEFAULT.per_day, "a day"),
+            };
+            let message = format!(
+                "The limit is {limit} audits {per} for each visitor, and you've used them. \
+                 Try again in {}, or sign in to monitor your own site.",
+                abuse::wait_text(retry_after_secs)
+            );
+            let mut res =
+                super::landing::refuse(&state, &form.url, StatusCode::TOO_MANY_REQUESTS, message)?;
+            res.headers_mut().insert(
+                header::RETRY_AFTER,
+                HeaderValue::from(retry_after_secs.max(1)),
+            );
+            return Ok(res);
+        }
     };
     events::record(
         &state.pool,
@@ -169,6 +230,8 @@ pub struct MainView {
     /// Waiting vs running, for the headline.
     pub running: bool,
     pub pages_done: u32,
+    /// `You're #3 in line.`, while waiting behind other audits.
+    pub line: Option<String>,
     pub done: Option<DoneView>,
     pub notice: Option<Notice>,
 }
@@ -212,6 +275,22 @@ pub struct UnlockPartial {
     pub unlock: UnlockCard,
 }
 
+/// The reader's place in the queue as a sentence. Position 1 is next.
+fn line_text(position: Option<i64>) -> Option<String> {
+    match position? {
+        n if n <= 1 => Some("You're next in line.".to_owned()),
+        n => Some(format!("You're #{n} in line.")),
+    }
+}
+
+async fn main_view(state: &AppState, audit: &Audit) -> Result<MainView, AppError> {
+    let mut view = build_main(audit);
+    if view.polling && !view.running {
+        view.line = line_text(quick::queue_position(&state.pool, audit.crawl.id).await?);
+    }
+    Ok(view)
+}
+
 fn build_main(audit: &Audit) -> MainView {
     let crawl = &audit.crawl;
     let mut view = MainView {
@@ -220,6 +299,7 @@ fn build_main(audit: &Audit) -> MainView {
         polling: false,
         running: false,
         pages_done: 0,
+        line: None,
         done: None,
         notice: None,
     };
@@ -369,7 +449,7 @@ async fn report(
 ) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
     let page = ReportPage {
-        main: build_main(&audit),
+        main: main_view(&state, &audit).await?,
         unlock: UnlockCard::new(audit.crawl.id),
     };
     Ok((report_headers(), html(&page)?).into_response())
@@ -378,7 +458,7 @@ async fn report(
 async fn live(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
     let part = MainPartial {
-        main: build_main(&audit),
+        main: main_view(&state, &audit).await?,
         unlock: UnlockCard::new(audit.crawl.id),
     };
     Ok((report_headers(), html(&part)?).into_response())
@@ -399,8 +479,27 @@ async fn unlock(
     let mut card = UnlockCard::new(audit.crawl.id);
     card.email = form.email.trim().to_owned();
 
+    let mut status = StatusCode::OK;
     match email::parse(&form.email) {
         None => card.error = Some("That doesn't look like an email address.".to_owned()),
+        Some(address) if abuse::is_disposable(address) => {
+            card.error = Some(
+                "Please use a permanent email address. Throwaway inboxes can't keep your \
+                 report or your alerts."
+                    .to_owned(),
+            );
+        }
+        Some(_)
+            if quick::unlock_emails_last_hour(&state.pool, audit.crawl.id).await?
+                >= UNLOCK_EMAILS_PER_HOUR =>
+        {
+            status = StatusCode::TOO_MANY_REQUESTS;
+            card.error = Some(
+                "We already sent several links for this audit. Check your inbox and spam \
+                 folder, or try again in an hour."
+                    .to_owned(),
+            );
+        }
         Some(address) => {
             let address = address.to_owned();
             magic::issue_link(
@@ -427,13 +526,13 @@ async fn unlock(
     }
 
     if hx.request {
-        return Ok(html(&UnlockPartial { unlock: card })?.into_response());
+        return Ok((status, html(&UnlockPartial { unlock: card })?).into_response());
     }
     let page = ReportPage {
-        main: build_main(&audit),
+        main: main_view(&state, &audit).await?,
         unlock: card,
     };
-    Ok((report_headers(), html(&page)?).into_response())
+    Ok((status, report_headers(), html(&page)?).into_response())
 }
 
 /// After a sign-in link from an audit is used: gives the account the audited site (see

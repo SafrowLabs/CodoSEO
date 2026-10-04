@@ -21,6 +21,14 @@ pub struct GithubConfig {
     pub api_url: Url,
 }
 
+/// Cloudflare Turnstile keys, plus the verify endpoint so tests can point it at a fake.
+#[derive(Debug, Clone)]
+pub struct TurnstileConfig {
+    pub site_key: String,
+    pub secret: String,
+    pub verify_url: Url,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub mode: Mode,
@@ -34,6 +42,11 @@ pub struct Config {
     pub github: Option<GithubConfig>,
     /// The fixed address cloud crawls come from, listed on the bot page (`CODOSEO_BOT_IP`).
     pub bot_ip: Option<String>,
+    /// Turnstile on the audit form: `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`. Cloud only.
+    pub turnstile: Option<TurnstileConfig>,
+    /// The request header carrying the visitor's address behind the cloud's proxy
+    /// (`CLIENT_IP_HEADER`, default `CF-Connecting-IP`). Read in cloud mode only.
+    pub client_ip_header: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +115,23 @@ impl Config {
             _ => None,
         };
 
+        let turnstile = match (get("TURNSTILE_SITE_KEY"), get("TURNSTILE_SECRET")) {
+            (Some(site_key), Some(secret)) if mode == Mode::Cloud => {
+                let verify = get("TURNSTILE_VERIFY_URL").unwrap_or_else(|| {
+                    "https://challenges.cloudflare.com/turnstile/v0/siteverify".to_owned()
+                });
+                Some(TurnstileConfig {
+                    site_key,
+                    secret,
+                    verify_url: Url::parse(&verify).map_err(|e| ConfigError::Invalid {
+                        name: "TURNSTILE_VERIFY_URL",
+                        reason: e.to_string(),
+                    })?,
+                })
+            }
+            _ => None,
+        };
+
         Ok(Config {
             mode,
             base_url,
@@ -110,6 +140,9 @@ impl Config {
             smtp_url: get("SMTP_URL"),
             github,
             bot_ip: get("CODOSEO_BOT_IP"),
+            turnstile,
+            client_ip_header: get("CLIENT_IP_HEADER")
+                .unwrap_or_else(|| "CF-Connecting-IP".to_owned()),
         })
     }
 
@@ -177,6 +210,35 @@ mod tests {
     #[test]
     fn unknown_mode_is_rejected() {
         assert!(cfg(&[("CODOSEO_MODE", "nope")]).is_err());
+    }
+
+    #[test]
+    fn turnstile_needs_both_keys_and_the_cloud() {
+        let keys = [("TURNSTILE_SITE_KEY", "a"), ("TURNSTILE_SECRET", "b")];
+        let cloud = [
+            ("CODOSEO_MODE", "cloud"),
+            ("BASE_URL", "https://codoseo.com"),
+            ("SECRET_KEY", "k"),
+        ];
+        let both: Vec<_> = cloud.iter().chain(keys.iter()).copied().collect();
+        let t = cfg(&both).unwrap().turnstile.expect("configured");
+        assert_eq!(t.site_key, "a");
+        assert!(t.verify_url.as_str().contains("challenges.cloudflare.com"));
+        let one: Vec<_> = cloud.iter().chain(keys[..1].iter()).copied().collect();
+        assert!(cfg(&one).unwrap().turnstile.is_none());
+        // Self-hosted never shows Turnstile, even with keys set.
+        assert!(cfg(&keys).unwrap().turnstile.is_none());
+    }
+
+    #[test]
+    fn the_client_ip_header_has_a_default() {
+        assert_eq!(cfg(&[]).unwrap().client_ip_header, "CF-Connecting-IP");
+        assert_eq!(
+            cfg(&[("CLIENT_IP_HEADER", "X-Real-IP")])
+                .unwrap()
+                .client_ip_header,
+            "X-Real-IP"
+        );
     }
 
     #[test]

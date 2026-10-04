@@ -10,6 +10,7 @@
 <meta property="og:site_name" content="CodoSEO">
 <meta name="twitter:card" content="summary">
 <link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% if turnstile_site_key.is_some() %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
 {"@type":"Organization","@id":"{{ base }}/#organization","name":"SafrowLabs","url":"{{ base }}","sameAs":["https://github.com/SafrowLabs"]},
@@ -34,6 +35,7 @@
     <p class="l-lead">Paste your site's address. In about a minute you get a health score and your top issues, with no sign-up. Then let CodoSEO watch the site and tell you when something important changes.</p>
     <form class="l-form" method="post" action="/audit" hx-boost="false">
       <input class="input input-lg" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="l-hint" required autofocus>
+      {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile l-ts" data-sitekey="{{ key }}" data-theme="auto"></div>{% endif %}
       <button class="btn btn-primary btn-lg" type="submit">Audit my site</button>
     </form>
     {% if let Some(err) = error %}<p class="error-text" role="alert" style="margin-top:10px"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}

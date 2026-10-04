@@ -1,6 +1,7 @@
 //! The CodoSEO web app: axum routes, askama templates and htmx partials, in one crate the
 //! `codoseo` binary serves as its `web` role.
 
+pub mod abuse;
 pub mod assets;
 pub mod auth;
 pub mod config;
@@ -12,6 +13,9 @@ pub mod render;
 pub mod routes;
 pub mod serp;
 pub mod state;
+pub mod turnstile;
+
+use std::net::SocketAddr;
 
 use axum::Router;
 use axum::extract::Request;
@@ -48,9 +52,13 @@ pub async fn serve(
     listener: TcpListener,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    axum::serve(listener, app(state))
-        .with_graceful_shutdown(shutdown)
-        .await
+    // Connect info gives the abuse limits the socket's address when no proxy header applies.
+    axum::serve(
+        listener,
+        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
 }
 
 /// Headers every response gets: no framing, no MIME sniffing, a strict referrer policy, and
