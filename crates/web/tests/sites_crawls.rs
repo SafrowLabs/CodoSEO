@@ -666,3 +666,40 @@ async fn status_poll_announces_a_failed_crawl() {
         "Crawl #2 failed: robots.txt blocks the whole site"
     );
 }
+
+/// The add-site form is boosted: success is a normal redirect into the new site, and a bad
+/// address or a reached limit comes back as the form, retargeted onto itself.
+#[tokio::test]
+async fn add_site_over_htmx_redirects_or_retargets_the_form() {
+    let app = TestApp::new().await;
+    let (_, cookie) = app
+        .login_with_plan("free@example.com", Some(Plan::Free))
+        .await;
+
+    let res = app
+        .post_hx("/sites", "url=not%20a%20url", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(res.header("hx-retarget"), Some("#add-site"));
+    assert_eq!(res.header("hx-reswap"), Some("outerHTML"));
+    assert!(res.body.contains("id=\"add-site\""));
+    assert!(res.body.contains("error-text"));
+
+    let res = app
+        .post_hx("/sites", "url=example.com", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    assert!(res.location().unwrap().ends_with("/audit"));
+
+    // Free allows one site: the second shows the limit inside the form.
+    let res = app
+        .post_hx("/sites", "url=second.example", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(res.header("hx-retarget"), Some("#add-site"));
+    assert!(
+        res.body.contains("Your plan includes 1 site"),
+        "{}",
+        res.body
+    );
+}

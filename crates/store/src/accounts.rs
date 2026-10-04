@@ -133,6 +133,29 @@ pub async fn sign_in(
         return Ok(SignInOutcome::Existing(found));
     }
 
+    // An account from before `email_canonical` existed (or one that lost a backfill tie) is
+    // still found by its address, and takes the key if it is free.
+    let legacy: Option<AccountRow> = sqlx::query_as(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM accounts a WHERE lower(a.email) = lower($1) \
+         ORDER BY a.created_at, a.id LIMIT 1"
+    ))
+    .bind(who.email)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(found) = legacy {
+        sqlx::query(
+            "UPDATE accounts SET email_canonical = $2 \
+             WHERE id = $1 AND email_canonical IS NULL \
+               AND NOT EXISTS (SELECT 1 FROM accounts WHERE email_canonical = $2)",
+        )
+        .bind(found.id)
+        .bind(who.canonical)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(SignInOutcome::Existing(found.into()));
+    }
+
     let first: bool = sqlx::query_scalar("SELECT NOT EXISTS (SELECT 1 FROM accounts)")
         .fetch_one(&mut *tx)
         .await?;

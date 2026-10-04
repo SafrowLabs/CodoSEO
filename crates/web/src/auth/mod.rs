@@ -129,10 +129,19 @@ fn current_path(headers: &HeaderMap, uri: Option<&str>) -> String {
 }
 
 /// Only same-site relative paths are allowed as a post-login destination, so `?next=` can't
-/// be used to bounce a user to another site.
+/// be used to bounce a user to another site. Browsers drop tabs and newlines from a redirect
+/// address (`/\t/evil.com` becomes `//evil.com`), so any whitespace or control character
+/// rejects the value outright; it also keeps the `Location` header valid.
 pub fn safe_next(next: Option<&str>) -> &str {
     match next {
-        Some(n) if n.starts_with('/') && !n.starts_with("//") && !n.contains('\\') => n,
+        Some(n)
+            if n.starts_with('/')
+                && !n.starts_with("//")
+                && !n.contains('\\')
+                && !n.chars().any(|c| c.is_control() || c.is_whitespace()) =>
+        {
+            n
+        }
         _ => "/",
     }
 }
@@ -183,5 +192,15 @@ mod tests {
         assert_eq!(safe_next(Some("https://evil.com")), "/");
         assert_eq!(safe_next(Some("/\\evil.com")), "/");
         assert_eq!(safe_next(None), "/");
+        // Browsers strip these, turning the path into `//evil.com`.
+        for sneaky in [
+            "/\t/evil.com",
+            "/\n/evil.com",
+            "/\r/evil.com",
+            "/ /evil.com",
+            "/\u{0}x",
+        ] {
+            assert_eq!(safe_next(Some(sneaky)), "/", "{sneaky:?}");
+        }
     }
 }

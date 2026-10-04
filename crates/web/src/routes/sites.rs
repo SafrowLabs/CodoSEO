@@ -2,6 +2,7 @@
 
 use askama::Template;
 use axum::extract::State;
+use axum::http::HeaderName;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Form, Router};
@@ -125,7 +126,16 @@ async fn create(
             first,
         };
         if hx.request {
-            Ok(html(&f)?.into_response())
+            // The form is boosted (a normal navigation on success), so send the corrected form
+            // back into its own place rather than over the page.
+            Ok((
+                [
+                    (HeaderName::from_static("hx-retarget"), "#add-site"),
+                    (HeaderName::from_static("hx-reswap"), "outerHTML"),
+                ],
+                html(&f)?,
+            )
+                .into_response())
         } else {
             Err(AppError::BadRequest(f.error.unwrap_or_default()))
         }
@@ -139,9 +149,15 @@ async fn create(
             if max == 1 { "" } else { "s" }
         ))
     };
+    let over_limit = |e: AppError| -> Result<Response, AppError> {
+        match e {
+            AppError::Limit(msg) if hx.request => invalid(msg),
+            e => Err(e),
+        }
+    };
     // A quick check before validating the address; `create_checked` makes the final call.
     if max_sites.is_some_and(|max| count >= max) {
-        return Err(limit_reached());
+        return over_limit(limit_reached());
     }
     let start = match parse_start_url(&form.url) {
         Ok(u) => u,
@@ -167,7 +183,7 @@ async fn create(
         CreateOutcome::Created(site) => {
             Ok(Redirect::to(&format!("/s/{}/audit", site.id)).into_response())
         }
-        CreateOutcome::LimitReached => Err(limit_reached()),
+        CreateOutcome::LimitReached => over_limit(limit_reached()),
         CreateOutcome::Duplicate => invalid(format!("{domain} is already one of your sites.")),
     }
 }

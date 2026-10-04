@@ -435,3 +435,52 @@ async fn github_routes_are_hidden_when_not_configured() {
     let page = app.get("/login", None).await;
     assert!(!page.body.contains("Continue with GitHub"));
 }
+
+/// Browsers strip tabs and newlines from a redirect address, so `/\t/evil.com` would become
+/// `//evil.com`. Any such `next` falls back to `/`.
+#[tokio::test]
+async fn next_with_control_characters_cannot_leave_the_site() {
+    let app = TestApp::new().await;
+    let (_, cookie) = app.login("ana@example.com").await;
+    for next in [
+        "/%09/evil.example",
+        "/%0A/evil.example",
+        "/%0D%0A/evil.example",
+    ] {
+        let res = app.get(&format!("/login?next={next}"), Some(&cookie)).await;
+        assert_eq!(res.status, StatusCode::SEE_OTHER, "{next}");
+        assert_eq!(res.location(), Some("/"), "{next}");
+    }
+    let token = request_link(&app, "bo@example.com", "/\t/evil.example").await;
+    let (status, _, location) = consume(&app, &token).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(location.as_deref(), Some("/"));
+}
+
+/// An account written before `email_canonical` existed is found by its address and keyed,
+/// instead of a sign-in trying to create a duplicate.
+#[tokio::test]
+async fn legacy_accounts_without_a_canonical_key_still_sign_in() {
+    let app = TestApp::new().await;
+    let legacy: Uuid =
+        sqlx::query_scalar("INSERT INTO accounts (email) VALUES ('A.Na@Gmail.com') RETURNING id")
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    for email in ["a.na@gmail.com", "ana+seo@gmail.com"] {
+        let token = request_link(&app, email, "/").await;
+        assert_eq!(
+            consume(&app, &token).await.0,
+            StatusCode::SEE_OTHER,
+            "{email}"
+        );
+    }
+    assert_eq!(account_count(&app).await, 1);
+    let canonical: Option<String> =
+        sqlx::query_scalar("SELECT email_canonical FROM accounts WHERE id = $1")
+            .bind(legacy)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(canonical.as_deref(), Some("ana@gmail.com"));
+}

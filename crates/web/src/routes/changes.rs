@@ -241,6 +241,14 @@ fn chip(c: &Crawl) -> String {
 
 fn tiles(c: &ChangeCounts) -> Vec<Tile> {
     let tone = |n: i64, class| if n > 0 { class } else { "" };
+    // A sign only on a real change: "+12", "−34", but a plain "0".
+    let signed = |sign: char, n| {
+        if n == 0 {
+            "0".to_owned()
+        } else {
+            format!("{sign}{}", fmt::thousands(n))
+        }
+    };
     let new = c.kind(ChangeKind::NewUrl);
     let removed = c.kind(ChangeKind::RemovedUrl);
     let noindex = c.kind(ChangeKind::BecameNoindex);
@@ -248,12 +256,12 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
     vec![
         Tile {
             label: "New URLs",
-            value: format!("+{}", fmt::thousands(new)),
+            value: signed('+', new),
             class: tone(new, "c-ok"),
         },
         Tile {
             label: "Removed URLs",
-            value: format!("−{}", fmt::thousands(removed)),
+            value: signed('−', removed),
             class: tone(removed, "c-err"),
         },
         Tile {

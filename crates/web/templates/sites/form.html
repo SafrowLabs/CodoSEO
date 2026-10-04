@@ -1,4 +1,4 @@
-<form id="add-site" class="add-site" method="post" action="/sites" hx-post="/sites" hx-target="#add-site" hx-swap="outerHTML" hx-disabled-elt="find button">
+<form id="add-site" class="add-site" method="post" action="/sites" hx-disabled-elt="find button">
   <div class="field">
     <input class="input input-lg" name="url" value="{{ url }}" placeholder="example.com" aria-label="Site address" autocomplete="url" {% if first %}autofocus{% endif %} required{% if !can_add %} disabled{% endif %}>
     {% if let Some(err) = error %}<span class="error-text"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</span>{% endif %}
