@@ -175,6 +175,13 @@ pub async fn queue_position(pool: &PgPool, crawl_id: Uuid) -> Result<Option<i64>
     Ok(position.flatten())
 }
 
+/// How many no-signup audits are waiting for a crawler.
+pub async fn queue_depth(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT count(*) FROM crawls WHERE trigger = 'quick' AND status = 'queued'")
+        .fetch_one(pool)
+        .await
+}
+
 /// How many sign-in emails were sent for this audit in the last hour (the cap on mail sent to
 /// arbitrary addresses).
 pub async fn unlock_emails_last_hour(pool: &PgPool, crawl_id: Uuid) -> Result<i64, sqlx::Error> {
