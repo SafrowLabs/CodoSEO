@@ -179,6 +179,24 @@ pub async fn response_time_buckets(
     })
 }
 
+/// The crawl's best pages for RankOrg to look at: indexable 200s with the most inlinks, ties in
+/// crawl order.
+pub async fn top_pages_by_inlinks(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    limit: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT url FROM pages \
+         WHERE crawl_id = $1 AND status = 200 AND indexability = 'indexable' \
+         ORDER BY inlinks DESC, id LIMIT $2",
+    )
+    .bind(crawl_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,22 +226,4 @@ mod tests {
         assert_eq!(c.severity(Severity::Notice), 7);
         assert_eq!(c.severity(Severity::Critical), 0);
     }
-}
-
-/// The crawl's best pages for RankOrg to look at: indexable 200s with the most inlinks, ties in
-/// crawl order.
-pub async fn top_pages_by_inlinks(
-    pool: &PgPool,
-    crawl_id: Uuid,
-    limit: i64,
-) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT url FROM pages \
-         WHERE crawl_id = $1 AND status = 200 AND indexability = 'indexable' \
-         ORDER BY inlinks DESC, id LIMIT $2",
-    )
-    .bind(crawl_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
 }
