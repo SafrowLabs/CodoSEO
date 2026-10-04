@@ -1,0 +1,3 @@
+{%- for hit in hits -%}
+<a class="pal-item" role="option" href="{{ hit.href }}"><svg class="icon"><use href="#i-explorer"/></svg><span class="pal-main mono">{{ hit.path }}</span><span class="pal-sub">{{ hit.title }}</span></a>
+{%- endfor -%}
