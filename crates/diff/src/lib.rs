@@ -1,6 +1,7 @@
 //! Change detection between two crawls of the same site.
 //!
-//! Pages are matched by URL hash and only pages on the snapshot's origin count. When the
+//! Pages are matched by the hash of their URL, recomputed here rather than trusted from
+//! the stored `url_hash`, and only pages on the snapshot's origin count. When the
 //! origin itself changed, the earlier URLs are moved onto the new origin first, so a move
 //! shows up as one `SiteMoved` and not as every page removed and added.
 
@@ -12,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::Severity;
+use codoseo_core::output::StopReason;
 use codoseo_core::page::PageRecord;
 use codoseo_core::snapshot::Snapshot;
 use codoseo_core::url::url_hash;
@@ -95,7 +97,7 @@ pub fn diff(prev: &Snapshot, curr: &Snapshot, key_pages: &HashSet<u64>) -> Vec<C
             } else {
                 (rec.url.clone(), rec.fields.canonical.clone())
             };
-            let hash = if moved { url_hash(&url) } else { rec.url_hash };
+            let hash = url_hash(&url);
             (
                 hash,
                 PrevPage {
@@ -110,7 +112,7 @@ pub fn diff(prev: &Snapshot, curr: &Snapshot, key_pages: &HashSet<u64>) -> Vec<C
         .pages
         .iter()
         .filter(|p| curr_origin.contains(&p.url))
-        .map(|p| (p.url_hash, p))
+        .map(|p| (url_hash(&p.url), p))
         .collect();
 
     let mut page_change = |hash: u64, kind, severity, url: &Url, before, after| {
@@ -195,9 +197,12 @@ pub fn diff(prev: &Snapshot, curr: &Snapshot, key_pages: &HashSet<u64>) -> Vec<C
         });
     }
 
+    let newly_blocked =
+        curr.stop == StopReason::RobotsBlocked && prev.stop != StopReason::RobotsBlocked;
     changes.extend(robots::robots_change(
         prev.robots.as_ref(),
         curr.robots.as_ref(),
+        newly_blocked,
     ));
 
     if sitemap_shrank(&prev.sitemap, &curr.sitemap) {
@@ -240,6 +245,6 @@ pub fn key_pages(snap: &Snapshot, starred: &HashSet<u64>) -> HashSet<u64> {
 
     let mut keys = starred.clone();
     keys.insert(url_hash(&snap.origin));
-    keys.extend(ranked.iter().take(TOP_PAGES).map(|p| p.url_hash));
+    keys.extend(ranked.iter().take(TOP_PAGES).map(|p| url_hash(&p.url)));
     keys
 }

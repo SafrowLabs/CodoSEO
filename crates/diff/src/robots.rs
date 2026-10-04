@@ -34,32 +34,51 @@ pub fn robots_fingerprint(body: &str) -> u64 {
 
 /// A change when the robots.txt status or its rules differ. A missing file on both sides is
 /// no change; missing on one side shows as `none`.
+///
+/// `newly_blocked` (this crawl stopped as `RobotsBlocked` and the previous one didn't)
+/// always gives one critical change, even when the file reads the same.
 pub(crate) fn robots_change(
     prev: Option<&RobotsFile>,
     curr: Option<&RobotsFile>,
+    newly_blocked: bool,
 ) -> Option<Change> {
-    let (before, after) = match (prev, curr) {
-        (None, None) => return None,
+    let status =
+        |f: Option<&RobotsFile>| f.map_or_else(|| "none".to_owned(), |f| f.status.to_string());
+    let (before, after, rules_changed) = match (prev, curr) {
+        (None, None) => (status(prev), status(curr), false),
         (Some(p), Some(c)) => {
             let rules_differ = robots_fingerprint(&p.body) != robots_fingerprint(&c.body);
-            if p.status == c.status && !rules_differ {
-                return None;
-            }
-            if p.status == c.status {
-                (
-                    p.status.to_string(),
-                    format!("{} (rules changed)", c.status),
-                )
-            } else {
-                (p.status.to_string(), c.status.to_string())
-            }
+            (
+                status(prev),
+                status(curr),
+                p.status == c.status && rules_differ,
+            )
         }
-        (Some(p), None) => (p.status.to_string(), "none".to_owned()),
-        (None, Some(c)) => ("none".to_owned(), c.status.to_string()),
+        _ => (status(prev), status(curr), false),
+    };
+    let differs = before != after || rules_changed;
+    if !differs && !newly_blocked {
+        return None;
+    }
+    let notes: Vec<&str> = [
+        rules_changed.then_some("rules changed"),
+        newly_blocked.then_some("blocks the crawl"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let after = if notes.is_empty() {
+        after
+    } else {
+        format!("{after} ({})", notes.join(", "))
     };
     Some(Change {
         kind: ChangeKind::RobotsTxtChanged,
-        severity: Severity::Warning,
+        severity: if newly_blocked {
+            Severity::Critical
+        } else {
+            Severity::Warning
+        },
         url: None,
         before,
         after,

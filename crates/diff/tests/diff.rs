@@ -760,3 +760,62 @@ fn changes_are_sorted_by_severity_then_kind_then_url() {
         ]
     );
 }
+
+#[test]
+fn robots_txt_that_now_blocks_the_crawl_is_critical() {
+    let mut prev = site_at("https://e.com/");
+    prev.robots = robots(200, "User-agent: *\nDisallow: /a\n");
+    let curr = Snapshot {
+        stop: StopReason::RobotsBlocked,
+        pages: Vec::new(),
+        robots: robots(200, "User-agent: *\nDisallow: /\n"),
+        ..prev.clone()
+    };
+    let c = only(diff(&prev, &curr, &none()));
+    assert_eq!(
+        (c.kind, c.severity),
+        (ChangeKind::RobotsTxtChanged, Severity::Critical)
+    );
+    assert_eq!(
+        (c.before.as_str(), c.after.as_str()),
+        ("200", "200 (rules changed, blocks the crawl)")
+    );
+
+    // Still reported when the rules themselves read the same (the start page became
+    // disallowed some other way), and only once.
+    let same_rules = Snapshot {
+        robots: prev.robots.clone(),
+        ..curr.clone()
+    };
+    let c = only(diff(&prev, &same_rules, &none()));
+    assert_eq!(
+        (c.kind, c.severity),
+        (ChangeKind::RobotsTxtChanged, Severity::Critical)
+    );
+    assert_eq!(
+        (c.before.as_str(), c.after.as_str()),
+        ("200", "200 (blocks the crawl)")
+    );
+
+    // Blocked both times: nothing new.
+    assert!(diff(&curr, &curr, &none()).is_empty());
+}
+
+#[test]
+fn url_hashes_are_recomputed_from_the_url() {
+    let prev = site_at("https://e.com/");
+    let mut curr = prev.clone();
+    for p in &mut curr.pages {
+        p.url_hash = p.url_hash.wrapping_add(1); // a stale or wrong stored hash
+    }
+    assert!(diff(&prev, &curr, &none()).is_empty());
+    assert!(diff(&curr, &prev, &none()).is_empty());
+
+    // Key pages also use the URL, so a change to a top page is still raised.
+    let mut changed = curr.clone();
+    edit(&mut changed, "https://e.com/a", |p| p.status = 404);
+    let keys = key_pages(&curr, &none());
+    assert!(keys.contains(&url_hash(&u("https://e.com/a"))));
+    let c = only(diff(&prev, &changed, &keys));
+    assert_eq!(c.severity, Severity::Critical);
+}
