@@ -11,7 +11,7 @@ use codoseo_crawler::crawl::inspect_page;
 use url::Url;
 
 use super::output::{clean, severity_label, slug, write_json, write_pairs};
-use super::{CliError, EXIT_OK, Outcome, PlainFormat};
+use super::{CliError, EXIT_OK, EXIT_RUNTIME, Outcome, PlainFormat};
 
 #[derive(Debug, Args)]
 pub struct CheckArgs {
@@ -38,6 +38,12 @@ pub async fn run(args: CheckArgs) -> Outcome {
         PlainFormat::Table => write_table(&mut w, &page).map_err(CliError::from)?,
     }
     w.flush()?;
+
+    // No response at all: the record is printed, but the command could not do its job.
+    if let Some(error) = &page.error {
+        eprintln!("the page could not be fetched ({})", slug(error));
+        return Ok(EXIT_RUNTIME);
+    }
     Ok(EXIT_OK)
 }
 

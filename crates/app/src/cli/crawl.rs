@@ -14,10 +14,7 @@ use codoseo_crawler::crawl::crawl;
 use url::Url;
 
 use super::output::write_crawl;
-use super::{CrawlFormat, EXIT_FAIL_ON, EXIT_OK, FailOn, Outcome, open_output};
-
-/// Exit code for a crawl that could not do its job.
-const EXIT_RUNTIME: u8 = 2;
+use super::{CrawlFormat, EXIT_FAIL_ON, EXIT_OK, EXIT_RUNTIME, FailOn, Outcome, open_output};
 const MIN_RPS: u32 = 1;
 const MAX_RPS: u32 = 50;
 
@@ -95,6 +92,8 @@ impl ProgressLine {
 
 pub async fn run(args: CrawlArgs) -> Outcome {
     let cfg = args.config();
+    // Opened first, so a bad path fails at once instead of after a long crawl.
+    let mut w = open_output(args.output.as_ref())?;
     let progress = ProgressLine {
         enabled: std::io::stderr().is_terminal(),
     };
@@ -103,19 +102,19 @@ pub async fn run(args: CrawlArgs) -> Outcome {
     let mut out = result?;
 
     let report = run_checks(&mut out);
+    let duration_ms = out.duration_ms;
     let audit = Audit {
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
         created_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
-        duration_ms: out.duration_ms,
+        duration_ms,
         start_url: cfg.start_url,
         report,
-        snapshot: Snapshot::from_output(&out),
+        snapshot: Snapshot::from_output_owned(out),
     };
 
-    let mut w = open_output(args.output.as_ref())?;
     write_crawl(&mut w, args.format, &audit)?;
     w.flush()?;
 

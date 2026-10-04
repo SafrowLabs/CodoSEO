@@ -43,6 +43,17 @@ impl CliError {
     pub fn msg(text: impl Into<String>) -> CliError {
         CliError::Message(text.into())
     }
+
+    /// The reader of our output went away (`codoseo ... | head`): not worth an error.
+    pub fn is_broken_pipe(&self) -> bool {
+        let broken = |kind: io::ErrorKind| kind == io::ErrorKind::BrokenPipe;
+        match self {
+            CliError::Io(e) => broken(e.kind()),
+            CliError::Json(e) => e.io_error_kind().is_some_and(broken),
+            CliError::Csv(e) => matches!(e.kind(), csv::ErrorKind::Io(e) if broken(e.kind())),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -124,6 +135,9 @@ impl FailOn {
     }
 }
 
+/// Exit code for a command that could not do its job.
+pub const EXIT_RUNTIME: u8 = 2;
+
 /// Opens `-o FILE` or stdout for a rendered report.
 pub fn open_output(path: Option<&PathBuf>) -> Result<Box<dyn Write>, CliError> {
     Ok(match path {
@@ -134,4 +148,37 @@ pub fn open_output(path: Option<&PathBuf>) -> Result<Box<dyn Write>, CliError> {
         }
         None => Box::new(BufWriter::new(io::stdout().lock())),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A writer whose reader has gone away.
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    #[test]
+    fn broken_pipe_is_recognised_through_every_writer() {
+        let io_err = CliError::from(ClosedPipe.write_all(b"x").unwrap_err());
+        assert!(io_err.is_broken_pipe());
+        let json_err = CliError::from(serde_json::to_writer(ClosedPipe, &[1, 2]).unwrap_err());
+        assert!(json_err.is_broken_pipe());
+        let mut csv = csv::Writer::from_writer(ClosedPipe);
+        csv.write_record(["a", "b"]).unwrap();
+        let csv_err = CliError::from(csv.flush().map_err(csv::Error::from).unwrap_err());
+        assert!(csv_err.is_broken_pipe());
+
+        assert!(!CliError::msg("nope").is_broken_pipe());
+        let other = CliError::from(io::Error::from(io::ErrorKind::PermissionDenied));
+        assert!(!other.is_broken_pipe());
+    }
 }

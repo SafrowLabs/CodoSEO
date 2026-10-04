@@ -154,3 +154,11 @@ fn counts_for_unknown_checks_are_skipped() {
         .push(serde_json::json!(["og_missing", "three"]));
     assert!(Audit::from_json(&serde_json::to_vec(&bad).unwrap()).is_err());
 }
+
+#[test]
+fn owned_snapshot_moves_the_pages_and_matches_the_borrowed_one() {
+    let out = output();
+    let borrowed = Snapshot::from_output(&out);
+    let owned = Snapshot::from_output_owned(out);
+    assert_eq!(owned, borrowed);
+}

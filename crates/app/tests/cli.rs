@@ -34,6 +34,40 @@ fn serve(site: SiteBuilder) -> Url {
     rx.recv().expect("the site started")
 }
 
+/// Starts `site` and returns the address of its home page and a way to read how many
+/// requests it has received so far.
+fn serve_counted(site: SiteBuilder) -> (Url, impl Fn() -> usize) {
+    let (tx, rx) = mpsc::channel();
+    let (ask_tx, ask_rx) = mpsc::channel::<mpsc::Sender<usize>>();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let started = rt.block_on(site.start());
+        tx.send(started.url("/")).expect("the test is waiting");
+        while let Ok(reply) = ask_rx.recv() {
+            let _ = reply.send(started.hits());
+        }
+        loop {
+            std::thread::park();
+        }
+    });
+    let url = rx.recv().expect("the site started");
+    let hits = move || {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        ask_tx.send(reply_tx).expect("the site is running");
+        reply_rx.recv().expect("a hit count")
+    };
+    (url, hits)
+}
+
+fn closed_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    listener.local_addr().expect("an address").port()
+}
+
 fn at(base: &Url, path: &str) -> String {
     base.join(path).expect("a path").to_string()
 }
@@ -554,4 +588,211 @@ fn terminal_escapes_in_diffed_values_never_reach_stdout() {
         OsStr::new("json"),
     ]);
     assert!(json.contains("\\u001b"), "{json}");
+}
+
+#[test]
+fn an_unwritable_output_path_fails_before_crawling() {
+    let (url, hits) = serve_counted(clean_site());
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let file = dir.path().join("no-such-dir").join("report.json");
+    let started = std::time::Instant::now();
+    crawl(&url)
+        .args(["--format", "json", "-o"])
+        .arg(&file)
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("cannot write"));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert_eq!(hits(), 0, "the crawl must not start");
+}
+
+#[test]
+fn a_closed_stdout_pipe_is_a_quiet_success() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    // Enough pages that the CSV is larger than a pipe buffer, so the binary is still
+    // writing when the reader goes away after the first line.
+    // 40 rows of about 6 KB each (the long URL appears in more than one column).
+    let paths: Vec<String> = (0..40)
+        .map(|i| format!("/page-{i:02}-{}", "x".repeat(2_000)))
+        .collect();
+    let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let url = serve(
+        SiteBuilder::new()
+            .html("/", "Home page title for tests here", &refs)
+            .every_path(Page::html(&html_page(
+                "A page title for the pipe test",
+                &[],
+            ))),
+    );
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_codoseo"))
+        .args(["crawl", url.as_str(), "--rps", "50", "--format", "csv"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    let mut first = String::new();
+    BufReader::new(child.stdout.take().expect("stdout"))
+        .read_line(&mut first)
+        .expect("a first line");
+    assert!(first.starts_with("url,"), "{first}");
+    // The reader is dropped here: the pipe is closed.
+    let out = child.wait_with_output().expect("the binary exits");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stderr.is_empty(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn check_exits_2_when_the_page_cannot_be_fetched() {
+    let out = codoseo()
+        .args(["check", &format!("http://127.0.0.1:{}/", closed_port())])
+        .output()
+        .expect("the binary runs");
+    assert_eq!(out.status.code(), Some(2));
+    // The table is still printed first.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Status") && stdout.contains("Error"),
+        "{stdout}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("could not be fetched"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn diff_of_incomplete_crawls_says_so() {
+    let url = serve(clean_site());
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let a = dir.path().join("a.json");
+    let b = dir.path().join("b.json");
+    for file in [&a, &b] {
+        crawl(&url)
+            .args(["--max-pages", "1", "--format", "json", "-o"])
+            .arg(file)
+            .assert()
+            .success();
+    }
+    let note =
+        "Note: both crawls stopped early (page limit); new and removed URLs were not compared.";
+    let out = codoseo()
+        .arg("diff")
+        .args([&a, &b])
+        .output()
+        .expect("the binary runs");
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.trim_end(), note);
+    assert!(stdout.starts_with(note), "{stdout}");
+
+    let md = run([
+        OsStr::new("diff"),
+        a.as_os_str(),
+        b.as_os_str(),
+        OsStr::new("--format"),
+        OsStr::new("md"),
+    ]);
+    assert!(md.starts_with(note), "{md}");
+
+    // JSON stays a pure array; the note goes to stderr only.
+    let out = codoseo()
+        .arg("diff")
+        .args([&a, &b])
+        .args(["--format", "json"])
+        .output()
+        .expect("the binary runs");
+    assert_eq!(out.status.code(), Some(0));
+    let changes: Vec<Change> = serde_json::from_slice(&out.stdout).expect("an array");
+    assert!(changes.is_empty());
+    assert_eq!(String::from_utf8_lossy(&out.stderr).trim_end(), note);
+
+    // Complete crawls: no note anywhere.
+    let full = dir.path().join("full.json");
+    crawl(&url)
+        .args(["--format", "json", "-o"])
+        .arg(&full)
+        .assert()
+        .success();
+    let out = codoseo()
+        .arg("diff")
+        .args([&full, &full])
+        .output()
+        .expect("the binary runs");
+    assert!(out.stderr.is_empty());
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("Note"));
+
+    // Only the newer crawl incomplete: only removed URLs go unchecked.
+    let out = codoseo()
+        .arg("diff")
+        .args([&full, &b])
+        .output()
+        .expect("the binary runs");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr).trim_end(),
+        "Note: the newer crawl stopped early (page limit); removed URLs were not compared."
+    );
+}
+
+#[test]
+fn a_robots_txt_that_starts_blocking_the_crawl_is_a_critical_change() {
+    let url = serve(
+        SiteBuilder::new()
+            .html("/", "Home page title for tests here", &[])
+            .page(
+                "/robots.txt",
+                Page::sequence(vec![
+                    Page::status(200, "User-agent: *\nDisallow: /private\n")
+                        .header("content-type", "text/plain"),
+                    Page::status(200, "User-agent: *\nDisallow: /\n")
+                        .header("content-type", "text/plain"),
+                ]),
+            ),
+    );
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let a = dir.path().join("a.json");
+    let b = dir.path().join("b.json");
+    crawl(&url)
+        .args(["--format", "json", "-o"])
+        .arg(&a)
+        .assert()
+        .success();
+    // The blocked crawl exits 2 but still saves its audit.
+    crawl(&url)
+        .args(["--format", "json", "-o"])
+        .arg(&b)
+        .assert()
+        .code(2);
+
+    let out = codoseo()
+        .arg("diff")
+        .args([&a, &b])
+        .args(["--fail-on", "critical"])
+        .output()
+        .expect("the binary runs");
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.starts_with("critical") && l.contains("robots_txt_changed")),
+        "{stdout}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("blocked by robots.txt"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

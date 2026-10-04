@@ -21,6 +21,8 @@ fn main() -> ExitCode {
     };
     match runtime.block_on(cli::run(args)) {
         Ok(code) => ExitCode::from(code),
+        // Whoever read our output stopped early (`| head`): that is their choice, not a failure.
+        Err(e) if e.is_broken_pipe() => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {}", cli::clean(&e.to_string()));
             ExitCode::from(2)

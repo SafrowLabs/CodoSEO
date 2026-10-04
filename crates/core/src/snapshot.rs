@@ -27,4 +27,15 @@ impl Snapshot {
             sitemap: out.sitemap.clone(),
         }
     }
+
+    /// Like [`Snapshot::from_output`], but moves the pages out instead of cloning them.
+    pub fn from_output_owned(out: CrawlOutput) -> Snapshot {
+        Snapshot {
+            origin: out.origin,
+            stop: out.stop,
+            pages: out.pages,
+            robots: out.robots,
+            sitemap: out.sitemap,
+        }
+    }
 }
