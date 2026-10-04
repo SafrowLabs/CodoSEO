@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CodoSEO — Open-Source SEO Crawler & Site Monitor</title>
+  <meta name="description" content="Know the moment your SEO breaks. Open-source SEO crawler and monitor built in Rust. Runs 44 checks, scores your site 0–100, diffs audits and integrates with CI. Free to install and self-host.">
+  <link rel="canonical" href="https://codoseo.com/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://codoseo.com/">
+  <meta property="og:title" content="CodoSEO — Open-Source SEO Crawler & Site Monitor">
+  <meta property="og:description" content="Know the moment your SEO breaks. 44 SEO checks, health scoring, audit diffs and CI integration. Built in Rust by SafrowLabs.">
+  <meta property="og:site_name" content="CodoSEO">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="CodoSEO — Open-Source SEO Crawler & Site Monitor">
+  <meta name="twitter:description" content="Know the moment your SEO breaks. 44 checks, health scoring, audit diffs and CI. Built in Rust.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- JSON-LD structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://codoseo.com/#organization",
+        "name": "SafrowLabs",
+        "url": "https://codoseo.com",
+        "sameAs": ["https://github.com/SafrowLabs"]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://codoseo.com/#app",
+        "name": "CodoSEO",
+        "alternateName": ["codoseo", "CodoSEO CLI"],
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "description": "Open-source SEO crawler and monitor built in Rust. Crawls a site, runs 44 SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema. Scores the site 0–100 and diffs two audits to catch regressions in CI.",
+        "url": "https://codoseo.com",
+        "downloadUrl": "https://crates.io/crates/codoseo",
+        "softwareVersion": "0.0.1",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "isAccessibleForFree": true,
+        "author": { "@id": "https://codoseo.com/#organization" },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "keywords": "SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "How do I install CodoSEO?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Run: cargo install codoseo. Requires Rust 1.88 or newer." }
+          },
+          {
+            "@type": "Question",
+            "name": "Is CodoSEO free?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. The CLI is free and open-source under AGPL-3.0. The upcoming hosted web app will have a free tier." }
+          },
+          {
+            "@type": "Question",
+            "name": "What SEO checks does CodoSEO run?",
+            "acceptedAnswer": { "@type": "Answer", "text": "CodoSEO runs 44 checks across 9 categories: response errors (4xx, 5xx, redirect loops), indexability (noindex, canonical, robots.txt), on-page (title, meta description, H1), content (thin pages, duplicates, missing alt text), links (broken links, orphan pages, redirect chains), technical (HTTPS, mixed content, slow responses), sitemap (pages missing from or conflicting with sitemap), social (Open Graph) and schema (JSON-LD, hreflang)." }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #070b14;
+      --bg-2: #0d1117;
+      --bg-3: #111827;
+      --border: #1f2937;
+      --border-2: #374151;
+      --text: #f9fafb;
+      --text-2: #d1d5db;
+      --text-3: #9ca3af;
+      --green: #10b981;
+      --green-2: #34d399;
+      --green-dim: rgba(16,185,129,0.12);
+      --green-glow: rgba(16,185,129,0.25);
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --purple: #8b5cf6;
+      --blue: #60a5fa;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ─── LAYOUT ─── */
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+    .section { padding: 96px 0; }
+    .section-sm { padding: 64px 0; }
+
+    /* ─── NAV ─── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(7,11,20,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+    .logo-owl { font-size: 1.4rem; }
+    .logo-codo { color: var(--text); }
+    .logo-seo { color: var(--green); }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-link {
+      color: var(--text-3);
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-3); }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      padding: 8px 18px;
+      border-radius: 8px;
+      transition: all 0.15s;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--green);
+      color: #000;
+    }
+    .btn-primary:hover { background: var(--green-2); box-shadow: 0 0 20px var(--green-glow); }
+    .btn-outline {
+      background: transparent;
+      color: var(--text-2);
+      border: 1px solid var(--border-2);
+    }
+    .btn-outline:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+
+    /* ─── HERO ─── */
+    .hero {
+      padding: 100px 0 80px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 600px;
+      background: radial-gradient(ellipse at center, rgba(16,185,129,0.08) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--green-dim);
+      border: 1px solid rgba(16,185,129,0.3);
+      color: var(--green-2);
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 5px 14px;
+      border-radius: 100px;
+      margin-bottom: 32px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .hero-badge::before { content: '●'; font-size: 0.5rem; }
+    h1 {
+      font-size: clamp(2.5rem, 5vw, 3.75rem);
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      margin-bottom: 24px;
+    }
+    .hero-sub {
+      font-size: 1.2rem;
+      color: var(--text-3);
+      max-width: 560px;
+      margin-bottom: 40px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 48px;
+    }
+    .hero-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+    }
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.875rem;
+      color: var(--text-3);
+    }
+    .stat-val {
+      color: var(--text-2);
+      font-weight: 600;
+    }
+    .stat-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--border-2);
+    }
+
+    /* ─── INSTALL BOX ─── */
+    .install-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.95rem;
+      margin-bottom: 40px;
+    }
+    .install-prompt { color: var(--green); user-select: none; }
+    .install-cmd { color: var(--text); }
+    .copy-btn {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      color: var(--text-3);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { border-color: var(--green); color: var(--green); }
+
+    /* ─── TAGLINE STRIP ─── */
+    .tagline-strip {
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 0;
+      text-align: center;
+      background: linear-gradient(90deg, transparent, rgba(16,185,129,0.04), transparent);
+    }
+    .tagline-strip p {
+      font-size: 1.1rem;
+      color: var(--text-3);
+      font-style: italic;
+    }
+    .tagline-strip strong { color: var(--text-2); font-style: normal; }
+
+    /* ─── SECTION HEADINGS ─── */
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 12px;
+    }
+    h2 {
+      font-size: clamp(1.75rem, 3vw, 2.5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 1.05rem;
+      color: var(--text-3);
+      max-width: 560px;
+      line-height: 1.7;
+    }
+
+    /* ─── FEATURES ─── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-top: 56px;
+    }
+    .feature-card {
+      background: var(--bg-2);
+      padding: 32px;
+      transition: background 0.2s;
+    }
+    .feature-card:hover { background: var(--bg-3); }
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: var(--green-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      margin-bottom: 20px;
+      border: 1px solid rgba(16,185,129,0.2);
+    }
+    .feature-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .feature-desc {
+      font-size: 0.9rem;
+      color: var(--text-3);
+      line-height: 1.6;
+    }
+
+    /* ─── TERMINAL ─── */
+    .terminal-wrap {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      margin-top: 56px;
+      box-shadow: 0 0 60px rgba(16,185,129,0.08);
+    }
+    .terminal-bar {
+      background: var(--bg-3);
+      padding: 13px 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tdot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .tdot-r { background: #ff5f57; }
+    .tdot-y { background: #febc2e; }
+    .tdot-g { background: #28c840; }
+    .terminal-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--text-3);
+      margin-left: 8px;
+    }
+    .terminal-body {
+      padding: 24px 28px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      line-height: 1.75;
+      overflow-x: auto;
+    }
+    .t-prompt { color: var(--green); }
+    .t-cmd { color: var(--text); }
+    .t-dim { color: #4b5563; }
+    .t-green { color: #10b981; }
+    .t-red { color: #ef4444; }
+    .t-amber { color: #f59e0b; }
+    .t-blue { color: #60a5fa; }
+    .t-white { color: #f9fafb; }
+    .t-bold { font-weight: 600; }
+
+    /* ─── CHECKS GRID ─── */
+    .checks-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 56px;
+    }
+    .check-category {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .check-category:hover {
+      border-color: var(--green);
+      background: var(--bg-3);
+    }
+    .cat-icon { font-size: 1.5rem; margin-bottom: 12px; }
+    .cat-name {
+      font-size: 0.875rem;
+      font-weight: 700;
+      color: var(--text-2);
+      margin-bottom: 8px;
+    }
+    .cat-checks {
+      font-size: 0.8rem;
+      color: var(--text-3);
+      line-height: 1.5;
+    }
+    .cat-count {
+      display: inline-block;
+      background: var(--green-dim);
+      color: var(--green-2);
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 100px;
+      margin-top: 12px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* ─── SEVERITY BADGES ─── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .badge-c { background: rgba(239,68,68,0.15); color: #f87171; }
+    .badge-w { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .badge-n { background: rgba(96,165,250,0.15); color: #93c5fd; }
+
+    /* ─── COMING SOON ─── */
+    .coming-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 24px;
+      margin-top: 56px;
+    }
+    .coming-card {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .coming-card:hover { border-color: var(--border-2); }
+    .coming-card::after {
+      content: '';
+      position: absolute;
+      top: 0; right: 0;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .coming-card.mcp::after { background: radial-gradient(circle, rgba(139,92,246,0.07) 0%, transparent 70%); }
+    .coming-card.webapp::after { background: radial-gradient(circle, rgba(16,185,129,0.07) 0%, transparent 70%); }
+    .coming-pill {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 100px;
+      margin-bottom: 20px;
+    }
+    .coming-pill.green { background: var(--green-dim); color: var(--green-2); border: 1px solid rgba(16,185,129,0.25); }
+    .coming-pill.purple { background: rgba(139,92,246,0.1); color: #a78bfa; border: 1px solid rgba(139,92,246,0.25); }
+    .coming-icon { font-size: 2.5rem; margin-bottom: 16px; }
+    h3 { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
+    .coming-desc { color: var(--text-3); line-height: 1.7; margin-bottom: 24px; }
+    .coming-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .coming-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 0.875rem;
+      color: var(--text-3);
+    }
+    .coming-list li::before { content: '→'; color: var(--green); flex-shrink: 0; font-weight: 600; }
+    .coming-card.mcp .coming-list li::before { color: #a78bfa; }
+
+    /* ─── OPEN SOURCE ─── */
+    .oss-section {
+      text-align: center;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, transparent, rgba(16,185,129,0.03), transparent);
+    }
+    .oss-badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+      margin: 32px 0;
+    }
+    .oss-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-2);
+      transition: all 0.15s;
+    }
+    .oss-badge:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+    .oss-badge-icon { font-size: 1.1rem; }
+
+    /* ─── FINAL CTA ─── */
+    .cta-section { text-align: center; }
+    .cta-section h2 { margin-bottom: 12px; }
+    .cta-desc { color: var(--text-3); margin-bottom: 32px; font-size: 1.05rem; }
+    .cta-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 24px; }
+    .cta-note { font-size: 0.8rem; color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
+    .cta-note a { color: var(--green-2); }
+    .cta-note a:hover { text-decoration: underline; }
+
+    /* ─── FOOTER ─── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+    }
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .footer-left { font-size: 0.875rem; color: var(--text-3); }
+    .footer-left a { color: var(--text-3); transition: color 0.15s; }
+    .footer-left a:hover { color: var(--green); }
+    .footer-links { display: flex; gap: 20px; }
+    .footer-link { font-size: 0.875rem; color: var(--text-3); transition: color 0.15s; }
+    .footer-link:hover { color: var(--text-2); }
+
+    /* ─── RESPONSIVE ─── */
+    @media (max-width: 640px) {
+      .nav-link { display: none; }
+      .hero { padding: 72px 0 60px; }
+      .install-box { flex-wrap: wrap; }
+      .coming-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- ═══ NAV ═══ -->
+<nav>
+  <div class="container">
+    <div class="nav-inner">
+      <a href="/" class="logo">
+        <span class="logo-owl">🦉</span>
+        <span><span class="logo-codo">Codo</span><span class="logo-seo">SEO</span></span>
+      </a>
+      <div class="nav-links">
+        <a href="https://github.com/SafrowLabs/codoSEO" class="nav-link" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/SafrowLabs/codoSEO#readme" class="nav-link" target="_blank" rel="noopener">Docs</a>
+        <a href="https://crates.io/crates/codoseo" class="btn btn-outline" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          crates.io
+        </a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ HERO ═══ -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge">v0.0.1 now on crates.io</div>
+    <h1>Know the moment<br>your <span style="color:var(--green)">SEO breaks.</span></h1>
+    <p class="hero-sub">
+      Open-source SEO crawler and monitor built in Rust.
+      Runs 44 checks, scores your site 0–100, diffs audits and
+      integrates with CI — in a single static binary.
+    </p>
+
+    <div class="install-box">
+      <span class="install-prompt">$</span>
+      <span class="install-cmd" id="install-cmd">cargo install codoseo</span>
+      <button class="copy-btn" onclick="copyInstall(this)" aria-label="Copy install command">copy</button>
+    </div>
+
+    <div class="hero-actions">
+      <a href="https://github.com/SafrowLabs/codoSEO" class="btn btn-primary" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        View on GitHub
+      </a>
+      <a href="https://crates.io/crates/codoseo" class="btn btn-outline" target="_blank" rel="noopener">
+        crates.io / codoseo
+      </a>
+    </div>
+
+    <div class="hero-stats">
+      <span class="stat"><span class="stat-val">44</span> SEO checks</span>
+      <span class="stat-dot"></span>
+      <span class="stat"><span class="stat-val">299</span> tests</span>
+      <span class="stat-dot"></span>
+      <span class="stat"><span class="stat-val">Rust</span> 1.88+</span>
+      <span class="stat-dot"></span>
+      <span class="stat"><span class="stat-val">AGPL-3.0</span></span>
+      <span class="stat-dot"></span>
+      <span class="stat"><span class="stat-val">v0.0.1</span> published</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ TAGLINE ═══ -->
+<div class="tagline-strip">
+  <div class="container">
+    <p><strong>"Uptime monitoring, but for your SEO."</strong> — An open-source alternative to Screaming Frog and an affordable alternative to ContentKing.</p>
+  </div>
+</div>
+
+<!-- ═══ FEATURES ═══ -->
+<section class="section">
+  <div class="container">
+    <div class="section-label">Why CodoSEO</div>
+    <h2>Everything you need<br>to audit a site.</h2>
+    <p class="section-desc">A single binary that crawls, checks, scores and diffs — with no browser, no headless Chrome, no configuration files.</p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🦀</div>
+        <div class="feature-title">Fast Rust crawler</div>
+        <div class="feature-desc">Async, polite and memory-flat. Crawls 500 pages in seconds. Respects <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">robots.txt</code>, <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">Crawl-delay</code> and backs off on 429/503.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">✅</div>
+        <div class="feature-title">44 SEO checks</div>
+        <div class="feature-desc">Across 9 categories: response, indexability, on-page, content, links, technical, sitemap, social and schema. Critical · Warning · Notice severities.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <div class="feature-title">Health score 0–100</div>
+        <div class="feature-desc">Weighted by severity and the fraction of affected pages. A site where every page fails every check scores 0. No failures scores 100.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔄</div>
+        <div class="feature-title">Audit diff</div>
+        <div class="feature-desc">Compare two saved JSON audits. Surfaces new issues, resolved issues, score changes, status changes, title changes and redirect regressions.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🚀</div>
+        <div class="feature-title">CI-ready</div>
+        <div class="feature-desc"><code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">--fail-on critical</code> exits 1. Pipe into GitHub Actions, GitLab CI or any shell script. Fail the build before rankings drop.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📄</div>
+        <div class="feature-title">Multiple output formats</div>
+        <div class="feature-desc">Table, JSON, Markdown and CSV. Pipe JSON into <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">jq</code>, export CSV to a spreadsheet, or save Markdown as a report.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ TERMINAL DEMO ═══ -->
+<section class="section-sm">
+  <div class="container">
+    <div class="section-label">See it in action</div>
+    <h2>Runs in seconds.<br>Tells you what's broken.</h2>
+    <p class="section-desc">Point it at any URL. No API key, no account, no configuration.</p>
+
+    <div class="terminal-wrap">
+      <div class="terminal-bar">
+        <span class="tdot tdot-r"></span>
+        <span class="tdot tdot-y"></span>
+        <span class="tdot tdot-g"></span>
+        <span class="terminal-title">codoseo crawl https://example.com</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-cmd">codoseo crawl https://example.com --format md</span></div>
+        <div class="t-dim" style="margin-top:8px">Preflight … ok</div>
+        <div class="t-dim">Crawling  ━━━━━━━━━━━━━━━━━━━━  142 pages  28s</div>
+        <br>
+        <div class="t-white t-bold"># CodoSEO report for https://example.com/</div>
+        <br>
+        <div><span class="t-white">- </span><span class="t-bold t-white">Health score:</span><span class="t-green t-bold"> 84 / 100</span></div>
+        <div><span class="t-white">- </span><span class="t-bold t-white">Checks:</span><span class="t-white"> 37 of 44 checks passed</span></div>
+        <div><span class="t-white">- </span><span class="t-bold t-white">Stop reason:</span><span class="t-green"> Completed</span></div>
+        <br>
+        <div class="t-red t-bold">## Critical (1)</div>
+        <br>
+        <div class="t-dim">| Check                         | Slug      | Affected | Examples                          |</div>
+        <div class="t-dim">|-------------------------------|-----------|----------|-----------------------------------|</div>
+        <div>| <span class="t-red">Page returns a 4xx error</span>      | <span class="t-blue">http_4xx</span>  | 1 page   | <span class="t-white">https://example.com/old-page</span>  |</div>
+        <br>
+        <div class="t-amber t-bold">## Warning (2)</div>
+        <br>
+        <div class="t-dim">| Check                         | Slug             | Affected | Examples                          |</div>
+        <div class="t-dim">|-------------------------------|------------------|----------|-----------------------------------|</div>
+        <div>| <span class="t-amber">Page links to a broken URL</span>    | <span class="t-blue">links_to_broken</span> | 1 page  | <span class="t-white">https://example.com/contact</span>  |</div>
+        <div>| <span class="t-amber">Meta description is missing</span>   | <span class="t-blue">description_missing</span> | 6 pages | <span class="t-white">https://example.com/blog/…</span> |</div>
+        <br>
+        <div class="t-bold" style="color:#93c5fd">## Summary</div>
+        <br>
+        <div><span class="t-white">- Pages: </span><span class="t-green t-bold">142</span><span class="t-dim"> (138 indexable)</span></div>
+        <div><span class="t-white">- Status: </span><span class="t-green">2xx 138</span><span class="t-dim"> · </span><span class="t-dim">3xx 3</span><span class="t-dim"> · </span><span class="t-red">4xx 1</span><span class="t-dim"> · 5xx 0</span></div>
+        <div><span class="t-white">- Avg response: </span><span class="t-green">210 ms</span></div>
+        <div><span class="t-white">- Duration: </span><span class="t-dim">28 s</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo check &lt;URL&gt;</code>
+      <span style="color:var(--border-2)">·</span>
+      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo robots &lt;URL&gt;</code>
+      <span style="color:var(--border-2)">·</span>
+      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo redirects &lt;URL&gt;</code>
+      <span style="color:var(--border-2)">·</span>
+      <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-3)">codoseo diff before.json after.json</code>
+      <a href="https://github.com/SafrowLabs/codoSEO#readme" target="_blank" rel="noopener" style="color:var(--green-2);font-size:0.8rem;margin-left:4px">full docs →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 44 CHECKS ═══ -->
+<section class="section">
+  <div class="container">
+    <div class="section-label">44 checks across 9 categories</div>
+    <h2>Nothing slips through.</h2>
+    <p class="section-desc">Every crawled page is evaluated for response health, indexability, on-page quality, content issues, link problems and more.</p>
+
+    <div class="checks-grid">
+      <div class="check-category">
+        <div class="cat-icon">🔴</div>
+        <div class="cat-name">Response</div>
+        <div class="cat-checks">4xx errors, 5xx errors, fetch failures, redirect loops, redirect chains</div>
+        <div><span class="badge badge-c">C</span> <span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">6 checks</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">🔍</div>
+        <div class="cat-name">Indexability</div>
+        <div class="cat-checks">Noindex, canonical issues, robots.txt blocking, canonical to non-200</div>
+        <div><span class="badge badge-c">C</span> <span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">6 checks</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">📝</div>
+        <div class="cat-name">On-Page</div>
+        <div class="cat-checks">Missing/duplicate titles, meta descriptions, H1s; length violations</div>
+        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">12 checks</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">📄</div>
+        <div class="cat-name">Content</div>
+        <div class="cat-checks">Thin pages (under 200 words), duplicate content, missing image alt text</div>
+        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">3 checks</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">🔗</div>
+        <div class="cat-name">Links</div>
+        <div class="cat-checks">Broken links, redirect links, orphan pages, nofollow internal links, deep pages</div>
+        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">6 checks</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">⚙️</div>
+        <div class="cat-name">Technical</div>
+        <div class="cat-checks">HTTP instead of HTTPS, mixed content on HTTPS pages, slow response times</div>
+        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">3 checks</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">🗺️</div>
+        <div class="cat-name">Sitemap</div>
+        <div class="cat-checks">Pages missing from sitemap, sitemap pages that are noindex or non-200</div>
+        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">5 checks</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">📣</div>
+        <div class="cat-name">Social</div>
+        <div class="cat-checks">Missing Open Graph title or image</div>
+        <div><span class="badge badge-n">N</span> <span class="cat-count">1 check</span></div>
+      </div>
+      <div class="check-category">
+        <div class="cat-icon">🧩</div>
+        <div class="cat-name">Schema</div>
+        <div class="cat-checks">Invalid JSON-LD, hreflang missing self-reference</div>
+        <div><span class="badge badge-w">W</span> <span class="badge badge-n">N</span> <span class="cat-count">2 checks</span></div>
+      </div>
+    </div>
+
+    <p style="margin-top:24px;font-size:0.8rem;color:var(--text-3)">
+      <span class="badge badge-c">C</span> Critical &nbsp;
+      <span class="badge badge-w">W</span> Warning &nbsp;
+      <span class="badge badge-n">N</span> Notice &nbsp;&mdash;&nbsp;
+      <a href="https://github.com/SafrowLabs/codoSEO#the-44-seo-checks" target="_blank" rel="noopener" style="color:var(--green-2)">Full check reference →</a>
+    </p>
+  </div>
+</section>
+
+<!-- ═══ COMING SOON ═══ -->
+<section class="section" style="background:linear-gradient(180deg,transparent,rgba(16,185,129,0.02),transparent)">
+  <div class="container">
+    <div class="section-label">Coming soon</div>
+    <h2>The CLI is just the start.</h2>
+    <p class="section-desc">CodoSEO is growing into a full SEO monitoring platform. The web app and MCP server are in development.</p>
+
+    <div class="coming-grid">
+      <!-- Web App -->
+      <div class="coming-card webapp">
+        <div class="coming-pill green">In development</div>
+        <div class="coming-icon">🌐</div>
+        <h3>Web App</h3>
+        <p class="coming-desc">A hosted dashboard for continuous SEO monitoring. No CLI needed — add a URL, get your first report in under 2 minutes.</p>
+        <ul class="coming-list">
+          <li>Scheduled crawls — weekly (free), daily (paid)</li>
+          <li>Change detection between crawls</li>
+          <li>Alerts via Slack, Discord, email and webhook</li>
+          <li>Health score trend and issue history</li>
+          <li>Free tier · Pro $9–19/mo · Agency $49+/mo</li>
+          <li>Self-host with one <code style="color:var(--green-2);font-family:JetBrains Mono,monospace;font-size:0.85em">docker compose up</code></li>
+        </ul>
+      </div>
+
+      <!-- MCP Server -->
+      <div class="coming-card mcp">
+        <div class="coming-pill purple">Planned</div>
+        <div class="coming-icon">🤖</div>
+        <h3>MCP Server</h3>
+        <p class="coming-desc">Connect CodoSEO to your AI assistant. Ask Claude or Cursor to audit a page, check a canonical, or diff two crawls — without leaving your editor.</p>
+        <ul class="coming-list">
+          <li>Works with Claude, Cursor, Windsurf and any MCP client</li>
+          <li>Crawl and audit a site from a chat prompt</li>
+          <li>Ask natural-language questions about SEO issues</li>
+          <li>AI-suggested fixes for failing checks</li>
+          <li>Integrates with the CLI and web app</li>
+        </ul>
+      </div>
+    </div>
+
+    <p style="margin-top:32px;font-size:0.875rem;color:var(--text-3);text-align:center">
+      Want early access? Watch the
+      <a href="https://github.com/SafrowLabs/codoSEO" target="_blank" rel="noopener" style="color:var(--green-2)">GitHub repo</a>
+      for updates.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ OPEN SOURCE ═══ -->
+<section class="section-sm oss-section">
+  <div class="container" style="text-align:center">
+    <div class="section-label">Free & Open Source</div>
+    <h2>Use it. Self-host it.<br>Contribute to it.</h2>
+    <p class="section-desc" style="margin:0 auto 0">Licensed under AGPL-3.0. The source is on GitHub and the CLI is published to crates.io. No account required.</p>
+
+    <div class="oss-badges">
+      <a href="https://github.com/SafrowLabs/codoSEO" class="oss-badge" target="_blank" rel="noopener">
+        <span class="oss-badge-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        </span>
+        GitHub
+      </a>
+      <a href="https://crates.io/crates/codoseo" class="oss-badge" target="_blank" rel="noopener">
+        <span class="oss-badge-icon">📦</span>
+        crates.io/codoseo
+      </a>
+      <a href="https://crates.io/crates/codoseo-core" class="oss-badge" target="_blank" rel="noopener">
+        <span class="oss-badge-icon">🔩</span>
+        codoseo-core
+      </a>
+      <a href="https://crates.io/crates/codoseo-crawler" class="oss-badge" target="_blank" rel="noopener">
+        <span class="oss-badge-icon">🕷️</span>
+        codoseo-crawler
+      </a>
+      <a href="https://www.gnu.org/licenses/agpl-3.0.html" class="oss-badge" target="_blank" rel="noopener">
+        <span class="oss-badge-icon">⚖️</span>
+        AGPL-3.0
+      </a>
+    </div>
+
+    <p style="font-size:0.875rem;color:var(--text-3)">
+      Each crate is published independently — embed the crawler or checks in your own Rust project.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ FINAL CTA ═══ -->
+<section class="section cta-section">
+  <div class="container">
+    <div class="section-label">Get started</div>
+    <h2>One command.<br>Your first audit in seconds.</h2>
+    <p class="cta-desc">No account. No config. No browser runtime required.</p>
+
+    <div class="install-box" style="display:inline-flex;margin-bottom:32px">
+      <span class="install-prompt">$</span>
+      <span class="install-cmd" id="install-cmd-2">cargo install codoseo && codoseo crawl https://yoursite.com</span>
+      <button class="copy-btn" onclick="copyInstall2(this)" aria-label="Copy command">copy</button>
+    </div>
+
+    <div class="cta-actions">
+      <a href="https://github.com/SafrowLabs/codoSEO" class="btn btn-primary" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        Star on GitHub
+      </a>
+      <a href="https://github.com/SafrowLabs/codoSEO#readme" class="btn btn-outline" target="_blank" rel="noopener">Read the docs</a>
+    </div>
+
+    <p class="cta-note">
+      Requires Rust 1.88+ &nbsp;·&nbsp;
+      <a href="https://rustup.rs" target="_blank" rel="noopener">Install Rust via rustup.rs</a>
+      &nbsp;·&nbsp; Binaries on the
+      <a href="https://github.com/SafrowLabs/codoSEO/releases" target="_blank" rel="noopener">releases page</a>
+    </p>
+  </div>
+</section>
+
+<!-- ═══ FOOTER ═══ -->
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-left">
+        <a href="/" class="logo" style="display:inline-flex;gap:8px;align-items:center;margin-bottom:6px">
+          <span>🦉</span>
+          <span><strong>Codo</strong><span style="color:var(--green)">SEO</span></span>
+        </a>
+        <div>Built by <a href="https://github.com/SafrowLabs" target="_blank" rel="noopener">SafrowLabs</a> · <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0</a></div>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/SafrowLabs/codoSEO" class="footer-link" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://crates.io/crates/codoseo" class="footer-link" target="_blank" rel="noopener">crates.io</a>
+        <a href="https://github.com/SafrowLabs/codoSEO#readme" class="footer-link" target="_blank" rel="noopener">Docs</a>
+        <a href="https://github.com/SafrowLabs/codoSEO/issues" class="footer-link" target="_blank" rel="noopener">Issues</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  function copyInstall(btn) {
+    const cmd = document.getElementById('install-cmd').textContent;
+    navigator.clipboard.writeText(cmd).then(() => {
+      btn.textContent = 'copied!';
+      btn.style.color = 'var(--green)';
+      setTimeout(() => { btn.textContent = 'copy'; btn.style.color = ''; }, 2000);
+    });
+  }
+  function copyInstall2(btn) {
+    const cmd = 'cargo install codoseo';
+    navigator.clipboard.writeText(cmd).then(() => {
+      btn.textContent = 'copied!';
+      btn.style.color = 'var(--green)';
+      setTimeout(() => { btn.textContent = 'copy'; btn.style.color = ''; }, 2000);
+    });
+  }
+</script>
+
+</body>
+</html>

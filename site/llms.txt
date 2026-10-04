@@ -1,0 +1,51 @@
+# CodoSEO
+
+> Open-source SEO crawler and site monitor built in Rust. Know the moment your SEO breaks.
+
+CodoSEO is a command-line tool and upcoming web platform for technical SEO auditing and monitoring. It crawls a website, runs 44 SEO checks across 9 categories, scores the site 0–100, and can diff two audits to catch regressions in CI. Built by SafrowLabs (the team behind RankOrg) and licensed AGPL-3.0.
+
+## Install
+
+```
+cargo install codoseo
+```
+
+Requires Rust 1.88+.
+
+## Commands
+
+- `codoseo crawl <URL>` — crawl a site, run all 44 checks, print a report
+- `codoseo check <URL>` — inspect a single page: fields, redirect chain, page issues
+- `codoseo robots <URL>` — fetch and display robots.txt, test a path
+- `codoseo redirects <URL>` — follow a URL's redirect chain hop by hop
+- `codoseo diff <BEFORE> <AFTER>` — compare two saved JSON audits
+
+## The 44 SEO checks
+
+Categories: Response (6), Indexability (6), On-Page (12), Content (3), Links (6), Technical (3), Sitemap (5), Social (1), Schema (2).
+
+Severities: Critical (exits 1 with --fail-on critical), Warning, Notice.
+
+Key checks include: 4xx/5xx errors, redirect loops, noindex pages, missing/broken canonicals, robots.txt blocking, duplicate/missing titles and meta descriptions, missing H1s, thin content, duplicate content, broken links, orphan pages, HTTP on HTTPS pages, mixed content, slow responses, sitemap inconsistencies, missing Open Graph tags, invalid JSON-LD.
+
+## Output formats
+
+Table (default), JSON, Markdown, CSV. Use `--format json -o audit.json` to save for diffing.
+
+## CI integration
+
+`--fail-on critical` exits 1 when a critical check fails. `diff --fail-on critical` exits 1 when a regression is detected. Use in GitHub Actions, GitLab CI, or any shell pipeline.
+
+## Coming soon
+
+- **Web App**: hosted dashboard, scheduled crawls (weekly free / daily paid), change alerts via Slack, Discord, email and webhook, health score trends
+- **MCP Server**: connect CodoSEO to Claude, Cursor or any MCP-compatible AI assistant
+
+## Links
+
+- Homepage: https://codoseo.com
+- GitHub: https://github.com/SafrowLabs/codoSEO
+- crates.io: https://crates.io/crates/codoseo
+- Docs (README): https://github.com/SafrowLabs/codoSEO#readme
+- License: AGPL-3.0
+- Built by: SafrowLabs — https://github.com/SafrowLabs
