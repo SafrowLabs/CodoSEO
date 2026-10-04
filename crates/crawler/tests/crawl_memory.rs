@@ -52,6 +52,19 @@ fn an_endless_faceted_site_crawls_in_flat_memory() {
 
     assert_eq!(out.pages.len(), 300);
     assert_eq!(out.stop, StopReason::PageLimit);
-    // Without the frontier cap the queue would hold about 30,000 URLs.
+    // Facet pages link to fresh facets of their own, so the crawl really does walk
+    // into a growing space: some fetched pages are facets of facets (f > 100).
+    let deep_facets = out
+        .pages
+        .iter()
+        .filter(|p| {
+            p.url
+                .query_pairs()
+                .any(|(k, v)| k == "f" && v.parse::<usize>().is_ok_and(|f| f > 100))
+        })
+        .count();
+    assert!(deep_facets > 50, "only {deep_facets} facet-of-facet pages");
+    // Each of the ~300 fetched pages links 100 fresh URLs, so without the frontier cap
+    // the queue would hold about 30,000 URLs by the end.
     assert!(peak < 24 * MB, "peak {} MB", peak / MB);
 }

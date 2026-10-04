@@ -150,8 +150,10 @@ impl SiteBuilder {
         self
     }
 
-    /// `/list?page=N` links to `?page=N+1` and to `facets` fresh `?page=N&f=K` pages,
-    /// for every N. The space has no end.
+    /// `/list?page=N` links to `?page=N+1` and to `facets` fresh `?page=N&f=K` pages
+    /// (K = 1..=facets), for every N, and each facet page `f=K` links to `facets` fresh
+    /// facets of its own (`f = K × facets + 1 ..= K × facets + facets`, a tree, so no
+    /// URL repeats). The space has no end and grows with every page fetched.
     pub fn endless(mut self, facets: usize) -> Self {
         self.endless = Some(facets);
         self
@@ -288,13 +290,26 @@ impl SiteState {
                 .and_then(|v| v.parse::<usize>().ok())
         };
         let n = value("page").unwrap_or(0);
-        if let Some(f) = value("f") {
-            return Page::html(&html_page(&format!("List {n} facet {f}"), &[]));
+        // The list page is node 0 of the facet tree; node K's children are
+        // K × facets + 1 ..= K × facets + facets.
+        let node = value("f");
+        let first_child = node
+            .unwrap_or(0)
+            .checked_mul(facets)
+            .and_then(|c| c.checked_add(1));
+        let mut links = Vec::new();
+        if node.is_none() {
+            links.push(format!("/list?page={}", n + 1));
         }
-        let mut links = vec![format!("/list?page={}", n + 1)];
-        links.extend((0..facets).map(|k| format!("/list?page={n}&f={k}")));
+        if let Some(first) = first_child {
+            links.extend((0..facets).map(|j| format!("/list?page={n}&f={}", first + j)));
+        }
+        let title = match node {
+            Some(f) => format!("List {n} facet {f}"),
+            None => format!("List {n}"),
+        };
         let refs: Vec<&str> = links.iter().map(String::as_str).collect();
-        Page::html(&html_page(&format!("List {n}"), &refs))
+        Page::html(&html_page(&title, &refs))
     }
 }
 
