@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}CodoSEO{% endblock %}</title>
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>
+<link rel="icon" href="{{ crate::assets::url("favicon.svg") }}" type="image/svg+xml">
+<link rel="stylesheet" href="{{ crate::assets::url("app.css") }}">
+<script>(function(){try{var t=localStorage.getItem("codoseo-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}})()</script>
+<script src="{{ crate::assets::url("htmx.min.js") }}" defer></script>
+<script src="{{ crate::assets::url("app.js") }}" defer></script>
+{% block head %}{% endblock %}
+</head>
+<body class="solo">
+{% include "partials/icons.html" %}
+<div class="progress" aria-hidden="true"></div>
+{% block body %}{% endblock %}
+<div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

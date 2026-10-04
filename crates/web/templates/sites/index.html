@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block main %}
+{% if cards.is_empty() %}
+<div class="onboard">
+  <div style="display:flex;justify-content:center;margin-bottom:22px"><span class="owl" style="width:48px;height:48px;border-radius:13px 13px 17px 17px;gap:3px;padding-bottom:7px"><i style="width:17px;height:17px"></i><i style="width:17px;height:17px"></i></span></div>
+  <h1>Add your first site</h1>
+  <p class="lead">Paste your homepage. We'll crawl it politely, run 44 SEO checks and show you what to fix first.</p>
+  {{ form|safe }}
+  <div class="steps">
+    <div class="step"><span class="n">01</span><b>Crawl</b>Polite by default: 5 requests a second, robots.txt respected.</div>
+    <div class="step"><span class="n">02</span><b>Audit</b>A health score, every issue, and the exact URLs behind it.</div>
+    <div class="step"><span class="n">03</span><b>Monitor</b>Each crawl is compared with the last, so you see what changed.</div>
+  </div>
+</div>
+{% else %}
+<div class="page">
+  <div class="page-head"><h1>Sites</h1>{% if let Some(note) = limit_note %}<span class="chip">{{ note }}</span>{% endif %}</div>
+  <div class="site-cards">
+    {% for c in cards %}
+      <a class="site-card" href="{{ c.href }}"><span class="avatar">{{ c.initial }}</span><span style="flex:1;min-width:0"><b class="trunc" style="display:block;font-weight:500">{{ c.domain }}</b><span class="faint mono" style="font-size:11.5px">added {{ c.added }}</span></span><svg class="icon go" style="opacity:1;transform:none"><use href="#i-arrow"/></svg></a>
+    {% endfor %}
+  </div>
+  <div class="card card-pad" id="add" style="margin-top:20px;max-width:640px">
+    <div class="card-title" style="margin-bottom:4px">Add a site</div>
+    <p class="muted" style="font-size:13px;margin-bottom:14px">{% if form.can_add %}The first crawl starts right away.{% else %}You've reached your plan's site limit.{% endif %}</p>
+    {{ form|safe }}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

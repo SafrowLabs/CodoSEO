@@ -1,0 +1,7 @@
+<div id="crawler" class="crawler" data-state="{{ crawler.state }}" data-quiet{% if let Some(poll) = crawler.poll_url %} hx-get="{{ poll }}?was={{ crawler.state }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="row" style="display:flex">
+    <span class="state"><i class="dot {{ crawler.state }}"></i><span{% if crawler.state == "running" %} class="shimmer"{% endif %}>{{ crawler.label }}</span></span>
+  </div>
+  {% for (k, v) in crawler.rows %}<div class="row"><span>{{ k }}</span><b>{{ v }}</b></div>{% endfor %}
+  {% if let Some(pct) = crawler.pct %}<div class="bar"><span style="width:{{ pct }}%"></span></div>{% endif %}
+</div>
