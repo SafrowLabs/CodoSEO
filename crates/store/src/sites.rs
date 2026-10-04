@@ -5,6 +5,7 @@ use sqlx::{FromRow, PgPool};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::crawl_queue::CrawlTrigger;
 use crate::hash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +104,71 @@ pub async fn create(
     .fetch_one(pool)
     .await?;
     Ok(row.into())
+}
+
+/// What [`create_checked`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateOutcome {
+    /// The site was added and its first crawl queued.
+    Created(Site),
+    /// The account already has `max_sites` sites.
+    LimitReached,
+    /// The account already has a site on this domain.
+    Duplicate,
+}
+
+/// Adds a site and queues its `first` crawl at `first_priority`, in one transaction, unless
+/// the account already has `max_sites` sites (`None` means no limit) or a site on `domain`.
+///
+/// The account row is locked (`FOR UPDATE`) around the checks and the inserts, so two submits
+/// at once can't go past the limit or add the same domain twice.
+pub async fn create_checked(
+    pool: &PgPool,
+    account_id: Uuid,
+    domain: &str,
+    start_url: &str,
+    schedule: Option<&str>,
+    max_sites: Option<i64>,
+    first_priority: i16,
+) -> Result<CreateOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT id FROM accounts WHERE id = $1 FOR UPDATE")
+        .bind(account_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+    let (count, duplicate): (i64, Option<bool>) =
+        sqlx::query_as("SELECT count(*), bool_or(domain = $2) FROM sites WHERE account_id = $1")
+            .bind(account_id)
+            .bind(domain)
+            .fetch_one(&mut *tx)
+            .await?;
+    if max_sites.is_some_and(|max| count >= max) {
+        return Ok(CreateOutcome::LimitReached);
+    }
+    if duplicate == Some(true) {
+        return Ok(CreateOutcome::Duplicate);
+    }
+
+    let row: SiteRow = sqlx::query_as(&format!(
+        "INSERT INTO sites (account_id, domain, start_url, schedule) VALUES ($1, $2, $3, $4) \
+         RETURNING {COLUMNS}"
+    ))
+    .bind(account_id)
+    .bind(domain)
+    .bind(start_url)
+    .bind(schedule)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO crawls (site_id, domain, trigger, priority) VALUES ($1, $2, $3, $4)")
+        .bind(row.id)
+        .bind(&row.domain)
+        .bind(CrawlTrigger::First)
+        .bind(first_priority)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(CreateOutcome::Created(row.into()))
 }
 
 /// Stars or unstars a key page. Returns whether the page is starred afterwards.

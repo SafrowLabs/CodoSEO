@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Form, Router};
 use codoseo_core::plan::{Plan, PlanLimits, Schedule};
-use codoseo_store::crawl_queue::{CrawlQueue, CrawlTrigger};
+use codoseo_store::sites::CreateOutcome;
 use serde::Deserialize;
 use url::Url;
 
@@ -131,43 +131,45 @@ async fn create(
         }
     };
 
-    if let Some(max) = limits.max_sites
-        && count >= i64::from(max)
-    {
-        return Err(AppError::Limit(format!(
+    let max_sites = limits.max_sites.map(i64::from);
+    let limit_reached = || {
+        let max = max_sites.unwrap_or_default();
+        AppError::Limit(format!(
             "Your plan includes {max} site{}. Remove one or upgrade to add more.",
             if max == 1 { "" } else { "s" }
-        )));
+        ))
+    };
+    // A quick check before validating the address; `create_checked` makes the final call.
+    if max_sites.is_some_and(|max| count >= max) {
+        return Err(limit_reached());
     }
     let start = match parse_start_url(&form.url) {
         Ok(u) => u,
         Err(msg) => return invalid(msg),
     };
     let domain = start.host_str().unwrap_or_default().to_lowercase();
-    let existing = codoseo_store::sites::list_for_account(&state.pool, user.id()).await?;
-    if existing.iter().any(|s| s.domain == domain) {
-        return invalid(format!("{domain} is already one of your sites."));
-    }
-
     let schedule = match limits.fastest_schedule {
         Some(Schedule::Daily) if user.account.plan != Plan::Free => Some("daily"),
         Some(_) => Some("weekly"),
         None => None,
     };
-    let site =
-        codoseo_store::sites::create(&state.pool, user.id(), &domain, start.as_str(), schedule)
-            .await?;
-    CrawlQueue::new(state.pool.clone())
-        .enqueue(
-            site.id,
-            &site.domain,
-            CrawlTrigger::First,
-            FIRST_CRAWL_PRIORITY,
-            None,
-            None,
-        )
-        .await?;
-    Ok(Redirect::to(&format!("/s/{}/audit", site.id)).into_response())
+    let outcome = codoseo_store::sites::create_checked(
+        &state.pool,
+        user.id(),
+        &domain,
+        start.as_str(),
+        schedule,
+        max_sites,
+        FIRST_CRAWL_PRIORITY,
+    )
+    .await?;
+    match outcome {
+        CreateOutcome::Created(site) => {
+            Ok(Redirect::to(&format!("/s/{}/audit", site.id)).into_response())
+        }
+        CreateOutcome::LimitReached => Err(limit_reached()),
+        CreateOutcome::Duplicate => invalid(format!("{domain} is already one of your sites.")),
+    }
 }
 
 #[cfg(test)]
