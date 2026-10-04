@@ -132,3 +132,25 @@ fn link_graph_resolves_interned_anchors() {
     };
     assert_eq!(g.anchor(&g.edges[0]), "Home");
 }
+
+#[test]
+fn counts_for_unknown_checks_are_skipped() {
+    // An audit written by a later version that knows more checks still loads.
+    let a = audit();
+    let mut v = serde_json::to_value(&a).unwrap();
+    let counts = v["report"]["counts"].as_array_mut().unwrap();
+    counts.insert(0, serde_json::json!(["future_check", 3]));
+    counts.push(serde_json::json!(["another_new_one", 1]));
+    let json = serde_json::to_vec(&v).unwrap();
+    let loaded = Audit::from_json(&json).unwrap();
+    assert_eq!(loaded.report.counts, vec![(CheckId::OgMissing, 1)]);
+    assert_eq!(loaded, a);
+
+    // Malformed entries are still errors.
+    let mut bad = serde_json::to_value(&a).unwrap();
+    bad["report"]["counts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!(["og_missing", "three"]));
+    assert!(Audit::from_json(&serde_json::to_vec(&bad).unwrap()).is_err());
+}

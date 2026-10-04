@@ -1,6 +1,6 @@
 //! The result of running the checks over a crawl.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::check::CheckId;
 
@@ -44,8 +44,19 @@ pub struct CrawlReport {
     pub checks_passed: u16,
     pub checks_total: u16,
     /// Failing checks only, in `CheckId` order, with the number of affected pages
-    /// (1 for site-wide checks).
+    /// (1 for site-wide checks). When read back, entries for checks this version doesn't
+    /// know (added by a later one) are skipped, so newer audits still load.
+    #[serde(deserialize_with = "known_counts")]
     pub counts: Vec<(CheckId, u32)>,
     pub inlink_samples: Vec<InlinkSample>,
     pub summary: CrawlSummary,
+}
+
+/// Reads `counts`, dropping entries whose check slug is unknown.
+fn known_counts<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<(CheckId, u32)>, D::Error> {
+    let raw = Vec::<(String, u32)>::deserialize(d)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|(slug, n)| Some((CheckId::from_slug(&slug)?, n)))
+        .collect())
 }

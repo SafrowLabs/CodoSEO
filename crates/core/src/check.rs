@@ -115,6 +115,11 @@ impl CheckId {
     pub fn from_bit(bit: u8) -> Option<CheckId> {
         CheckId::ALL.into_iter().find(|c| c.bit() == bit)
     }
+
+    /// The check with this slug, if this version knows it.
+    pub fn from_slug(slug: &str) -> Option<CheckId> {
+        CheckId::ALL.into_iter().find(|c| c.slug() == slug)
+    }
 }
 
 impl IssueBits {
