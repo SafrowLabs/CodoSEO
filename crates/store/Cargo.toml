@@ -1,0 +1,25 @@
+[package]
+name = "codoseo-store"
+description = "Postgres storage for CodoSEO: migrations, crawl queue and jobs queue."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+codoseo-core.workspace = true
+sqlx.workspace = true
+time.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true
