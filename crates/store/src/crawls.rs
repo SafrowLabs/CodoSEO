@@ -1,7 +1,9 @@
 //! The read side of the `crawls` table for the web app: the latest finished crawl, the crawl
-//! in flight, history, and the manual-crawl count behind the plan allowance.
+//! in flight, history, and the manual-crawl count behind the plan allowance; plus the checked
+//! insert behind Run crawl.
 
 use codoseo_core::output::{Progress, StopReason};
+use codoseo_core::plan::ManualAllowance;
 use codoseo_core::report::CrawlSummary;
 use serde::Deserialize;
 use sqlx::{FromRow, PgPool};
@@ -168,4 +170,136 @@ pub async fn oldest_manual_since(
     .bind(since)
     .fetch_one(pool)
     .await
+}
+
+/// A plan's manual-crawl allowance for one site, as a sliding window: at most `max` manual
+/// crawls in any `window` (1 a week on Free, 1 a day on Pro).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ManualWindow {
+    pub max: i64,
+    pub window: time::Duration,
+}
+
+impl ManualWindow {
+    /// The window for a plan's allowance, or `None` when it is unlimited.
+    pub fn for_allowance(allowance: ManualAllowance) -> Option<ManualWindow> {
+        match allowance {
+            ManualAllowance::PerWeek(n) => Some(ManualWindow {
+                max: n.into(),
+                window: time::Duration::weeks(1),
+            }),
+            ManualAllowance::PerDay(n) => Some(ManualWindow {
+                max: n.into(),
+                window: time::Duration::days(1),
+            }),
+            ManualAllowance::Unlimited => None,
+        }
+    }
+}
+
+/// What [`enqueue_manual_checked`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManualOutcome {
+    /// The crawl was queued. `number` is its place in the site's history (`#49`).
+    Queued { id: Uuid, number: i64 },
+    /// The site already has a crawl queued or running (running wins), so nothing was queued.
+    Busy(CrawlStatus),
+    /// The allowance is used up. `frees_at` is when the oldest manual crawl in the window
+    /// drops out of it.
+    LimitReached { frees_at: OffsetDateTime },
+}
+
+/// Queues a manual crawl unless the site already has one queued or running, or `allowance`
+/// is used up (`None` means unlimited; only `trigger = 'manual'` crawls count against it).
+///
+/// The site row is locked (`FOR UPDATE`) around the checks and the insert, so two Run crawl
+/// clicks at once queue one crawl: the second waits for the first to commit, then sees it.
+pub async fn enqueue_manual_checked(
+    pool: &PgPool,
+    site_id: Uuid,
+    domain: &str,
+    priority: i16,
+    allowance: Option<ManualWindow>,
+) -> Result<ManualOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT id FROM sites WHERE id = $1 FOR UPDATE")
+        .bind(site_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+    let busy: Option<CrawlStatus> = sqlx::query_scalar(
+        "SELECT status FROM crawls WHERE site_id = $1 AND status IN ('queued', 'running') \
+         ORDER BY (status = 'running') DESC LIMIT 1",
+    )
+    .bind(site_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(status) = busy {
+        return Ok(ManualOutcome::Busy(status));
+    }
+
+    if let Some(allowance) = allowance {
+        let now = OffsetDateTime::now_utc();
+        let (used, oldest): (i64, Option<OffsetDateTime>) = sqlx::query_as(
+            "SELECT count(*), min(created_at) FROM crawls \
+             WHERE site_id = $1 AND trigger = 'manual' AND created_at >= $2",
+        )
+        .bind(site_id)
+        .bind(now - allowance.window)
+        .fetch_one(&mut *tx)
+        .await?;
+        if used >= allowance.max {
+            let frees_at = oldest.unwrap_or(now) + allowance.window;
+            return Ok(ManualOutcome::LimitReached { frees_at });
+        }
+    }
+
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO crawls (site_id, domain, trigger, priority) \
+         VALUES ($1, $2, $3, $4) RETURNING id",
+    )
+    .bind(site_id)
+    .bind(domain)
+    .bind(CrawlTrigger::Manual)
+    .bind(priority)
+    .fetch_one(&mut *tx)
+    .await?;
+    // The same ordering `number` uses in `SELECT` above.
+    let number: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM crawls WHERE site_id = $1 \
+           AND (created_at, id) <= (SELECT created_at, id FROM crawls WHERE id = $2)",
+    )
+    .bind(site_id)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(ManualOutcome::Queued { id, number })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_windows_per_plan() {
+        assert_eq!(
+            ManualWindow::for_allowance(ManualAllowance::PerWeek(1)),
+            Some(ManualWindow {
+                max: 1,
+                window: time::Duration::days(7)
+            })
+        );
+        assert_eq!(
+            ManualWindow::for_allowance(ManualAllowance::PerDay(3)),
+            Some(ManualWindow {
+                max: 3,
+                window: time::Duration::hours(24)
+            })
+        );
+        assert_eq!(
+            ManualWindow::for_allowance(ManualAllowance::Unlimited),
+            None
+        );
+    }
 }

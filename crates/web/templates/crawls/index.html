@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page">
+  <div class="page-head">
+    <h1>Crawls</h1>
+    <span class="chip" id="crawl-total">{{ total }}</span>
+    <span class="grow"></span>
+    <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>
+  </div>
+  {% if let Some(note) = allowance %}<p class="page-sub" id="crawl-allowance">{{ note }}</p>{% endif %}
+  {{ list|safe }}
+</div>
+{% endblock %}
