@@ -136,7 +136,16 @@ impl CrawlQueue {
     /// First failure (`attempt = 0`): requeue once, gated 15 minutes out via `queued_at` (which
     /// `claim`'s `queued_at <= now()` filter already honours). Second failure: fail for good.
     /// One statement, so there's no read-then-write race against a concurrent call.
-    pub async fn finish_failed(&self, id: Uuid, reason: &str) -> Result<(), sqlx::Error> {
+    ///
+    /// Guarded by `status = 'running' AND worker_id = $3`: a worker that was requeued (by
+    /// `requeue_stale`) and reclaimed by someone else before this call lands is a no-op here,
+    /// the same way a late `heartbeat()` is — the row no longer belongs to the caller.
+    pub async fn finish_failed(
+        &self,
+        id: Uuid,
+        reason: &str,
+        worker_id: &str,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE crawls SET \
                status = CASE WHEN attempt = 0 THEN 'queued'::crawl_status ELSE 'failed'::crawl_status END, \
@@ -145,10 +154,11 @@ impl CrawlQueue {
                worker_id = CASE WHEN attempt = 0 THEN NULL ELSE worker_id END, \
                heartbeat_at = CASE WHEN attempt = 0 THEN NULL ELSE heartbeat_at END, \
                failure_reason = $2 \
-             WHERE id = $1",
+             WHERE id = $1 AND status = 'running' AND worker_id = $3",
         )
         .bind(id)
         .bind(reason)
+        .bind(worker_id)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -161,7 +171,7 @@ impl CrawlQueue {
     pub async fn previous_snapshot(&self, site_id: Uuid) -> Result<Option<Snapshot>, sqlx::Error> {
         let row = sqlx::query(
             "SELECT id, finished_at, summary FROM crawls \
-             WHERE site_id = $1 AND status = 'done' ORDER BY finished_at DESC LIMIT 1",
+             WHERE site_id = $1 AND status = 'done' ORDER BY finished_at DESC, id DESC LIMIT 1",
         )
         .bind(site_id)
         .fetch_optional(&self.pool)

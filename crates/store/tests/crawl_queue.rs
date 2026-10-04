@@ -266,7 +266,7 @@ async fn finish_failed_retries_once_then_fails_for_good() {
         .expect("claimed");
 
     queue
-        .finish_failed(id, "site unreachable")
+        .finish_failed(id, "site unreachable", "worker-a")
         .await
         .expect("first failure");
 
@@ -306,7 +306,7 @@ async fn finish_failed_retries_once_then_fails_for_good() {
     assert_eq!(reclaimed.id, id);
 
     queue
-        .finish_failed(id, "site unreachable again")
+        .finish_failed(id, "site unreachable again", "worker-b")
         .await
         .expect("second failure");
     let (status, reason): (String, Option<String>) =
@@ -418,4 +418,60 @@ async fn heartbeat_updates_progress_on_a_running_crawl() {
             .expect("fetch after heartbeat");
     assert!(heartbeat_at <= OffsetDateTime::now_utc());
     assert_eq!(stored["pages_done"], 7);
+}
+
+#[tokio::test]
+async fn finish_failed_by_a_stale_worker_does_not_clobber_the_new_owner() {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let site_id = make_site(&db.pool, "race.example").await;
+    let id = queue
+        .enqueue(site_id, "race.example", CrawlTrigger::Manual, 2, None, None)
+        .await
+        .expect("enqueue");
+
+    // worker-a claims it, then its heartbeat goes stale and requeue_stale puts it back.
+    queue
+        .claim("worker-a")
+        .await
+        .expect("claim")
+        .expect("claimed by worker-a");
+    sqlx::query("UPDATE crawls SET heartbeat_at = now() - interval '1 hour' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .expect("age the heartbeat");
+    let requeued = queue
+        .requeue_stale(StdDuration::from_secs(60))
+        .await
+        .expect("requeue_stale");
+    assert_eq!(requeued, 1);
+
+    // worker-b claims the now-queued row and is actively running it.
+    let reclaimed = queue
+        .claim("worker-b")
+        .await
+        .expect("claim")
+        .expect("claimed by worker-b");
+    assert_eq!(reclaimed.id, id);
+
+    // worker-a, unaware it lost the row, finally reports its (stale) failure.
+    queue
+        .finish_failed(id, "worker-a's stale failure", "worker-a")
+        .await
+        .expect("finish_failed is a no-op, not an error, for a stale worker");
+
+    let (status, worker_id, failure_reason): (String, Option<String>, Option<String>) =
+        sqlx::query("SELECT status::text, worker_id, failure_reason FROM crawls WHERE id = $1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await
+            .map(|row| (row.get(0), row.get(1), row.get(2)))
+            .expect("fetch after the stale finish_failed");
+    assert_eq!(status, "running", "worker-b's row must still be running");
+    assert_eq!(worker_id, Some("worker-b".to_string()));
+    assert_eq!(
+        failure_reason, None,
+        "worker-a's failure reason must not have landed on worker-b's row"
+    );
 }

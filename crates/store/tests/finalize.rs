@@ -28,13 +28,18 @@ async fn make_site(pool: &sqlx::PgPool, domain: &str) -> Uuid {
         .get(0)
 }
 
+/// The `worker_id` every test's `finalize()` call uses, matching the row `make_crawl` sets up
+/// as the current owner — `finalize`'s ownership guard needs the two to agree.
+const WORKER_ID: &str = "test-worker";
+
 async fn make_crawl(pool: &sqlx::PgPool, site_id: Uuid, domain: &str) -> Uuid {
     sqlx::query(
-        "INSERT INTO crawls (site_id, domain, trigger, priority, status) \
-         VALUES ($1, $2, 'manual', 2, 'running') RETURNING id",
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id) \
+         VALUES ($1, $2, 'manual', 2, 'running', $3) RETURNING id",
     )
     .bind(site_id)
     .bind(domain)
+    .bind(WORKER_ID)
     .fetch_one(pool)
     .await
     .expect("insert crawl")
@@ -120,9 +125,11 @@ async fn finalize_writes_pages_and_marks_the_crawl_done() {
         after: "5 errors".to_string(),
     }];
 
-    finalize(&db.pool, crawl_id, site_id, &out, &report, &changes)
-        .await
-        .expect("finalize");
+    finalize(
+        &db.pool, crawl_id, site_id, WORKER_ID, &out, &report, &changes,
+    )
+    .await
+    .expect("finalize");
 
     let (status, health_score): (String, Option<i16>) =
         sqlx::query("SELECT status::text, health_score FROM crawls WHERE id = $1")
@@ -169,9 +176,17 @@ async fn finalize_round_trips_the_stop_reason_for_previous_snapshot() {
         vec![sample_page(1)],
         StopReason::Blocked("site blocked our crawler".to_string()),
     );
-    finalize(&db.pool, crawl_id, site_id, &out, &empty_report(), &[])
-        .await
-        .expect("finalize");
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize");
 
     let queue = CrawlQueue::new(db.pool.clone());
     let snapshot = queue
@@ -202,7 +217,16 @@ async fn finalize_is_atomic_when_a_change_fails_to_insert() {
         after: "after".to_string(),
     }];
 
-    let result = finalize(&db.pool, crawl_id, site_id, &out, &empty_report(), &changes).await;
+    let result = finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &changes,
+    )
+    .await;
     assert!(result.is_err(), "the NUL byte must make finalize fail");
 
     for (table, query) in [
@@ -285,6 +309,7 @@ async fn finalize_keeps_only_the_latest_two_done_crawls_pages() {
         &db.pool,
         current_crawl_id,
         site_id,
+        WORKER_ID,
         &out,
         &empty_report(),
         &[],
@@ -313,9 +338,17 @@ async fn finalize_handles_a_synthetic_fifty_thousand_page_crawl() {
 
     let pages: Vec<PageRecord> = (0..50_000u64).map(sample_page).collect();
     let out = empty_output(pages, StopReason::PageLimit);
-    finalize(&db.pool, crawl_id, site_id, &out, &empty_report(), &[])
-        .await
-        .expect("finalize 50k pages");
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize 50k pages");
 
     let page_count: i64 = sqlx::query_scalar("SELECT count(*) FROM pages WHERE crawl_id = $1")
         .bind(crawl_id)
@@ -323,4 +356,56 @@ async fn finalize_handles_a_synthetic_fifty_thousand_page_crawl() {
         .await
         .expect("count pages");
     assert_eq!(page_count, 50_000);
+}
+
+#[tokio::test]
+async fn finalize_by_a_stale_worker_rolls_back_and_does_not_touch_the_new_owners_row() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "stale-finalize.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "stale-finalize.example").await;
+
+    // Simulate requeue_stale + a reclaim by another worker: the row is now owned by
+    // "worker-b", not the `WORKER_ID` ("test-worker") that originally claimed it and is
+    // about to (stale-ly) call finalize.
+    sqlx::query("UPDATE crawls SET worker_id = 'worker-b' WHERE id = $1")
+        .bind(crawl_id)
+        .execute(&db.pool)
+        .await
+        .expect("simulate a reclaim by worker-b");
+
+    let out = empty_output(vec![sample_page(1)], StopReason::Completed);
+    let result = finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "finalize must refuse to commit for a worker_id that no longer owns the row"
+    );
+
+    let (status, worker_id): (String, Option<String>) =
+        sqlx::query("SELECT status::text, worker_id FROM crawls WHERE id = $1")
+            .bind(crawl_id)
+            .fetch_one(&db.pool)
+            .await
+            .map(|row| (row.get(0), row.get(1)))
+            .expect("fetch crawl");
+    assert_eq!(status, "running", "worker-b's row must still be running");
+    assert_eq!(worker_id, Some("worker-b".to_string()));
+
+    let page_count: i64 = sqlx::query_scalar("SELECT count(*) FROM pages WHERE crawl_id = $1")
+        .bind(crawl_id)
+        .fetch_one(&db.pool)
+        .await
+        .expect("count pages");
+    assert_eq!(
+        page_count, 0,
+        "the rolled-back transaction must not leave pages behind"
+    );
 }

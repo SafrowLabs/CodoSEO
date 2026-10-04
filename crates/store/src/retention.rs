@@ -7,6 +7,8 @@ use codoseo_core::plan::{Plan, PlanLimits};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::dbenum::enum_slug;
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RetentionReport {
     pub crawls_trimmed: u64,
@@ -26,12 +28,16 @@ pub async fn run(
     let mut crawls_trimmed = 0;
     for plan in [Plan::Free, Plan::Pro, Plan::Agency, Plan::SelfHosted] {
         let days = match plan {
-            Plan::SelfHosted => self_hosted_history_days.unwrap_or(365),
+            Plan::SelfHosted => self_hosted_history_days.unwrap_or_else(|| {
+                PlanLimits::for_plan(Plan::SelfHosted)
+                    .history_days
+                    .expect("self-hosted always has a history_days default")
+            }),
             _ => PlanLimits::for_plan(plan)
                 .history_days
                 .expect("cloud plans always have a history_days limit"),
         };
-        crawls_trimmed += trim_plan_history(pool, plan_db_value(plan), i64::from(days)).await?;
+        crawls_trimmed += trim_plan_history(pool, &enum_slug(&plan), i64::from(days)).await?;
     }
 
     let unclaimed_sites_deleted = sqlx::query(
@@ -100,13 +106,4 @@ async fn trim_plan_history(pool: &PgPool, plan_value: &str, days: i64) -> Result
         .execute(pool)
         .await?;
     Ok(ids.len() as u64)
-}
-
-fn plan_db_value(plan: Plan) -> &'static str {
-    match plan {
-        Plan::Free => "free",
-        Plan::Pro => "pro",
-        Plan::Agency => "agency",
-        Plan::SelfHosted => "self_hosted",
-    }
 }

@@ -14,15 +14,22 @@ use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::dbenum::enum_slug;
 use crate::hash;
 
 /// Rows per `COPY` chunk, per spec ("COPY in batches of 500").
 const COPY_BATCH: usize = 500;
 
+/// Writes a finished crawl. `worker_id` must match the row's current `worker_id` and the row
+/// must still be `running`, or the whole transaction is rolled back instead of committing —
+/// this is the guard against a worker whose heartbeat went stale (and was reclaimed by
+/// `requeue_stale`, then claimed by another worker) finishing late and overwriting whatever the
+/// new owner has written or is about to write.
 pub async fn finalize(
     pool: &PgPool,
     crawl_id: Uuid,
     site_id: Uuid,
+    worker_id: &str,
     out: &CrawlOutput,
     report: &CrawlReport,
     changes: &[Change],
@@ -35,24 +42,31 @@ pub async fn finalize(
     insert_changes(&mut tx, crawl_id, site_id, changes).await?;
 
     let summary = build_summary(out, report);
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE crawls SET status = 'done', finished_at = now(), health_score = $2, \
-         checks_passed = $3, checks_total = $4, summary = $5 WHERE id = $1",
+         checks_passed = $3, checks_total = $4, summary = $5 \
+         WHERE id = $1 AND status = 'running' AND worker_id = $6",
     )
     .bind(crawl_id)
     .bind(report.health_score as i16)
     .bind(report.checks_passed as i16)
     .bind(report.checks_total as i16)
     .bind(summary)
+    .bind(worker_id)
     .execute(&mut *tx)
     .await?;
+    if result.rows_affected() == 0 {
+        // Someone else now owns this crawl_id (requeued and reclaimed while we were still
+        // running). Roll back rather than leave orphaned pages/inlinks/changes for their crawl.
+        return Err(sqlx::Error::RowNotFound);
+    }
 
     // Keep only the latest 2 `done` crawls' per-URL data (spec section 6).
     for table in ["pages", "inlinks", "site_files"] {
         let sql = format!(
             "DELETE FROM {table} WHERE crawl_id IN (\
                SELECT id FROM crawls WHERE site_id = $1 AND status = 'done' \
-               ORDER BY finished_at DESC OFFSET 2)"
+               ORDER BY finished_at DESC, id DESC OFFSET 2)"
         );
         sqlx::query(&sql).bind(site_id).execute(&mut *tx).await?;
     }
@@ -331,7 +345,9 @@ fn bool_field(b: bool) -> String {
 }
 
 /// Escapes a value for `COPY ... WITH (FORMAT text)`: backslash, tab, newline and carriage
-/// return are the only characters that need it.
+/// return need it; NUL is dropped outright since Postgres `text` data can never contain one
+/// (and nothing upstream filters it — a NUL can reach here from malformed/binary content
+/// mislabeled as `text/html`).
 fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -340,6 +356,7 @@ fn escape(s: &str) -> String {
             '\t' => out.push_str("\\t"),
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
+            '\0' => {}
             _ => out.push(c),
         }
     }
@@ -348,13 +365,4 @@ fn escape(s: &str) -> String {
 
 fn escape_json<T: Serialize>(v: &T) -> String {
     escape(&serde_json::to_string(v).expect("value always serializes"))
-}
-
-/// The slug a `#[serde(rename_all = "snake_case")]` fieldless enum serializes to — also exactly
-/// the label its matching Postgres enum type uses, since the migration was written to match.
-fn enum_slug<T: Serialize>(v: &T) -> String {
-    match serde_json::to_value(v).expect("enum always serializes") {
-        serde_json::Value::String(s) => s,
-        other => panic!("expected a fieldless enum to serialize to a JSON string, got {other}"),
-    }
 }
