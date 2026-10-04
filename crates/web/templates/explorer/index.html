@@ -16,7 +16,7 @@
     <div class="toolbar">
       <label class="search">
         <svg class="icon"><use href="#i-search"/></svg>
-        <input class="input" id="ex-q" type="search" name="q" value="{{ ex.q }}" placeholder="Filter by URL or title" aria-label="Filter by URL or title" autocomplete="off" spellcheck="false" data-search-input hx-get="{{ ex.rows_url }}" hx-trigger="input changed delay:250ms, search" hx-target="#rows" hx-swap="innerHTML" hx-include="#ex-filter, #ex-sel, #ex-tab">
+        <input class="input" style="padding-right:34px" id="ex-q" type="search" name="q" value="{{ ex.q }}" placeholder="Filter by URL or title" aria-label="Filter by URL or title" autocomplete="off" spellcheck="false" data-search-input hx-get="{{ ex.rows_url }}" hx-trigger="input changed delay:250ms, search" hx-target="#rows" hx-swap="innerHTML" hx-include="#ex-filter, #ex-sel, #ex-tab">
         <kbd>/</kbd>
       </label>
       <input type="hidden" id="ex-filter" name="filter" value="{{ ex.filter_key }}">
