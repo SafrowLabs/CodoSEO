@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page">
+{% if let Some(e) = empty %}
+  <div class="page-head"><h1>Crawl comparison</h1></div>
+  <div class="card">
+    <div class="empty">
+      <div class="art"><svg class="icon"><use href="#i-changes"/></svg></div>
+      <h2>{{ e.title }}</h2>
+      <p>{{ e.text }}</p>
+      {% if e.can_run %}<button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>{% endif %}
+    </div>
+  </div>
+{% else if let Some(c) = cmp %}
+  <div class="page-head">
+    <h1>Crawl comparison</h1>
+    <span class="chip">{{ c.from_chip }}</span>
+    <svg class="icon faint" aria-label="compared with"><use href="#i-arrow"/></svg>
+    <span class="chip">{{ c.to_chip }}</span>
+  </div>
+  <div class="tiles">
+    {% for t in c.tiles %}<div class="tile"><div class="tile-label">{{ t.label }}</div><div class="tile-value{% if !t.class.is_empty() %} {{ t.class }}{% endif %}">{{ t.value }}</div></div>{% endfor %}
+  </div>
+  <div class="cols">
+    <div class="card">
+      <div class="card-head">
+        <nav class="tabs" aria-label="Severity">
+          {% for t in c.tabs %}<a class="tab{% if t.active %} is-active{% endif %}" href="{{ t.href }}"{% if t.active %} aria-current="page"{% endif %}>{{ t.label }}<span class="n">{{ t.n }}</span></a>{% endfor %}
+        </nav>
+      </div>
+      {% if let Some(msg) = c.nothing %}
+      <div class="empty">
+        <div class="art"><svg class="icon"><use href="#i-check"/></svg></div>
+        <h2>No changes</h2>
+        <p>{{ msg }}</p>
+      </div>
+      {% else if let Some(msg) = c.tab_empty %}
+      <div class="empty-sm">{{ msg }}</div>
+      {% else %}
+      <div class="rows">
+        {% for r in c.rows %}
+        <div class="row-item change" style="grid-template-columns:minmax(0,1fr);gap:0">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <span class="badge sev-{{ r.severity }}">{{ r.severity_label }}</span>
+            <span style="font-weight:500;white-space:nowrap">{{ r.title }}</span>
+            {% if let Some(path) = r.path %}{% if let Some(href) = r.href %}<a class="url trunc" href="{{ href }}">{{ path }}</a>{% else %}<span class="mono c-muted trunc" style="font-size:12.5px">{{ path }}</span>{% endif %}{% else %}<span class="tag">site-wide</span>{% endif %}
+            <span class="grow"></span>
+            <span class="c-muted" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap"><svg class="icon" style="width:13px;height:13px"><use href="#{{ r.mode_icon }}"/></svg>{{ r.mode }}</span>
+          </div>
+          <div class="diff"><div class="before">{{ r.before }}</div><div class="after{{ r.after_class }}">{{ r.after }}</div></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% if let Some(m) = c.more %}<div class="load-more">{{ m }}</div>{% endif %}
+      {% endif %}
+    </div>
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Health score by crawl</span><span class="card-aside">{{ c.score_aside }}</span></div>
+        <div class="card-pad" style="padding-top:2px">
+          <div class="spark">{% for b in c.spark %}<span{% if !b.class.is_empty() %} class="{{ b.class }}"{% endif %} style="height:{{ b.height }}%{% if b.class.is_empty() %};background:var(--ok-soft){% endif %}" data-tip="{{ b.tip }}"></span>{% endfor %}</div>
+          <div class="mono faint" style="display:flex;justify-content:space-between;margin-top:6px;font-size:11px"><span>{{ c.spark_first }}</span><span>{{ c.spark_last }}</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Alert rules</span><span class="card-aside">defaults</span></div>
+        <div class="rows">
+          {% for r in c.rules %}<div class="row-item" style="grid-template-columns:minmax(0,1fr) auto"><span>{{ r.label }}</span><span class="badge {% if r.instant %}t-accent{% else %}t-muted{% endif %}">{{ r.mode }}</span></div>{% endfor %}
+        </div>
+        <div class="card-pad hint" style="padding-top:12px;padding-bottom:14px">Alert channels arrive with monitoring (M7).</div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+</div>
+{% endblock %}

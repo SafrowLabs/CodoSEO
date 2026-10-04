@@ -1,0 +1,115 @@
+<div id="audit-body" class="page"{% if reloads_on_queue() %} hx-get="{{ base }}/audit" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+{% if let Some(d) = done %}
+  <div class="page-head">
+    <h1>Site audit</h1>
+    <span class="chip">{{ d.checks_chip }}</span>
+    {% if let Some(stop) = d.stop_chip %}<span class="chip">{{ stop }}</span>{% endif %}
+    <span class="grow"></span>
+    <a class="btn" href="{{ base }}/export.csv" hx-boost="false" download><svg class="icon"><use href="#i-download"/></svg>Export CSV</a>
+  </div>
+  {% if let Some(live) = live %}{{ live|safe }}{% endif %}
+  <div class="kpis">
+    {% for k in d.kpis %}
+    <div class="kpi">
+      <div class="kpi-label"><span class="swatch {{ k.swatch }}"></span>{{ k.label }}</div>
+      <div class="kpi-value">{% for p in k.parts %}<b data-count="{{ p.count }}">{{ p.text }}</b>{% if !p.unit.is_empty() %}<span>{{ p.unit }}</span>{% endif %}{% endfor %}</div>
+      <div class="kpi-delta{% if !k.tone.is_empty() %} {{ k.tone }}{% endif %}">{{ k.delta }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="cols">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Issues</span><span class="card-aside">Click an issue to see its URLs</span></div>
+      {% if d.issues.is_empty() %}
+      <div class="empty-sm" style="display:flex;align-items:center;gap:10px"><span class="badge t-ok"><svg class="icon" style="width:13px;height:13px"><use href="#i-check"/></svg>All clear</span>Every check passed on this crawl. Nice work.</div>
+      {% else %}
+      <div class="rows">
+        <div class="row-head" style="grid-template-columns:92px minmax(0,1fr) 70px 110px 16px"><span>Severity</span><span>Issue</span><span class="r">URLs</span><span>% of crawl</span><span></span></div>
+        {% for i in d.issues %}
+        {% if let Some(href) = i.href %}
+        <a class="row-item" href="{{ href }}" style="grid-template-columns:92px minmax(0,1fr) 70px 110px 16px">
+          <span><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span></span>
+          <span class="trunc">{{ i.title }}</span>
+          <span class="r mono num">{{ i.count }}</span>
+          <span style="display:flex;align-items:center;gap:8px"><span class="minibar"><span class="{{ i.bar_class }}" style="width:{{ i.bar }}%"></span></span><span class="mono muted" style="font-size:12px">{{ i.pct }}</span></span>
+          <svg class="icon go"><use href="#i-arrow"/></svg>
+        </a>
+        {% else %}
+        <div class="row-item" style="grid-template-columns:92px minmax(0,1fr) 70px 110px 16px">
+          <span><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span></span>
+          <span style="display:flex;align-items:center;gap:8px;min-width:0"><span class="trunc">{{ i.title }}</span><span class="tag">site-wide</span></span>
+          <span class="r mono faint">{{ i.count }}</span>
+          <span class="mono faint" style="font-size:12px">{{ i.pct }}</span>
+          <span></span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Response codes</span><span class="card-aside">{{ d.pages_label }}</span></div>
+        <div class="card-pad">
+          <div class="stackbar">{% for s in d.codes %}{% if s.n > 0 %}<span class="{{ s.class }}" style="flex:{{ s.n }}"></span>{% endif %}{% endfor %}</div>
+          <div class="legend">{% for s in d.codes %}<div><span class="swatch {{ s.class }}"></span><span class="k">{{ s.label }}</span><span class="mono num">{{ s.count }}</span></div>{% endfor %}</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Crawl depth</span><span class="card-aside">clicks from homepage</span></div>
+        <div class="card-pad" style="padding-top:2px">
+          <div class="vbars">{% for b in d.depth %}<div data-tip="{{ b.value }} · {{ b.tip }}"><div class="v">{{ b.value }}</div><div class="b {{ b.class }}" style="height:{{ b.height }}%"></div></div>{% endfor %}</div>
+          <div class="vbars-axis">{% for b in d.depth %}<span>{{ b.label }}</span>{% endfor %}</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Response time</span><span class="card-aside">{{ d.times_aside }}</span></div>
+        <div class="card-pad" style="padding-top:4px">
+          <div class="hbars">{% for h in d.times %}<div class="hbar"><span class="muted">{{ h.label }}</span><span class="track"><span class="{{ h.class }}" style="width:{{ h.width }}%"></span></span><span class="r mono num">{{ h.value }}</span></div>{% endfor %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% else if let Some(live) = live %}
+  <div class="page-head"><h1>Site audit</h1><span class="chip">first crawl</span></div>
+  <div class="kpis" aria-hidden="true">
+    {% for label in kpi_labels() %}
+    <div class="kpi"><div class="kpi-label">{{ label }}</div><div class="skel" style="height:32px;width:62%"></div><div class="skel skel-line" style="width:42%;margin:2px 0 0"></div></div>
+    {% endfor %}
+  </div>
+  <div class="card card-pad" style="margin-top:16px">{{ live|safe }}</div>
+  <div class="cols" aria-hidden="true">
+    <div class="card card-pad">
+      <div class="skel skel-line" style="width:24%;margin-top:0"></div>
+      <div class="skel skel-line" style="width:92%;margin-top:22px"></div>
+      <div class="skel skel-line" style="width:84%"></div>
+      <div class="skel skel-line" style="width:88%"></div>
+      <div class="skel skel-line" style="width:70%"></div>
+    </div>
+    <div class="stack">
+      <div class="card card-pad"><div class="skel skel-line" style="width:40%;margin-top:0"></div><div class="skel" style="height:10px;margin-top:18px"></div></div>
+      <div class="card card-pad"><div class="skel skel-line" style="width:36%;margin-top:0"></div><div class="skel" style="height:96px;margin-top:18px"></div></div>
+    </div>
+  </div>
+{% else if let Some(reason) = failure %}
+  <div class="page-head"><h1>Site audit</h1></div>
+  <div class="card">
+    <div class="empty">
+      <div class="art"><svg class="icon"><use href="#i-alert"/></svg></div>
+      <h2>The crawl failed</h2>
+      <p>{{ reason }}</p>
+      <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Try again</button>
+    </div>
+  </div>
+{% else %}
+  <div class="page-head"><h1>Site audit</h1></div>
+  <div class="card">
+    <div class="empty">
+      <div class="art"><svg class="icon"><use href="#i-audit"/></svg></div>
+      <h2>No crawls yet</h2>
+      <p>Run a crawl of {{ domain }} to get a health score and every issue, with the exact URLs behind it.</p>
+      <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>
+    </div>
+  </div>
+{% endif %}
+</div>
