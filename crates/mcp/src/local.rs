@@ -22,7 +22,7 @@ use codoseo_diff::{diff, key_pages};
 use url::Url;
 
 use crate::backend::{Backend, BackendError};
-use crate::cache::AuditCache;
+use crate::cache::{AuditCache, CacheError};
 use crate::types::{
     AuditHandle, AuditId, AuditState, AuditStatus, AuditSummary, FailingCheck, MAX_FAILING_CHECKS,
     RedirectReport, RobotsReport, UrlRow,
@@ -41,10 +41,13 @@ impl LocalBackend {
         }
     }
 
+    /// Distinguishes "no such audit" from a real I/O or corruption problem, so a
+    /// corrupted cache file doesn't get reported as a typo'd id.
     fn load_finished(&self, id: &AuditId) -> Result<Audit, BackendError> {
-        self.cache
-            .load(id)
-            .map_err(|_| BackendError::AuditNotFound(id.0.clone()))
+        self.cache.load(id).map_err(|e| match e {
+            CacheError::NotFound(id) => BackendError::AuditNotFound(id),
+            other => BackendError::Other(format!("could not load the cached audit: {other}")),
+        })
     }
 }
 
@@ -63,6 +66,7 @@ impl Backend for LocalBackend {
             .insert(id.clone(), Arc::clone(&state));
 
         let cache = self.cache.clone();
+        let running = Arc::clone(&self.running);
         let task_id = id.clone();
         let cfg = CrawlConfig {
             start_url: url,
@@ -83,7 +87,9 @@ impl Backend for LocalBackend {
                     .progress = Some(p);
             })
             .await;
-            let new_status = match result {
+            // Resolved fully before taking the lock, so a concurrent `get_audit` never
+            // observes `summary` set while `status` is still `Running` (or vice versa).
+            let (status, summary) = match result {
                 Ok(mut out) => {
                     let report = run_checks(&mut out);
                     let audit = Audit {
@@ -96,21 +102,31 @@ impl Backend for LocalBackend {
                         snapshot: Snapshot::from_output_owned(out),
                     };
                     match cache.save(&task_id, &audit) {
-                        Ok(()) => {
-                            let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                            guard.summary = Some(build_summary(&task_id, &audit));
-                            AuditStatus::Done
-                        }
-                        Err(e) => AuditStatus::Failed(format!("could not cache audit: {e}")),
+                        Ok(()) => (AuditStatus::Done, Some(build_summary(&task_id, &audit))),
+                        Err(e) => (
+                            AuditStatus::Failed(format!("could not cache audit: {e}")),
+                            None,
+                        ),
                     }
                 }
-                Err(e) => AuditStatus::Failed(e.to_string()),
+                Err(e) => (AuditStatus::Failed(e.to_string()), None),
             };
-            let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
-            if !matches!(guard.status, AuditStatus::Done)
-                || matches!(new_status, AuditStatus::Failed(_))
+            let is_done = matches!(status, AuditStatus::Done);
             {
-                guard.status = new_status;
+                let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
+                guard.status = status;
+                guard.summary = summary;
+            }
+            // A `Done` audit is now safely served from the cache (which correctly
+            // reports no progress), so drop it here - otherwise a long-lived `codoseo
+            // mcp` process accumulates one entry per audit forever. `Failed` audits
+            // were never written to the cache, so they stay in memory; it's the only
+            // record of why they failed.
+            if is_done {
+                running
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&task_id);
             }
         });
 
@@ -354,6 +370,28 @@ mod tests {
                 .iter()
                 .any(|f| f.check == CheckId::TitleMissing)
         );
+    }
+
+    /// A `Done` audit must stop being served from the in-memory map once it's cached:
+    /// otherwise `progress` never gets cleared (it would still hold the last `Running`
+    /// value forever) and the map leaks one entry per audit for the life of the process.
+    #[tokio::test]
+    async fn a_done_audit_is_evicted_from_memory_and_served_only_from_the_cache() {
+        let site = SiteBuilder::new().html("/", "Home", &[]).start().await;
+        let (backend, dir) = backend();
+        let id = audit_fast(&backend, site.url("/")).await;
+
+        let state = backend.get_audit(&id).await.unwrap();
+        assert_eq!(
+            state.progress, None,
+            "a Done audit must not report stale progress"
+        );
+
+        // If the entry were still held in memory, deleting its cache file would have no
+        // effect on get_audit; since it's evicted, deleting the file must make it 404.
+        std::fs::remove_file(dir.path().join(format!("{}.json", id.0))).unwrap();
+        let err = backend.get_audit(&id).await.unwrap_err();
+        assert!(matches!(err, BackendError::AuditNotFound(_)));
     }
 
     #[tokio::test]

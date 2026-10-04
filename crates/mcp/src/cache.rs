@@ -17,6 +17,14 @@ pub enum CacheError {
     Corrupt(String, codoseo_core::audit::AuditError),
 }
 
+/// `AuditId`s we generate are 32 lowercase hex characters (a v4 UUID's simple form), but
+/// `get_audit`, `get_page`, `get_issue_urls` and `compare_audits` take an id straight from
+/// an MCP caller. Without this check, an id like `"../../../../etc/passwd"` would walk
+/// `AuditCache::path` right out of the cache directory.
+fn is_safe_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
 #[derive(Clone)]
 pub struct AuditCache {
     dir: PathBuf,
@@ -27,19 +35,24 @@ impl AuditCache {
         AuditCache { dir }
     }
 
-    fn path(&self, id: &AuditId) -> PathBuf {
-        self.dir.join(format!("{}.json", id.0))
+    fn path(&self, id: &AuditId) -> Option<PathBuf> {
+        is_safe_id(&id.0).then(|| self.dir.join(format!("{}.json", id.0)))
     }
 
     pub fn save(&self, id: &AuditId, audit: &Audit) -> Result<(), CacheError> {
+        let path = self
+            .path(id)
+            .ok_or_else(|| CacheError::NotFound(id.0.clone()))?;
         std::fs::create_dir_all(&self.dir)?;
         let bytes = serde_json::to_vec(audit).expect("Audit always serialises");
-        std::fs::write(self.path(id), bytes)?;
+        std::fs::write(path, bytes)?;
         Ok(())
     }
 
     pub fn load(&self, id: &AuditId) -> Result<Audit, CacheError> {
-        let path = self.path(id);
+        let path = self
+            .path(id)
+            .ok_or_else(|| CacheError::NotFound(id.0.clone()))?;
         let bytes = std::fs::read(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 CacheError::NotFound(id.0.clone())
@@ -117,6 +130,34 @@ mod tests {
         let cache = AuditCache::new(dir.path().to_owned());
         let err = cache.load(&AuditId::new()).unwrap_err();
         assert!(matches!(err, CacheError::NotFound(_)));
+    }
+
+    #[test]
+    fn a_path_traversal_id_cannot_escape_the_cache_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir
+            .path()
+            .parent()
+            .unwrap()
+            .join("escaped-by-mcp-test.json");
+        std::fs::write(&outside, b"not a real audit, just a canary").unwrap();
+        let cache = AuditCache::new(dir.path().join("audits"));
+
+        let traversal = AuditId("../escaped-by-mcp-test".to_owned());
+        let err = cache.load(&traversal).unwrap_err();
+        assert!(matches!(err, CacheError::NotFound(_)));
+
+        let absolute = AuditId(
+            outside
+                .to_str()
+                .unwrap()
+                .trim_end_matches(".json")
+                .to_owned(),
+        );
+        let err = cache.load(&absolute).unwrap_err();
+        assert!(matches!(err, CacheError::NotFound(_)));
+
+        std::fs::remove_file(&outside).unwrap();
     }
 
     #[test]
