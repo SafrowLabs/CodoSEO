@@ -207,9 +207,10 @@ mod tests {
     #[test]
     fn one_long_word_is_cut_mid_word() {
         let word = "a".repeat(200);
-        let (out, cut) = truncate_to_px(&word, 100, title_px);
+        let (out, cut) = truncate_to_px(&word, 300, title_px);
         assert!(cut);
-        assert!(out.len() > 10);
-        assert!(title_px(&out) <= 100);
+        // "a" is about 11 px and " …" about 26 px: some 24 letters fit in 300 px.
+        assert!(out.starts_with(&"a".repeat(20)), "{out:?}");
+        assert!(title_px(&out) <= 300);
     }
 }
