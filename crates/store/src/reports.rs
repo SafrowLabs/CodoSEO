@@ -87,14 +87,26 @@ pub async fn changes_for_crawl(
     severity: Option<Severity>,
     limit: i64,
 ) -> Result<Vec<ChangeRow>, sqlx::Error> {
+    changes_for_crawl_at(pool, crawl_id, severity, 0, limit).await
+}
+
+/// [`changes_for_crawl`] skipping the first `offset` rows, for paging.
+pub async fn changes_for_crawl_at(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    severity: Option<Severity>,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<ChangeRow>, sqlx::Error> {
     let rows: Vec<(String, String, Option<String>, String, String)> = sqlx::query_as(
         "SELECT kind::text, severity::text, url, before_value, after_value FROM changes \
          WHERE crawl_id = $1 AND ($2::text IS NULL OR severity::text = $2) \
-         ORDER BY changes.severity, id LIMIT $3",
+         ORDER BY changes.severity, id LIMIT $3 OFFSET $4",
     )
     .bind(crawl_id)
     .bind(severity.map(|s| enum_slug(&s)))
     .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
     Ok(rows

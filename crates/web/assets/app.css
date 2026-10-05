@@ -784,6 +784,10 @@ body.solo { overflow: auto; }
 .solo-card h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-top: 14px; }
 .solo-card p { color: var(--muted-2); margin: 10px auto 22px; max-width: 360px; }
 .solo-card .actions { display: flex; gap: 8px; justify-content: center; }
+.solo-card-wide { width: min(620px, 100%); }
+.solo-card-wide p { max-width: 480px; }
+.solo-card .solo-left { text-align: left; margin: 0 0 14px; }
+.solo-card .solo-left .hint { margin: 0; max-width: none; color: var(--faint-2); }
 
 /* Sites / onboarding */
 .onboard { max-width: 640px; margin: 8vh auto 0; padding: 0 24px 48px; text-align: center; animation: rise 0.35s var(--ease) both; }
@@ -837,7 +841,7 @@ body.solo { overflow: auto; }
 
 /* ── Alerts settings ────────────────────────────────── */
 
-.page-alerts { max-width: 1040px; }
+.page-alerts, .page-keys { max-width: 1040px; }
 .callout { border-color: color-mix(in oklab, var(--accent-strong) 55%, var(--line)); background: var(--accent-soft); margin-bottom: 16px; }
 .secret { display: block; font: 500 13px var(--mono); padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow-wrap: anywhere; user-select: all; }
 .channel { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 18px; border-bottom: 1px solid var(--line-faint); }
@@ -855,6 +859,9 @@ body.solo { overflow: auto; }
 .channel-target { flex: 2 1 260px; }
 .channel-name { flex: 1 1 140px; }
 .upgrade-hint { color: var(--warn); }
+.key-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.key-actions .btn { gap: 6px; }
+.snippet { margin: 0; padding: 10px 12px; font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); white-space: pre; overflow-x: auto; user-select: all; }
 .rules-site { padding: 14px 18px 6px; border-bottom: 1px solid var(--line-faint); }
 .rules-site-name { margin-bottom: 8px; font-size: 13.5px; }
 .rules-site-name b { font-weight: 500; }

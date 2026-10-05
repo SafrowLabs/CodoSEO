@@ -94,6 +94,22 @@ pub async fn get_for_account(
     Ok(row.map(Site::from))
 }
 
+/// When the scheduler crawls the site next. `None` when it has no slot yet, no schedule or
+/// monitoring is off.
+pub async fn next_crawl_at(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<OffsetDateTime>, sqlx::Error> {
+    let next: Option<Option<OffsetDateTime>> = sqlx::query_scalar(
+        "SELECT CASE WHEN monitoring_active AND schedule IS NOT NULL THEN next_crawl_at END \
+         FROM sites WHERE id = $1",
+    )
+    .bind(site_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(next.flatten())
+}
+
 pub async fn count_for_account(pool: &PgPool, account_id: Uuid) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar("SELECT count(*) FROM sites WHERE account_id = $1")
         .bind(account_id)
@@ -138,6 +154,12 @@ pub enum CreateOutcome {
 ///
 /// The account row is locked (`FOR UPDATE`) around the checks and the inserts, so two submits
 /// at once can't go past the limit or add the same domain twice.
+///
+/// `first_source` marks where the first crawl came from (`crawls.source`: `"agent"` for a site
+/// added by `start_monitoring`, `"audit"` for one added from a website audit, `None` for a site
+/// added by hand; see `quick::Source` for the other values); the funnel reads it when that crawl
+/// finishes.
+#[allow(clippy::too_many_arguments)] // one transaction's worth of inputs, all plain values
 pub async fn create_checked(
     pool: &PgPool,
     account_id: Uuid,
@@ -146,6 +168,7 @@ pub async fn create_checked(
     schedule: Option<&str>,
     max_sites: Option<i64>,
     first_priority: i16,
+    first_source: Option<&str>,
 ) -> Result<CreateOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT id FROM accounts WHERE id = $1 FOR UPDATE")
@@ -176,13 +199,16 @@ pub async fn create_checked(
     .bind(schedule)
     .fetch_one(&mut *tx)
     .await?;
-    sqlx::query("INSERT INTO crawls (site_id, domain, trigger, priority) VALUES ($1, $2, $3, $4)")
-        .bind(row.id)
-        .bind(&row.domain)
-        .bind(CrawlTrigger::First)
-        .bind(first_priority)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, source) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(row.id)
+    .bind(&row.domain)
+    .bind(CrawlTrigger::First)
+    .bind(first_priority)
+    .bind(first_source)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(CreateOutcome::Created(row.into()))
 }

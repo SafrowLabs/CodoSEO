@@ -13,8 +13,10 @@ include = ["src/**/*", "templates/**/*", "assets/**/*", "askama.toml", "Cargo.to
 codoseo-core.workspace = true
 codoseo-checks.workspace = true
 codoseo-crawler.workspace = true
+codoseo-mcp.workspace = true
 codoseo-notify.workspace = true
 codoseo-store.workspace = true
+rmcp = { workspace = true, features = ["transport-streamable-http-server"] }
 axum = { workspace = true, features = ["macros"] }
 askama.workspace = true
 askama_web.workspace = true
@@ -35,12 +37,14 @@ base64.workspace = true
 hmac.workspace = true
 reqwest = { workspace = true, features = ["json", "form"] }
 futures-util.workspace = true
+tokio-util.workspace = true
 bytes.workspace = true
 csv.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true
 tower.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

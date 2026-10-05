@@ -126,6 +126,76 @@ async fn the_funnel_only_counts_the_window() {
 }
 
 #[tokio::test]
+async fn agent_events_have_their_own_funnel_and_stay_out_of_the_websites() {
+    let db = TestDb::new().await;
+    let crawl = Uuid::new_v4();
+    // The website: an audit started and an email given. Agents: two audits, an email, a click.
+    events::record(
+        &db.pool,
+        EventKind::AuditStarted,
+        None,
+        None,
+        Some(json!({ "crawl_id": crawl })),
+    )
+    .await
+    .unwrap();
+    events::record(&db.pool, EventKind::EmailGiven, None, None, None)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        events::record(
+            &db.pool,
+            EventKind::AuditStarted,
+            None,
+            None,
+            Some(json!({ "crawl_id": Uuid::new_v4(), "source": "agent" })),
+        )
+        .await
+        .unwrap();
+    }
+    for kind in [
+        EventKind::EmailGiven,
+        EventKind::LinkClicked,
+        EventKind::FirstFullCrawl,
+    ] {
+        events::record(
+            &db.pool,
+            kind,
+            None,
+            None,
+            Some(json!({ "source": "agent" })),
+        )
+        .await
+        .unwrap();
+    }
+    // A website crawl's own payload names its source too ("web", or "audit" for a first crawl).
+    events::record(
+        &db.pool,
+        EventKind::AuditFinished,
+        None,
+        None,
+        Some(json!({ "crawl_id": crawl, "source": "web" })),
+    )
+    .await
+    .unwrap();
+
+    let by =
+        |f: &[events::FunnelCount], k: EventKind| f.iter().find(|c| c.kind == k).unwrap().events;
+    let web = events::funnel_counts(&db.pool, 30).await.unwrap();
+    assert_eq!(by(&web, EventKind::AuditStarted), 1);
+    assert_eq!(by(&web, EventKind::EmailGiven), 1);
+    assert_eq!(by(&web, EventKind::LinkClicked), 0);
+    assert_eq!(by(&web, EventKind::FirstFullCrawl), 0);
+    assert_eq!(by(&web, EventKind::AuditFinished), 1);
+    let agents = events::agent_funnel_counts(&db.pool, 30).await.unwrap();
+    assert_eq!(by(&agents, EventKind::AuditStarted), 2);
+    assert_eq!(by(&agents, EventKind::EmailGiven), 1);
+    assert_eq!(by(&agents, EventKind::LinkClicked), 1);
+    assert_eq!(by(&agents, EventKind::FirstFullCrawl), 1);
+    assert_eq!(by(&agents, EventKind::AuditFinished), 0);
+}
+
+#[tokio::test]
 async fn failed_jobs_come_back_newest_first_with_their_error() {
     let db = TestDb::new().await;
     let queue = JobQueue::new(db.pool.clone());
@@ -171,6 +241,8 @@ async fn queue_depth_counts_waiting_quick_audits_only() {
                 claim_hash: d.as_bytes(),
                 ip_hash: None,
                 limits: quick::Limits::NONE,
+                source: quick::Source::Web,
+                agent_daily_budget: None,
                 previous_ip_hash: None,
             },
         )

@@ -111,14 +111,30 @@ pub struct FunnelCount {
     pub unique: i64,
 }
 
-/// Every funnel step, in order, for the last `days` days. Steps with no events are zeros.
+/// The website's funnel for the last `days` days, in order: every step, with no agent events
+/// (`payload.source = 'agent'`). Steps with no events are zeros.
 pub async fn funnel_counts(pool: &PgPool, days: i64) -> Result<Vec<FunnelCount>, sqlx::Error> {
+    funnel(pool, days, false).await
+}
+
+/// The same steps for agents only: audits started through the no-key MCP tools, emails given
+/// to `start_monitoring`, links clicked, and the audits and first crawls that came of them.
+pub async fn agent_funnel_counts(
+    pool: &PgPool,
+    days: i64,
+) -> Result<Vec<FunnelCount>, sqlx::Error> {
+    funnel(pool, days, true).await
+}
+
+async fn funnel(pool: &PgPool, days: i64, agents: bool) -> Result<Vec<FunnelCount>, sqlx::Error> {
     let rows: Vec<(String, i64, i64)> = sqlx::query_as(
         "SELECT kind, count(*), \
                 count(DISTINCT COALESCE(payload->>'crawl_id', site_id::text, id::text)) \
-         FROM events WHERE created_at > now() - ($1 || ' days')::interval GROUP BY kind",
+         FROM events WHERE created_at > now() - ($1 || ' days')::interval \
+           AND (COALESCE(payload->>'source', '') = 'agent') = $2 GROUP BY kind",
     )
     .bind(days.to_string())
+    .bind(agents)
     .fetch_all(pool)
     .await?;
     Ok(EventKind::ALL

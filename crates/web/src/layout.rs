@@ -27,6 +27,7 @@ pub enum Screen {
     Sites,
     Account,
     Alerts,
+    ApiKeys,
     Billing,
     Admin,
 }
@@ -41,6 +42,7 @@ impl Screen {
             Screen::Sites => "Sites",
             Screen::Account => "Account",
             Screen::Alerts => "Alerts",
+            Screen::ApiKeys => "API keys",
             Screen::Billing => "Billing",
             Screen::Admin => "Admin",
         }
@@ -193,6 +195,13 @@ impl Shell {
                 screen == Screen::Alerts,
                 "",
                 "i-bell",
+            ),
+            workspace_item(
+                "API keys",
+                "/settings/api-keys",
+                screen == Screen::ApiKeys,
+                "",
+                "i-key",
             ),
             NavItem {
                 soon: true,

@@ -25,6 +25,11 @@ pub struct AppState {
     /// client the job runner delivers with (the cloud refuses private and internal addresses,
     /// self-hosted allows them).
     pub notify_http: GuardedHttp,
+    /// Cancelled when the server begins shutting down ([`crate::serve`]), so long-lived
+    /// connections that axum's graceful shutdown would wait for (`/mcp` calls) end.
+    pub shutdown: tokio_util::sync::CancellationToken,
+    /// Calls per minute of the no-key MCP tools, per client address.
+    pub anon_calls: Arc<crate::agent::limiter::CallLimiter>,
 }
 
 impl AppState {
@@ -39,6 +44,8 @@ impl AppState {
             notify_http: GuardedHttp::new(policy).expect("http client builds"),
             config: Arc::new(config),
             mailer,
+            shutdown: tokio_util::sync::CancellationToken::new(),
+            anon_calls: Arc::new(crate::agent::limiter::CallLimiter::for_anon_tools()),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .user_agent(concat!("CodoSEO/", env!("CARGO_PKG_VERSION")))

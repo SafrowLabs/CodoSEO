@@ -74,6 +74,25 @@ pub async fn consume_token(
     .await
 }
 
+/// Makes a token usable again after [`consume_token`] when what it was for failed half-way, so
+/// the person's link still works. Only an unexpired token comes back.
+pub async fn unconsume_token(
+    executor: impl PgExecutor<'_>,
+    purpose: TokenPurpose,
+    token_hash: &[u8],
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE login_tokens SET used_at = NULL \
+         WHERE token_hash = $1 AND purpose = $2::login_token_purpose \
+           AND used_at IS NOT NULL AND expires_at > now()",
+    )
+    .bind(token_hash)
+    .bind(purpose.slug())
+    .execute(executor)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
 /// Whether the token could still be consumed (known, unused, unexpired), without using it. For
 /// links that must not change anything on a GET: mail scanners open every link.
 pub async fn token_is_live(
@@ -90,6 +109,26 @@ pub async fn token_is_live(
     .bind(purpose.slug())
     .fetch_one(executor)
     .await
+}
+
+/// The payload of a token that could still be consumed, without using it: for the confirm page
+/// of a link that must not change anything on a GET. `None` when the token is unknown, used or
+/// expired; a live token without a payload gives `Some(Value::Null)`.
+pub async fn live_token_payload(
+    executor: impl PgExecutor<'_>,
+    purpose: TokenPurpose,
+    token_hash: &[u8],
+) -> Result<Option<serde_json::Value>, sqlx::Error> {
+    let row: Option<(Option<serde_json::Value>,)> = sqlx::query_as(
+        "SELECT payload FROM login_tokens \
+         WHERE token_hash = $1 AND purpose = $2::login_token_purpose \
+           AND used_at IS NULL AND expires_at > now()",
+    )
+    .bind(token_hash)
+    .bind(purpose.slug())
+    .fetch_optional(executor)
+    .await?;
+    Ok(row.map(|(payload,)| payload.unwrap_or(serde_json::Value::Null)))
 }
 
 pub async fn create_session(

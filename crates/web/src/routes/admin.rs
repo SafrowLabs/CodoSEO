@@ -136,10 +136,17 @@ async fn page(State(state): State<AppState>, user: CurrentUser) -> Result<Respon
     let pool = &state.pool;
     let week = events::funnel_counts(pool, 7).await?;
     let month = events::funnel_counts(pool, 30).await?;
+    let agents = events::agent_funnel_counts(pool, 30).await?;
     let jobs = jobs::failed_jobs(pool, FAILED_JOBS_SHOWN).await?;
     Ok(html(&AdminPage {
         shell,
-        tables: vec![table("Last 7 days", &week), table("Last 30 days", &month)],
+        tables: vec![
+            table("Last 7 days", &week),
+            table("Last 30 days", &month),
+            // Audits and emails that came through the no-key MCP tools, kept out of the
+            // website's numbers above.
+            table("Agents, last 30 days", &agents),
+        ],
         queue_depth: quick::queue_depth(pool).await?,
         jobs: jobs.iter().map(job_row).collect(),
     })?

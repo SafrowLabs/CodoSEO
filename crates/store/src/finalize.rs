@@ -93,11 +93,12 @@ async fn record_funnel_event(
             .bind(crawl_id)
             .fetch_one(&mut **tx)
             .await?;
-    // Only a first crawl queued by unlocking an audit (`source = 'audit'`) is a funnel step;
-    // sites added directly never saw the audit.
+    // Only a first crawl queued by unlocking an audit (`source = 'audit'`) or by an agent's
+    // `start_monitoring` (`source = 'agent'`) is a funnel step; sites added directly never saw
+    // the audit.
     let kind = match (trigger.as_str(), source.as_deref()) {
         ("quick", _) => EventKind::AuditFinished,
-        ("first", Some("audit")) => EventKind::FirstFullCrawl,
+        ("first", Some("audit" | "agent")) => EventKind::FirstFullCrawl,
         _ => return Ok(()),
     };
     let account_id: Option<Uuid> = sqlx::query_scalar("SELECT account_id FROM sites WHERE id = $1")
@@ -109,7 +110,12 @@ async fn record_funnel_event(
         kind,
         account_id,
         Some(site_id),
-        Some(json!({ "crawl_id": crawl_id, "score": report.health_score })),
+        Some(json!({
+            "crawl_id": crawl_id,
+            "score": report.health_score,
+            // Agent audits and agent-added sites have their own funnel row.
+            "source": source,
+        })),
     )
     .await
 }

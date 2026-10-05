@@ -129,6 +129,35 @@ pub struct Config {
     pub rankorg_url: Url,
     /// Billing through Dodo Payments; `None` in self-hosted mode or when keys are missing.
     pub billing: Option<DodoConfig>,
+    /// The no-key MCP tier (cloud only; self-hosted refuses it).
+    pub mcp: McpAnonConfig,
+}
+
+/// The `User-Agent`s of the hosted connectors that call from shared servers.
+pub const DEFAULT_SHARED_CLIENTS: &str = "claude-user,chatgpt,openai-mcp";
+
+/// The no-key MCP tier's limits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpAnonConfig {
+    /// Fresh audits agents may start in any 24 hours, over all of them (`MCP_ANON_DAILY_AUDITS`,
+    /// default 200). Cached and joined audits don't count.
+    pub daily_audits: i64,
+    /// Start-monitoring emails the tool may send in any 24 hours (`MCP_ANON_DAILY_EMAILS`,
+    /// default 200).
+    pub daily_emails: i64,
+    /// Lowercase fragments of the `User-Agent` of clients that connect from shared servers
+    /// (`MCP_SHARED_CLIENTS`, comma separated, matched case-insensitively). Per-IP limits don't
+    /// apply to them, since everyone behind the connector shares an address.
+    pub shared_clients: Vec<String>,
+}
+
+impl McpAnonConfig {
+    /// Whether a request with this `User-Agent` comes from a shared connector.
+    pub fn is_shared_client(&self, user_agent: Option<&str>) -> bool {
+        let Some(ua) = user_agent else { return false };
+        let ua = ua.to_ascii_lowercase();
+        self.shared_clients.iter().any(|name| ua.contains(name))
+    }
 }
 
 /// Written by hand so a stray `{:?}` of the config can't put `SECRET_KEY` or the SMTP password
@@ -149,6 +178,7 @@ impl std::fmt::Debug for Config {
             .field("admin_emails", &self.admin_emails)
             .field("rankorg_url", &self.rankorg_url.as_str())
             .field("billing", &self.billing)
+            .field("mcp", &self.mcp)
             .finish()
     }
 }
@@ -273,6 +303,16 @@ impl Config {
                 })?;
 
         let billing = dodo_from(&get, mode)?;
+        let mcp = McpAnonConfig {
+            daily_audits: count_from(&get, "MCP_ANON_DAILY_AUDITS", 200)?,
+            daily_emails: count_from(&get, "MCP_ANON_DAILY_EMAILS", 200)?,
+            shared_clients: get("MCP_SHARED_CLIENTS")
+                .unwrap_or_else(|| DEFAULT_SHARED_CLIENTS.to_owned())
+                .split(',')
+                .map(|name| name.trim().to_ascii_lowercase())
+                .filter(|name| !name.is_empty())
+                .collect(),
+        };
 
         Ok(Config {
             mode,
@@ -289,6 +329,7 @@ impl Config {
             admin_emails,
             rankorg_url,
             billing,
+            mcp,
         })
     }
 
@@ -306,6 +347,25 @@ impl Config {
     pub fn for_tests() -> Config {
         Config::from_lookup(|_| None).expect("defaults are valid")
     }
+}
+
+/// A whole number of at least 0 from `name`, or `default` when it isn't set.
+fn count_from(
+    get: &impl Fn(&str) -> Option<String>,
+    name: &'static str,
+    default: i64,
+) -> Result<i64, ConfigError> {
+    let Some(raw) = get(name) else {
+        return Ok(default);
+    };
+    raw.trim()
+        .parse::<i64>()
+        .ok()
+        .filter(|n| *n >= 0)
+        .ok_or_else(|| ConfigError::Invalid {
+            name,
+            reason: format!("expected a whole number of 0 or more, got {raw:?}"),
+        })
 }
 
 const DODO_KEYS: [&str; 4] = [
@@ -493,6 +553,49 @@ mod tests {
         // A value that isn't a URL is hidden whole.
         let odd = cloud_with(&[("SMTP_URL", "not a url p4ssw0rd-y")]).unwrap();
         assert!(!format!("{odd:?}").contains("p4ssw0rd-y"));
+    }
+
+    #[test]
+    fn the_no_key_tier_has_defaults_and_reads_its_limits() {
+        let d = cfg(&[]).unwrap().mcp;
+        assert_eq!((d.daily_audits, d.daily_emails), (200, 200));
+        assert_eq!(d.shared_clients, ["claude-user", "chatgpt", "openai-mcp"]);
+
+        let c = cfg(&[
+            ("MCP_ANON_DAILY_AUDITS", " 50 "),
+            ("MCP_ANON_DAILY_EMAILS", "0"),
+            ("MCP_SHARED_CLIENTS", " Claude-User , ,Cursor "),
+        ])
+        .unwrap()
+        .mcp;
+        assert_eq!((c.daily_audits, c.daily_emails), (50, 0));
+        assert_eq!(c.shared_clients, ["claude-user", "cursor"]);
+
+        for bad in ["many", "-1", "1.5"] {
+            assert!(cfg(&[("MCP_ANON_DAILY_AUDITS", bad)]).is_err(), "{bad}");
+            assert!(cfg(&[("MCP_ANON_DAILY_EMAILS", bad)]).is_err(), "{bad}");
+        }
+        // A blank value is "not set".
+        assert_eq!(
+            cfg(&[("MCP_ANON_DAILY_AUDITS", " ")])
+                .unwrap()
+                .mcp
+                .daily_audits,
+            200
+        );
+    }
+
+    #[test]
+    fn shared_clients_are_matched_by_user_agent_fragment_ignoring_case() {
+        let mcp = cfg(&[]).unwrap().mcp;
+        assert!(mcp.is_shared_client(Some("Claude-User/1.0 (+https://anthropic.com)")));
+        assert!(mcp.is_shared_client(Some("Mozilla/5.0 ChatGPT-User/1.0")));
+        assert!(mcp.is_shared_client(Some("openai-mcp/1.2")));
+        assert!(!mcp.is_shared_client(Some("claude-code/2.0 (cli)")));
+        assert!(!mcp.is_shared_client(Some("node")));
+        assert!(!mcp.is_shared_client(None));
+        let none = cfg(&[("MCP_SHARED_CLIENTS", ",")]).unwrap().mcp;
+        assert!(!none.is_shared_client(Some("claude-user")));
     }
 
     #[test]

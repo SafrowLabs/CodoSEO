@@ -108,9 +108,16 @@ pub fn parse_start_url(raw: &str) -> Result<Url, String> {
     if !matches!(url.scheme(), "http" | "https") {
         return Err("Only http and https sites can be crawled.".to_owned());
     }
-    let host = url.host_str().unwrap_or_default();
+    // `example.com.` is `example.com`: the trailing dot would otherwise make a second site and
+    // dodge the audit reuse.
+    let host = url.host_str().unwrap_or_default().trim_end_matches('.');
     if host.is_empty() || (!host.contains('.') && host != "localhost") {
         return Err("That isn't a valid web address.".to_owned());
+    }
+    if url.host_str().is_some_and(|h| h.ends_with('.')) {
+        let trimmed = host.to_owned();
+        url.set_host(Some(&trimmed))
+            .map_err(|_| "That isn't a valid web address.".to_owned())?;
     }
     url.set_fragment(None);
     Ok(url)
@@ -215,6 +222,7 @@ async fn create(
         schedule,
         max_sites,
         FIRST_CRAWL_PRIORITY,
+        None,
     )
     .await?;
     match outcome {
@@ -269,5 +277,18 @@ mod tests {
         assert!(parse_start_url("").is_err());
         assert!(parse_start_url("ftp://example.com").is_err());
         assert!(parse_start_url("nodot").is_err());
+        // A trailing dot is the same host.
+        assert_eq!(
+            parse_start_url("Example.com.").unwrap().as_str(),
+            "https://example.com/"
+        );
+        assert_eq!(
+            parse_start_url("https://example.com.../a?b=1")
+                .unwrap()
+                .as_str(),
+            "https://example.com/a?b=1"
+        );
+        assert!(parse_start_url("https://.").is_err());
+        assert!(parse_start_url("nodot.").is_err());
     }
 }

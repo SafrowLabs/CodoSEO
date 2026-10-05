@@ -697,6 +697,67 @@ async fn active_after_4_weeks_is_recorded_once_per_account() {
 }
 
 #[tokio::test]
+async fn active_after_4_weeks_of_an_agent_account_is_an_agent_funnel_event() {
+    let db = TestDb::new().await;
+    let finished = noon() - SignedDuration::from_hours(24);
+    // Its first site's first crawl came from start_monitoring.
+    let agent = account(&db, "agent@example.test", "free", "UTC", 40).await;
+    let s = site(&db, agent, "agent.test", "weekly", -600).await;
+    done_crawl_at(&db, s, "agent.test", finished).await;
+    sqlx::query("UPDATE crawls SET source = 'agent' WHERE site_id = $1")
+        .bind(s)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    // A website account, and one whose second site was an agent's: the first site decides.
+    let web = account(&db, "web@example.test", "free", "UTC", 40).await;
+    let w = site(&db, web, "web.test", "weekly", -600).await;
+    done_crawl_at(&db, w, "web.test", finished).await;
+    let mixed = account(&db, "mixed@example.test", "free", "UTC", 40).await;
+    let m1 = site(&db, mixed, "first.test", "weekly", -600).await;
+    done_crawl_at(&db, m1, "first.test", finished).await;
+    let m2 = site(&db, mixed, "second.test", "weekly", -600).await;
+    done_crawl_at(&db, m2, "second.test", finished).await;
+    sqlx::query("UPDATE crawls SET source = 'agent' WHERE site_id = $1")
+        .bind(m2)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    assert_eq!(tick(&ctx(&db, Mode::Cloud), noon()).await.active_events, 3);
+    let source = |who: Uuid| {
+        let pool = db.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT payload->>'source' FROM events \
+                 WHERE kind = 'active_after_4_weeks' AND account_id = $1",
+            )
+            .bind(who)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(source(agent).await.as_deref(), Some("agent"));
+    assert_eq!(source(web).await, None);
+    assert_eq!(source(mixed).await, None);
+
+    let by = |f: &[codoseo_store::events::FunnelCount]| {
+        f.iter()
+            .find(|c| c.kind == codoseo_store::events::EventKind::ActiveAfter4Weeks)
+            .unwrap()
+            .events
+    };
+    let agents = codoseo_store::events::agent_funnel_counts(&db.pool, 30)
+        .await
+        .unwrap();
+    let website = codoseo_store::events::funnel_counts(&db.pool, 30)
+        .await
+        .unwrap();
+    assert_eq!((by(&agents), by(&website)), (1, 2));
+}
+
+#[tokio::test]
 async fn every_tick_records_a_heartbeat() {
     let db = TestDb::new().await;
     assert!(

@@ -89,6 +89,24 @@ pub async fn latest_done(pool: &PgPool, site_id: Uuid) -> Result<Option<Crawl>, 
     .await
 }
 
+/// For each of the account's sites with a finished crawl: `(site, health score, finished at)` of
+/// the latest one, chosen like [`latest_done`] (`finished_at DESC`, then `number DESC`; `number`
+/// is the crawl's place by `created_at, id`, so the ties break the same way).
+pub async fn latest_done_for_account(
+    pool: &PgPool,
+    account_id: Uuid,
+) -> Result<Vec<(Uuid, Option<i16>, Option<OffsetDateTime>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT DISTINCT ON (c.site_id) c.site_id, c.health_score, c.finished_at \
+         FROM crawls c JOIN sites s ON s.id = c.site_id \
+         WHERE s.account_id = $1 AND c.status = 'done' \
+         ORDER BY c.site_id, c.finished_at DESC, c.created_at DESC, c.id DESC",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await
+}
+
 /// The finished crawl before `crawl_id` (what the changes screen compares against).
 pub async fn previous_done(
     pool: &PgPool,

@@ -1,0 +1,69 @@
+{% extends "solo_base.html" %}
+{% block title %}{% match view %}{% when StartView::Confirm { domain, .. } %}Monitor {{ domain }}{% when StartView::Expired { .. } %}Link expired{% when StartView::Done(d) %}{% match d.site %}{% when SiteNote::PlanFull { .. } %}Your plan is full{% else %}Monitoring started{% endmatch %}{% endmatch %} — CodoSEO{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block body %}
+<div class="solo-page">
+  <div class="solo-card solo-card-wide">
+    <div style="display:flex;justify-content:center;margin-bottom:18px"><span class="owl" style="width:44px;height:44px;border-radius:12px 12px 16px 16px;gap:3px;padding-bottom:6px"><i style="width:16px;height:16px"></i><i style="width:16px;height:16px"></i></span></div>
+    {% match view %}
+    {% when StartView::Confirm { domain, email } %}
+    <h1>Monitor {{ domain }}?</h1>
+    <p>An AI assistant asked CodoSEO to watch <b>{{ domain }}</b> for <b>{{ email }}</b>. Press the button and CodoSEO starts weekly monitoring on your free CodoSEO account (one is created if you don't have one), crawls the site now, and emails you when something important breaks.</p>
+    <form method="post" action="/monitoring/start/{{ token }}" data-once>
+      <div class="actions"><button class="btn btn-primary btn-lg" type="submit">Start monitoring</button></div>
+    </form>
+    <p class="hint" style="margin-top:14px">Didn't ask for this? Close the page and nothing happens.</p>
+    {% when StartView::Expired { signed_in } %}
+    <h1>This link has run out</h1>
+    <p>This link has expired or was already used. Ask your assistant to start monitoring again, or add your site yourself.</p>
+    <p class="hint">If you already confirmed, your key was shown once. You can create a new one under <a href="/settings/api-keys">Settings → API keys</a>.</p>
+    {% if !signed_in %}<div class="actions"><a class="btn btn-primary" href="/login">Sign in</a></div>{% endif %}
+    {% when StartView::Done(d) %}
+    {% match d.site %}
+    {% when SiteNote::Added %}
+    <h1>Monitoring started for {{ d.domain }}</h1>
+    <p>CodoSEO is crawling <b>{{ d.domain }}</b> now (up to 500 pages) and will crawl it every week. We email <b>{{ d.email }}</b> when something important breaks.</p>
+    {% when SiteNote::Existing %}
+    <h1>{{ d.domain }} is already monitored</h1>
+    <p>You already have <b>{{ d.domain }}</b> in CodoSEO, so nothing new was queued. It keeps its schedule, and we email <b>{{ d.email }}</b> when something important breaks.</p>
+    {% when SiteNote::PlanFull { max_sites } %}
+    <h1>Your plan is full</h1>
+    <p>Your plan includes {{ max_sites }} site{% if max_sites != &1 %}s{% endif %}, so <b>{{ d.domain }}</b> was not added. Remove a site or upgrade to add it.</p>
+    {% endmatch %}
+
+    {% if let Some(k) = d.key %}
+    <div class="card callout solo-left" role="status">
+      <div class="card-head"><span class="card-title">Your API key</span><span class="card-aside">shown once</span></div>
+      <div class="card-pad" style="display:grid;gap:10px">
+        <code class="secret">{{ k.key }}</code>
+        <div class="key-actions">
+          <button type="button" class="btn btn-sm" data-copy="{{ k.key }}"><svg class="icon" style="width:14px;height:14px"><use href="#i-copy"/></svg>Copy key</button>
+        </div>
+        <p class="hint">Copy it now, it isn't shown again. It lets an agent read your sites. Keep it out of repositories and chat logs; you can revoke it under Settings, API keys.</p>
+      </div>
+    </div>
+    <div class="card solo-left">
+      <div class="card-head"><span class="card-title">Connect Claude Code</span></div>
+      <div class="card-pad" style="display:grid;gap:10px">
+        <pre class="snippet mono">{{ k.command }}</pre>
+        <div class="key-actions"><button type="button" class="btn btn-sm" data-copy="{{ k.command }}"><svg class="icon" style="width:14px;height:14px"><use href="#i-copy"/></svg>Copy command</button></div>
+      </div>
+    </div>
+    <div class="card solo-left">
+      <div class="card-head"><span class="card-title">Other MCP clients</span><span class="card-aside">JSON</span></div>
+      <div class="card-pad" style="display:grid;gap:10px">
+        <pre class="snippet mono">{{ k.json }}</pre>
+        <div class="key-actions"><button type="button" class="btn btn-sm" data-copy="{{ k.json }}"><svg class="icon" style="width:14px;height:14px"><use href="#i-copy"/></svg>Copy JSON</button></div>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint">You already have {{ d.key_limit }} API keys, so no new one was made. Revoke one under Settings, API keys to connect an agent.</p>
+    {% endif %}
+
+    <div class="actions" style="margin-top:6px">
+      {% if let Some(href) = d.audit_href %}<a class="btn btn-primary" href="{{ href }}">Open {{ d.domain }}</a>{% else %}<a class="btn btn-primary" href="/">Go to your dashboard</a>{% endif %}
+    </div>
+    {% endmatch %}
+  </div>
+</div>
+{% endblock %}

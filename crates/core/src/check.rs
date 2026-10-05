@@ -11,6 +11,19 @@ pub enum Severity {
     Notice,
 }
 
+impl Severity {
+    /// The severity named by its lowercase slug (`critical`, `warning`, `notice`), as it is
+    /// written in URLs, filters and the API.
+    pub fn from_slug(slug: &str) -> Option<Severity> {
+        match slug {
+            "critical" => Some(Severity::Critical),
+            "warning" => Some(Severity::Warning),
+            "notice" => Some(Severity::Notice),
+            _ => None,
+        }
+    }
+}
+
 /// One bit per check, stored as `pages.issues`. Bit numbers are never reused.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct IssueBits(pub u64);

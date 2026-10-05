@@ -362,7 +362,9 @@ pub async fn pause_unresponsive(pool: &PgPool, now: OffsetDateTime) -> Result<u6
 
 /// Records the funnel event `active_after_4_weeks`, once per account: it signed up at least 28
 /// days before `now`, isn't paused, and had a crawl finish in the 7 days before `now`. Returns
-/// how many events it wrote.
+/// how many events it wrote. An account whose first site's first crawl came from an agent
+/// (`crawls.source = 'agent'`, a site added by `start_monitoring`) gets `payload.source =
+/// 'agent'`, so it counts in the agent funnel and not the website's.
 pub async fn record_active_after_4_weeks(
     pool: &PgPool,
     now: OffsetDateTime,
@@ -373,8 +375,14 @@ pub async fn record_active_after_4_weeks(
         .execute(&mut *tx)
         .await?;
     let done = sqlx::query(
-        "INSERT INTO events (account_id, site_id, kind) \
-         SELECT DISTINCT ON (a.id) a.id, s.id, 'active_after_4_weeks' \
+        "INSERT INTO events (account_id, site_id, kind, payload) \
+         SELECT DISTINCT ON (a.id) a.id, s.id, 'active_after_4_weeks', \
+                CASE WHEN (SELECT fc.source FROM crawls fc \
+                           WHERE fc.site_id = (SELECT fs.id FROM sites fs \
+                                               WHERE fs.account_id = a.id \
+                                               ORDER BY fs.created_at, fs.id LIMIT 1) \
+                           ORDER BY fc.created_at, fc.id LIMIT 1) = 'agent' \
+                     THEN jsonb_build_object('source', 'agent') END \
          FROM accounts a \
            JOIN sites s ON s.account_id = a.id \
            JOIN crawls c ON c.site_id = s.id \

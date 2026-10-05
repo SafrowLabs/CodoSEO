@@ -11,16 +11,17 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use codoseo_core::output::StopReason;
-use codoseo_core::plan::{ManualAllowance, Plan, PlanLimits};
+use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_store::crawl_queue::CrawlTrigger;
 use codoseo_store::crawls::{Crawl, CrawlStatus, ManualOutcome, ManualWindow};
 use codoseo_store::sites::Site;
 use serde::Deserialize;
 use serde_json::json;
-use time::{Duration, OffsetDateTime};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::auth::{CurrentUser, load_site};
+use crate::crawl_policy::{allowance_phrase, limit_message, manual_priority, plan_name, until};
 use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{CrawlerView, Screen, Shell, crawler_for};
@@ -33,24 +34,11 @@ pub fn routes() -> Router<AppState> {
         .route("/s/{site}/status", get(status))
 }
 
-/// Priority lane for a manual crawl on a paid plan (spec section 10).
-pub const PAID_MANUAL_PRIORITY: i16 = 2;
-/// Priority lane for a manual crawl on Free (spec section 10).
-pub const FREE_MANUAL_PRIORITY: i16 = 4;
-
 /// How many crawls the history shows.
 const HISTORY_LIMIT: i64 = 100;
 
 /// Grid columns shared by the history header and rows.
 const COLS: &str = "52px minmax(190px, 2fr) minmax(96px, 1fr) 76px 84px 84px 92px 16px";
-
-/// The queue lane for a manual crawl on `plan`.
-pub fn manual_priority(plan: Plan) -> i16 {
-    match plan {
-        Plan::Free => FREE_MANUAL_PRIORITY,
-        Plan::Pro | Plan::Agency | Plan::SelfHosted => PAID_MANUAL_PRIORITY,
-    }
-}
 
 /// One row of the history.
 pub struct CrawlRow {
@@ -277,57 +265,6 @@ fn finished_toast(c: &Crawl) -> serde_json::Value {
     json!({ "kind": "ok", "message": message })
 }
 
-fn plan_name(plan: Plan) -> &'static str {
-    match plan {
-        Plan::Free => "Free",
-        Plan::Pro => "Pro",
-        Plan::Agency => "Agency",
-        Plan::SelfHosted => "self-hosted",
-    }
-}
-
-/// `1 manual crawl a week`, `3 manual crawls a day`; `None` when unlimited.
-fn allowance_phrase(allowance: ManualAllowance) -> Option<String> {
-    let (n, per) = match allowance {
-        ManualAllowance::PerWeek(n) => (n, "week"),
-        ManualAllowance::PerDay(n) => (n, "day"),
-        ManualAllowance::Unlimited => return None,
-    };
-    let s = if n == 1 { "" } else { "s" };
-    Some(format!("{n} manual crawl{s} a {per}"))
-}
-
-/// The refusal when the allowance is used up, e.g. "Your Free plan includes 1 manual crawl a
-/// week. The next one is available in 3 days."
-fn limit_message(plan: Plan, allowance: ManualAllowance, wait: Duration) -> String {
-    let phrase = allowance_phrase(allowance).unwrap_or_else(|| "manual crawls".to_owned());
-    format!(
-        "Your {} plan includes {phrase}. The next one is available {}.",
-        plan_name(plan),
-        until(wait)
-    )
-}
-
-/// `in a minute`, `in 12 minutes`, `in 5 hours`, `in 3 days` (rounded up below a day, to the
-/// nearest day above).
-fn until(wait: Duration) -> String {
-    let minutes = (wait.whole_seconds().max(0) + 59) / 60;
-    if minutes <= 1 {
-        return "in a minute".to_owned();
-    }
-    if minutes < 60 {
-        return format!("in {minutes} minutes");
-    }
-    let hours = (minutes + 59) / 60;
-    if hours < 24 {
-        let s = if hours == 1 { "" } else { "s" };
-        return format!("in {hours} hour{s}");
-    }
-    let days = (hours + 12) / 24;
-    let s = if days == 1 { "" } else { "s" };
-    format!("in {days} day{s}")
-}
-
 /// The line under the page title on plans with a manual allowance: `Free plan: 1 manual crawl
 /// a week · next one available in 3 days`.
 async fn allowance_note(
@@ -469,48 +406,6 @@ fn row(base: &str, c: &Crawl, now: OffsetDateTime) -> CrawlRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn manual_lanes() {
-        assert_eq!(manual_priority(Plan::Free), 4);
-        assert_eq!(manual_priority(Plan::Pro), 2);
-        assert_eq!(manual_priority(Plan::Agency), 2);
-        assert_eq!(manual_priority(Plan::SelfHosted), 2);
-    }
-
-    #[test]
-    fn waits() {
-        assert_eq!(until(Duration::seconds(-5)), "in a minute");
-        assert_eq!(until(Duration::seconds(50)), "in a minute");
-        assert_eq!(until(Duration::minutes(12)), "in 12 minutes");
-        assert_eq!(
-            until(Duration::minutes(59) + Duration::seconds(59)),
-            "in 1 hour"
-        );
-        assert_eq!(
-            until(Duration::hours(4) + Duration::minutes(10)),
-            "in 5 hours"
-        );
-        assert_eq!(until(Duration::hours(25)), "in 1 day");
-        assert_eq!(until(Duration::days(3) - Duration::seconds(1)), "in 3 days");
-        assert_eq!(until(Duration::days(6) + Duration::hours(23)), "in 7 days");
-    }
-
-    #[test]
-    fn limit_messages() {
-        assert_eq!(
-            limit_message(
-                Plan::Free,
-                ManualAllowance::PerWeek(1),
-                Duration::days(3) - Duration::seconds(1)
-            ),
-            "Your Free plan includes 1 manual crawl a week. The next one is available in 3 days."
-        );
-        assert_eq!(
-            limit_message(Plan::Pro, ManualAllowance::PerDay(2), Duration::minutes(30)),
-            "Your Pro plan includes 2 manual crawls a day. The next one is available in 30 minutes."
-        );
-    }
 
     #[test]
     fn trigger_header_is_ascii_json() {

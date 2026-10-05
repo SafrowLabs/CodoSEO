@@ -1,0 +1,11 @@
+<form id="add-key" class="channel-form" method="post" action="/settings/api-keys" hx-disabled-elt="find button[type=submit]">
+  <div class="channel-form-row">
+    <div class="field channel-target">
+      <label class="label" for="key-name">Name</label>
+      <input class="input" id="key-name" name="name" value="{{ name }}" placeholder="Claude Code on my laptop" maxlength="60" autocomplete="off" required>
+    </div>
+    <button class="btn btn-primary" type="submit">Create key</button>
+  </div>
+  {% if let Some(err) = error %}<span class="error-text" role="alert"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</span>{% endif %}
+  <p class="hint">A name to tell the key apart later. The key itself is shown once, right after you create it.</p>
+</form>

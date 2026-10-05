@@ -125,12 +125,20 @@ async fn migrations_apply_and_every_table_accepts_a_row() {
     .await
     .expect("insert session");
 
-    sqlx::query("INSERT INTO api_keys (account_id, name, key_hash) VALUES ($1, 'ci', $2)")
+    sqlx::query(
+        "INSERT INTO api_keys (account_id, name, key_hash, prefix) VALUES ($1, 'ci', $2, 'cdo_Ab3dE5gH')",
+    )
+    .bind(account_id)
+    .bind(b"keyhash".as_slice())
+    .execute(pool)
+    .await
+    .expect("insert api_key");
+
+    sqlx::query("INSERT INTO api_usage (account_id, day, calls) VALUES ($1, current_date, 1)")
         .bind(account_id)
-        .bind(b"keyhash".as_slice())
         .execute(pool)
         .await
-        .expect("insert api_key");
+        .expect("insert api_usage");
 }
 
 #[tokio::test]

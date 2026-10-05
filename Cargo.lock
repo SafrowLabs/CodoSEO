@@ -696,13 +696,17 @@ dependencies = [
  "codoseo-diff",
  "codoseo-testkit",
  "dirs",
+ "futures-util",
+ "http",
  "rmcp",
  "schemars",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "time",
  "tokio",
+ "tracing",
  "url",
  "uuid",
 ]
@@ -774,6 +778,7 @@ dependencies = [
  "codoseo-checks",
  "codoseo-core",
  "codoseo-crawler",
+ "codoseo-mcp",
  "codoseo-notify",
  "codoseo-store",
  "codoseo-testkit",
@@ -783,6 +788,7 @@ dependencies = [
  "hmac 0.13.0",
  "rand 0.10.3",
  "reqwest",
+ "rmcp",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -790,6 +796,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-util",
  "tower",
  "tracing",
  "url",
@@ -2957,20 +2964,29 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fae7019994ae0fe4ada40b732f798f3ff26f0f04facb1477f1bf37eb4f18a2d3"
 dependencies = [
+ "async-trait",
  "base64 0.23.1",
+ "bytes",
  "chrono",
  "futures",
+ "http",
+ "http-body",
+ "http-body-util",
  "indexmap",
  "pastey 0.2.3",
  "pin-project-lite",
+ "rand 0.10.3",
+ "reqwest",
  "rmcp-macros",
  "schemars",
  "serde",
  "serde_json",
+ "sse-stream",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower-service",
  "tracing",
  "uuid",
 ]
@@ -3654,6 +3670,19 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "sse-stream"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c25ac7aff0abd1dbc474536e40416e1102c7dd9bfba0b9861c6d357f835dcfb4"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
 ]
 
 [[package]]

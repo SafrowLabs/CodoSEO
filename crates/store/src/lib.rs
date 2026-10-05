@@ -3,6 +3,7 @@
 
 pub mod accounts;
 pub mod alert_rules;
+pub mod api_keys;
 pub mod auth;
 pub mod billing;
 pub mod channels;

@@ -37,9 +37,9 @@ async fn migrate_creates_every_table() {
             .await
             .expect("count tables")
             .get(0);
-    // 14 data tables from 0001, instance_settings from 0002, billing_events from 0008, and
-    // sqlx's own _sqlx_migrations bookkeeping table.
-    assert_eq!(count, 17);
+    // 14 data tables from 0001, instance_settings from 0002, billing_events from 0008,
+    // api_usage from 0010, and sqlx's own _sqlx_migrations bookkeeping table.
+    assert_eq!(count, 18);
     drop(check);
 
     admin

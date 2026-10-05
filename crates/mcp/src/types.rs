@@ -85,6 +85,20 @@ pub struct AuditSummary {
     pub more_failing_checks: u16,
 }
 
+/// Failing checks in the order summaries list them: most severe first, then the most affected
+/// pages, then by check id so equal counts always come out the same way.
+pub fn rank_failing(counts: impl IntoIterator<Item = (CheckId, u32)>) -> Vec<(CheckId, u32)> {
+    let mut ranked: Vec<(CheckId, u32)> = counts.into_iter().collect();
+    ranked.sort_by_key(|&(check, count)| {
+        (
+            codoseo_checks::def(check).severity,
+            std::cmp::Reverse(count),
+            check,
+        )
+    });
+    ranked
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FailingCheck {
     pub check: CheckId,
@@ -167,6 +181,28 @@ mod tests {
         let json = serde_json::to_string(&summary).unwrap();
         let back: AuditSummary = serde_json::from_str(&json).unwrap();
         assert_eq!(summary, back);
+    }
+
+    #[test]
+    fn failing_checks_rank_by_severity_then_count_then_id() {
+        let ranked = rank_failing([
+            (CheckId::TitleMissing, 4),
+            (CheckId::Http4xx, 1),
+            (CheckId::H1Missing, 4),
+            (CheckId::TitleTooLong, 9),
+        ]);
+        // Critical first, then warnings (equal counts by check id), and a less severe check
+        // after them however many pages it affects.
+        let order: Vec<CheckId> = ranked.iter().map(|r| r.0).collect();
+        assert_eq!(
+            order,
+            [
+                CheckId::Http4xx,
+                CheckId::TitleMissing,
+                CheckId::H1Missing,
+                CheckId::TitleTooLong
+            ]
+        );
     }
 
     /// A synthetic worst case: 500 pages, every check failing, 3 example URLs each,

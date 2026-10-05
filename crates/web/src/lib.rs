@@ -2,10 +2,12 @@
 //! `codoseo` binary serves as its `web` role.
 
 pub mod abuse;
+pub mod agent;
 pub mod assets;
 pub mod auth;
 pub mod billing;
 pub mod config;
+pub mod crawl_policy;
 pub mod error;
 pub mod fmt;
 pub mod health;
@@ -35,6 +37,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .merge(auth::router())
         .merge(routes::router())
+        .merge(routes::mcp::routes(&state))
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/assets/{file}", get(assets::serve))
@@ -54,6 +57,13 @@ pub async fn serve(
     listener: TcpListener,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
+    // The MCP service runs each call in its own task, which graceful shutdown can't see; its
+    // token is cancelled as soon as shutdown begins so open calls finish instead of holding it.
+    let token = state.shutdown.clone();
+    let shutdown = async move {
+        shutdown.await;
+        token.cancel();
+    };
     // Connect info gives the abuse limits the socket's address when no proxy header applies.
     axum::serve(
         listener,

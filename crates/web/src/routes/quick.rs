@@ -17,10 +17,10 @@ use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::output::StopReason;
 use codoseo_core::plan::PlanLimits;
 use codoseo_store::accounts::Account;
-use codoseo_store::crawls::CrawlStatus;
+use codoseo_store::crawls::{Crawl, CrawlStatus};
 use codoseo_store::events::{self, EventKind};
 use codoseo_store::quick::{
-    self, Audit, ClaimOutcome, LimitWindow, Limits, StartOutcome, StartRequest, UnlockSlot,
+    self, Audit, ClaimOutcome, LimitWindow, Limits, Source, StartOutcome, StartRequest, UnlockSlot,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -146,6 +146,8 @@ async fn start(
             ip_hash: ip_hash.as_deref(),
             previous_ip_hash: previous_ip_hash.as_deref(),
             limits: Limits::DEFAULT,
+            source: Source::Web,
+            agent_daily_budget: None,
         },
     )
     .await?;
@@ -153,6 +155,16 @@ async fn start(
         StartOutcome::Started { crawl_id } => (crawl_id, "started", true),
         StartOutcome::Cached { crawl_id } => (crawl_id, "cached", false),
         StartOutcome::Joined { crawl_id } => (crawl_id, "joined", false),
+        // The website sets no agent budget, so this never happens here; say so if it does.
+        StartOutcome::AgentBudgetReached { .. } => {
+            return super::landing::refuse(
+                &state,
+                &form.url,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "We can't start another audit right now. Please try again in a few minutes."
+                    .to_owned(),
+            );
+        }
         StartOutcome::Limited {
             window,
             retry_after_secs,
@@ -336,11 +348,11 @@ fn build_main(audit: &Audit) -> MainView {
             view.running = crawl.status == CrawlStatus::Running;
             view.pages_done = crawl.progress().map_or(0, |p| p.pages_done);
         }
-        CrawlStatus::Failed => {
-            view.notice = Some(failure_notice(crawl.failure_reason.as_deref()));
-        }
-        CrawlStatus::Done => match (crawl.summary(), crawl.health_score) {
-            (Some(summary), Some(score)) if summary.report_summary.pages > 0 => {
+        CrawlStatus::Failed | CrawlStatus::Done => {
+            view.notice = no_report_notice(crawl);
+            if view.notice.is_none()
+                && let (Some(summary), Some(score)) = (crawl.summary(), crawl.health_score)
+            {
                 view.done = Some(done_view(
                     crawl.id,
                     score,
@@ -349,26 +361,37 @@ fn build_main(audit: &Audit) -> MainView {
                     &summary,
                 ));
             }
+        }
+    }
+    view
+}
+
+/// Why an ended audit has no score to show: it failed, its robots.txt blocks crawlers, or it
+/// found no pages. `None` while it is waiting or running, and when it has a report. The website
+/// and the no-key MCP tools say the same thing.
+pub(crate) fn no_report_notice(crawl: &Crawl) -> Option<Notice> {
+    match crawl.status {
+        CrawlStatus::Queued | CrawlStatus::Running => None,
+        CrawlStatus::Failed => Some(failure_notice(crawl.failure_reason.as_deref())),
+        CrawlStatus::Done => match (crawl.summary(), crawl.health_score) {
+            (Some(summary), Some(_)) if summary.report_summary.pages > 0 => None,
             (Some(summary), _) if matches!(summary.stop_reason, StopReason::RobotsBlocked) => {
-                view.notice = Some(Notice {
+                Some(Notice {
                     title: "This site's robots.txt blocks crawlers",
                     message: "Its robots.txt forbids crawling the whole site, so CodoSEObot \
                               stayed out, as it always does. If you own the site and want an \
                               audit, allow CodoSEObot in robots.txt and try again."
                         .to_owned(),
-                });
+                })
             }
-            _ => {
-                view.notice = Some(Notice {
-                    title: "We found nothing to audit",
-                    message: "The crawl finished without finding any pages. Check the address \
-                              and try again."
-                        .to_owned(),
-                });
-            }
+            _ => Some(Notice {
+                title: "We found nothing to audit",
+                message: "The crawl finished without finding any pages. Check the address \
+                          and try again."
+                    .to_owned(),
+            }),
         },
     }
-    view
 }
 
 /// The start URL when it is more than `https://{domain}/`.

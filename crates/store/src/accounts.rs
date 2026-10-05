@@ -19,7 +19,7 @@ pub struct Account {
 }
 
 #[derive(FromRow)]
-struct AccountRow {
+pub(crate) struct AccountRow {
     id: Uuid,
     email: String,
     plan: String,

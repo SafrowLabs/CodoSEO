@@ -356,6 +356,17 @@
     $$("details[open].switcher, details[open].user, details[open][data-menu]").forEach((d) => { if (!d.contains(e.target)) d.removeAttribute("open"); });
   });
 
+  // ── One-shot forms: a second submit (double click, Enter again) is swallowed ─
+  // For a form whose POST uses up a link and shows something once.
+  document.addEventListener("submit", (e) => {
+    const form = e.target.closest && e.target.closest("form[data-once]");
+    if (!form) return;
+    if (form.dataset.sent) { e.preventDefault(); return; }
+    form.dataset.sent = "1";
+    // After the submit has gone out: a button disabled earlier would drop out of the request.
+    setTimeout(() => $$("button[type=submit]", form).forEach((b) => (b.disabled = true)), 0);
+  });
+
   document.addEventListener("DOMContentLoaded", () => {
     countUp(document);
     $$("[data-theme-label]").forEach((el) => (el.textContent = themeLabel()));
