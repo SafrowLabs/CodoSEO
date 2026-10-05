@@ -187,14 +187,20 @@ pub async fn issue_link(
             ),
         ),
     };
-    state
+    if let Err(e) = state
         .mailer
         .send(Email {
             to: address.to_owned(),
             subject,
             text,
+            html: None,
         })
-        .await;
+        .await
+    {
+        // The page says "if the address is registered we sent a link" either way; a broken mail
+        // server is for the operator to see in the logs, not for the visitor to probe.
+        tracing::error!(error = %e, "could not send the sign-in link");
+    }
     Ok(LinkOutcome::Sent)
 }
 

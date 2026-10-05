@@ -36,9 +36,11 @@ pub struct Config {
     /// check on every POST.
     pub base_url: Url,
     pub bind: SocketAddr,
-    /// Signs nothing yet; reserved for M7's channel encryption key derivation.
+    /// Keys the channel-target encryption (`codoseo_notify::ChannelKey`).
     pub secret_key: String,
     pub smtp_url: Option<String>,
+    /// The sender of every email (`MAIL_FROM`).
+    pub mail_from: String,
     pub github: Option<GithubConfig>,
     /// The fixed address cloud crawls come from, listed on the bot page (`CODOSEO_BOT_IP`).
     pub bot_ip: Option<String>,
@@ -62,6 +64,8 @@ pub enum ConfigError {
 }
 
 const DEFAULT_BIND: &str = "0.0.0.0:8080";
+/// The default `MAIL_FROM`; shared with the worker, which sends the alert and digest mail.
+pub const DEFAULT_MAIL_FROM: &str = "CodoSEO <hello@codoseo.com>";
 
 impl Config {
     pub fn from_env() -> Result<Config, ConfigError> {
@@ -156,6 +160,7 @@ impl Config {
             bind,
             secret_key,
             smtp_url: get("SMTP_URL"),
+            mail_from: get("MAIL_FROM").unwrap_or_else(|| DEFAULT_MAIL_FROM.to_owned()),
             github,
             bot_ip: get("CODOSEO_BOT_IP"),
             turnstile,
@@ -274,6 +279,17 @@ mod tests {
                 .unwrap()
                 .client_ip_header,
             "X-Real-IP"
+        );
+    }
+
+    #[test]
+    fn mail_from_has_a_default() {
+        assert_eq!(cfg(&[]).unwrap().mail_from, "CodoSEO <hello@codoseo.com>");
+        assert_eq!(
+            cfg(&[("MAIL_FROM", "Me <me@example.com>")])
+                .unwrap()
+                .mail_from,
+            "Me <me@example.com>"
         );
     }
 

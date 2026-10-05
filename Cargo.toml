@@ -18,6 +18,7 @@ codoseo-diff = { path = "crates/diff", version = "0.0.1" }
 codoseo-mcp = { path = "crates/mcp", version = "0.0.1" }
 codoseo-store = { path = "crates/store", version = "0.0.1" }
 codoseo-web = { path = "crates/web", version = "0.0.1" }
+codoseo-notify = { path = "crates/notify", version = "0.0.1" }
 codoseo-testkit = { path = "crates/testkit" }
 url = { version = "2.5.8", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -57,6 +58,10 @@ sha2 = "0.11.0"
 rand = "0.10.3"
 base64 = "0.23.1"
 tower = { version = "0.5.3", features = ["util"] }
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "hostname", "tokio1-rustls-tls"] }
+aes-gcm = "0.11.1"
+hmac = "0.13.0"
+hex = "0.4.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

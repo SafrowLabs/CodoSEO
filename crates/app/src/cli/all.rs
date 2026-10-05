@@ -1,5 +1,5 @@
 //! `codoseo all`: the self-hosted single process. Applies migrations, then runs the web app and
-//! a crawl worker side by side until SIGTERM or Ctrl-C.
+//! a crawl worker and a job runner side by side until SIGTERM or Ctrl-C.
 
 use std::net::SocketAddr;
 
@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::web::{cancel_on_signal, prepare, serve};
 use super::{CliError, Outcome};
+use crate::jobs::{JobContext, job_loop};
 use crate::worker::{
     DEFAULT_MEMORY_BUDGET, address_policy_from_env, requeue_stale_sweep, worker_loop,
 };
@@ -38,6 +39,13 @@ pub async fn run(args: AllArgs) -> Outcome {
         std::env::var("HOSTNAME").unwrap_or_else(|_| "codoseo".to_owned()),
         std::process::id()
     );
+    let jobs = JobContext::from_config(pool.clone(), state.mailer.clone(), &state.config);
+    let job_runner = tokio::spawn(job_loop(
+        jobs,
+        job_queue.clone(),
+        worker_id.clone(),
+        shutdown.clone(),
+    ));
     let sweep = tokio::spawn(requeue_stale_sweep(crawl_queue.clone(), shutdown.clone()));
     let worker = {
         let shutdown = shutdown.clone();
@@ -57,6 +65,7 @@ pub async fn run(args: AllArgs) -> Outcome {
     let outcome = serve(state, shutdown.clone()).await;
     shutdown.cancel();
     let _ = worker.await;
+    let _ = job_runner.await;
     sweep.abort();
     outcome
 }

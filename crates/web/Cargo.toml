@@ -13,6 +13,7 @@ include = ["src/**/*", "templates/**/*", "assets/**/*", "askama.toml", "Cargo.to
 codoseo-core.workspace = true
 codoseo-checks.workspace = true
 codoseo-crawler.workspace = true
+codoseo-notify.workspace = true
 codoseo-store.workspace = true
 axum = { workspace = true, features = ["macros"] }
 askama.workspace = true

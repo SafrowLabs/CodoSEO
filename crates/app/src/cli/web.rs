@@ -32,7 +32,14 @@ pub fn prepare(bind: Option<SocketAddr>) -> Result<AppState, CliError> {
         std::env::var("DATABASE_URL").map_err(|_| CliError::msg("DATABASE_URL is not set"))?;
     let pool = codoseo_web::state::lazy_pool(&database_url)
         .map_err(|e| CliError::msg(format!("invalid DATABASE_URL: {e}")))?;
-    Ok(AppState::new(pool, config, Mailer::Log))
+    let mailer = mailer_for(&config)?;
+    Ok(AppState::new(pool, config, mailer))
+}
+
+/// The mailer for `SMTP_URL` and `MAIL_FROM`; a bad value stops the process at startup.
+pub fn mailer_for(config: &Config) -> Result<Mailer, CliError> {
+    Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from)
+        .map_err(|e| CliError::msg(e.to_string()))
 }
 
 pub async fn serve(state: AppState, shutdown: CancellationToken) -> Outcome {

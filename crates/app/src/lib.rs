@@ -2,4 +2,5 @@
 //! worker loop directly instead of only through the compiled binary.
 
 pub mod cli;
+pub mod jobs;
 pub mod worker;
