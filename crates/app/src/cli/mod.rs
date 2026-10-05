@@ -4,6 +4,7 @@ mod all;
 mod check;
 mod crawl;
 mod diff;
+mod healthcheck;
 mod mcp;
 mod migrate;
 mod output;
@@ -95,6 +96,8 @@ enum Command {
     Web(web::WebArgs),
     /// Self-hosting in one process: migrate, then run the web app and a worker together
     All(all::AllArgs),
+    /// Probe the web app's /readyz and exit 0 if healthy (for container HEALTHCHECKs)
+    Healthcheck(healthcheck::HealthcheckArgs),
 }
 
 pub async fn run(cli: Cli) -> Outcome {
@@ -109,6 +112,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Worker(args) => worker::run(args).await,
         Command::Web(args) => web::run(args).await,
         Command::All(args) => all::run(args).await,
+        Command::Healthcheck(args) => healthcheck::run(args).await,
     }
 }
 
