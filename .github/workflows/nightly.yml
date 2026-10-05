@@ -1,0 +1,39 @@
+name: nightly
+
+# Checks too slow or too time-dependent for every push: the 50,000-page crawl memory test and the
+# dependency audit (a new advisory can land against an unchanged lockfile).
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  memory:
+    name: 50,000-page memory test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install 1.99.0 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      # Release mode: the crawl is the point, not the test harness. The test asserts a per-page
+      # heap budget and prints the measured peak.
+      - name: Crawl 50,000 pages
+        run: cargo test --release -p codoseo-crawler --test crawl_memory -- --ignored --nocapture
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

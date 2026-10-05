@@ -1,0 +1,429 @@
+name: release
+
+# Tag `vX.Y.Z` (or `vX.Y.Z-rc.N`) builds the binaries, the container image and publishes everything.
+# Manual runs (workflow_dispatch) and pull requests that touch the release machinery build and
+# check everything but publish nothing; see RELEASING.md.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and check everything, publish nothing. Untick on a tag ref to (re)publish."
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "packaging/**"
+      - "npm/**"
+      - "Dockerfile"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/*/Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/safrowlabs/codoseo
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The version gate, and the one place that decides whether this run publishes.
+  meta:
+    name: Version gate
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag against the workspace and npm versions
+        id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          tag=""
+          if [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; fi
+          version="$(python3 packaging/check-version.py "$tag")"
+          publish=false
+          if [ "$EVENT" = push ] && [ -n "$tag" ]; then
+            publish=true
+          elif [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN" = false ]; then
+            if [ -z "$tag" ]; then
+              echo "::error::A real release must run from a tag ref, not a branch."
+              exit 1
+            fi
+            publish=true
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "prerelease=$prerelease"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "version $version, prerelease $prerelease, publish $publish"
+
+  binaries:
+    name: Binary ${{ matrix.target }}
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            binary: codoseo
+            alpine: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            binary: codoseo
+            alpine: true
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: codoseo
+          - os: macos-15
+            target: aarch64-apple-darwin
+            binary: codoseo
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: codoseo.exe
+    steps:
+      - uses: actions/checkout@v4
+      # Linux binaries are built in the same Alpine image as the container image (static musl,
+      # native on each architecture, no cross toolchain). The image tag is the pinned toolchain.
+      - name: Build (Linux, static musl)
+        if: matrix.alpine
+        run: |
+          docker run --rm -v "$PWD":/src -w /src rust:1.99.0-alpine sh -ec '
+            apk add --no-cache musl-dev build-base perl cmake
+            cargo build --locked --profile dist -p codoseo
+          '
+          # The container ran as root; hand target/ back to the runner user.
+          sudo chown -R "$(id -u):$(id -g)" target
+          mkdir -p "target/${{ matrix.target }}/dist"
+          cp target/dist/codoseo "target/${{ matrix.target }}/dist/codoseo"
+      - name: Install toolchain
+        if: ${{ !matrix.alpine }}
+        shell: bash
+        run: rustup toolchain install 1.99.0 --profile minimal --target ${{ matrix.target }} && rustup default 1.99.0
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ !matrix.alpine }}
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        if: ${{ !matrix.alpine }}
+        run: cargo build --locked --profile dist -p codoseo --target ${{ matrix.target }}
+      - name: Smoke test binary
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BINARY: ${{ matrix.binary }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          bin="target/${TARGET}/dist/${BINARY}"
+          "$bin" --version | tee version.txt
+          grep -q "$VERSION" version.txt
+          case "$TARGET" in
+            *linux-musl)
+              # Static means it runs on any distribution, glibc or musl.
+              ldd "$bin" 2>&1 | grep -qE 'not a dynamic executable|statically linked' ;;
+          esac
+      - name: Package and checksum
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BINARY: ${{ matrix.binary }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          mkdir -p staging
+          cp "target/${TARGET}/dist/${BINARY}" "staging/${BINARY}"
+          archive="codoseo-${TAG}-${TARGET}.tar.gz"
+          tar -czf "$archive" -C staging "${BINARY}"
+          python3 - "$archive" <<'PY'
+          import hashlib, pathlib, sys
+          archive = pathlib.Path(sys.argv[1])
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          pathlib.Path(str(archive) + ".sha256").write_text(f"{digest}  {archive.name}\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codoseo-${{ matrix.target }}
+          path: codoseo-*.tar.gz*
+          if-no-files-found: error
+
+  # One image per architecture, built natively and pushed by digest (publishing runs only);
+  # `image-manifest` stitches the digests into one multi-arch tag.
+  image:
+    name: Image ${{ matrix.arch }}
+    needs: meta
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to ghcr.io
+        if: needs.meta.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build${{ needs.meta.outputs.publish == 'true' && ' and push by digest' || '' }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Attestations would end up in per-arch manifests that the merge step drops.
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.version=${{ needs.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ needs.meta.outputs.publish == 'true' }}
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.arch }}
+      - name: Export digest
+        if: needs.meta.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p digests
+          touch "digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@v4
+        if: needs.meta.outputs.publish == 'true'
+        with:
+          name: digests-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+
+  image-manifest:
+    name: Image manifest
+    if: needs.meta.outputs.publish == 'true'
+    needs: [meta, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: digests
+          pattern: digests-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # 1.2.3 gets 1.2.3, 1.2 and latest; 1.2.3-rc.1 gets only 1.2.3-rc.1.
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.meta.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.meta.outputs.tag }},enable=${{ needs.meta.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ needs.meta.outputs.prerelease == 'false' }}
+      - name: Create the multi-arch manifest
+        working-directory: digests
+        run: |
+          # shellcheck disable=SC2046
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${IMAGE}@sha256:%s " *)
+      - name: Inspect
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+
+  # What publishing would do, checked without credentials: every crate packages and builds from
+  # its published form, the npm tarball packs, the Homebrew formula renders.
+  dry-run-checks:
+    name: Publish dry run
+    if: needs.meta.outputs.publish != 'true'
+    needs: [meta, binaries]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal && rustup default 1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo publish --dry-run for the whole workspace
+        run: cargo publish --workspace --dry-run --locked
+      - name: npm pack
+        working-directory: npm
+        run: npm ci --ignore-scripts && npm test && npm pack --dry-run
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: codoseo-*
+          merge-multiple: true
+      - name: Render the Homebrew formula
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          # The dry run has no macOS checksums to hand if a build failed; fail loudly in that case.
+          python3 packaging/render-formula.py "$VERSION" assets > codoseo.rb
+          ruby -c codoseo.rb
+          cat codoseo.rb
+
+  release:
+    name: GitHub release
+    if: needs.meta.outputs.publish == 'true'
+    needs: [meta, binaries]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: codoseo-*
+          merge-multiple: true
+      - name: Combined SHA256SUMS
+        working-directory: assets
+        run: |
+          test "$(ls codoseo-*.tar.gz | wc -l)" -eq 5
+          cat codoseo-*.tar.gz.sha256 | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            assets/codoseo-*.tar.gz
+            assets/codoseo-*.tar.gz.sha256
+            assets/SHA256SUMS
+
+  # The publish jobs wait for the GitHub release: the npm installer and the Homebrew formula
+  # download from it. Each skips (with a notice) when its secret is missing.
+  crates:
+    name: crates.io
+    if: needs.meta.outputs.publish == 'true' && needs.meta.outputs.prerelease == 'false'
+    needs: [meta, release]
+    runs-on: ubuntu-24.04
+    env:
+      HAS_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    steps:
+      - name: Skip notice
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::CARGO_REGISTRY_TOKEN is not set, skipping crates.io"
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+      - name: Install toolchain
+        if: env.HAS_TOKEN == 'true'
+        run: rustup toolchain install 1.99.0 --profile minimal && rustup default 1.99.0
+      # cargo publishes the workspace in dependency order and waits for each crate to appear in
+      # the index. codoseo-testkit is publish = false and is skipped.
+      - name: cargo publish
+        if: env.HAS_TOKEN == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --workspace --locked
+
+  npm:
+    name: npm
+    if: needs.meta.outputs.publish == 'true'
+    needs: [meta, release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - name: Skip notice
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::NPM_TOKEN is not set, skipping npm"
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+      - uses: actions/setup-node@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm publish
+        if: env.HAS_TOKEN == 'true'
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Release candidates go to the `next` dist-tag so `latest` never moves to one.
+          NPM_TAG: ${{ needs.meta.outputs.prerelease == 'true' && 'next' || 'latest' }}
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm publish --provenance --access public --tag "$NPM_TAG"
+
+  homebrew:
+    name: Homebrew tap
+    if: needs.meta.outputs.publish == 'true' && needs.meta.outputs.prerelease == 'false'
+    needs: [meta, release]
+    runs-on: ubuntu-24.04
+    env:
+      HAS_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+    steps:
+      - name: Skip notice
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::HOMEBREW_TAP_TOKEN is not set, skipping the Homebrew tap"
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+      - name: Download the published checksums
+        if: env.HAS_TOKEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets --pattern '*.tar.gz.sha256'
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          repository: SafrowLabs/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Render and push the formula
+        if: env.HAS_TOKEN == 'true'
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          mkdir -p tap/Formula
+          python3 packaging/render-formula.py "$VERSION" assets > tap/Formula/codoseo.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/codoseo.rb
+          if git diff --cached --quiet; then
+            echo "formula already up to date"
+          else
+            git commit -m "codoseo ${VERSION}"
+            git push
+          fi

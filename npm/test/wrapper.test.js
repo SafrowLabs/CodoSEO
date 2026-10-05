@@ -8,7 +8,7 @@ const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { download, verifyChecksum } = require("../install.js");
+const { download, verifyChecksum, targets } = require("../install.js");
 
 const root = path.resolve(__dirname, "..");
 function temporary(t) {
@@ -174,4 +174,14 @@ test("bare command overrides cannot recurse through PATH", () => {
   const result = run("bin/codoseo.js", [], { CODOSEO_BINARY: "codoseo" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /absolute path/);
+});
+
+test("linux installs use the static musl release assets", () => {
+  assert.deepEqual(targets, {
+    "linux-x64": "x86_64-unknown-linux-musl",
+    "linux-arm64": "aarch64-unknown-linux-musl",
+    "darwin-x64": "x86_64-apple-darwin",
+    "darwin-arm64": "aarch64-apple-darwin",
+    "win32-x64": "x86_64-pc-windows-msvc"
+  });
 });
