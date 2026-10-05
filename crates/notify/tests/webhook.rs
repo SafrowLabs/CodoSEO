@@ -13,9 +13,7 @@ use axum::routing::any;
 use codoseo_core::check::Severity;
 use codoseo_core::crawl::AddressPolicy;
 use codoseo_crawler::guard::Lookup;
-use codoseo_notify::deliver::{
-    ChannelTarget, DeliveryError, deliver, guarded_client, guarded_client_with,
-};
+use codoseo_notify::deliver::{ChannelTarget, DeliveryError, GuardedHttp, deliver};
 use codoseo_notify::message::{AlertItem, AlertMessage};
 use codoseo_notify::{Mailer, webhook};
 use uuid::Uuid;
@@ -115,21 +113,15 @@ fn url_for(addr: SocketAddr, path: &str) -> url::Url {
 #[tokio::test]
 async fn a_webhook_gets_the_exact_body_and_a_signature_the_server_can_verify() {
     let (addr, seen) = server(200, None).await;
-    let client = guarded_client(AddressPolicy::AllowPrivate).unwrap();
+    let http = GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap();
     let target = ChannelTarget::Webhook {
         url: url_for(addr, "/hook"),
         secret: "s3cr3t".into(),
     };
     let msg = message();
-    deliver(
-        &client,
-        AddressPolicy::AllowPrivate,
-        &Mailer::Log,
-        &target,
-        &msg,
-    )
-    .await
-    .expect("delivered");
+    deliver(&http, &Mailer::Log, &target, &msg)
+        .await
+        .expect("delivered");
 
     let requests = seen.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
@@ -159,7 +151,7 @@ async fn a_webhook_gets_the_exact_body_and_a_signature_the_server_can_verify() {
 #[tokio::test]
 async fn slack_and_discord_get_their_json_without_a_signature() {
     let (addr, seen) = server(204, None).await;
-    let client = guarded_client(AddressPolicy::AllowPrivate).unwrap();
+    let http = GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap();
     for target in [
         ChannelTarget::Slack {
             url: url_for(addr, "/slack"),
@@ -168,15 +160,9 @@ async fn slack_and_discord_get_their_json_without_a_signature() {
             url: url_for(addr, "/discord"),
         },
     ] {
-        deliver(
-            &client,
-            AddressPolicy::AllowPrivate,
-            &Mailer::Log,
-            &target,
-            &message(),
-        )
-        .await
-        .expect("delivered");
+        deliver(&http, &Mailer::Log, &target, &message())
+            .await
+            .expect("delivered");
     }
     let requests = seen.requests.lock().unwrap();
     let first: serde_json::Value = serde_json::from_slice(&requests[0].1).unwrap();
@@ -189,10 +175,9 @@ async fn slack_and_discord_get_their_json_without_a_signature() {
 #[tokio::test]
 async fn email_goes_through_the_mailer() {
     let (mailer, sent) = Mailer::capture();
-    let client = guarded_client(AddressPolicy::Public).unwrap();
+    let http = GuardedHttp::new(AddressPolicy::Public).unwrap();
     deliver(
-        &client,
-        AddressPolicy::Public,
+        &http,
         &mailer,
         &ChannelTarget::Email {
             to: "owner@example.com".into(),
@@ -210,19 +195,13 @@ async fn email_goes_through_the_mailer() {
 #[tokio::test]
 async fn a_500_is_a_delivery_error_with_status_and_excerpt() {
     let (addr, _seen) = server(500, None).await;
-    let client = guarded_client(AddressPolicy::AllowPrivate).unwrap();
+    let http = GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap();
     let target = ChannelTarget::Slack {
         url: url_for(addr, "/"),
     };
-    let err = deliver(
-        &client,
-        AddressPolicy::AllowPrivate,
-        &Mailer::Log,
-        &target,
-        &message(),
-    )
-    .await
-    .unwrap_err();
+    let err = deliver(&http, &Mailer::Log, &target, &message())
+        .await
+        .unwrap_err();
     match &err {
         DeliveryError::Status { status, body } => {
             assert_eq!(*status, 500);
@@ -236,7 +215,7 @@ async fn a_500_is_a_delivery_error_with_status_and_excerpt() {
 #[tokio::test]
 async fn public_policy_refuses_ip_literals_before_any_request() {
     let (addr, seen) = server(200, None).await; // listening on 127.0.0.1
-    let client = guarded_client(AddressPolicy::Public).unwrap();
+    let http = GuardedHttp::new(AddressPolicy::Public).unwrap();
     for url in [
         url_for(addr, "/"),
         "http://169.254.169.254/latest/meta-data".parse().unwrap(),
@@ -246,15 +225,9 @@ async fn public_policy_refuses_ip_literals_before_any_request() {
             url,
             secret: "s".into(),
         };
-        let err = deliver(
-            &client,
-            AddressPolicy::Public,
-            &Mailer::Log,
-            &target,
-            &message(),
-        )
-        .await
-        .unwrap_err();
+        let err = deliver(&http, &Mailer::Log, &target, &message())
+            .await
+            .unwrap_err();
         assert!(matches!(err, DeliveryError::Blocked(_)), "{err:?}");
     }
     assert!(seen.requests.lock().unwrap().is_empty());
@@ -274,39 +247,27 @@ impl Lookup for Fixed {
 async fn a_hostname_that_resolves_to_a_private_address_is_refused_at_delivery() {
     let (addr, seen) = server(200, None).await;
     // The lookup says the name is 10.0.0.5; nothing may connect to it (nor to the real server).
-    let client =
-        guarded_client_with(AddressPolicy::Public, Fixed("10.0.0.5".parse().unwrap())).unwrap();
+    let http = GuardedHttp::with_lookup(AddressPolicy::Public, Fixed("10.0.0.5".parse().unwrap()))
+        .unwrap();
     let target = ChannelTarget::Webhook {
         url: format!("http://hooks.example.test:{}/", addr.port())
             .parse()
             .unwrap(),
         secret: "s".into(),
     };
-    let err = deliver(
-        &client,
-        AddressPolicy::Public,
-        &Mailer::Log,
-        &target,
-        &message(),
-    )
-    .await
-    .unwrap_err();
+    let err = deliver(&http, &Mailer::Log, &target, &message())
+        .await
+        .unwrap_err();
     assert!(matches!(err, DeliveryError::Request(_)), "{err:?}");
     assert!(seen.requests.lock().unwrap().is_empty());
 
     // The same name resolving to localhost is just as blocked.
-    let client =
-        guarded_client_with(AddressPolicy::Public, Fixed("127.0.0.1".parse().unwrap())).unwrap();
+    let http = GuardedHttp::with_lookup(AddressPolicy::Public, Fixed("127.0.0.1".parse().unwrap()))
+        .unwrap();
     assert!(
-        deliver(
-            &client,
-            AddressPolicy::Public,
-            &Mailer::Log,
-            &target,
-            &message()
-        )
-        .await
-        .is_err()
+        deliver(&http, &Mailer::Log, &target, &message())
+            .await
+            .is_err()
     );
     assert!(seen.requests.lock().unwrap().is_empty());
 }
@@ -315,20 +276,14 @@ async fn a_hostname_that_resolves_to_a_private_address_is_refused_at_delivery() 
 async fn a_redirect_is_an_error_and_is_never_followed() {
     let (inner, inner_seen) = server(200, None).await;
     let (outer, outer_seen) = server(302, Some(format!("http://{inner}/internal"))).await;
-    let client = guarded_client(AddressPolicy::AllowPrivate).unwrap();
+    let http = GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap();
     let target = ChannelTarget::Webhook {
         url: url_for(outer, "/hook"),
         secret: "s".into(),
     };
-    let err = deliver(
-        &client,
-        AddressPolicy::AllowPrivate,
-        &Mailer::Log,
-        &target,
-        &message(),
-    )
-    .await
-    .unwrap_err();
+    let err = deliver(&http, &Mailer::Log, &target, &message())
+        .await
+        .unwrap_err();
     assert!(
         matches!(err, DeliveryError::Status { status: 302, .. }),
         "{err:?}"
@@ -375,102 +330,187 @@ fn targets_round_trip_through_json_by_kind() {
 
 mod validate {
     use codoseo_core::crawl::AddressPolicy::{AllowPrivate, Public};
-    use codoseo_notify::deliver::{ChannelKind, validate_target};
+    use codoseo_notify::deliver::{ChannelKind, GuardedHttp};
 
-    fn ok(kind: ChannelKind, url: &str, policy: codoseo_core::crawl::AddressPolicy) -> bool {
-        validate_target(kind, url, policy).is_ok()
+    use codoseo_notify::TargetError;
+
+    use super::Fixed;
+
+    /// Names resolve to a public address, so only the rules under test decide.
+    async fn ok(kind: ChannelKind, url: &str, policy: codoseo_core::crawl::AddressPolicy) -> bool {
+        resolving_to("93.184.216.34", policy)
+            .validate_target(kind, url)
+            .await
+            .is_ok()
     }
 
-    #[test]
-    fn slack_must_be_hooks_slack_com_over_https() {
-        assert!(ok(
-            ChannelKind::Slack,
-            "https://hooks.slack.com/services/T0/B0/xyz",
-            Public
-        ));
-        assert!(!ok(
-            ChannelKind::Slack,
-            "https://example.com/services/T0/B0/xyz",
-            Public
-        ));
-        assert!(!ok(
-            ChannelKind::Slack,
-            "http://hooks.slack.com/services/T0/B0/xyz",
-            Public
-        ));
-        assert!(!ok(
-            ChannelKind::Slack,
-            "https://hooks.slack.com.evil.test/services/x",
-            Public
-        ));
-        assert!(!ok(ChannelKind::Slack, "https://hooks.slack.com/", Public));
-        assert!(!ok(ChannelKind::Slack, "not a url", Public));
-        assert!(!ok(
-            ChannelKind::Slack,
-            "https://example.com/x",
-            AllowPrivate
-        ));
+    fn resolving_to(ip: &str, policy: codoseo_core::crawl::AddressPolicy) -> GuardedHttp {
+        GuardedHttp::with_lookup(policy, Fixed(ip.parse().unwrap())).unwrap()
     }
 
-    #[test]
-    fn discord_must_be_a_discord_webhook_url() {
-        assert!(ok(
-            ChannelKind::Discord,
-            "https://discord.com/api/webhooks/1/abc",
-            Public
-        ));
-        assert!(ok(
-            ChannelKind::Discord,
-            "https://discordapp.com/api/webhooks/1/abc",
-            Public
-        ));
-        assert!(!ok(
-            ChannelKind::Discord,
-            "https://discord.com/other/1/abc",
-            Public
-        ));
-        assert!(!ok(
-            ChannelKind::Discord,
-            "https://discord.com.evil.test/api/webhooks/1/abc",
-            Public
-        ));
+    #[tokio::test]
+    async fn slack_must_be_hooks_slack_com_over_https() {
+        assert!(
+            ok(
+                ChannelKind::Slack,
+                "https://hooks.slack.com/services/T0/B0/xyz",
+                Public
+            )
+            .await
+        );
+        assert!(
+            !ok(
+                ChannelKind::Slack,
+                "https://example.com/services/T0/B0/xyz",
+                Public
+            )
+            .await
+        );
+        assert!(
+            !ok(
+                ChannelKind::Slack,
+                "http://hooks.slack.com/services/T0/B0/xyz",
+                Public
+            )
+            .await
+        );
+        assert!(
+            !ok(
+                ChannelKind::Slack,
+                "https://hooks.slack.com.evil.test/services/x",
+                Public
+            )
+            .await
+        );
+        assert!(!ok(ChannelKind::Slack, "https://hooks.slack.com/", Public).await);
+        assert!(!ok(ChannelKind::Slack, "not a url", Public).await);
+        assert!(!ok(ChannelKind::Slack, "https://example.com/x", AllowPrivate).await);
     }
 
-    #[test]
-    fn a_webhook_is_https_and_public_unless_self_hosted() {
-        assert!(ok(ChannelKind::Webhook, "https://example.com/hook", Public));
-        assert!(!ok(ChannelKind::Webhook, "http://example.com/hook", Public));
-        assert!(ok(
-            ChannelKind::Webhook,
-            "http://localhost:8080/hook",
-            AllowPrivate
-        ));
-        assert!(!ok(
-            ChannelKind::Webhook,
-            "ftp://example.com/hook",
-            AllowPrivate
-        ));
+    #[tokio::test]
+    async fn discord_must_be_a_discord_webhook_url() {
+        assert!(
+            ok(
+                ChannelKind::Discord,
+                "https://discord.com/api/webhooks/1/abc",
+                Public
+            )
+            .await
+        );
+        assert!(
+            ok(
+                ChannelKind::Discord,
+                "https://discordapp.com/api/webhooks/1/abc",
+                Public
+            )
+            .await
+        );
+        assert!(
+            !ok(
+                ChannelKind::Discord,
+                "https://discord.com/other/1/abc",
+                Public
+            )
+            .await
+        );
+        assert!(
+            !ok(
+                ChannelKind::Discord,
+                "https://discord.com.evil.test/api/webhooks/1/abc",
+                Public
+            )
+            .await
+        );
     }
 
-    #[test]
-    fn the_cloud_guard_applies_to_every_kind() {
+    #[tokio::test]
+    async fn a_webhook_is_https_and_public_unless_self_hosted() {
+        assert!(ok(ChannelKind::Webhook, "https://example.com/hook", Public).await);
+        assert!(!ok(ChannelKind::Webhook, "http://example.com/hook", Public).await);
+        assert!(
+            ok(
+                ChannelKind::Webhook,
+                "http://localhost:8080/hook",
+                AllowPrivate
+            )
+            .await
+        );
+        assert!(!ok(ChannelKind::Webhook, "ftp://example.com/hook", AllowPrivate).await);
+    }
+
+    #[tokio::test]
+    async fn the_cloud_guard_applies_to_every_kind() {
         for url in [
             "https://169.254.169.254/latest/meta-data",
             "https://127.0.0.1/hook",
             "https://[::1]/hook",
             "https://10.0.0.5/hook",
         ] {
-            assert!(!ok(ChannelKind::Webhook, url, Public), "{url}");
+            assert!(!ok(ChannelKind::Webhook, url, Public).await, "{url}");
         }
-        assert!(ok(
-            ChannelKind::Webhook,
-            "https://10.0.0.5/hook",
-            AllowPrivate
-        ));
+        assert!(ok(ChannelKind::Webhook, "https://10.0.0.5/hook", AllowPrivate).await);
     }
 
-    #[test]
-    fn email_is_not_a_url_channel() {
-        assert!(!ok(ChannelKind::Email, "https://example.com", Public));
+    #[tokio::test]
+    async fn email_is_not_a_url_channel() {
+        assert!(!ok(ChannelKind::Email, "https://example.com", Public).await);
+    }
+
+    #[tokio::test]
+    async fn a_host_name_is_resolved_at_save_time_under_public() {
+        for (name, ip) in [
+            ("hooks.example.test", "10.0.0.5"),
+            ("hooks.example.test", "169.254.169.254"),
+            ("localhost", "127.0.0.1"),
+        ] {
+            let http = resolving_to(ip, Public);
+            let err = http
+                .validate_target(ChannelKind::Webhook, &format!("https://{name}/hook"))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, TargetError::Blocked(_)),
+                "{name} -> {ip}: {err:?}"
+            );
+        }
+        // The real system resolver refuses localhost too: it only resolves to loopback.
+        let http = GuardedHttp::new(Public).unwrap();
+        assert!(
+            http.validate_target(ChannelKind::Webhook, "https://localhost/hook")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_that_does_not_resolve_is_refused_at_save_time() {
+        struct Nothing;
+        impl codoseo_crawler::guard::Lookup for Nothing {
+            async fn lookup(&self, _host: &str) -> std::io::Result<Vec<std::net::IpAddr>> {
+                Err(std::io::Error::other("no such host"))
+            }
+        }
+        let http = GuardedHttp::with_lookup(Public, Nothing).unwrap();
+        assert!(
+            http.validate_target(ChannelKind::Webhook, "https://nope.example.test/hook")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_same_names_are_fine_when_self_hosted() {
+        let http = resolving_to("10.0.0.5", AllowPrivate);
+        assert!(
+            http.validate_target(ChannelKind::Webhook, "https://hooks.example.test/hook")
+                .await
+                .is_ok()
+        );
+        let http = resolving_to("127.0.0.1", AllowPrivate);
+        assert!(
+            http.validate_target(ChannelKind::Webhook, "https://localhost/hook")
+                .await
+                .is_ok()
+        );
     }
 }

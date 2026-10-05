@@ -18,6 +18,8 @@ pub enum ChannelError {
     Decrypt(#[from] CryptoError),
     #[error("the stored target is damaged: {0}")]
     Target(#[from] TargetError),
+    #[error("unknown channel kind {0:?}")]
+    UnknownKind(String),
 }
 
 /// A channel as the settings page shows it. `target` is display-safe: the address for email, the
@@ -71,8 +73,8 @@ fn decrypt_target(
     Ok(ChannelTarget::from_json(kind, &json)?)
 }
 
-fn kind_of(slug: &str) -> ChannelKind {
-    ChannelKind::parse(slug).unwrap_or(ChannelKind::Email)
+fn kind_of(slug: &str) -> Result<ChannelKind, ChannelError> {
+    ChannelKind::parse(slug).ok_or_else(|| ChannelError::UnknownKind(slug.to_owned()))
 }
 
 fn short_error(error: &str) -> String {
@@ -111,7 +113,7 @@ pub async fn list_for_account(
     pool: &PgPool,
     key: &ChannelKey,
     account_id: Uuid,
-) -> Result<Vec<ChannelSummary>, sqlx::Error> {
+) -> Result<Vec<ChannelSummary>, ChannelError> {
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT id, kind::text AS kind, name, target_encrypted, enabled, muted, is_default, \
                 last_error, last_failure_at, consecutive_failures, created_at \
@@ -121,13 +123,12 @@ pub async fn list_for_account(
     .bind(account_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
+    rows.into_iter()
         .map(|r| {
-            let kind = kind_of(&r.kind);
+            let kind = kind_of(&r.kind)?;
             let target = decrypt_target(key, kind, &r.target_encrypted)
                 .map_or_else(|_| "(unreadable)".to_owned(), |t| t.display());
-            ChannelSummary {
+            Ok(ChannelSummary {
                 id: r.id,
                 kind,
                 name: r.name,
@@ -139,9 +140,9 @@ pub async fn list_for_account(
                 last_failure_at: r.last_failure_at,
                 consecutive_failures: r.consecutive_failures,
                 created_at: r.created_at,
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// The decrypted target, to deliver to. `None` when the channel doesn't exist.
@@ -155,7 +156,7 @@ pub async fn get_target(
             .bind(id)
             .fetch_optional(pool)
             .await?;
-    row.map(|(kind, bytes)| decrypt_target(key, kind_of(&kind), &bytes))
+    row.map(|(kind, bytes)| decrypt_target(key, kind_of(&kind)?, &bytes))
         .transpose()
 }
 
@@ -288,4 +289,18 @@ pub async fn disable(pool: &PgPool, id: Uuid, error: &str) -> Result<(), sqlx::E
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_kind_is_an_error_not_email() {
+        assert_eq!(kind_of("slack").unwrap(), ChannelKind::Slack);
+        assert!(matches!(
+            kind_of("pagerduty"),
+            Err(ChannelError::UnknownKind(k)) if k == "pagerduty"
+        ));
+    }
 }

@@ -5,6 +5,9 @@
 //! and internal addresses, no redirects (a public URL that 302s to `localhost` is an error, never
 //! followed), no proxy, and a 10 second timeout.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use codoseo_core::crawl::AddressPolicy;
@@ -12,7 +15,7 @@ use codoseo_crawler::guard::{GuardError, GuardedResolver, Lookup, SystemLookup, 
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use url::Url;
+use url::{Host, Url};
 
 use crate::email::{MailError, Mailer};
 use crate::message::{self, AlertMessage};
@@ -138,15 +141,9 @@ pub enum TargetError {
     Blocked(#[from] GuardError),
 }
 
-/// Checks a URL a user wants to save as a channel target: Slack must be
-/// `https://hooks.slack.com/...`, Discord `https://discord.com/api/webhooks/...` (or
-/// `discordapp.com`), a webhook any `https` URL (plain `http` only under `AllowPrivate`); then
-/// the address guard. The same guard runs again at delivery.
-pub fn validate_target(
-    kind: ChannelKind,
-    url: &str,
-    policy: AddressPolicy,
-) -> Result<Url, TargetError> {
+/// The synchronous part of save-time validation: the URL's shape for the channel kind, and the
+/// guard's check of IP literals. Host names are resolved by [`GuardedHttp::validate_target`].
+fn check_shape(kind: ChannelKind, url: &str, policy: AddressPolicy) -> Result<Url, TargetError> {
     let bad = |msg: &str| TargetError::Invalid(msg.to_owned());
     let url = Url::parse(url.trim()).map_err(|_| bad("that doesn't look like a web address"))?;
     let has_host = |hosts: &[&str]| url.host_str().is_some_and(|h| hosts.contains(&h));
@@ -196,27 +193,73 @@ pub enum DeliveryError {
     Mail(#[from] MailError),
 }
 
-/// The client HTTP channels are delivered with, resolving names through the system resolver.
-/// Build it once and keep it. `Public` drops private and internal addresses from DNS answers;
-/// `AllowPrivate` (self-hosted) resolves normally.
-pub fn guarded_client(policy: AddressPolicy) -> Result<reqwest::Client, reqwest::Error> {
-    guarded_client_with(policy, SystemLookup)
+type HostCheck =
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<(), GuardError>> + Send>> + Send + Sync;
+
+/// The HTTP side of delivery: a client plus the address policy it was built for, so the two can't
+/// drift apart. Build it once per process and keep it (the job context, the web settings page).
+///
+/// The client uses the guarded DNS resolver under `Public` (private and internal addresses are
+/// dropped from answers), never follows redirects, ignores proxy settings and times out after
+/// 10 seconds. `AllowPrivate` (self-hosted) resolves normally.
+#[derive(Clone)]
+pub struct GuardedHttp {
+    client: reqwest::Client,
+    policy: AddressPolicy,
+    host_check: Arc<HostCheck>,
 }
 
-/// [`guarded_client`] with another resolver (tests resolve names to chosen addresses).
-pub fn guarded_client_with<L: Lookup>(
-    policy: AddressPolicy,
-    lookup: L,
-) -> Result<reqwest::Client, reqwest::Error> {
-    let mut builder = reqwest::Client::builder()
-        .redirect(Policy::none())
-        .timeout(TIMEOUT)
-        .user_agent("CodoSEO-Notify")
-        .no_proxy();
-    if policy == AddressPolicy::Public {
-        builder = builder.dns_resolver(GuardedResolver::new(lookup));
+impl GuardedHttp {
+    /// Resolves names through the system resolver.
+    pub fn new(policy: AddressPolicy) -> Result<GuardedHttp, reqwest::Error> {
+        GuardedHttp::with_lookup(policy, SystemLookup)
     }
-    builder.build()
+
+    /// [`GuardedHttp::new`] with another resolver (tests resolve names to chosen addresses).
+    pub fn with_lookup<L: Lookup>(
+        policy: AddressPolicy,
+        lookup: L,
+    ) -> Result<GuardedHttp, reqwest::Error> {
+        let resolver = Arc::new(GuardedResolver::new(lookup));
+        let mut builder = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .timeout(TIMEOUT)
+            .user_agent("CodoSEO-Notify")
+            .no_proxy();
+        if policy == AddressPolicy::Public {
+            builder = builder.dns_resolver(Arc::clone(&resolver));
+        }
+        let checker = Arc::clone(&resolver);
+        let host_check: Arc<HostCheck> = Arc::new(move |host: String| {
+            let checker = Arc::clone(&checker);
+            Box::pin(async move { checker.lookup_checked(&host).await.map(|_| ()) })
+        });
+        Ok(GuardedHttp {
+            client: builder.build()?,
+            policy,
+            host_check,
+        })
+    }
+
+    pub fn policy(&self) -> AddressPolicy {
+        self.policy
+    }
+
+    /// Checks a URL a user wants to save as a channel target: Slack must be
+    /// `https://hooks.slack.com/...`, Discord `https://discord.com/api/webhooks/...` (or
+    /// `discordapp.com`), a webhook any `https` URL (plain `http` only under `AllowPrivate`).
+    /// Then the address guard: IP literals are checked, and under `Public` a host name is
+    /// resolved and refused when it only resolves to private or internal addresses (or doesn't
+    /// resolve at all). The same guard runs again at delivery.
+    pub async fn validate_target(&self, kind: ChannelKind, url: &str) -> Result<Url, TargetError> {
+        let url = check_shape(kind, url, self.policy)?;
+        if self.policy == AddressPolicy::Public
+            && let Some(Host::Domain(host)) = url.host()
+        {
+            (self.host_check)(host.to_owned()).await?;
+        }
+        Ok(url)
+    }
 }
 
 fn unix_now() -> u64 {
@@ -225,37 +268,34 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Delivers `msg` to one channel. `http` must come from [`guarded_client`] (a plain client would
-/// skip the DNS guard); `policy` is the same policy it was built with. The URL is checked first.
+/// Delivers `msg` to one channel. HTTP channels check the URL with the address guard first, then
+/// post through `http`'s guarded client.
 pub async fn deliver(
-    http: &reqwest::Client,
-    policy: AddressPolicy,
+    http: &GuardedHttp,
     mailer: &Mailer,
     target: &ChannelTarget,
     msg: &AlertMessage,
 ) -> Result<(), DeliveryError> {
     match target {
         ChannelTarget::Email { to } => Ok(mailer.send(message::email(msg, to)).await?),
-        ChannelTarget::Slack { url } => post(http, policy, url, &slack::payload(msg), None).await,
-        ChannelTarget::Discord { url } => {
-            post(http, policy, url, &discord::payload(msg), None).await
-        }
+        ChannelTarget::Slack { url } => post(http, url, &slack::payload(msg), None).await,
+        ChannelTarget::Discord { url } => post(http, url, &discord::payload(msg), None).await,
         ChannelTarget::Webhook { url, secret } => {
-            post(http, policy, url, &webhook::payload(msg), Some(secret)).await
+            post(http, url, &webhook::payload(msg), Some(secret)).await
         }
     }
 }
 
 async fn post(
-    http: &reqwest::Client,
-    policy: AddressPolicy,
+    http: &GuardedHttp,
     url: &Url,
     payload: &Value,
     sign_with: Option<&str>,
 ) -> Result<(), DeliveryError> {
-    check_url(url, policy)?;
+    check_url(url, http.policy)?;
     let body = serde_json::to_vec(payload).expect("a JSON value always serializes");
     let mut request = http
+        .client
         .post(url.clone())
         .header(reqwest::header::CONTENT_TYPE, "application/json");
     if let Some(secret) = sign_with {

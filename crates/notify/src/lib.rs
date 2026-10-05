@@ -10,9 +10,6 @@ pub mod slack;
 pub mod webhook;
 
 pub use crypto::{ChannelKey, CryptoError};
-pub use deliver::{
-    ChannelKind, ChannelTarget, DeliveryError, TargetError, deliver, guarded_client,
-    validate_target,
-};
+pub use deliver::{ChannelKind, ChannelTarget, DeliveryError, GuardedHttp, TargetError, deliver};
 pub use email::{Email, MailError, Mailer};
 pub use message::{AlertItem, AlertKind, AlertMessage};
