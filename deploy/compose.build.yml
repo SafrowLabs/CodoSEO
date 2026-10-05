@@ -1,0 +1,8 @@
+# Override for building the image from this checkout instead of pulling it:
+#
+#   docker compose -f compose.selfhost.yml -f compose.build.yml up -d --build
+services:
+  codoseo:
+    build:
+      context: ..
+      dockerfile: Dockerfile

@@ -1,0 +1,48 @@
+# documentation: https://github.com/SafrowLabs/codoSEO/blob/main/docs/deploy-coolify.md
+# slogan: Know the moment your SEO breaks. A fast, polite SEO crawler and site auditor with alerts.
+# category: monitoring
+# tags: seo,crawler,audit,monitoring,alerts,mcp
+# logo: svgs/codoseo.svg
+# port: 8080
+
+services:
+  codoseo:
+    image: ghcr.io/safrowlabs/codoseo:latest
+    command: ["all"]
+    environment:
+      # Coolify assigns the domain and routes it to container port 8080.
+      - SERVICE_FQDN_CODOSEO_8080
+      - CODOSEO_MODE=selfhost
+      - BASE_URL=${SERVICE_URL_CODOSEO}
+      - SECRET_KEY=${SERVICE_BASE64_64_SECRETKEY}
+      - DATABASE_URL=postgres://codoseo:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/codoseo
+      # Optional settings: fill them in under the service's environment variables.
+      - SMTP_URL=${SMTP_URL:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - RETENTION_DAYS_SELFHOST=${RETENTION_DAYS_SELFHOST:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/codoseo", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=codoseo
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DB=codoseo
+    volumes:
+      - codoseo-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codoseo -d codoseo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

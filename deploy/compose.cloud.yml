@@ -1,0 +1,94 @@
+# CodoSEO as two containers from one image, against a Postgres you run elsewhere:
+#
+#   migrate   one-shot: applies pending migrations, then exits
+#   web       the web app and API, behind your reverse proxy (port 8080, no host binding)
+#   worker    claims crawls from the Postgres queue and runs them
+#
+# Deploy order: `migrate` first, then web and worker; depends_on enforces it, so a plain
+# `docker compose up -d` (or a Coolify redeploy) does the right thing.
+#
+# The database and its roles are not part of this file: see postgres-role.sql. Variables are
+# documented in .env.example. Limits below suit a small shared VPS; raise them for more load.
+
+name: codoseo-cloud
+
+x-image: &image ${CODOSEO_IMAGE:-ghcr.io/safrowlabs/codoseo}:${CODOSEO_VERSION:-latest}
+
+# Settings every long-running role reads. Empty values are treated as unset by the app.
+x-app-env: &app-env
+  CODOSEO_MODE: cloud
+  BASE_URL: ${BASE_URL:?set BASE_URL (the public https URL)}
+  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (openssl rand -hex 32)}
+  SMTP_URL: ${SMTP_URL:?set SMTP_URL}
+  MAIL_FROM: ${MAIL_FROM:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+  TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+  ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+  RANKORG_URL: ${RANKORG_URL:-}
+  CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+  CODOSEO_BOT_IP: ${CODOSEO_BOT_IP:-}
+  MCP_SHARED_CLIENTS: ${MCP_SHARED_CLIENTS:-}
+  MCP_ANON_DAILY_AUDITS: ${MCP_ANON_DAILY_AUDITS:-}
+  MCP_ANON_DAILY_EMAILS: ${MCP_ANON_DAILY_EMAILS:-}
+  DODO_ENV: ${DODO_ENV:-}
+  DODO_API_KEY: ${DODO_API_KEY:-}
+  DODO_API_URL: ${DODO_API_URL:-}
+  DODO_WEBHOOK_SECRET: ${DODO_WEBHOOK_SECRET:-}
+  DODO_PRODUCT_PRO: ${DODO_PRODUCT_PRO:-}
+  DODO_PRODUCT_AGENCY: ${DODO_PRODUCT_AGENCY:-}
+  SCHEDULER_HEARTBEAT_URL: ${SCHEDULER_HEARTBEAT_URL:-}
+  CODOSEO_SCHEDULER: ${CODOSEO_SCHEDULER:-}
+
+services:
+  migrate:
+    image: *image
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      # Migrations create objects, so they run as the owning role (codoseo).
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (postgres://codoseo:...@host:5432/codoseo)}
+    healthcheck:
+      disable: true
+
+  web:
+    image: *image
+    command: ["web"]
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+    # No `ports:`; the reverse proxy (Coolify's Traefik) reaches the container on 8080.
+    expose:
+      - "8080"
+    environment:
+      <<: *app-env
+      # The web role may use a separate, tighter login role (codoseo_web, statement_timeout 5s).
+      DATABASE_URL: ${DATABASE_URL_WEB:-${DATABASE_URL}}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/codoseo", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  worker:
+    image: *image
+    command: ["worker"]
+    restart: unless-stopped
+    # The worker budgets crawl memory as 70% of this limit, so keep it honest.
+    mem_limit: 1536m
+    cpus: 1.5
+    # Lets a running crawl finish its current batch on `docker stop` (the worker drains for 60 s).
+    stop_grace_period: 75s
+    environment:
+      <<: *app-env
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true

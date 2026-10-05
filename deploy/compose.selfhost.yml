@@ -1,0 +1,62 @@
+# CodoSEO, self-hosted: the app (web + worker + scheduler in one process) and its Postgres.
+#
+#   cp .env.example .env      # then set SECRET_KEY and POSTGRES_PASSWORD
+#   docker compose -f compose.selfhost.yml up -d
+#
+# Then open http://localhost:8080 (or the CODOSEO_PORT you chose). To build the image from a
+# source checkout instead of pulling it, add the build override:
+#
+#   docker compose -f compose.selfhost.yml -f compose.build.yml up -d --build
+#
+# Upgrade: bump CODOSEO_VERSION (or pull `latest`) and `up -d` again; the app applies pending
+# migrations on start.
+
+name: codoseo
+
+services:
+  codoseo:
+    # CODOSEO_IMAGE exists so CI and local builds can point at an image that is not on ghcr.io.
+    image: ${CODOSEO_IMAGE:-ghcr.io/safrowlabs/codoseo}:${CODOSEO_VERSION:-latest}
+    command: ["all"]
+    restart: unless-stopped
+    ports:
+      - "${CODOSEO_PORT:-8080}:8080"
+    environment:
+      CODOSEO_MODE: selfhost
+      DATABASE_URL: postgres://codoseo:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/codoseo
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (openssl rand -hex 32)}
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      # Optional: outgoing mail for sign-in links and alerts. Unset, mail is only logged.
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      RETENTION_DAYS_SELFHOST: ${RETENTION_DAYS_SELFHOST:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/codoseo", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: codoseo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: codoseo
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codoseo -d codoseo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db-data:
