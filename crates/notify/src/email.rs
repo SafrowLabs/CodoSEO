@@ -3,6 +3,7 @@
 //! the SMTP mailer sends through `SMTP_URL`; tests capture messages.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use lettre::message::{Mailbox, MultiPart};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
@@ -30,10 +31,15 @@ pub enum MailError {
     Send(String),
 }
 
+/// How long one SMTP connect or command may take before the send fails (and the job retries).
+/// lettre's own default is 60 s, long enough to hold the single job runner on a hung server.
+pub const SMTP_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// A configured SMTP connection.
 pub struct SmtpMailer {
     transport: AsyncSmtpTransport<Tokio1Executor>,
     from: Mailbox,
+    timeout: Duration,
 }
 
 #[derive(Clone, Default)]
@@ -57,6 +63,15 @@ impl Mailer {
     /// no URL means the log mailer. `from` is the `MAIL_FROM` sender, e.g.
     /// `CodoSEO <hello@codoseo.com>`.
     pub fn from_config(smtp_url: Option<&str>, from: &str) -> Result<Mailer, MailError> {
+        Mailer::from_config_with_timeout(smtp_url, from, SMTP_TIMEOUT)
+    }
+
+    /// [`from_config`](Self::from_config) with an explicit connect/command timeout.
+    fn from_config_with_timeout(
+        smtp_url: Option<&str>,
+        from: &str,
+        timeout: Duration,
+    ) -> Result<Mailer, MailError> {
         let from: Mailbox = from
             .parse()
             .map_err(|e| MailError::Config(format!("MAIL_FROM is invalid: {e}")))?;
@@ -65,8 +80,13 @@ impl Mailer {
         };
         let transport = AsyncSmtpTransport::<Tokio1Executor>::from_url(url)
             .map_err(|e| MailError::Config(format!("SMTP_URL is invalid: {e}")))?
+            .timeout(Some(timeout))
             .build();
-        Ok(Mailer::Smtp(Arc::new(SmtpMailer { transport, from })))
+        Ok(Mailer::Smtp(Arc::new(SmtpMailer {
+            transport,
+            from,
+            timeout,
+        })))
     }
 
     pub async fn send(&self, email: Email) -> Result<(), MailError> {
@@ -86,11 +106,15 @@ impl Mailer {
             }
             Mailer::Smtp(smtp) => {
                 let message = build_message(&smtp.from, &email)?;
-                smtp.transport
-                    .send(message)
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| MailError::Send(e.to_string()))
+                // lettre's timeout bounds only the TCP connect; a server that accepts and then
+                // goes quiet would hold the job runner, so the whole send gets the same limit.
+                match tokio::time::timeout(smtp.timeout, smtp.transport.send(message)).await {
+                    Ok(sent) => sent.map(|_| ()).map_err(|e| MailError::Send(e.to_string())),
+                    Err(_) => Err(MailError::Send(format!(
+                        "the SMTP server did not answer within {} seconds",
+                        smtp.timeout.as_secs()
+                    ))),
+                }
             }
         }
     }
@@ -126,6 +150,33 @@ mod tests {
             text: "plain body".into(),
             html: html.map(str::to_owned),
         }
+    }
+
+    #[tokio::test]
+    async fn a_server_that_never_answers_fails_the_send_within_the_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accepts and then says nothing, like a hung server.
+        let _server = tokio::spawn(async move {
+            let _held = listener.accept().await;
+            std::future::pending::<()>().await;
+        });
+        let mailer = Mailer::from_config_with_timeout(
+            Some(&format!("smtp://127.0.0.1:{port}")),
+            "CodoSEO <hello@codoseo.com>",
+            Duration::from_millis(300),
+        )
+        .unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(5), mailer.send(email(None))).await;
+        assert!(
+            matches!(outcome, Ok(Err(MailError::Send(_)))),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn the_default_timeout_is_twenty_seconds() {
+        assert_eq!(SMTP_TIMEOUT, Duration::from_secs(20));
     }
 
     fn from() -> Mailbox {

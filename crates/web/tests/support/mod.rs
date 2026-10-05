@@ -376,6 +376,7 @@ pub fn cloud_config_with(extra: &[(&str, &str)]) -> Config {
         "CODOSEO_MODE" => Some("cloud".into()),
         "BASE_URL" => Some("https://codoseo.com".into()),
         "SECRET_KEY" => Some("test-secret".into()),
+        "SMTP_URL" => Some("smtp://127.0.0.1:2525".into()),
         other => extra
             .iter()
             .find(|(n, _)| n == other)

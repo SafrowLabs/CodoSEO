@@ -17,10 +17,27 @@ pub struct WebArgs {
     pub bind: Option<SocketAddr>,
 }
 
+/// The warning for a process running on the built-in development `SECRET_KEY`, if it is.
+/// Every role that stores or reads channel secrets prints it at startup.
+pub fn secret_key_warning(secret_key_set: bool) -> Option<&'static str> {
+    (!secret_key_set).then_some(
+        "warning: SECRET_KEY is not set; using the built-in development key. Set it so \
+         stored channel secrets are protected.",
+    )
+}
+
+/// Prints [`secret_key_warning`] for this process's environment.
+pub fn warn_if_dev_secret_key() {
+    if let Some(warning) = secret_key_warning(std::env::var("SECRET_KEY").is_ok()) {
+        eprintln!("{warning}");
+    }
+}
+
 /// Reads the web configuration and opens a lazy pool, so the web role starts (and serves its
 /// 503 page) even while Postgres is down.
 pub fn prepare(bind: Option<SocketAddr>) -> Result<AppState, CliError> {
     let mut config = Config::from_env().map_err(|e| CliError::msg(e.to_string()))?;
+    warn_if_dev_secret_key();
     if let Some(bind) = bind {
         config.bind = bind;
         if std::env::var("BASE_URL").is_err() {
@@ -95,4 +112,19 @@ pub async fn run(args: WebArgs) -> Outcome {
         let _ = scheduler.await;
     }
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_development_key_is_warned_about_only_when_secret_key_is_unset() {
+        assert!(
+            secret_key_warning(false)
+                .unwrap()
+                .contains("SECRET_KEY is not set")
+        );
+        assert_eq!(secret_key_warning(true), None);
+    }
 }

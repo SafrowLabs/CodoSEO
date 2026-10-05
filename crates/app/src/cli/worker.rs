@@ -10,7 +10,7 @@ use crate::worker::{
     DEFAULT_MEMORY_BUDGET, address_policy_from_env, requeue_stale_sweep, worker_loop,
 };
 
-use super::web::mailer_for;
+use super::web::{mailer_for, warn_if_dev_secret_key};
 use super::{CliError, EXIT_OK, Outcome};
 
 #[derive(Debug, Args)]
@@ -26,12 +26,7 @@ pub async fn run(_args: WorkerArgs) -> Outcome {
     // The same SMTP_URL, MAIL_FROM, SECRET_KEY, BASE_URL and CODOSEO_MODE the web role reads.
     // SECRET_KEY and BASE_URL are required in the cloud; elsewhere the dev defaults apply.
     let config = codoseo_web::Config::from_env().map_err(|e| CliError::msg(e.to_string()))?;
-    if std::env::var("SECRET_KEY").is_err() {
-        eprintln!(
-            "warning: SECRET_KEY is not set; using the built-in development key. Set it so \
-             stored channel secrets are protected."
-        );
-    }
+    warn_if_dev_secret_key();
     let jobs = JobContext::from_config(pool.clone(), mailer_for(&config)?, &config);
 
     let crawl_queue = CrawlQueue::new(pool.clone());
