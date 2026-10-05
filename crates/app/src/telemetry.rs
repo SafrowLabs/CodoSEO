@@ -28,7 +28,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
 
-/// The log filter when `RUST_LOG` is unset: info, with the query log of sqlx quieted.
+/// The log filter when `RUST_LOG` is unset or blank: info, with the query log of sqlx quieted.
 pub const DEFAULT_FILTER: &str = "info,sqlx=warn";
 
 /// Seconds a crawl may wait in the queue, in histogram buckets: from an idle queue to a day.
@@ -62,6 +62,17 @@ pub fn log_format(mode: Option<&str>, over: Option<&str>) -> Result<LogFormat, S
 
 pub fn default_filter() -> EnvFilter {
     EnvFilter::new(DEFAULT_FILTER)
+}
+
+/// The filter for the value of `RUST_LOG`: that value when it is set and parses, the default
+/// otherwise. A blank value counts as unset: Compose's `RUST_LOG: ${RUST_LOG:-}` hands the
+/// container an empty string, which would otherwise parse to no directives (errors only).
+pub fn env_filter(rust_log: Option<&str>) -> EnvFilter {
+    rust_log
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .and_then(|v| EnvFilter::try_new(v).ok())
+        .unwrap_or_else(default_filter)
 }
 
 /// A subscriber printing in `format` to `writer`, filtered by `filter`. Colour is left to the
@@ -165,7 +176,7 @@ pub fn init_logging() -> Telemetry {
         Ok(guard) => (guard, None),
         Err(e) => (None, Some(e)),
     };
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| default_filter());
+    let filter = env_filter(std::env::var("RUST_LOG").ok().as_deref());
     let ansi = format == LogFormat::Text && std::io::stderr().is_terminal();
     let subscriber = subscriber_with_ansi(format, filter, std::io::stderr, ansi);
     if tracing::subscriber::set_global_default(subscriber).is_ok() {

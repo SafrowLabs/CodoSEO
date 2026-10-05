@@ -631,3 +631,36 @@ async fn a_failed_warning_is_reset_for_active_accounts_but_not_paused_ones() {
     );
     assert!(warned_at(&db, delivered).await.is_some());
 }
+
+/// The web-hosted scheduler runs this under the web role's short statement_timeout. On a pool
+/// whose sessions have a 1 s limit and an `events` table locked for 2 s, it must still finish:
+/// it lifts the limit for its own transaction.
+#[tokio::test]
+async fn active_after_4_weeks_outlasts_a_short_statement_timeout() {
+    use sqlx::postgres::PgPoolOptions;
+
+    let db = TestDb::new().await;
+    let options = (*db.pool.connect_options())
+        .clone()
+        .options([("statement_timeout", "1000")]);
+    let limited = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await
+        .unwrap();
+    let mut lock = db.pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE events IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+        lock.commit().await.unwrap();
+    });
+    let written =
+        codoseo_store::schedule::record_active_after_4_weeks(&limited, OffsetDateTime::now_utc())
+            .await
+            .expect("not cut off by statement_timeout");
+    release.await.unwrap();
+    assert_eq!(written, 0);
+}

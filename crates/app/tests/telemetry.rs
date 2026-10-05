@@ -101,6 +101,32 @@ fn a_text_log_line_is_plain_and_the_default_filter_quiets_sqlx() {
     );
 }
 
+/// Compose passes `RUST_LOG: ${RUST_LOG:-}`, so an unset host variable arrives as an empty
+/// string; that must mean the default filter, not "no directives" (errors only).
+#[test]
+fn a_blank_rust_log_means_the_default_filter() {
+    for value in [None, Some(""), Some("   ")] {
+        let out = Capture::default();
+        let subscriber =
+            telemetry::subscriber(LogFormat::Text, telemetry::env_filter(value), out.clone());
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "sqlx::query", "noisy statement");
+            tracing::info!("worker started");
+        });
+        let text = out.text();
+        assert!(text.contains("worker started"), "{value:?}: {text}");
+        assert!(!text.contains("noisy statement"), "{value:?}: {text}");
+    }
+    let out = Capture::default();
+    let subscriber = telemetry::subscriber(
+        LogFormat::Text,
+        telemetry::env_filter(Some("warn")),
+        out.clone(),
+    );
+    tracing::subscriber::with_default(subscriber, || tracing::info!("hidden"));
+    assert!(!out.text().contains("hidden"));
+}
+
 /// Records every metric once through the helpers, into a recorder of its own.
 fn render_all() -> String {
     let recorder = telemetry::build_recorder();
