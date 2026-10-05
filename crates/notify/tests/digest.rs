@@ -170,6 +170,14 @@ fn the_rankorg_line_shows_only_when_there_is_a_link() {
 fn the_email_goes_to_the_account_with_both_parts_and_escapes_html() {
     let mut site = example();
     site.new_issues = vec![("Title <b>bold</b> & more".into(), 1)];
+    // A page URL and values from the crawled site are attacker-controlled text.
+    site.top_changes = vec![change(
+        Severity::Critical,
+        "Title changed",
+        "https://example.com/\"><script>alert(1)</script>",
+        "<img src=x onerror=alert(2)>",
+        "a & b \"quoted\" 'single'",
+    )];
     let email = view(vec![site]).render().unwrap();
     assert_eq!(email.to, "owner@example.com");
     assert!(email.text.contains("Title <b>bold</b> & more"));
@@ -179,5 +187,22 @@ fn the_email_goes_to_the_account_with_both_parts_and_escapes_html() {
         "{html}"
     );
     assert!(!html.contains("<b>bold</b>"));
+    // Hostile page URL, before and after: escaped everywhere in the HTML, raw in the text.
+    assert!(!html.contains("<script>"), "{html}");
+    assert!(!html.contains("<img src=x"), "{html}");
+    assert!(!html.contains("\"><script"), "{html}");
+    assert!(
+        html.contains("&#60;script&#62;alert(1)&#60;/script&#62;"),
+        "{html}"
+    );
+    assert!(
+        html.contains("&#60;img src=x onerror=alert(2)&#62;"),
+        "{html}"
+    );
+    assert!(
+        html.contains("a &#38; b &#34;quoted&#34; &#39;single&#39;"),
+        "{html}"
+    );
+    assert!(email.text.contains("<script>alert(1)</script>"));
     assert!(!html.contains("<img"), "no external images");
 }

@@ -357,3 +357,113 @@ async fn the_examples_are_the_five_most_severe_changes() {
     );
     assert_eq!(w.changes.total(), 8);
 }
+
+#[tokio::test]
+async fn weekly_crawls_with_normal_jitter_still_get_a_baseline() {
+    let db = TestDb::new().await;
+    let s = site(&db.pool).await;
+    // The previous crawl finished 6 days 23 hours 52 minutes before the latest.
+    let gap = 6.0 + 23.0 / 24.0 + 52.0 / 1440.0;
+    let previous = crawl(&db.pool, s, 1.0 + gap, 80, 30, &[("title_too_long", 3)]).await;
+    crawl(&db.pool, s, 1.0, 83, 31, &[]).await;
+    let w = week(&db.pool, s).await.unwrap();
+    assert_eq!(w.baseline.as_ref().unwrap().crawl_id, previous);
+    assert_eq!(w.score_delta(), Some(3));
+    assert_eq!(w.resolved_issues, vec![("title_too_long".to_owned(), 3)]);
+
+    // Six days is the line: a crawl 5 days 23 hours before is only a fallback.
+    let db = TestDb::new().await;
+    let s = site(&db.pool).await;
+    let near = crawl(&db.pool, s, 1.0 + 5.0 + 23.0 / 24.0, 80, 30, &[]).await;
+    let latest = crawl(&db.pool, s, 1.0, 83, 31, &[]).await;
+    let w = week(&db.pool, s).await.unwrap();
+    // In the window, so it is still the fallback baseline.
+    assert_eq!(w.latest.crawl_id, latest);
+    assert_eq!(w.baseline.unwrap().crawl_id, near);
+}
+
+#[tokio::test]
+async fn a_crawl_six_days_back_is_preferred_over_a_nearer_one() {
+    let db = TestDb::new().await;
+    let s = site(&db.pool).await;
+    let six_back = crawl(&db.pool, s, 7.2, 70, 28, &[]).await;
+    crawl(&db.pool, s, 3.0, 75, 29, &[]).await;
+    crawl(&db.pool, s, 1.0, 80, 30, &[]).await;
+    let w = week(&db.pool, s).await.unwrap();
+    assert_eq!(w.baseline.unwrap().crawl_id, six_back);
+}
+
+#[tokio::test]
+async fn an_unreadable_summary_is_not_read_as_no_failing_checks() {
+    // Latest crawl's summary is malformed: the site is skipped.
+    let db = TestDb::new().await;
+    let s = site(&db.pool).await;
+    crawl(&db.pool, s, 8.0, 80, 30, &[("title_too_long", 3)]).await;
+    let latest = crawl(&db.pool, s, 1.0, 83, 31, &[]).await;
+    sqlx::query("UPDATE crawls SET summary = '{\"counts\": \"nope\"}' WHERE id = $1")
+        .bind(latest)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert!(week(&db.pool, s).await.is_none());
+
+    // The baseline's is malformed: no baseline, so no delta and nothing new or resolved.
+    let db = TestDb::new().await;
+    let s = site(&db.pool).await;
+    let old = crawl(&db.pool, s, 8.0, 80, 30, &[("title_too_long", 3)]).await;
+    crawl(&db.pool, s, 1.0, 83, 31, &[("http_5xx", 2)]).await;
+    sqlx::query("UPDATE crawls SET summary = NULL WHERE id = $1")
+        .bind(old)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let w = week(&db.pool, s).await.unwrap();
+    assert!(w.baseline.is_none());
+    assert_eq!(w.score_delta(), None);
+    assert!(w.new_issues.is_empty() && w.resolved_issues.is_empty());
+}
+
+#[tokio::test]
+async fn a_crawls_changes_come_most_severe_first_in_enum_order() {
+    let db = TestDb::new().await;
+    let s = site(&db.pool).await;
+    let c = crawl(&db.pool, s, 1.0, 83, 31, &[]).await;
+    change(
+        &db.pool,
+        c,
+        s,
+        "notice",
+        "https://example.com/n",
+        1.0,
+        false,
+    )
+    .await;
+    change(
+        &db.pool,
+        c,
+        s,
+        "warning",
+        "https://example.com/w",
+        1.0,
+        false,
+    )
+    .await;
+    change(
+        &db.pool,
+        c,
+        s,
+        "critical",
+        "https://example.com/c",
+        1.0,
+        false,
+    )
+    .await;
+    let rows = codoseo_store::reports::changes_for_crawl(&db.pool, c, None, 10)
+        .await
+        .unwrap();
+    let got: Vec<Severity> = rows.iter().map(|r| r.severity).collect();
+    assert_eq!(
+        got,
+        [Severity::Critical, Severity::Warning, Severity::Notice]
+    );
+}

@@ -81,16 +81,15 @@ const CRAWL_COLUMNS: &str = "id, finished_at, health_score, checks_passed, check
 
 #[derive(Deserialize)]
 struct CountsOnly {
-    #[serde(default)]
     counts: Vec<(String, u32)>,
 }
 
+/// Reads a crawl row. `None` when the row is incomplete or its `summary` can't be read: a
+/// missing or malformed summary must not pass for "no failing checks", which would make every
+/// issue look new or resolved.
 fn stats(row: CrawlRow) -> Option<CrawlStats> {
     let (crawl_id, finished_at, score, passed, total, summary) = row;
-    let counts = summary
-        .and_then(|s| serde_json::from_value::<CountsOnly>(s).ok())
-        .map(|c| c.counts)
-        .unwrap_or_default();
+    let counts = serde_json::from_value::<CountsOnly>(summary?).ok()?.counts;
     Some(CrawlStats {
         crawl_id,
         finished_at,
@@ -101,9 +100,13 @@ fn stats(row: CrawlRow) -> Option<CrawlStats> {
     })
 }
 
+/// How long before the latest crawl the baseline must have finished. Weekly crawls drift by
+/// minutes either way, so this is a day short of a week.
+const BASELINE_MIN_GAP: Duration = Duration::days(6);
+
 /// The site's week ending `now`, or `None` when it has no finished crawl yet.
 ///
-/// The baseline is the latest finished crawl at least seven days before the newest one, or,
+/// The baseline is the latest finished crawl at least six days before the newest one, or,
 /// when there is none, the oldest finished crawl inside the last seven days (other than the
 /// newest). The change summary covers all of the last seven days' changes whatever their
 /// `alerted_at`: that column records routing to an instant channel, not a delivery.
@@ -121,20 +124,25 @@ pub async fn site_week(
     .bind(now)
     .fetch_optional(pool)
     .await?;
-    let Some(latest) = latest.and_then(stats) else {
+    let Some(latest_row) = latest else {
+        return Ok(None);
+    };
+    let latest_id = latest_row.0;
+    let Some(latest) = stats(latest_row) else {
+        tracing::warn!(site = %site_id, crawl = %latest_id, "digest: skipping a site whose latest crawl has no readable summary");
         return Ok(None);
     };
 
-    let a_week_before: Option<CrawlRow> = sqlx::query_as(&format!(
+    let six_days_before: Option<CrawlRow> = sqlx::query_as(&format!(
         "SELECT {CRAWL_COLUMNS} AND id <> $2 AND finished_at <= $3 \
          ORDER BY finished_at DESC, created_at DESC LIMIT 1"
     ))
     .bind(site_id)
     .bind(latest.crawl_id)
-    .bind(latest.finished_at - Duration::days(7))
+    .bind(latest.finished_at - BASELINE_MIN_GAP)
     .fetch_optional(pool)
     .await?;
-    let baseline = match a_week_before {
+    let baseline = match six_days_before {
         Some(row) => Some(row),
         None => {
             sqlx::query_as(&format!(
