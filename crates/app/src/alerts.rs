@@ -211,7 +211,7 @@ fn channel_name(kind: ChannelKind) -> &'static str {
 
 /// Phase two: sends the message. A failure is recorded on the channel and returned, so the job
 /// retries with backoff; on the job's `last_attempt` the channel is switched off and the account
-/// is told, once.
+/// is told, once (the account's default email channel only keeps its `last_error`).
 ///
 /// A channel that has been deleted, muted or switched off, or that the plan no longer allows,
 /// is skipped without error: the job is simply done.
@@ -297,7 +297,9 @@ pub async fn deliver_alert(
             channels::record_failure(pool, delivery.channel_id, &error)
                 .await
                 .map_err(db)?;
-            if last_attempt {
+            // The account's own address is never switched off: an SMTP outage would turn off
+            // its only guaranteed channel, and the notice would go through the same mailer.
+            if last_attempt && !state.is_default {
                 turn_off(
                     ctx,
                     delivery.channel_id,

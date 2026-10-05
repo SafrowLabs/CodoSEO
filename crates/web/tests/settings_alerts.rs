@@ -302,6 +302,7 @@ async fn a_webhook_shows_its_signing_secret_once() {
     };
     assert!(secret.len() >= 32, "{secret}");
     assert!(res.body.contains(&secret), "shown on creation");
+    assert_eq!(res.header("cache-control"), Some("no-store"));
 
     let later = app.get("/settings/alerts", Some(&cookie)).await;
     assert!(!later.body.contains(&secret), "never again");
@@ -730,4 +731,77 @@ async fn adding_a_site_turns_on_the_default_rules_for_the_default_email_channel(
             "{kind:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn send_test_is_limited_to_five_a_hour_per_account() {
+    let app = self_hosted().await;
+    let (_, cookie) = app.login("owner@example.com").await;
+    let (_, other_cookie) = app.login("other@example.com").await;
+    app.get("/settings/alerts", Some(&cookie)).await;
+    app.get("/settings/alerts", Some(&other_cookie)).await;
+    let id: Uuid = sqlx::query_scalar(
+        "SELECT c.id FROM alert_channels c JOIN accounts a ON a.id = c.account_id WHERE a.email = 'owner@example.com'",
+    )
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let other: Uuid = sqlx::query_scalar(
+        "SELECT c.id FROM alert_channels c JOIN accounts a ON a.id = c.account_id WHERE a.email = 'other@example.com'",
+    )
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+
+    for n in 1..=5 {
+        let res = app
+            .post_hx(
+                &format!("/settings/alerts/channels/{id}/test"),
+                "",
+                Some(&cookie),
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::OK, "send {n}");
+        assert!(res.body.contains("Sent"));
+    }
+    let res = app
+        .post_hx(
+            &format!("/settings/alerts/channels/{id}/test"),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        res.body.contains("Too many test messages") && res.body.contains("try again in"),
+        "{}",
+        res.body
+    );
+    assert_eq!(app.mail.lock().unwrap().len(), 5, "the sixth sent nothing");
+
+    // Another account has its own allowance.
+    let res = app
+        .post_hx(
+            &format!("/settings/alerts/channels/{other}/test"),
+            "",
+            Some(&other_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+
+    // An hour later the allowance is back.
+    sqlx::query(
+        "UPDATE events SET created_at = now() - interval '61 minutes' WHERE kind = 'channel_test'",
+    )
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let res = app
+        .post_hx(
+            &format!("/settings/alerts/channels/{id}/test"),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
 }

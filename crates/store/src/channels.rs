@@ -54,6 +54,8 @@ pub struct ChannelState {
     pub kind: ChannelKind,
     pub enabled: bool,
     pub muted: bool,
+    /// The account's own email channel.
+    pub is_default: bool,
 }
 
 #[derive(FromRow)]
@@ -223,18 +225,19 @@ pub async fn set_muted(
 /// One channel's owner, kind and switches; `None` when it doesn't exist (deleted since the
 /// delivery job was planned).
 pub async fn state(pool: &PgPool, id: Uuid) -> Result<Option<ChannelState>, ChannelError> {
-    let row: Option<(Uuid, String, bool, bool)> = sqlx::query_as(
-        "SELECT account_id, kind::text, enabled, muted FROM alert_channels WHERE id = $1",
+    let row: Option<(Uuid, String, bool, bool, bool)> = sqlx::query_as(
+        "SELECT account_id, kind::text, enabled, muted, is_default FROM alert_channels WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    row.map(|(account_id, kind, enabled, muted)| {
+    row.map(|(account_id, kind, enabled, muted, is_default)| {
         Ok(ChannelState {
             account_id,
             kind: kind_of(&kind)?,
             enabled,
             muted,
+            is_default,
         })
     })
     .transpose()

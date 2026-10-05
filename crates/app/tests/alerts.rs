@@ -858,3 +858,43 @@ fn notices(w: &World) -> Vec<Email> {
         .filter(|m| m.subject.starts_with("We turned off"))
         .collect()
 }
+
+#[tokio::test]
+async fn the_default_email_channel_is_never_switched_off_by_failures() {
+    let mut w = World::new("pro").await;
+    // Nothing listens on port 9, so every send fails, like an SMTP outage.
+    w.ctx.mailer =
+        Mailer::from_config(Some("smtp://127.0.0.1:9"), "CodoSEO <hello@codoseo.test>").unwrap();
+    let email = w.email_channel().await;
+    w.change(ChangeKind::ErrorSpike, None).await;
+    w.queue
+        .enqueue(JobKind::SendAlert, json!({ "crawl_id": w.crawl }))
+        .await
+        .unwrap();
+
+    for _ in 0..5 {
+        w.drain().await;
+        make_due(w.pool()).await;
+    }
+    w.drain().await;
+
+    let status: String = sqlx::query_scalar(
+        "SELECT status::text FROM jobs WHERE kind = 'send_alert' AND payload->>'channel_id' = $1",
+    )
+    .bind(email.to_string())
+    .fetch_one(w.pool())
+    .await
+    .unwrap();
+    assert_eq!(status, "failed", "the job itself ran out of attempts");
+    let listed = channels::list_for_account(w.pool(), &key(), w.account)
+        .await
+        .unwrap();
+    assert!(listed[0].enabled, "still on");
+    assert!(listed[0].last_error.is_some());
+    assert_eq!(listed[0].consecutive_failures, 5);
+    let notices: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'send_email'")
+        .fetch_one(w.pool())
+        .await
+        .unwrap();
+    assert_eq!(notices, 0, "no notice either");
+}

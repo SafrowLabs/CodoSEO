@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use askama::Template;
 use axum::extract::{Path, State};
-use axum::http::{HeaderName, StatusCode};
+use axum::http::{HeaderName, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
@@ -15,6 +15,7 @@ use codoseo_core::plan::PlanLimits;
 use codoseo_notify::{AlertMessage, ChannelKind, ChannelTarget, deliver};
 use codoseo_store::alert_rules::{self, ALL_KINDS};
 use codoseo_store::channels::{self, ChannelSummary, DeleteOutcome};
+use codoseo_store::events::{self, EventKind};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -27,6 +28,8 @@ use crate::state::AppState;
 
 /// How long "Send test" waits for the channel.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// "Send test" messages per account per hour.
+const TEST_LIMIT: i64 = 5;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -333,10 +336,14 @@ async fn add_channel(
                 )
                 .await?;
                 return Ok((
-                    [(
-                        HeaderName::from_static("hx-replace-url"),
-                        "/settings/alerts",
-                    )],
+                    [
+                        (
+                            HeaderName::from_static("hx-replace-url"),
+                            "/settings/alerts",
+                        ),
+                        // The secret is on this page; nothing may cache it.
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
                     page,
                 )
                     .into_response());
@@ -519,6 +526,24 @@ async fn test_channel(
     Path(id): Path<Uuid>,
 ) -> Result<Response, AppError> {
     owned(&state, &user, id).await?;
+    if let Err(minutes) = events::take_allowance(
+        &state.pool,
+        EventKind::ChannelTest,
+        user.id(),
+        TEST_LIMIT,
+        60,
+    )
+    .await?
+    {
+        let message = format!(
+            "Too many test messages — try again in {minutes} minute{}.",
+            if minutes == 1 { "" } else { "s" }
+        );
+        let page = html(&TestResult {
+            error: Some(message),
+        })?;
+        return Ok((StatusCode::TOO_MANY_REQUESTS, page).into_response());
+    }
     let result =
         |error: Option<String>| html(&TestResult { error }).map(IntoResponse::into_response);
     let target = match channels::get_target(&state.pool, &state.channel_key, id).await {
