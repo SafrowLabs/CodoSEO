@@ -108,10 +108,23 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Redirects(args) => redirects::run(args).await,
         Command::Diff(args) => diff::run(args),
         Command::Mcp(args) => mcp::run(args).await,
-        Command::Migrate(args) => migrate::run(args).await,
-        Command::Worker(args) => worker::run(args).await,
-        Command::Web(args) => web::run(args).await,
-        Command::All(args) => all::run(args).await,
+        // The server roles log through `tracing`; the commands above print only their results.
+        Command::Migrate(args) => {
+            let _telemetry = crate::telemetry::init_logging();
+            migrate::run(args).await
+        }
+        Command::Worker(args) => {
+            let _telemetry = crate::telemetry::init_logging();
+            worker::run(args).await
+        }
+        Command::Web(args) => {
+            let _telemetry = crate::telemetry::init_logging();
+            web::run(args).await
+        }
+        Command::All(args) => {
+            let _telemetry = crate::telemetry::init_logging();
+            all::run(args).await
+        }
         Command::Healthcheck(args) => healthcheck::run(args).await,
     }
 }

@@ -26,6 +26,7 @@ use crate::agent::anon::AnonCaller;
 use crate::agent::auth::{self, ApiCaller};
 use crate::agent::mcp::AgentBackend;
 use crate::config::{Config, Mode};
+use crate::metrics::{self, Surface, Tier};
 use crate::state::AppState;
 
 /// Where the MCP server lives; the `Origin` check exempts exactly this path.
@@ -102,7 +103,10 @@ async fn resolve_caller(State(state): State<AppState>, mut req: Request, next: N
         // A key, a bad key, or no key where one is required: `authenticate` says which.
         _ => match auth::authenticate(&state, headers).await {
             Ok(keyed) => Caller::Keyed(keyed),
-            Err(e) => return e.into_response(),
+            Err(e) => {
+                metrics::api_request(Surface::Mcp, Tier::Key, e.code());
+                return e.into_response();
+            }
         },
     };
     req.extensions_mut().insert(caller);

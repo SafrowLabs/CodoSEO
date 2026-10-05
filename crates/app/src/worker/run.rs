@@ -17,9 +17,11 @@ use codoseo_diff::{diff, key_pages};
 use codoseo_store::crawl_queue::{ClaimedCrawl, CrawlQueue};
 use codoseo_store::finalize::finalize;
 use codoseo_store::jobs::JobQueue;
+use codoseo_web::metrics;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 use url::Url;
 
 /// How often a crawl's progress callback is allowed to write a heartbeat.
@@ -102,6 +104,14 @@ async fn claim_and_spawn(
         Err(e) => return Err(e.into()),
     };
     let crawl_id = claimed.id;
+    metrics::queue_wait(claimed.priority, claimed.queue_wait_secs);
+    // Every log line of the crawl carries these (the domain is public, never an email or key).
+    let span = tracing::info_span!(
+        "crawl",
+        %crawl_id,
+        site_id = %claimed.site_id,
+        domain = %claimed.domain,
+    );
     let pool_for_task = pool.clone();
     let crawl_queue_for_task = crawl_queue.clone();
     let worker_id = worker_id.to_owned();
@@ -114,6 +124,7 @@ async fn claim_and_spawn(
             policy,
             claimed,
         )
+        .instrument(span)
         .await
     });
     Ok(Some((crawl_id, handle)))
@@ -138,9 +149,11 @@ async fn handle_outcome(
     worker_id: &str,
     result: Result<Result<(), String>, tokio::task::JoinError>,
 ) -> Result<(), WorkerError> {
+    metrics::crawl_finished(matches!(result, Ok(Ok(()))));
     match result {
         Ok(Ok(())) => Ok(()),
         Ok(Err(reason)) => {
+            tracing::warn!(%crawl_id, %reason, "crawl failed");
             crawl_queue
                 .finish_failed(crawl_id, &reason, worker_id)
                 .await?;
@@ -241,11 +254,15 @@ async fn run_one_crawl(
         .unwrap_or(CrawlLimits::default().max_duration);
 
     let budget = crate::worker::budget::memory_budget_bytes(default_budget);
+    metrics::worker_memory_budget(budget);
     if !crate::worker::budget::fits(max_pages, budget) {
         return Err(format!(
             "exceeds worker memory budget: {max_pages} pages needs more than the {budget}-byte budget"
         ));
     }
+    // Counted as running, with its memory reserved, until this function ends (or panics).
+    let _running = metrics::crawl_started(crate::worker::budget::reserved_bytes(max_pages));
+    tracing::info!(max_pages, attempt = claimed.attempt, "crawl started");
 
     let cfg = CrawlConfig {
         start_url,
@@ -307,6 +324,9 @@ async fn run_one_crawl(
 
     let crawl_result = crawl(cfg, on_progress).await;
     liveness.abort();
+    if let Ok(out) = &crawl_result {
+        metrics::pages_crawled(out.pages.len() as u64);
+    }
 
     let mut out = crawl_result.map_err(|e| format!("could not start crawl: {e}"))?;
 
@@ -351,6 +371,7 @@ async fn run_one_crawl(
     .await
     .map_err(|e| format!("finalize failed: {e}"))?;
 
+    tracing::info!(pages = out.pages.len(), "crawl finished");
     Ok(())
 }
 

@@ -420,3 +420,69 @@ async fn a_starred_page_counts_as_a_key_page_in_the_diff() {
     assert_eq!(severity("/yyy").await, "notice");
     assert_eq!(severity("/zzz").await, "warning");
 }
+
+/// Runs one worker cycle against a fresh queue holding one crawl for `settings`, with a
+/// recorder of its own installed, and returns what it rendered. The test runtime is
+/// single-threaded, so the crawl task records into the same recorder.
+async fn metrics_of_one_cycle(start_url: &str, settings: serde_json::Value) -> String {
+    let recorder = codoseo::telemetry::build_recorder();
+    let handle = recorder.handle();
+    let _guard = metrics::set_default_local_recorder(&recorder);
+
+    let db = TestDb::new().await;
+    let site_id = db
+        .seed_site_with_settings("metrics.test", start_url, settings)
+        .await;
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let job_queue = JobQueue::new(db.pool.clone());
+    crawl_queue
+        .enqueue(site_id, "metrics.test", CrawlTrigger::Manual, 2, None, None)
+        .await
+        .expect("enqueue crawl");
+    worker_loop_once(
+        &db.pool,
+        &crawl_queue,
+        &job_queue,
+        "test-worker",
+        DEFAULT_MEMORY_BUDGET,
+        AddressPolicy::AllowPrivate,
+    )
+    .await
+    .expect("worker_loop_once");
+    handle.render()
+}
+
+#[tokio::test]
+async fn a_finished_crawl_is_counted_with_its_pages_wait_and_memory() {
+    let site = SiteBuilder::new()
+        .html("/", "Home", &["/a", "/b"])
+        .html("/a", "A", &[])
+        .html("/b", "B", &[])
+        .start()
+        .await;
+    let body = metrics_of_one_cycle(site.url("/").as_str(), json!({})).await;
+    for expected in [
+        r#"codoseo_crawls_finished_total{outcome="completed"} 1"#,
+        "codoseo_pages_crawled_total 3",
+        r#"codoseo_crawl_queue_wait_seconds_count{lane="2"} 1"#,
+        "codoseo_crawls_running 0",
+        "codoseo_worker_memory_reserved_bytes 0",
+        "codoseo_worker_memory_budget_bytes ",
+    ] {
+        assert!(body.contains(expected), "{expected} missing from:\n{body}");
+    }
+}
+
+#[tokio::test]
+async fn a_panicking_crawl_counts_as_failed_and_releases_what_it_held() {
+    let body = metrics_of_one_cycle(
+        "http://127.0.0.1:1/",
+        json!({ "test_panic_before_crawl": true }),
+    )
+    .await;
+    assert!(
+        body.contains(r#"codoseo_crawls_finished_total{outcome="failed"} 1"#),
+        "{body}"
+    );
+    assert!(!body.contains("codoseo_crawls_running 1"), "{body}");
+}

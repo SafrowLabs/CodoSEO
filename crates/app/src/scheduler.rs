@@ -10,6 +10,7 @@ use codoseo_store::jobs::JobQueue;
 use codoseo_store::plans;
 use codoseo_store::schedule::{self, DueSite};
 use codoseo_web::auth::session;
+use codoseo_web::metrics;
 use codoseo_web::{Config, Mode};
 use jiff::civil::{Time, Weekday};
 use jiff::tz::TimeZone;
@@ -264,6 +265,7 @@ pub async fn tick(ctx: &SchedulerContext, now: Timestamp) -> TickReport {
         Ok(()) => ping_heartbeat(ctx).await,
         Err(e) => report.fail("heartbeat", e),
     }
+    metrics::scheduler_tick(unix_now());
     report
 }
 
@@ -272,6 +274,11 @@ impl TickReport {
         tracing::warn!(step, %error, "scheduler step failed");
         self.failures.push((step, error.to_string()));
     }
+}
+
+/// Now as Unix seconds, for the last-tick gauge.
+fn unix_now() -> f64 {
+    Timestamp::now().as_millisecond() as f64 / 1000.0
 }
 
 fn to_odt(ts: Timestamp) -> OffsetDateTime {

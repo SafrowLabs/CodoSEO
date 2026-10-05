@@ -12,6 +12,7 @@ pub mod error;
 pub mod fmt;
 pub mod health;
 pub mod layout;
+pub mod metrics;
 pub mod rankorg;
 pub mod render;
 pub mod routes;

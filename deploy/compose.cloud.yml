@@ -40,6 +40,13 @@ x-app-env: &app-env
   DODO_PRODUCT_AGENCY: ${DODO_PRODUCT_AGENCY:-}
   SCHEDULER_HEARTBEAT_URL: ${SCHEDULER_HEARTBEAT_URL:-}
   CODOSEO_SCHEDULER: ${CODOSEO_SCHEDULER:-}
+  # Logs are JSON lines on stderr in the cloud. Prometheus metrics are served on an internal
+  # port only (never on 8080): scrape web:9090 and worker:9090 from inside the Docker network.
+  CODOSEO_METRICS_BIND: ${CODOSEO_METRICS_BIND:-0.0.0.0:9090}
+  CODOSEO_LOG_FORMAT: ${CODOSEO_LOG_FORMAT:-}
+  RUST_LOG: ${RUST_LOG:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
 
 services:
   migrate:
@@ -61,6 +68,7 @@ services:
     # No `ports:`; the reverse proxy (Coolify's Traefik) reaches the container on 8080.
     expose:
       - "8080"
+      - "9090"
     environment:
       <<: *app-env
       # The web role may use a separate, tighter login role (codoseo_web, statement_timeout 5s).
@@ -84,6 +92,8 @@ services:
     cpus: 1.5
     # Lets a running crawl finish its current batch on `docker stop` (the worker drains for 60 s).
     stop_grace_period: 75s
+    expose:
+      - "9090"
     environment:
       <<: *app-env
       DATABASE_URL: ${DATABASE_URL}

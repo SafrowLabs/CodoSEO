@@ -36,6 +36,8 @@ pub struct ClaimedCrawl {
     pub attempt: i16,
     pub start_url: String,
     pub crawl_settings: serde_json::Value,
+    /// Seconds the crawl sat in the queue (`started_at - queued_at`), for the wait metric.
+    pub queue_wait_secs: f64,
 }
 
 /// No-signup audits running at once, across all workers.
@@ -111,7 +113,8 @@ impl CrawlQueue {
                  LIMIT 1 \
                ) \
              RETURNING c.id, c.site_id, c.domain, c.trigger, c.priority, c.source, c.attempt, \
-                       s.start_url, s.crawl_settings",
+                       s.start_url, s.crawl_settings, \
+                       EXTRACT(EPOCH FROM (now() - c.queued_at))::float8 AS queue_wait_secs",
         )
         .bind(worker_id)
         .bind(MAX_CONCURRENT_QUICK)
