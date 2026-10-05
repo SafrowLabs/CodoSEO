@@ -670,6 +670,31 @@ async fn a_site_with_no_rules_or_email_channel_yet_still_gets_the_default_alert(
 }
 
 #[tokio::test]
+async fn planning_covers_a_slack_channel_added_before_the_site_had_rules() {
+    let w = World::new("pro").await;
+    let (server, hook) = Hook::start(200).await;
+    // A channel with no rules on this site (it was added before the site was).
+    let target = ChannelTarget::Slack {
+        url: server.url("/slack"),
+    };
+    let slack = channels::create(w.pool(), &key(), w.account, &target, None, false)
+        .await
+        .unwrap();
+    w.change(ChangeKind::SiteMoved, None).await;
+    w.queue
+        .enqueue(JobKind::SendAlert, json!({ "crawl_id": w.crawl }))
+        .await
+        .unwrap();
+    w.drain().await;
+    assert_eq!(hook.bodies().len(), 1, "the slack channel got the alert");
+    assert_eq!(w.mail_to("owner@example.com").len(), 1);
+    let on = alert_rules::instant_channels_for(w.pool(), w.site, ChangeKind::SiteMoved)
+        .await
+        .unwrap();
+    assert!(on.contains(&slack));
+}
+
+#[tokio::test]
 async fn planning_twice_does_not_queue_a_second_delivery() {
     let w = World::new("pro").await;
     w.email_channel().await;
@@ -734,7 +759,7 @@ async fn the_second_failed_crawl_alerts_every_allowed_enabled_channel() {
             .unwrap();
         crawls.claim("w").await.unwrap().expect("claimable");
         crawls
-            .finish_failed(id, "site unreachable: connection refused", "w")
+            .finish_failed(id, "site unreachable: connection refused to 10.0.0.5", "w")
             .await
             .unwrap();
     }
@@ -754,8 +779,13 @@ async fn the_second_failed_crawl_alerts_every_allowed_enabled_channel() {
         mails[0].subject
     );
     assert!(
-        mails[0].text.contains("connection refused"),
-        "the reason is in the message: {}",
+        mails[0].text.contains("didn't answer"),
+        "our own wording is in the message: {}",
+        mails[0].text
+    );
+    assert!(
+        !mails[0].text.contains("connection refused") && !mails[0].text.contains("10.0.0.5"),
+        "the raw reason stays out of the message: {}",
         mails[0].text
     );
 }

@@ -734,6 +734,36 @@ async fn adding_a_site_turns_on_the_default_rules_for_the_default_email_channel(
 }
 
 #[tokio::test]
+async fn a_site_added_after_a_slack_channel_gets_its_default_rules_too() {
+    let app = cloud().await;
+    let (account, cookie) = app
+        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .await;
+    app.site(&account, "one.example.com").await;
+    add_channel(&app, &cookie, "slack", SLACK).await;
+    let slack = channel_of_kind(&app, &account, "slack").await;
+
+    let res = app
+        .post("/sites", "url=two.example.com", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    let two: Uuid = sqlx::query_scalar("SELECT id FROM sites WHERE domain = 'two.example.com'")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    let email = channel_of_kind(&app, &account, "email").await;
+    for kind in alert_rules::DEFAULT_INSTANT {
+        let mut on = alert_rules::instant_channels_for(app.pool(), two, kind)
+            .await
+            .unwrap();
+        on.sort();
+        let mut want = vec![email, slack];
+        want.sort();
+        assert_eq!(on, want, "{kind:?}");
+    }
+}
+
+#[tokio::test]
 async fn send_test_is_limited_to_five_a_hour_per_account() {
     let app = self_hosted().await;
     let (_, cookie) = app.login("owner@example.com").await;

@@ -4,7 +4,7 @@
 
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
-use codoseo_core::output::{Progress, StopReason};
+use codoseo_core::output::{Progress, SiteFault, StopReason};
 use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::snapshot::Snapshot;
 use serde::Deserialize;
@@ -163,7 +163,10 @@ impl CrawlQueue {
 
     /// First failure (`attempt = 0`): requeue once, gated 15 minutes out via `queued_at` (which
     /// `claim`'s `queued_at <= now()` filter already honours). Second failure: fail for good, and
-    /// queue a "couldn't reach your site" alert (`send_alert {crawl_id, unreachable: true}`).
+    /// queue a "couldn't reach your site" alert (`send_alert {crawl_id, unreachable: true}`) when
+    /// the site was at fault (`reason` is one of the crawler's unreachable / blocked stop
+    /// messages); an internal failure of ours (database, memory budget, ...) says nothing to the
+    /// user.
     /// A quick (no-signup) audit is never retried and never alerts: the visitor is watching it,
     /// and a retry 15 minutes later would leave them on a spinner. One transaction, so the
     /// alert exists exactly when the crawl ended `failed`, and there's no read-then-write race
@@ -198,6 +201,7 @@ impl CrawlQueue {
         if let Some((status, trigger)) = outcome
             && status == "failed"
             && trigger != "quick"
+            && SiteFault::from_failure_reason(reason).is_some()
         {
             sqlx::query(
                 "INSERT INTO jobs (kind, payload) \

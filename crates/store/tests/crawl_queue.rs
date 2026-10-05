@@ -528,6 +528,58 @@ async fn the_second_failure_queues_an_unreachable_alert_and_the_first_does_not()
     assert_eq!(alert_jobs(&db.pool).await.len(), 1);
 }
 
+/// Two scheduled failures with `reason`; the alert jobs queued by then.
+async fn alerts_after_two_failures(reason: &str) -> Vec<serde_json::Value> {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let site_id = make_site(&db.pool, "reasons.example").await;
+    let id = queue
+        .enqueue(
+            site_id,
+            "reasons.example",
+            CrawlTrigger::Schedule,
+            5,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        sqlx::query("UPDATE crawls SET queued_at = now() - interval '1 minute' WHERE id = $1")
+            .bind(id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        claim_and_fail(&queue, id, reason).await;
+    }
+    alert_jobs(&db.pool).await
+}
+
+#[tokio::test]
+async fn internal_failures_never_queue_an_unreachable_alert() {
+    for reason in [
+        "finalize failed: pool timed out",
+        "internal error",
+        "could not load starred pages: boom",
+        "exceeds worker memory budget",
+    ] {
+        assert!(
+            alerts_after_two_failures(reason).await.is_empty(),
+            "{reason} is our problem, not the site's"
+        );
+    }
+}
+
+#[tokio::test]
+async fn blocked_and_unreachable_sites_queue_the_alert() {
+    for reason in [
+        "site blocked our crawler: 403 on every page",
+        "site unreachable: dns error",
+    ] {
+        assert_eq!(alerts_after_two_failures(reason).await.len(), 1, "{reason}");
+    }
+}
+
 #[tokio::test]
 async fn a_failed_quick_audit_never_alerts() {
     let db = TestDb::new().await;

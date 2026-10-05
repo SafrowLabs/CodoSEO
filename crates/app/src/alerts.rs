@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use codoseo_core::change::ChangeKind;
+use codoseo_core::output::SiteFault;
 use codoseo_core::plan::PlanLimits;
 use codoseo_notify::{AlertItem, AlertMessage, ChannelKind, DeliveryError, deliver};
 use codoseo_store::alert_rules::{self, AlertCrawl, Route, StoredChange};
@@ -93,13 +94,14 @@ async fn alertable(ctx: &JobContext, crawl_id: Uuid) -> Result<Option<(AlertCraw
     }
 }
 
-/// Makes sure the account's own address is a channel with the default rules on this site, so a
-/// site that predates alert rules (or an account that never opened the settings) is covered.
+/// Makes sure the account's own address is a channel, and that every enabled channel has the
+/// default rules on this site, so a site that predates alert rules (or a channel added before
+/// the site) is covered.
 async fn ensure_defaults(ctx: &JobContext, account_id: Uuid, site_id: Uuid) -> Result<(), String> {
-    let email = channels::ensure_default_email(&ctx.pool, &ctx.channel_key, account_id)
+    channels::ensure_default_email(&ctx.pool, &ctx.channel_key, account_id)
         .await
         .map_err(db)?;
-    alert_rules::create_defaults(&ctx.pool, site_id, email)
+    alert_rules::create_defaults_for_site(&ctx.pool, account_id, site_id)
         .await
         .map_err(db)
 }
@@ -248,10 +250,16 @@ pub async fn deliver_alert(
         .join(&format!("s/{}/changes", crawl.site_id))
         .map_err(|e| format!("bad base URL: {e}"))?;
     let message = if delivery.unreachable {
-        let reason = crawl
+        // Our own words per kind: the stored reason can carry resolver or socket details that
+        // don't belong in a message to a channel we don't control.
+        let reason = match crawl
             .failure_reason
             .as_deref()
-            .unwrap_or("it did not answer");
+            .and_then(SiteFault::from_failure_reason)
+        {
+            Some(SiteFault::Blocked) => "it blocked our crawler",
+            _ => "it didn't answer",
+        };
         AlertMessage::unreachable(&crawl.domain, site_url, delivery.crawl_id, reason)
     } else {
         let changes = alert_rules::changes_by_ids(pool, delivery.crawl_id, &delivery.change_ids)

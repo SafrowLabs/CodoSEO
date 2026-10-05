@@ -67,6 +67,32 @@ pub async fn create_defaults(
     Ok(())
 }
 
+/// The default instant rules on `site_id` for every enabled channel of the account (a site was
+/// just added, or an old one is being planned). Idempotent: existing rules, including defaults
+/// the user switched off, are left alone.
+pub async fn create_defaults_for_site(
+    pool: &PgPool,
+    account_id: Uuid,
+    site_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let kinds: Vec<String> = DEFAULT_INSTANT.iter().map(enum_slug).collect();
+    sqlx::query(
+        "INSERT INTO alert_rules (site_id, change_kind, channel_id, mode) \
+         SELECT s.id, k::change_kind, c.id, 'instant' \
+         FROM sites s \
+         JOIN alert_channels c ON c.account_id = s.account_id AND c.enabled \
+         CROSS JOIN unnest($3::text[]) AS k \
+         WHERE s.id = $2 AND s.account_id = $1 \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(account_id)
+    .bind(site_id)
+    .bind(kinds)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// The default instant rules for `channel_id` on every site of the account (a channel was just
 /// added).
 pub async fn create_defaults_for_account(

@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use codoseo_checks::run_checks;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
-use codoseo_core::output::{Progress, StopReason};
+use codoseo_core::output::{
+    BLOCKED_REASON_PREFIX, Progress, StopReason, UNREACHABLE_REASON_PREFIX,
+};
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_crawler::crawl::crawl;
 use codoseo_diff::{diff, key_pages};
@@ -354,8 +356,8 @@ async fn run_one_crawl(
 
 fn stop_reason_message(stop: &StopReason) -> String {
     match stop {
-        StopReason::Unreachable(reason) => format!("site unreachable: {reason}"),
-        StopReason::Blocked(reason) => format!("site blocked our crawler: {reason}"),
+        StopReason::Unreachable(reason) => format!("{UNREACHABLE_REASON_PREFIX}: {reason}"),
+        StopReason::Blocked(reason) => format!("{BLOCKED_REASON_PREFIX}: {reason}"),
         other => format!("{other:?}"),
     }
 }

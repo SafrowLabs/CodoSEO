@@ -60,14 +60,15 @@ fn kind_label(kind: ChannelKind) -> &'static str {
     }
 }
 
-/// Turns on the default instant rules for the account's own email address on a new site. The
-/// alert planner covers any site this misses, so a failure is logged and not shown.
+/// Turns on the default instant rules on a new site for every enabled channel of the account,
+/// the account's own email address first. The alert planner covers any site this misses, so a
+/// failure is logged and not shown.
 pub async fn default_rules_for_site(state: &AppState, account_id: Uuid, site_id: Uuid) {
     let result = async {
-        let email = channels::ensure_default_email(&state.pool, &state.channel_key, account_id)
+        channels::ensure_default_email(&state.pool, &state.channel_key, account_id)
             .await
             .map_err(|e| e.to_string())?;
-        alert_rules::create_defaults(&state.pool, site_id, email)
+        alert_rules::create_defaults_for_site(&state.pool, account_id, site_id)
             .await
             .map_err(|e| e.to_string())
     }
