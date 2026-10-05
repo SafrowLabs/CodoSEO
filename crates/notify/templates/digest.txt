@@ -1,0 +1,39 @@
+CodoSEO weekly digest, {{ view.week_label }}
+{% for site in view.sites %}
+== {{ site.domain }}: score {{ site.score_label() }} ==
+{{ site.headline() }}
+{{ site.changes_line() }}
+{%- if !site.new_issues.is_empty() %}
+
+New issues:
+{%- for issue in site.new_issues %}
+  - {{ issue.0 }} ({{ issue.1 }} {% if issue.1 == 1 %}page{% else %}pages{% endif %})
+{%- endfor %}
+{%- endif %}
+{%- if !site.resolved_issues.is_empty() %}
+
+Resolved:
+{%- for issue in site.resolved_issues %}
+  - {{ issue.0 }} ({{ issue.1 }} {% if issue.1 == 1 %}page{% else %}pages{% endif %})
+{%- endfor %}
+{%- endif %}
+{%- if !site.top_changes.is_empty() %}
+
+Most important changes:
+{%- for change in site.top_changes %}
+  - [{{ change.severity_word() }}] {{ change.kind_label }}
+{%- if let Some(url) = change.url %}: {{ url }}{% endif %}
+{%- let detail = change.change_text() %}
+{%- if !detail.is_empty() %} ({{ detail }}){% endif %}
+{%- endfor %}
+{%- if site.more_changes() > 0 %}
+  ...and {{ site.more_changes() }} more
+{%- endif %}
+{%- endif %}
+
+Open the dashboard: {{ site.dashboard_url }}
+{%- if let Some(url) = site.rankorg_url %}
+Turn these pages into rankings with RankOrg: {{ url }}
+{%- endif %}
+{% endfor %}
+You get this email every Monday. Change what you hear about: {{ view.settings_url }}

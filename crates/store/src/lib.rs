@@ -8,6 +8,7 @@ pub mod channels;
 pub mod crawl_queue;
 pub mod crawls;
 mod dbenum;
+pub mod digest;
 pub mod events;
 pub mod explorer;
 pub mod export;

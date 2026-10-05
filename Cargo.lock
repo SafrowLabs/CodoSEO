@@ -712,6 +712,7 @@ name = "codoseo-notify"
 version = "0.0.1"
 dependencies = [
  "aes-gcm",
+ "askama",
  "axum",
  "base64 0.23.1",
  "codoseo-core",

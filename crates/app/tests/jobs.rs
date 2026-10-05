@@ -7,7 +7,7 @@ mod support;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use codoseo::jobs::{JobContext, job_loop, run_job};
+use codoseo::jobs::{JobContext, job_loop};
 use codoseo_core::crawl::AddressPolicy;
 use codoseo_notify::{ChannelKey, Email, GuardedHttp, Mailer};
 use codoseo_store::jobs::{JobKind, JobQueue};
@@ -25,6 +25,7 @@ fn context(pool: &PgPool) -> (JobContext, Arc<Mutex<Vec<Email>>>) {
         channel_key: ChannelKey::derive("test secret"),
         base_url: url::Url::parse("http://localhost:8080").unwrap(),
         http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
+        rankorg_url: None,
     };
     (ctx, sent)
 }
@@ -216,17 +217,4 @@ async fn the_loop_stops_promptly_when_idle() {
     let running = RunningLoop::start(ctx, &db.pool);
     tokio::time::sleep(Duration::from_millis(200)).await;
     running.stop().await;
-}
-
-#[tokio::test]
-async fn digest_jobs_are_not_implemented_yet() {
-    let db = TestDb::new().await;
-    let (ctx, _sent) = context(&db.pool);
-    let queue = JobQueue::new(db.pool.clone());
-    for kind in [JobKind::SendDigest] {
-        queue.enqueue(kind, json!({})).await.unwrap();
-        let job = queue.claim("t").await.unwrap().expect("claimable");
-        let err = run_job(&ctx, job).await.unwrap_err();
-        assert!(err.contains("not implemented"), "{err}");
-    }
 }

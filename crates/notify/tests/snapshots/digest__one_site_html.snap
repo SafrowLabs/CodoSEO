@@ -1,0 +1,126 @@
+---
+source: crates/notify/tests/digest.rs
+expression: "view(vec![example()]).render().unwrap().html.unwrap()"
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>CodoSEO weekly digest</title>
+<style>
+  body { margin: 0; padding: 0; }
+  a { color: #1d4ed8; }
+  @media (prefers-color-scheme: dark) {
+    .page { background-color: #111113 !important; }
+    .card { background-color: #1c1c1f !important; border-color: #2e2e33 !important; }
+    .ink { color: #f4f4f5 !important; }
+    .muted { color: #a1a1aa !important; }
+    .rule { border-color: #2e2e33 !important; }
+    .good { color: #4ade80 !important; }
+    .bad { color: #f87171 !important; }
+    .chip { background-color: #27272a !important; }
+    a { color: #93c5fd !important; }
+  }
+</style>
+</head>
+<body class="page" style="margin:0;padding:0;background-color:#f4f4f5;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="page" style="background-color:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+  <tr><td class="ink" style="padding:0 4px 16px 4px;font-family:Helvetica,Arial,sans-serif;color:#18181b;">
+    <div style="font-size:20px;font-weight:bold;">CodoSEO weekly digest</div>
+    <div class="muted" style="font-size:14px;color:#52525b;padding-top:4px;">Sep 28 to Oct 5, 2026</div>
+  </td></tr>
+
+  <tr><td style="padding-bottom:16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="card" style="background-color:#ffffff;border:1px solid #e4e4e7;border-radius:8px;">
+      <tr><td style="padding:20px;font-family:Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td class="ink" style="font-size:18px;font-weight:bold;color:#18181b;">example.com</td>
+            <td align="right" class="ink" style="font-size:18px;font-weight:bold;color:#18181b;white-space:nowrap;">92 (+3)</td>
+          </tr>
+        </table>
+        <div class="ink" style="font-size:15px;color:#18181b;padding-top:10px;">Your site passed 37/40 checks. 2 new issues.</div>
+        <div class="muted" style="font-size:14px;color:#52525b;padding-top:6px;">Changes this week: 1 critical, 4 warnings, 11 notices.</div>
+
+        <div class="ink bad" style="font-size:14px;font-weight:bold;color:#b91c1c;padding-top:16px;">New issues</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+          <tr>
+            <td class="ink" style="font-size:14px;color:#18181b;padding:4px 0;">Page returns a 5xx error</td>
+            <td align="right" class="muted" style="font-size:13px;color:#52525b;padding:4px 0 4px 8px;white-space:nowrap;">2 pages</td>
+          </tr>
+
+          <tr>
+            <td class="ink" style="font-size:14px;color:#18181b;padding:4px 0;">Title is too long</td>
+            <td align="right" class="muted" style="font-size:13px;color:#52525b;padding:4px 0 4px 8px;white-space:nowrap;">14 pages</td>
+          </tr>
+
+        </table>
+
+
+        <div class="good" style="font-size:14px;font-weight:bold;color:#15803d;padding-top:16px;">Resolved</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+          <tr>
+            <td class="ink" style="font-size:14px;color:#18181b;padding:4px 0;">Missing meta description</td>
+            <td align="right" class="muted" style="font-size:13px;color:#52525b;padding:4px 0 4px 8px;white-space:nowrap;">6 pages</td>
+          </tr>
+
+        </table>
+
+
+        <div class="ink" style="font-size:14px;font-weight:bold;color:#18181b;padding-top:16px;">Most important changes</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+          <tr><td class="rule" style="padding:8px 0;border-top:1px solid #e4e4e7;font-size:14px;color:#18181b;">
+            <span class="ink" style="font-weight:bold;color:#18181b;">Critical</span>
+            <span class="ink" style="color:#18181b;">&middot; Became noindex</span>
+
+            <div class="muted" style="font-size:13px;color:#52525b;word-break:break-all;">https://example.com/pricing</div>
+
+
+
+            <div class="muted" style="font-size:13px;color:#52525b;">index → noindex</div>
+
+          </td></tr>
+
+          <tr><td class="rule" style="padding:8px 0;border-top:1px solid #e4e4e7;font-size:14px;color:#18181b;">
+            <span class="ink" style="font-weight:bold;color:#18181b;">Warning</span>
+            <span class="ink" style="color:#18181b;">&middot; Status changed</span>
+
+            <div class="muted" style="font-size:13px;color:#52525b;word-break:break-all;">https://example.com/blog/old-post</div>
+
+
+
+            <div class="muted" style="font-size:13px;color:#52525b;">200 → 404</div>
+
+          </td></tr>
+
+        </table>
+
+        <div class="muted" style="font-size:13px;color:#52525b;padding-top:6px;">and 14 more</div>
+
+
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+          <tr><td style="border-radius:6px;background-color:#1d4ed8;"><a href="https://codoseo.test/s/11111111-1111-1111-1111-111111111111/audit" style="display:inline-block;padding:10px 16px;font-size:14px;font-weight:bold;color:#ffffff !important;text-decoration:none;">Open the dashboard</a></td></tr>
+        </table>
+
+        <div class="muted" style="font-size:13px;color:#52525b;padding-top:14px;">Turn these pages into rankings: <a href="https://rankorg.com/?domain=example.com&#38;utm_source=codoseo&#38;utm_medium=digest">continue in RankOrg</a></div>
+
+      </td></tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="muted" style="padding:4px 4px 0 4px;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#52525b;">
+    You get this email every Monday. <a href="https://codoseo.test/settings/alerts">Change what you hear about</a>.
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

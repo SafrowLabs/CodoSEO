@@ -1,5 +1,5 @@
-//! The job runner: drains the `jobs` table (`send_email`, `send_alert`, `cleanup`, and later
-//! `send_digest`) beside the crawl loop. One job at a time; a failure or a panic fails only that
+//! The job runner: drains the `jobs` table (`send_email`, `send_alert`, `send_digest`,
+//! `cleanup`) beside the crawl loop. One job at a time; a failure or a panic fails only that
 //! job, which then retries with the queue's backoff.
 
 use std::time::Duration;
@@ -28,6 +28,9 @@ pub struct JobContext {
     /// For outgoing deliveries (Slack, Discord, webhooks): the guarded client with its address
     /// policy (the cloud refuses private and internal addresses, self-hosted allows them).
     pub http: GuardedHttp,
+    /// Where RankOrg links go; `Some` in the cloud only (self-hosted messages carry no RankOrg
+    /// link).
+    pub rankorg_url: Option<Url>,
 }
 
 impl JobContext {
@@ -44,6 +47,10 @@ impl JobContext {
                 Mode::SelfHost => AddressPolicy::AllowPrivate,
             })
             .expect("http client builds"),
+            rankorg_url: match config.mode {
+                Mode::Cloud => Some(config.rankorg_url.clone()),
+                Mode::SelfHost => None,
+            },
         }
     }
 }
@@ -120,7 +127,7 @@ pub async fn run_job(ctx: &JobContext, job: ClaimedJob) -> Result<(), String> {
         JobKind::SendEmail => send_email(ctx, &job.payload).await,
         JobKind::Cleanup => cleanup(ctx).await,
         JobKind::SendAlert => crate::alerts::send_alert(ctx, &job).await,
-        JobKind::SendDigest => Err("send_digest is not implemented".to_owned()),
+        JobKind::SendDigest => crate::digest::send_digest(ctx, &job.payload).await,
     }
 }
 

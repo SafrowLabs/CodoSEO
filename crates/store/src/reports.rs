@@ -75,7 +75,7 @@ impl ResponseBuckets {
 }
 
 /// Parses an enum label read back as text (`kind::text`) into its Rust enum.
-fn from_slug<T: DeserializeOwned>(slug: &str) -> Option<T> {
+pub(crate) fn from_slug<T: DeserializeOwned>(slug: &str) -> Option<T> {
     serde_json::from_value(serde_json::Value::String(slug.to_owned())).ok()
 }
 

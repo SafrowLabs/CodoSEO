@@ -12,6 +12,7 @@ publish = false
 [dependencies]
 codoseo-core.workspace = true
 codoseo-crawler.workspace = true
+askama.workspace = true
 lettre.workspace = true
 aes-gcm.workspace = true
 sha2.workspace = true

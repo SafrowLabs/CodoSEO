@@ -3,6 +3,7 @@
 
 pub mod alerts;
 pub mod cli;
+pub mod digest;
 pub mod jobs;
 pub mod scheduler;
 pub mod worker;

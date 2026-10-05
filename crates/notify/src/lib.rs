@@ -3,6 +3,7 @@
 
 pub mod crypto;
 pub mod deliver;
+pub mod digest;
 pub mod discord;
 pub mod email;
 pub mod message;

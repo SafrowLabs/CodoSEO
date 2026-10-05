@@ -125,6 +125,11 @@ impl AlertMessage {
 }
 
 impl AlertItem {
+    /// "Critical", "Warning" or "Notice".
+    pub fn severity_word(&self) -> &'static str {
+        severity_label(self.severity)
+    }
+
     /// "index → noindex"; empty when neither side has a value.
     pub fn change_text(&self) -> String {
         match (self.before.is_empty(), self.after.is_empty()) {
