@@ -93,3 +93,17 @@ fn the_default_url_follows_codoseo_bind() {
             addr.port()
         )));
 }
+
+#[test]
+fn proxy_environment_does_not_hijack_the_loopback_probe() {
+    // A container with HTTP_PROXY set (a corporate proxy, a Coolify setting) must still probe
+    // its own port directly, not through the proxy.
+    let addr = serve();
+    cargo_bin_cmd!("codoseo")
+        .args(["healthcheck", "--url", &format!("http://{addr}/ok")])
+        .env("HTTP_PROXY", "http://127.0.0.1:1")
+        .env("http_proxy", "http://127.0.0.1:1")
+        .env("ALL_PROXY", "http://127.0.0.1:1")
+        .assert()
+        .success();
+}

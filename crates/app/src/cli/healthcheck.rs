@@ -38,6 +38,8 @@ pub async fn run(args: HealthcheckArgs) -> Outcome {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(args.timeout))
         .redirect(reqwest::redirect::Policy::none())
+        // The probe targets the container's own port; a proxy in the environment must not see it.
+        .no_proxy()
         .build()
         .map_err(|e| CliError::msg(format!("could not build the HTTP client: {e}")))?;
     match client.get(&url).send().await {
