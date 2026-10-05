@@ -57,6 +57,13 @@ pub async fn serve(
     listener: TcpListener,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
+    // The MCP service runs each call in its own task, which graceful shutdown can't see; its
+    // token is cancelled as soon as shutdown begins so open calls finish instead of holding it.
+    let token = state.shutdown.clone();
+    let shutdown = async move {
+        shutdown.await;
+        token.cancel();
+    };
     // Connect info gives the abuse limits the socket's address when no proxy header applies.
     axum::serve(
         listener,

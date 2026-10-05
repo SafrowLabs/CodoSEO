@@ -37,6 +37,7 @@ base64.workspace = true
 hmac.workspace = true
 reqwest = { workspace = true, features = ["json", "form"] }
 futures-util.workspace = true
+tokio-util.workspace = true
 bytes.workspace = true
 csv.workspace = true
 

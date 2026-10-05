@@ -24,6 +24,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 url.workspace = true
 http.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true

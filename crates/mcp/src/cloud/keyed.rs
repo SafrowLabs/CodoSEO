@@ -72,7 +72,7 @@ impl<B: CloudBackend> CloudMcp<B> {
             is on, the crawl schedule, and the health score (0 to 100) and time of the latest \
             crawl. Start here: the other tools take a site's id.",
         input_schema = schema_for_empty_input(),
-        annotations(read_only_hint = true)
+        annotations(title = "List sites", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     async fn list_sites(
         &self,
@@ -91,7 +91,7 @@ impl<B: CloudBackend> CloudMcp<B> {
             says when the next scheduled crawl is, whether a crawl is running now, and where to \
             open the full audit. Use get_issue_urls for every page behind a failing check.",
         input_schema = schema::<SiteArgs>(),
-        annotations(read_only_hint = true)
+        annotations(title = "Site health", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     async fn get_site_health(
         &self,
@@ -106,9 +106,11 @@ impl<B: CloudBackend> CloudMcp<B> {
     #[tool(
         description = "The pages that fail one check in a site's latest finished crawl, \
             paginated: URL, status, title and indexability of each, the total, and next_offset \
-            for the next page. Use a check slug from get_site_health, e.g. \"title_missing\".",
+            for the next page. Use a check slug such as \"title_missing\"; get_site_health lists a \
+            site's failing checks (the 15 most severe), and an unknown slug's error lists all \
+            of them.",
         input_schema = schema::<IssueUrlsArgs>(),
-        annotations(read_only_hint = true)
+        annotations(title = "Pages failing a check", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     async fn get_issue_urls(
         &self,
@@ -135,7 +137,7 @@ impl<B: CloudBackend> CloudMcp<B> {
             status, redirect hops, title, meta description, canonical, headings, word count, \
             links in and out, indexability, and the checks the page fails (most severe first).",
         input_schema = schema::<PageArgs>(),
-        annotations(read_only_hint = true)
+        annotations(title = "Page details", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     async fn get_page(
         &self,
@@ -152,7 +154,7 @@ impl<B: CloudBackend> CloudMcp<B> {
             before: new and removed pages, status, title and robots.txt changes and more, most \
             severe first, with the old and new values. Optionally only one severity.",
         input_schema = schema::<ChangesArgs>(),
-        annotations(read_only_hint = true)
+        annotations(title = "Changes since the last crawl", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     async fn get_changes(
         &self,
@@ -180,7 +182,7 @@ impl<B: CloudBackend> CloudMcp<B> {
             crawl runs per site at a time. Returns right away with the queued crawl; follow it \
             with get_site_health (active_crawl) and read the result there once it finishes.",
         input_schema = schema::<SiteArgs>(),
-        annotations(read_only_hint = false, destructive_hint = false)
+        annotations(title = "Run a crawl", read_only_hint = false, idempotent_hint = false, destructive_hint = false, open_world_hint = false)
     )]
     async fn run_crawl(
         &self,

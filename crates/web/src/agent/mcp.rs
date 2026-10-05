@@ -3,6 +3,8 @@
 //! Errors become the message the agent reads as a tool error (`AgentError::message`, never raw
 //! internal text; quota exhaustion reads the same as over REST).
 
+use std::convert::Infallible;
+
 use codoseo_mcp::cloud::CloudBackend;
 use codoseo_mcp::cloud::types::{
     ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
@@ -92,16 +94,11 @@ impl CloudBackend for AgentBackend {
         outcome(self.service().run_crawl(who, site_id).await)
     }
 
-    async fn reject(&self, who: &ApiCaller, message: String) -> String {
-        match self
-            .service()
-            .refuse(who, AgentError::BadRequest(message))
+    async fn reject(&self, who: &ApiCaller, message: String) -> Result<Infallible, String> {
+        self.service()
+            .refuse::<Infallible>(who, AgentError::BadRequest(message))
             .await
             .into_result()
-        {
-            Err(e) => tool_error(e),
-            // `refuse` always answers with its error.
-            Ok(()) => String::new(),
-        }
+            .map_err(tool_error)
     }
 }

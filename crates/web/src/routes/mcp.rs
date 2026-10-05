@@ -8,7 +8,7 @@
 //! extensions; rmcp copies the request parts into every tool context, where the handler reads
 //! it. `initialize`, `tools/list` and pings are free; each keyed `tools/call` costs one call
 //! (see [`AgentBackend`]). The route is exempt from the `Origin` check (no cookie reaches it),
-//! and rmcp itself refuses a `Host` that isn't this app's (DNS rebinding).
+//! and in the cloud rmcp itself refuses a `Host` that isn't this app's (DNS rebinding).
 
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use codoseo_mcp::cloud::{Caller, CloudMcp};
+use codoseo_mcp::cloud::{Caller, CloudBackend, CloudMcp};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 
@@ -32,13 +32,33 @@ pub const PATH: &str = "/mcp";
 /// The caller as the middleware resolves it for [`AgentBackend`].
 type McpCaller = Caller<ApiCaller, ()>;
 
+/// The most a request body may hold: a tool call is a few hundred bytes.
+const MAX_BODY_BYTES: usize = 64 * 1024;
+
 pub fn routes(state: &AppState) -> Router<AppState> {
-    let handler = CloudMcp::new(AgentBackend::new(state.clone()));
+    router_for(state, CloudMcp::new(AgentBackend::new(state.clone())))
+}
+
+/// `/mcp` in front of `handler` (a test serves one with a faulty backend).
+pub fn router_for<B>(state: &AppState, handler: CloudMcp<B>) -> Router<AppState>
+where
+    B: CloudBackend<Keyed = ApiCaller, Anon = ()> + Clone,
+{
     let config = StreamableHttpServerConfig::default()
         // No sessions: every request stands alone, so any instance can answer it.
         .with_legacy_session_mode(false)
         .with_json_response(true)
-        .with_allowed_hosts(allowed_hosts(&state.config));
+        .with_max_request_body_bytes(MAX_BODY_BYTES)
+        // Open calls end when the server starts shutting down.
+        .with_cancellation_token(state.shutdown.clone());
+    let config = match state.config.mode {
+        Mode::Cloud => config.with_allowed_hosts(allowed_hosts(&state.config)),
+        // The Host check guards a local server against DNS rebinding from a browser, which
+        // needs a cookie or ambient network position to matter. This endpoint takes a Bearer
+        // key only, and a self-hosted address is whatever the operator makes it (a LAN name, a
+        // proxy that rewrites Host), so there is nothing to allow-list.
+        Mode::SelfHost => config.disable_allowed_hosts(),
+    };
     let service = StreamableHttpService::new(
         move || Ok(handler.clone()),
         Arc::new(NeverSessionManager::default()),
@@ -52,7 +72,7 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         ))
 }
 
-/// The `Host` values rmcp accepts: this app's own (with its port when `BASE_URL` has one) and
+/// The cloud's `Host` values rmcp accepts: this app's own (with its port when `BASE_URL` has one) and
 /// the loopback names, which a local client or a test server uses.
 fn allowed_hosts(config: &Config) -> Vec<String> {
     let mut hosts: Vec<String> = ["localhost", "127.0.0.1", "::1"].map(str::to_owned).into();

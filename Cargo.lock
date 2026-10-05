@@ -696,6 +696,7 @@ dependencies = [
  "codoseo-diff",
  "codoseo-testkit",
  "dirs",
+ "futures-util",
  "http",
  "rmcp",
  "schemars",
@@ -705,6 +706,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tracing",
  "url",
  "uuid",
 ]
@@ -794,6 +796,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-util",
  "tower",
  "tracing",
  "url",

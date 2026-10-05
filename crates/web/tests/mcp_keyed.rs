@@ -16,6 +16,7 @@ use codoseo_store::sites::Site;
 use codoseo_web::agent::keys;
 use serde_json::{Value, json};
 use support::{TestApp, TestResponse, cloud_config, page};
+use tower::ServiceExt;
 use url::Url;
 use uuid::Uuid;
 
@@ -53,6 +54,8 @@ struct Rpc<'a> {
     host: &'a str,
     key: Option<&'a str>,
     cookie: Option<&'a str>,
+    /// Another router in front of `/mcp` instead of the app's own.
+    router: Option<&'a axum::Router>,
 }
 
 impl<'a> Rpc<'a> {
@@ -62,6 +65,7 @@ impl<'a> Rpc<'a> {
             host: HOST,
             key,
             cookie: None,
+            router: None,
         }
     }
 
@@ -83,7 +87,23 @@ impl<'a> Rpc<'a> {
     }
 
     async fn post(&self, body: Value) -> TestResponse {
-        self.app.send(self.request(&body)).await
+        self.send(self.request(&body)).await
+    }
+
+    async fn send(&self, req: Request<Body>) -> TestResponse {
+        let Some(router) = self.router else {
+            return self.app.send(req).await;
+        };
+        let res = router.clone().oneshot(req).await.expect("infallible");
+        let (status, headers) = (res.status(), res.headers().clone());
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        TestResponse {
+            status,
+            headers,
+            body: String::from_utf8_lossy(&bytes).into_owned(),
+        }
     }
 
     /// The `result` of a request that succeeded at the protocol level.
@@ -247,6 +267,8 @@ async fn with_a_key_the_tool_list_is_exactly_the_six_keyed_tools() {
     let f = setup(Plan::Pro).await;
     let init = f.rpc().initialize().await;
     assert_eq!(init["protocolVersion"], PROTOCOL);
+    assert_eq!(init["serverInfo"]["name"], "codoseo");
+    assert_eq!(init["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
     let instructions = init["instructions"].as_str().unwrap();
     assert!(instructions.contains("quick_audit"), "{instructions}");
     assert!(instructions.contains("/api/v1"), "{instructions}");
@@ -262,6 +284,13 @@ async fn with_a_key_the_tool_list_is_exactly_the_six_keyed_tools() {
             "{name} has no real description"
         );
         assert_eq!(t["inputSchema"]["type"], "object", "{name}");
+        let hints = &t["annotations"];
+        assert!(hints["title"].is_string(), "{name}: {hints}");
+        assert_eq!(hints["openWorldHint"], false, "{name}");
+        assert_eq!(hints["destructiveHint"], false, "{name}");
+        let read_only = name != "run_crawl";
+        assert_eq!(hints["readOnlyHint"], read_only, "{name}");
+        assert_eq!(hints["idempotentHint"], read_only, "{name}");
     }
     let by_name = |n: &str| tools.iter().find(|t| t["name"] == n).unwrap();
     let issue = by_name("get_issue_urls")["inputSchema"].clone();
@@ -470,6 +499,10 @@ async fn bad_arguments_are_tool_errors_the_agent_can_read() {
         .await;
     assert!(is_error);
     assert!(text.contains("Unknown check \"nonsense\""), "{text}");
+    // The error lists every valid slug, so the agent can recover.
+    for slug in ["title_missing", "description_missing"] {
+        assert!(text.contains(slug), "{text}");
+    }
     let (is_error, text) = rpc
         .call(
             "get_changes",
@@ -558,7 +591,8 @@ async fn initialize_listing_and_pings_are_free_and_every_tool_call_costs_one() {
 
     rpc.call_ok("list_sites", json!({})).await;
     assert_eq!(calls_today(&f.app, &f.account).await, 1);
-    // A call that fails still costs one, whatever way it fails.
+    // A call the handler gets and fails still costs one, whatever way it fails. (A request
+    // rmcp itself rejects as unparsable never reaches the handler and is free.)
     rpc.call("get_site_health", json!({"site_id": Uuid::new_v4()}))
         .await;
     assert_eq!(calls_today(&f.app, &f.account).await, 2);
@@ -810,4 +844,195 @@ async fn a_real_mcp_client_lists_and_calls_tools_with_a_key_over_tcp() {
     drop(client);
     let _ = stop.send(());
     let _ = server.await;
+}
+
+// ---- review fixes ----
+
+use codoseo_mcp::cloud::types::{
+    ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
+};
+use codoseo_mcp::cloud::{CloudBackend, CloudMcp};
+use codoseo_web::agent::auth::ApiCaller;
+
+/// A backend whose `list_sites` panics or stalls, to see what the HTTP caller gets.
+#[derive(Clone)]
+struct Faulty {
+    panics: bool,
+}
+
+impl CloudBackend for Faulty {
+    type Keyed = ApiCaller;
+    type Anon = ();
+
+    async fn list_sites(&self, _: &ApiCaller) -> Result<Vec<SiteInfo>, String> {
+        if self.panics {
+            panic!("secret internal detail");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        Ok(Vec::new())
+    }
+    async fn site_health(&self, _: &ApiCaller, _: &str) -> Result<SiteHealth, String> {
+        unimplemented!()
+    }
+    async fn issue_urls(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: &str,
+        _: Option<u32>,
+        _: Option<u32>,
+    ) -> Result<IssueUrlsPage, String> {
+        unimplemented!()
+    }
+    async fn page(&self, _: &ApiCaller, _: &str, _: &str) -> Result<PageInfo, String> {
+        unimplemented!()
+    }
+    async fn changes(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: Option<&str>,
+        _: Option<u32>,
+        _: Option<u32>,
+    ) -> Result<ChangesPage, String> {
+        unimplemented!()
+    }
+    async fn run_crawl(&self, _: &ApiCaller, _: &str) -> Result<CrawlQueued, String> {
+        unimplemented!()
+    }
+    async fn reject(&self, _: &ApiCaller, _: String) -> Result<std::convert::Infallible, String> {
+        unimplemented!()
+    }
+}
+
+fn faulty_router(f: &Fixture, handler: CloudMcp<Faulty>) -> axum::Router {
+    codoseo_web::routes::mcp::router_for(&f.app.state, handler).with_state(f.app.state.clone())
+}
+
+#[tokio::test]
+async fn a_panicking_tool_answers_with_a_generic_error_at_once() {
+    let f = setup(Plan::Pro).await;
+    let router = faulty_router(&f, CloudMcp::new(Faulty { panics: true }));
+    let rpc = Rpc {
+        router: Some(&router),
+        ..f.rpc()
+    };
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        rpc.post(rpc_call("list_sites")),
+    )
+    .await
+    .expect("the request is answered, not left hanging");
+    let body: Value = serde_json::from_str(&res.body).unwrap();
+    assert!(body["error"].is_object(), "{}", res.body);
+    assert!(!res.body.contains("secret internal detail"), "{}", res.body);
+    // The server still answers afterwards.
+    assert_eq!(rpc.tools().await.len(), 6);
+}
+
+#[tokio::test]
+async fn a_stalled_tool_is_cut_off_with_a_tool_error() {
+    let f = setup(Plan::Pro).await;
+    let router = faulty_router(
+        &f,
+        CloudMcp::new(Faulty { panics: false })
+            .with_call_timeout(std::time::Duration::from_millis(150)),
+    );
+    let rpc = Rpc {
+        router: Some(&router),
+        ..f.rpc()
+    };
+    let started = std::time::Instant::now();
+    let (is_error, text) = rpc.call("list_sites", json!({})).await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert!(is_error);
+    assert!(text.contains("took too long"), "{text}");
+}
+
+#[tokio::test]
+async fn self_hosted_accepts_any_host_with_a_valid_key() {
+    let app = TestApp::new().await;
+    let (account, _) = app.login("owner@example.com").await;
+    let (key, _) = make_key(&app, &account).await;
+    // BASE_URL is the default localhost; a LAN name or a proxy's rewritten Host still works.
+    for host in ["nas.lan:9000", "seo.internal.example", "10.1.2.3"] {
+        let rpc = Rpc {
+            host,
+            ..Rpc::new(&app, Some(&key))
+        };
+        assert_eq!(rpc.tools().await.len(), 6, "{host}");
+    }
+    // And without a key it is still a 401.
+    let rpc = Rpc {
+        host: "nas.lan:9000",
+        ..Rpc::new(&app, None)
+    };
+    assert_eq!(rpc.post(rpc_init()).await.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_cloud_request_without_a_key_is_refused_for_a_foreign_host_too() {
+    let app = cloud().await;
+    let rpc = Rpc {
+        host: "evil.example",
+        ..Rpc::new(&app, None)
+    };
+    assert_eq!(rpc.post(rpc_init()).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        Rpc::new(&app, None).post(rpc_init()).await.status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn delete_is_not_allowed_and_a_big_body_is_refused() {
+    let f = setup(Plan::Pro).await;
+    let mut req = f.rpc().request(&rpc_init());
+    *req.method_mut() = Method::DELETE;
+    let res = f.app.send(req).await;
+    assert_eq!(res.status, StatusCode::METHOD_NOT_ALLOWED, "{}", res.body);
+
+    let big = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "list_sites", "arguments": {"pad": "x".repeat(70 * 1024)}}});
+    let res = f.rpc().post(big).await;
+    assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE, "{}", res.body);
+    assert_eq!(calls_today(&f.app, &f.account).await, 0);
+}
+
+#[tokio::test]
+async fn shutdown_ends_an_open_call() {
+    let f = setup(Plan::Pro).await;
+    // A call stuck in the backend is answered once shutdown begins, not left to hold it.
+    let router = faulty_router(&f, CloudMcp::new(Faulty { panics: false }));
+    let rpc = Rpc {
+        router: Some(&router),
+        ..f.rpc()
+    };
+    let state = f.app.state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        state.shutdown.cancel();
+    });
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        rpc.post(rpc_call("list_sites")),
+    )
+    .await
+    .expect("answered once shutdown began");
+    assert!(res.body.contains("error"), "{}", res.body);
+}
+
+#[tokio::test]
+async fn serve_cancels_the_shutdown_token_when_it_begins_shutting_down() {
+    let app = TestApp::new().await;
+    let state = app.state.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(codoseo_web::serve(state.clone(), listener, async {
+        let _ = stopped.await;
+    }));
+    assert!(!state.shutdown.is_cancelled());
+    let _ = stop.send(());
+    let _ = server.await;
+    assert!(state.shutdown.is_cancelled());
 }

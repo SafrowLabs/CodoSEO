@@ -114,7 +114,7 @@ impl<'a> AgentService<'a> {
 
     /// Counts a call that the caller's own arguments already made unanswerable (a query string
     /// that doesn't parse) and answers with `error`: every authenticated request costs one.
-    pub async fn refuse(&self, caller: &ApiCaller, error: AgentError) -> Reply<()> {
+    pub async fn refuse<T>(&self, caller: &ApiCaller, error: AgentError) -> Reply<T> {
         self.metered(caller, async { Err(error) }).await
     }
 
@@ -485,9 +485,10 @@ fn next_offset(offset: u32, shown: u32, total: u32) -> Option<u32> {
 /// A check by slug.
 pub fn parse_check(slug: &str) -> Result<CheckId, AgentError> {
     CheckId::from_slug(slug.trim()).ok_or_else(|| {
+        let valid: Vec<&str> = CheckId::ALL.iter().map(|c| c.slug()).collect();
         AgentError::BadRequest(format!(
-            "Unknown check \"{slug}\". Use a check slug such as title_missing; \
-             get_site_health lists the failing ones."
+            "Unknown check \"{slug}\". The check slugs are: {}.",
+            valid.join(", ")
         ))
     })
 }

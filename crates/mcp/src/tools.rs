@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use rmcp::handler::server::ServerHandler;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{ServerCapabilities, ServerConfig};
+use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -262,12 +262,12 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
 #[tool_handler(router = self.tool_router)]
 impl<B: Backend + 'static> ServerHandler for CodoseoMcp<B> {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            format!(
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("codoseo", env!("CARGO_PKG_VERSION")))
+            .with_instructions(format!(
                 "CodoSEO: crawl sites and check pages locally, with no login and no \
                  cloud calls. Private and internal addresses are allowed. {PROMO_LINE}"
-            ),
-        )
+            ))
     }
 }
 

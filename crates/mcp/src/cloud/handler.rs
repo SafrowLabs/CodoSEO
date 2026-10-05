@@ -11,8 +11,12 @@
 //! context, so the handler reads the caller from there. A tool of the other tier is simply
 //! "tool not found", and `initialize`, `tools/list` and pings never touch the backend (free).
 
+use std::convert::Infallible;
 use std::future::Future;
+use std::panic::AssertUnwindSafe;
+use std::time::Duration;
 
+use futures_util::FutureExt;
 use http::request::Parts;
 use rmcp::ErrorData as McpError;
 use rmcp::RoleServer;
@@ -20,8 +24,9 @@ use rmcp::handler::server::ServerHandler;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
-    CacheScope, CallToolRequestParams, CallToolResponse, ListToolsResult, PaginatedRequestParams,
-    ResultType, ServerCapabilities, ServerConfig,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+    Implementation, ListToolsResult, PaginatedRequestParams, ResultType, ServerCapabilities,
+    ServerConfig,
 };
 use rmcp::service::RequestContext;
 use serde::Serialize;
@@ -96,9 +101,18 @@ pub trait CloudBackend: Send + Sync + 'static {
 
     /// Counts one call for a tool call whose arguments were unusable (not even the right JSON
     /// shape), like any other call, and gives back what to tell the agent: `message`, or the
-    /// quota message when the allowance is spent.
-    fn reject(&self, who: &Self::Keyed, message: String) -> impl Future<Output = String> + Send;
+    /// quota message when the allowance is spent. It always answers with an error, which the
+    /// type says: there is no `Ok` value to be empty.
+    fn reject(
+        &self,
+        who: &Self::Keyed,
+        message: String,
+    ) -> impl Future<Output = Result<Infallible, String>> + Send;
 }
+
+/// The longest one tool call may take before the agent is told so. Above the 45 s the no-key
+/// `quick_audit` waits for a fresh audit.
+pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(75);
 
 /// The cloud MCP handler. One per HTTP request is cheap: the tool routers are built once and
 /// cloned.
@@ -107,6 +121,7 @@ pub struct CloudMcp<B: CloudBackend> {
     pub(super) backend: B,
     keyed_tools: ToolRouter<Self>,
     anon_tools: ToolRouter<Self>,
+    call_timeout: Duration,
 }
 
 impl<B: CloudBackend> CloudMcp<B> {
@@ -115,7 +130,14 @@ impl<B: CloudBackend> CloudMcp<B> {
             backend,
             keyed_tools: Self::keyed_router(),
             anon_tools: Self::anon_router(),
+            call_timeout: DEFAULT_CALL_TIMEOUT,
         }
+    }
+
+    /// For tests: a shorter limit than [`DEFAULT_CALL_TIMEOUT`] on one tool call.
+    pub fn with_call_timeout(mut self, timeout: Duration) -> CloudMcp<B> {
+        self.call_timeout = timeout;
+        self
     }
 
     /// The no-key tools: `quick_audit`, `get_audit`, `get_issue_urls` and `start_monitoring`.
@@ -154,10 +176,13 @@ impl<B: CloudBackend> CloudMcp<B> {
     ) -> Result<T, String> {
         match serde_json::from_value(serde_json::Value::Object(arguments)) {
             Ok(args) => Ok(args),
-            Err(e) => Err(self
-                .backend
-                .reject(who, format!("The arguments are not valid: {e}."))
-                .await),
+            Err(e) => {
+                let Err(message) = self
+                    .backend
+                    .reject(who, format!("The arguments are not valid: {e}."))
+                    .await;
+                Err(message)
+            }
         }
     }
 }
@@ -170,15 +195,18 @@ pub(super) fn to_json<T: Serialize>(value: &T) -> Result<String, String> {
 
 impl<B: CloudBackend> ServerHandler for CloudMcp<B> {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "CodoSEO monitors websites and checks them for SEO problems. With an API key \
-             (header \"Authorization: Bearer <key>\", created under Settings > API keys) these \
-             tools read your monitored sites: list_sites, then get_site_health, get_issue_urls, \
-             get_page, get_changes and run_crawl. Each tool call counts against your daily API \
-             allowance. Without a key, a connector can run a free quick audit of any public site \
-             (quick_audit, get_audit) and start monitoring it. The same data is available as a \
-             REST API under /api/v1 with the same key.",
-        )
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("codoseo", env!("CARGO_PKG_VERSION")))
+            .with_instructions(
+                "CodoSEO monitors websites and checks them for SEO problems. With an API key \
+                 (header \"Authorization: Bearer <key>\", created under Settings > API keys) \
+                 these tools read your monitored sites: list_sites, then get_site_health, \
+                 get_issue_urls, get_page, get_changes and run_crawl. Each tool call counts \
+                 against your daily API allowance. When connected without a key, the tools are \
+                 instead a free quick audit of any public site (quick_audit, get_audit, \
+                 get_issue_urls) and start_monitoring. The same data is available as a REST API \
+                 under /api/v1 with the same key.",
+            )
     }
 
     async fn list_tools(
@@ -216,8 +244,27 @@ impl<B: CloudBackend> ServerHandler for CloudMcp<B> {
             Caller::Keyed(_) => &self.keyed_tools,
             Caller::Anon(_) => &self.anon_tools,
         };
-        router
-            .call(ToolCallContext::new(self, request, context))
-            .await
+        let call = router.call(ToolCallContext::new(self, request, context));
+        // rmcp runs the handler in a task of its own: a panic would send no response and leave
+        // the HTTP request waiting, and so would a stalled backend.
+        match tokio::time::timeout(self.call_timeout, AssertUnwindSafe(call).catch_unwind()).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(panic)) => {
+                let detail = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_owned())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_default();
+                tracing::error!(%detail, "mcp tool call panicked");
+                Err(McpError::internal_error(
+                    "Something went wrong on our side. Try again in a moment.",
+                    None,
+                ))
+            }
+            Err(_) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                "That call took too long and was stopped. Try again in a moment.",
+            )])
+            .into()),
+        }
     }
 }

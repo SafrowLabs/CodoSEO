@@ -80,7 +80,7 @@ async fn counted<Q, T: Serialize, F: Future<Output = Reply<T>>>(
 ) -> Response {
     match query.0 {
         Ok(q) => respond(StatusCode::OK, call(q).await),
-        Err(e) => respond(StatusCode::OK, service.refuse(caller, e).await),
+        Err(e) => respond(StatusCode::OK, service.refuse::<T>(caller, e).await),
     }
 }
 
