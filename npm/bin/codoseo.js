@@ -9,18 +9,18 @@ const binaryName = process.platform === "win32" ? "codoseo.exe" : "codoseo";
 const bundledBinary = path.join(__dirname, "..", "vendor", target, binaryName);
 const requestedBinary = process.env.CODOSEO_BINARY;
 
-function findOnPath(name) {
-  const names = process.platform === "win32" ? [name, `${name}.exe`] : [name];
-  for (const directory of (process.env.PATH || "").split(path.delimiter)) {
-    for (const candidate of names) {
-      const fullPath = path.join(directory, candidate);
-      if (fs.existsSync(fullPath)) return fullPath;
-    }
-  }
-  return undefined;
+if (requestedBinary && !path.isAbsolute(requestedBinary)) {
+  console.error("CODOSEO_BINARY must be an absolute path to the native binary.");
+  process.exit(1);
 }
 
-const binary = requestedBinary || (fs.existsSync(bundledBinary) ? bundledBinary : findOnPath("codoseo"));
+// PATH can resolve to this npm shim again, recursively spawning processes.
+const binary = requestedBinary || (fs.existsSync(bundledBinary) ? bundledBinary : undefined);
+
+if (binary && fs.existsSync(binary) && fs.realpathSync(binary) === fs.realpathSync(__filename)) {
+  console.error("CODOSEO_BINARY must point to the native binary, not the npm launcher.");
+  process.exit(1);
+}
 
 if (!binary) {
   console.error("CodoSEO binary is not installed for this platform.");

@@ -2,9 +2,9 @@ const fs = require("node:fs");
 const https = require("node:https");
 const os = require("node:os");
 const path = require("node:path");
+const { createHash } = require("node:crypto");
+const { pipeline } = require("node:stream/promises");
 const { spawnSync } = require("node:child_process");
-
-if (process.env.CODOSEO_SKIP_DOWNLOAD === "1") process.exit(0);
 
 const targets = {
   "linux-x64": "x86_64-unknown-linux-gnu",
@@ -14,26 +14,14 @@ const targets = {
   "win32-x64": "x86_64-pc-windows-msvc"
 };
 
-const npmTarget = `${process.platform}-${process.arch}`;
-const rustTarget = targets[npmTarget];
-const packageVersion = require("./package.json").version;
-const archiveName = `codoseo-v${packageVersion}-${rustTarget}.tar.gz`;
-const archiveUrl = `https://github.com/SafrowLabs/codoSEO/releases/download/v${packageVersion}/${archiveName}`;
-const vendorDir = path.join(__dirname, "vendor", npmTarget);
-const binaryName = process.platform === "win32" ? "codoseo.exe" : "codoseo";
-const binaryPath = path.join(vendorDir, binaryName);
-
-if (!rustTarget) {
-  console.error(`CodoSEO does not have a published binary for ${npmTarget}.`);
-  process.exit(1);
-}
-
-function download(url, destination) {
+function download(url, destination, redirects = 0) {
   return new Promise((resolve, reject) => {
-    https.get(url, (response) => {
+    if (new URL(url).protocol !== "https:") return reject(new Error("download requires HTTPS"));
+    if (redirects > 5) return reject(new Error("too many download redirects"));
+    const request = https.get(url, (response) => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume();
-        download(new URL(response.headers.location, url), destination).then(resolve, reject);
+        download(new URL(response.headers.location, url), destination, redirects + 1).then(resolve, reject);
         return;
       }
       if (response.statusCode !== 200) {
@@ -41,32 +29,59 @@ function download(url, destination) {
         reject(new Error(`download returned HTTP ${response.statusCode}`));
         return;
       }
-      const output = fs.createWriteStream(destination);
-      response.pipe(output);
-      output.on("finish", () => output.close(resolve));
-      output.on("error", reject);
-    }).on("error", reject);
+      pipeline(response, fs.createWriteStream(destination, { flags: "wx" })).then(resolve, reject);
+    });
+    request.setTimeout(30_000, () => request.destroy(new Error("download timed out")));
+    request.on("error", reject);
   });
 }
 
+async function verifyChecksum(archive, checksumFile, archiveName) {
+  const entry = fs.readFileSync(checksumFile, "utf8").trim().match(/^([a-f0-9]{64})\s+\*?([^\r\n]+)$/i);
+  if (!entry || entry[2] !== archiveName) throw new Error("invalid release checksum file");
+  const hash = createHash("sha256");
+  for await (const chunk of fs.createReadStream(archive)) hash.update(chunk);
+  if (hash.digest("hex") !== entry[1].toLowerCase()) throw new Error("release checksum mismatch");
+}
+
 async function main() {
-  const temporaryArchive = path.join(os.tmpdir(), `codoseo-${process.pid}.tar.gz`);
-  fs.mkdirSync(vendorDir, { recursive: true });
+  if (process.env.CODOSEO_SKIP_DOWNLOAD === "1" || process.env.CODOSEO_BINARY) return;
+  const npmTarget = `${process.platform}-${process.arch}`;
+  const rustTarget = targets[npmTarget];
+  if (!rustTarget) throw new Error(`CodoSEO does not have a published binary for ${npmTarget}.`);
+  const packageVersion = require("./package.json").version;
+  const archiveName = `codoseo-v${packageVersion}-${rustTarget}.tar.gz`;
+  const archiveUrl = `https://github.com/SafrowLabs/codoSEO/releases/download/v${packageVersion}/${archiveName}`;
+  const vendorDir = path.join(__dirname, "vendor", npmTarget);
+  const binaryName = process.platform === "win32" ? "codoseo.exe" : "codoseo";
+  const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codoseo-"));
+  const temporaryArchive = path.join(temporaryDir, archiveName);
   try {
     console.log(`Downloading CodoSEO ${packageVersion} for ${npmTarget}...`);
     await download(archiveUrl, temporaryArchive);
-    const result = spawnSync("tar", ["-xzf", temporaryArchive, "-C", vendorDir], { stdio: "inherit" });
-    if (result.error || result.status !== 0 || !fs.existsSync(binaryPath)) {
-      throw result.error || new Error("downloaded archive did not contain the CodoSEO binary");
+    await download(`${archiveUrl}.sha256`, `${temporaryArchive}.sha256`);
+    await verifyChecksum(temporaryArchive, `${temporaryArchive}.sha256`, archiveName);
+    // Extract only the expected binary into a private directory before installing it.
+    const result = spawnSync("tar", ["-xzf", temporaryArchive, "-C", temporaryDir, binaryName], { stdio: "inherit" });
+    const extracted = path.join(temporaryDir, binaryName);
+    if (result.error || result.status !== 0 || !fs.existsSync(extracted) || !fs.lstatSync(extracted).isFile()) {
+      throw result.error || new Error("downloaded archive did not contain a regular CodoSEO binary");
     }
-    if (process.platform !== "win32") fs.chmodSync(binaryPath, 0o755);
+    fs.mkdirSync(vendorDir, { recursive: true });
+    fs.copyFileSync(extracted, path.join(vendorDir, binaryName));
+    if (process.platform !== "win32") fs.chmodSync(path.join(vendorDir, binaryName), 0o755);
   } catch (error) {
-    console.error(`Could not install the CodoSEO binary: ${error.message}`);
-    console.error(`Expected release asset: ${archiveUrl}`);
-    process.exit(1);
+    throw new Error(`${error.message}\nExpected release asset: ${archiveUrl}`);
   } finally {
-    fs.rmSync(temporaryArchive, { force: true });
+    fs.rmSync(temporaryDir, { recursive: true, force: true });
   }
 }
 
-main();
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`Could not install the CodoSEO binary: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { download, verifyChecksum };

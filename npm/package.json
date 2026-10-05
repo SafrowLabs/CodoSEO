@@ -8,7 +8,8 @@
   "files": [
     "bin",
     "install.js",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=18"
@@ -16,7 +17,7 @@
   "homepage": "https://codoseo.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SafrowLabs/codoSEO.git",
+    "url": "git+https://github.com/SafrowLabs/codoSEO.git",
     "directory": "npm"
   },
   "license": "AGPL-3.0-only",
@@ -27,6 +28,7 @@
     "cli"
   ],
   "scripts": {
-    "postinstall": "node install.js"
+    "postinstall": "node install.js",
+    "test": "node --test"
   }
 }
