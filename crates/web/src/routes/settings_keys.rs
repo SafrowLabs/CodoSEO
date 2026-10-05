@@ -40,7 +40,7 @@ pub struct KeyView {
 }
 
 /// A key just created: the only time it is shown.
-pub struct NewKey {
+pub struct ShownKey {
     pub name: String,
     pub key: String,
     /// The Claude Code command with this key filled in.
@@ -60,7 +60,7 @@ pub struct KeysPage {
     pub shell: Shell,
     pub keys: Vec<KeyView>,
     pub form: CreateForm,
-    pub new_key: Option<NewKey>,
+    pub new_key: Option<ShownKey>,
     /// `37 of 100 API calls used today`, or the unlimited wording.
     pub usage: String,
     /// The `/mcp` address.
@@ -110,7 +110,7 @@ async fn render_page(
     state: &AppState,
     user: &CurrentUser,
     form: CreateForm,
-    new_key: Option<NewKey>,
+    new_key: Option<ShownKey>,
 ) -> Result<Html<String>, AppError> {
     let listed = api_keys::list_for_account(&state.pool, user.id()).await?;
     let shell = Shell::load(state, user, None, Screen::ApiKeys).await?;
@@ -192,9 +192,9 @@ async fn try_create(
     user: &CurrentUser,
     name: &str,
 ) -> Result<Result<Response, Refusal>, AppError> {
-    if name.is_empty() || name.chars().count() > NAME_MAX {
+    if name.is_empty() || name.chars().count() > NAME_MAX || name.chars().any(char::is_control) {
         return Ok(Err(Refusal::Invalid(format!(
-            "Give the key a name of 1 to {NAME_MAX} characters."
+            "Give the key a name of 1 to {NAME_MAX} characters, with no line breaks or control characters."
         ))));
     }
     let key = keys::generate();
@@ -218,7 +218,7 @@ async fn try_create(
         state,
         user,
         blank_form(),
-        Some(NewKey {
+        Some(ShownKey {
             name: name.to_owned(),
             key: key.plaintext,
             command,

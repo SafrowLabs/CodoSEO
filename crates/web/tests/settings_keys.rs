@@ -161,7 +161,14 @@ async fn every_key_is_different() {
 async fn a_name_of_one_to_sixty_characters_is_required() {
     let app = cloud().await;
     let (account, cookie) = app.login("ana@example.com").await;
-    for body in ["name=", "name=+++", "", &format!("name={}", "a".repeat(61))] {
+    for body in [
+        "name=",
+        "name=+++",
+        "",
+        "name=a%00b",
+        "name=a%0Ab",
+        &format!("name={}", "a".repeat(61)),
+    ] {
         let res = app.post("/settings/api-keys", body, Some(&cookie)).await;
         assert_eq!(res.status, StatusCode::BAD_REQUEST, "{body}");
         let res = app.post_hx("/settings/api-keys", body, Some(&cookie)).await;
@@ -197,6 +204,7 @@ async fn a_name_is_escaped() {
         )
         .await;
     assert!(!res.body.contains("<script>alert"));
+    assert!(res.body.contains("&#60;script&#62;"), "{}", res.body);
 }
 
 #[tokio::test]

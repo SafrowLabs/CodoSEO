@@ -356,3 +356,33 @@ async fn deleting_an_account_removes_its_keys_and_usage() {
         assert_eq!(n, 0, "{table}");
     }
 }
+
+#[tokio::test]
+async fn retention_deletes_keys_revoked_over_90_days_ago() {
+    let db = TestDb::new().await;
+    let ana = account(&db.pool, "ana@example.com").await;
+    let live = key(&db.pool, ana, "live", 1).await;
+    let mut ids = Vec::new();
+    for (n, days) in [(2, 89), (3, 91), (4, 400)] {
+        let k = key(&db.pool, ana, &format!("revoked {days}"), n).await;
+        api_keys::revoke(&db.pool, ana, k.id).await.unwrap();
+        sqlx::query(
+            "UPDATE api_keys SET revoked_at = now() - ($2::int * interval '1 day') WHERE id = $1",
+        )
+        .bind(k.id)
+        .bind(days)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        ids.push((days, k.id));
+    }
+    let report = codoseo_store::retention::run(&db.pool, None).await.unwrap();
+    assert_eq!(report.revoked_keys_deleted, 2);
+    let left: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM api_keys")
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(left.len(), 2);
+    assert!(left.contains(&live.id), "a live key stays");
+    assert!(left.contains(&ids[0].1), "89 days stays");
+}

@@ -7,13 +7,16 @@ use sqlx::{FromRow, PgPool};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::accounts::{ACCOUNT_COLUMNS, Account, parse_plan};
+use crate::accounts::{ACCOUNT_COLUMNS, Account, AccountRow};
 
 /// How many live keys one account may hold.
 pub const MAX_LIVE_KEYS: i64 = 20;
 
 /// Usage rows older than this many days are deleted by the daily cleanup.
 pub const USAGE_RETENTION_DAYS: i64 = 35;
+
+/// Revoked keys are deleted by the daily cleanup this many days after their revocation.
+pub const REVOKED_KEY_RETENTION_DAYS: i64 = 90;
 
 /// A key as the settings screen lists it. Never carries the key itself.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -114,12 +117,8 @@ pub async fn authenticate(
     struct Row {
         key_id: Uuid,
         stale: bool,
-        id: Uuid,
-        email: String,
-        plan: String,
-        is_owner: bool,
-        github_id: Option<String>,
-        created_at: OffsetDateTime,
+        #[sqlx(flatten)]
+        account: AccountRow,
     }
     let row: Option<Row> = sqlx::query_as(&format!(
         "SELECT k.id AS key_id, \
@@ -133,22 +132,16 @@ pub async fn authenticate(
     .await?;
     let Some(r) = row else { return Ok(None) };
     if r.stale {
-        sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
-            .bind(r.key_id)
-            .execute(pool)
-            .await?;
+        // Guarded again so concurrent callers that all saw a stale value write once.
+        sqlx::query(
+            "UPDATE api_keys SET last_used_at = now() WHERE id = $1 \
+               AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')",
+        )
+        .bind(r.key_id)
+        .execute(pool)
+        .await?;
     }
-    Ok(Some((
-        r.key_id,
-        Account {
-            id: r.id,
-            email: r.email,
-            plan: parse_plan(&r.plan),
-            is_owner: r.is_owner,
-            github_id: r.github_id,
-            created_at: r.created_at,
-        },
-    )))
+    Ok(Some((r.key_id, Account::from(r.account))))
 }
 
 /// Counts one API call against today's (UTC) allowance. One atomic upsert that only increments
@@ -179,6 +172,7 @@ pub async fn charge(
             used: i64::from(used),
             limit,
         },
+        // Only reachable with a limit: an unlimited charge always gets its row back.
         (None, limit) => Charge::OverQuota {
             limit: limit.unwrap_or(0),
         },
@@ -202,6 +196,17 @@ pub async fn delete_old_usage(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let done =
         sqlx::query("DELETE FROM api_usage WHERE day < (now() AT TIME ZONE 'utc')::date - $1::int")
             .bind(USAGE_RETENTION_DAYS as i32)
+            .execute(pool)
+            .await?;
+    Ok(done.rows_affected())
+}
+
+/// Deletes keys revoked more than [`REVOKED_KEY_RETENTION_DAYS`] days ago, so creating and
+/// revoking in a loop can't grow the table for ever. Returns how many.
+pub async fn delete_old_revoked(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let done =
+        sqlx::query("DELETE FROM api_keys WHERE revoked_at < now() - ($1::int * interval '1 day')")
+            .bind(REVOKED_KEY_RETENTION_DAYS as i32)
             .execute(pool)
             .await?;
     Ok(done.rows_affected())
