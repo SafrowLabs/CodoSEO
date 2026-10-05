@@ -2,7 +2,6 @@
 //! around it ([`worker_loop`]) with Postgres-down backoff and a graceful-shutdown drain.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;

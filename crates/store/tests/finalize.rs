@@ -155,7 +155,7 @@ async fn finalize_writes_pages_and_marks_the_crawl_done() {
         .expect("count changes");
     assert_eq!(change_count, 1);
 
-    // ErrorSpike matches the default instant-alert shape, so a job must be queued for it.
+    // One planning job is queued for the crawl, since it recorded a change.
     let job_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM jobs WHERE kind = 'send_alert' AND payload->>'crawl_id' = $1",
     )
