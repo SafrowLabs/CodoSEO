@@ -80,22 +80,6 @@ fn key_view(k: &ApiKey) -> KeyView {
     }
 }
 
-fn mcp_url(state: &AppState) -> Result<String, AppError> {
-    Ok(state
-        .config
-        .base_url
-        .join("mcp")
-        .map_err(AppError::internal)?
-        .to_string())
-}
-
-/// `claude mcp add ...` for the key (or the placeholder).
-fn command(mcp_url: &str, key: &str) -> String {
-    format!(
-        "claude mcp add --transport http codoseo {mcp_url} --header \"Authorization: Bearer {key}\""
-    )
-}
-
 async fn usage_line(state: &AppState, user: &CurrentUser) -> Result<String, AppError> {
     let used = fmt::thousands(api_keys::usage_today(&state.pool, user.id()).await?);
     Ok(
@@ -120,7 +104,7 @@ async fn render_page(
         form,
         new_key,
         usage: usage_line(state, user).await?,
-        mcp_url: mcp_url(state)?,
+        mcp_url: keys::mcp_url(&state.config)?,
         max_keys: api_keys::MAX_LIVE_KEYS,
     })
 }
@@ -213,7 +197,7 @@ async fn try_create(
             api_keys::MAX_LIVE_KEYS
         ))));
     }
-    let command = command(&mcp_url(state)?, &key.plaintext);
+    let command = keys::claude_command(&keys::mcp_url(&state.config)?, &key.plaintext);
     let page = render_page(
         state,
         user,

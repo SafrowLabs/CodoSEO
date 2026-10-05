@@ -3,6 +3,8 @@
 //! exists in the clear once, in the response that creates it.
 
 use crate::auth::session::{hash, random_token};
+use crate::config::Config;
+use crate::error::AppError;
 
 /// Every key starts with this.
 pub const KEY_PREFIX: &str = "cdo_";
@@ -42,9 +44,58 @@ pub fn is_well_formed(key: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// The MCP server's address, `{BASE_URL}/mcp`.
+pub fn mcp_url(config: &Config) -> Result<String, AppError> {
+    Ok(config
+        .base_url
+        .join("mcp")
+        .map_err(AppError::internal)?
+        .to_string())
+}
+
+/// `claude mcp add ...` for the key (or a placeholder).
+pub fn claude_command(mcp_url: &str, key: &str) -> String {
+    format!(
+        "claude mcp add --transport http codoseo {mcp_url} --header \"Authorization: Bearer {key}\""
+    )
+}
+
+/// A `mcpServers` entry for MCP clients that take JSON, written out so the keys stay in the
+/// order a person reads them.
+pub fn mcp_servers_json(mcp_url: &str, key: &str) -> String {
+    // The URL and the key are plain ASCII with no quotes or backslashes.
+    format!(
+        "{{\n  \"mcpServers\": {{\n    \"codoseo\": {{\n      \"type\": \"http\",\n      \
+         \"url\": \"{mcp_url}\",\n      \"headers\": {{\n        \
+         \"Authorization\": \"Bearer {key}\"\n      }}\n    }}\n  }}\n}}"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_json_snippet_is_valid_and_carries_the_url_and_the_bearer_key() {
+        let key = "cdo_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let json = mcp_servers_json("https://codoseo.com/mcp", key);
+        let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let server = &v["mcpServers"]["codoseo"];
+        assert_eq!(server["type"], "http");
+        assert_eq!(server["url"], "https://codoseo.com/mcp");
+        assert_eq!(server["headers"]["Authorization"], format!("Bearer {key}"));
+        // Written in reading order, not alphabetically.
+        assert!(json.find("\"type\"").unwrap() < json.find("\"url\"").unwrap());
+        assert!(json.find("\"url\"").unwrap() < json.find("\"headers\"").unwrap());
+    }
+
+    #[test]
+    fn the_claude_command_names_the_url_and_the_bearer_key() {
+        assert_eq!(
+            claude_command("https://codoseo.com/mcp", "cdo_x"),
+            "claude mcp add --transport http codoseo https://codoseo.com/mcp --header \"Authorization: Bearer cdo_x\""
+        );
+    }
 
     #[test]
     fn a_key_is_cdo_and_43_url_safe_characters() {

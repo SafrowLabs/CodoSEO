@@ -136,7 +136,7 @@ pub struct StartDone {
     /// The site's audit screen, when the account has the site.
     pub audit_href: Option<String>,
     /// The key just minted; `None` when the account is at its key limit.
-    pub key: Option<ShownKey>,
+    pub key: Option<MintedKey>,
     pub key_limit: i64,
     pub mcp_url: String,
 }
@@ -150,19 +150,8 @@ pub enum SiteNote {
     PlanFull { max_sites: u32 },
 }
 
-/// A `mcpServers` entry for MCP clients that take JSON, written out so the keys stay in the
-/// order a person reads them.
-fn mcp_servers_json(mcp_url: &str, key: &str) -> String {
-    // The URL and the key are plain ASCII with no quotes or backslashes.
-    format!(
-        "{{\n  \"mcpServers\": {{\n    \"codoseo\": {{\n      \"type\": \"http\",\n      \
-         \"url\": \"{mcp_url}\",\n      \"headers\": {{\n        \
-         \"Authorization\": \"Bearer {key}\"\n      }}\n    }}\n  }}\n}}"
-    )
-}
-
 /// The key as the result page shows it, once.
-pub struct ShownKey {
+pub struct MintedKey {
     pub key: String,
     /// The Claude Code command with the key filled in.
     pub command: String,
@@ -330,12 +319,7 @@ async fn confirm_start(
     )
     .await?;
 
-    let mcp_url = state
-        .config
-        .base_url
-        .join("mcp")
-        .map_err(AppError::internal)?
-        .to_string();
+    let mcp_url = keys::mcp_url(&state.config)?;
     // The session first and the key last: the key is the one thing that can't be shown again,
     // so nothing that can fail comes after it but rendering the page.
     let cookie = session::start(state, account.id).await?;
@@ -353,12 +337,9 @@ async fn confirm_start(
         CreateKeyOutcome::Created(k) => Some(k.id),
         CreateKeyOutcome::LimitReached => None,
     };
-    let shown = new_key_id.map(|_| ShownKey {
-        command: format!(
-            "claude mcp add --transport http codoseo {mcp_url} --header \"Authorization: Bearer {}\"",
-            key.plaintext
-        ),
-        json: mcp_servers_json(&mcp_url, &key.plaintext),
+    let shown = new_key_id.map(|_| MintedKey {
+        command: keys::claude_command(&mcp_url, &key.plaintext),
+        json: keys::mcp_servers_json(&mcp_url, &key.plaintext),
         key: key.plaintext,
     });
 
@@ -398,23 +379,4 @@ async fn confirm_start(
         body,
     )
         .into_response())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_json_snippet_is_valid_and_carries_the_url_and_the_bearer_key() {
-        let key = "cdo_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        let json = mcp_servers_json("https://codoseo.com/mcp", key);
-        let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-        let server = &v["mcpServers"]["codoseo"];
-        assert_eq!(server["type"], "http");
-        assert_eq!(server["url"], "https://codoseo.com/mcp");
-        assert_eq!(server["headers"]["Authorization"], format!("Bearer {key}"));
-        // Written in reading order, not alphabetically.
-        assert!(json.find("\"type\"").unwrap() < json.find("\"url\"").unwrap());
-        assert!(json.find("\"url\"").unwrap() < json.find("\"headers\"").unwrap());
-    }
 }
