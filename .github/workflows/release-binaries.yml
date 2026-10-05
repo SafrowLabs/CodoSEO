@@ -1,0 +1,102 @@
+name: release binaries
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "npm/**"
+      - ".github/workflows/release-binaries.yml"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            binary: codoseo
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: codoseo
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: codoseo
+          - os: macos-15
+            target: aarch64-apple-darwin
+            binary: codoseo
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: codoseo.exe
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Check release version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          node -e 'const p = require("./npm/package.json"); if (process.env.TAG && process.env.TAG !== `v${p.version}`) process.exit(1)'
+          TAG="${TAG:-v$(node -p 'require("./npm/package.json").version')}"
+          test "$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "codoseo"))')" = "${TAG#v}"
+      - name: Build binary
+        run: cargo build --locked --release -p codoseo --target ${{ matrix.target }}
+      - name: Smoke test binary
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BINARY: ${{ matrix.binary }}
+        run: '"target/${TARGET}/release/${BINARY}" --version'
+      - name: Package binary
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BINARY: ${{ matrix.binary }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          TAG="${TAG:-v$(node -p 'require("./npm/package.json").version')}"
+          mkdir -p staging
+          cp "target/${TARGET}/release/${BINARY}" "staging/${BINARY}"
+          tar -czf "codoseo-${TAG}-${TARGET}.tar.gz" -C staging "${BINARY}"
+      - name: Checksum archive
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, pathlib
+          for archive in pathlib.Path(".").glob("codoseo-*.tar.gz"):
+              digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+              pathlib.Path(str(archive) + ".sha256").write_text(f"{digest}  {archive.name}\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codoseo-${{ matrix.target }}
+          path: codoseo-*.tar.gz*
+
+  release:
+    name: Publish GitHub release
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: codoseo-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/codoseo-*.tar.gz*
+          fail_on_unmatched_files: true

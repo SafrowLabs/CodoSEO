@@ -1,0 +1,37 @@
+name: npm wrapper
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "npm/**"
+      - ".github/workflows/npm.yml"
+  pull_request:
+    paths:
+      - "npm/**"
+      - ".github/workflows/npm.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+        node: [18, 22, 24]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci --ignore-scripts
+      - run: npm audit
+      - run: npm test
+      - run: npm pack --dry-run

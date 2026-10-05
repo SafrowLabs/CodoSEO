@@ -1,0 +1,34 @@
+{
+  "name": "codoseo",
+  "version": "0.0.1",
+  "description": "CodoSEO SEO crawler and site auditor CLI",
+  "bin": {
+    "codoseo": "bin/codoseo.js"
+  },
+  "files": [
+    "bin",
+    "install.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "homepage": "https://codoseo.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SafrowLabs/codoSEO.git",
+    "directory": "npm"
+  },
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "seo",
+    "crawler",
+    "audit",
+    "cli"
+  ],
+  "scripts": {
+    "postinstall": "node install.js",
+    "test": "node --test"
+  }
+}
