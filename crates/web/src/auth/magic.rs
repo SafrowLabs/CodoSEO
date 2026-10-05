@@ -252,6 +252,8 @@ pub async fn consume(
         SignInOutcome::SignupsClosed => return Err(signups_closed()),
     };
     let cookie = session::start(&state, account.id).await?;
+    // Opening a link from one of our emails counts as activity for the inactivity check.
+    codoseo_store::accounts::record_email_click(&state.pool, account.id).await?;
 
     // A link from the no-signup audit also attaches the audited site to the account.
     let audit = payload["audit"]

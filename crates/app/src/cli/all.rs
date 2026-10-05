@@ -1,5 +1,5 @@
 //! `codoseo all`: the self-hosted single process. Applies migrations, then runs the web app and
-//! a crawl worker and a job runner side by side until SIGTERM or Ctrl-C.
+//! a crawl worker, a job runner and the scheduler side by side until SIGTERM or Ctrl-C.
 
 use std::net::SocketAddr;
 
@@ -62,8 +62,12 @@ pub async fn run(args: AllArgs) -> Outcome {
             .await;
         })
     };
+    let scheduler = crate::scheduler::spawn(&state.pool, &state.config, &shutdown);
     let outcome = serve(state, shutdown.clone()).await;
     shutdown.cancel();
+    if let Some(scheduler) = scheduler {
+        let _ = scheduler.await;
+    }
     let _ = worker.await;
     let _ = job_runner.await;
     sweep.abort();

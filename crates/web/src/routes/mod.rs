@@ -9,6 +9,7 @@ pub mod crawls;
 pub mod explorer;
 pub mod export;
 pub mod landing;
+pub mod monitoring;
 pub mod quick;
 pub mod rankorg;
 pub mod search;
@@ -37,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .merge(export::routes())
         .merge(search::routes())
         .merge(quick::routes())
+        .merge(monitoring::routes())
         .merge(admin::routes())
         .merge(rankorg::routes())
         .route("/bot", get(bot::page))

@@ -87,5 +87,12 @@ pub async fn run(args: WebArgs) -> Outcome {
     let state = prepare(args.bind)?;
     let shutdown = CancellationToken::new();
     cancel_on_signal(shutdown.clone());
-    serve(state, shutdown).await
+    // The scheduler runs in the web role; `CODOSEO_SCHEDULER=off` leaves it to another container.
+    let scheduler = crate::scheduler::spawn(&state.pool, &state.config, &shutdown);
+    let outcome = serve(state, shutdown.clone()).await;
+    shutdown.cancel();
+    if let Some(scheduler) = scheduler {
+        let _ = scheduler.await;
+    }
+    outcome
 }

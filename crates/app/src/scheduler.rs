@@ -150,7 +150,25 @@ impl SchedulerContext {
 
 /// `CODOSEO_SCHEDULER=off` turns the scheduler off (for a second web container).
 pub fn enabled() -> bool {
-    !std::env::var("CODOSEO_SCHEDULER").is_ok_and(|v| v.trim().eq_ignore_ascii_case("off"))
+    enabled_by(std::env::var("CODOSEO_SCHEDULER").ok().as_deref())
+}
+
+fn enabled_by(value: Option<&str>) -> bool {
+    !value.is_some_and(|v| v.trim().eq_ignore_ascii_case("off"))
+}
+
+/// Starts [`scheduler_loop`] for a web process, unless `CODOSEO_SCHEDULER=off`.
+pub fn spawn(
+    pool: &PgPool,
+    config: &Config,
+    shutdown: &CancellationToken,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !enabled() {
+        tracing::info!("CODOSEO_SCHEDULER=off: this process does not run the scheduler");
+        return None;
+    }
+    let ctx = SchedulerContext::from_config(pool.clone(), config);
+    Some(tokio::spawn(scheduler_loop(ctx, shutdown.clone())))
 }
 
 /// Ticks every [`TICK_INTERVAL`] until `shutdown` is cancelled. A slow tick delays the next one
@@ -377,6 +395,15 @@ async fn ping_heartbeat(ctx: &SchedulerContext) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_off_disables_the_scheduler() {
+        assert!(enabled_by(None));
+        assert!(enabled_by(Some("on")));
+        assert!(enabled_by(Some("")));
+        assert!(!enabled_by(Some("off")));
+        assert!(!enabled_by(Some(" OFF ")));
+    }
 
     fn ts(s: &str) -> Timestamp {
         s.parse().unwrap()
