@@ -60,7 +60,7 @@ async function main() {
   if (!rustTarget) throw new Error(`CodoSEO does not have a published binary for ${npmTarget}.`);
   const packageVersion = require("./package.json").version;
   const archiveName = `codoseo-v${packageVersion}-${rustTarget}.tar.gz`;
-  const archiveUrl = `https://github.com/SafrowLabs/codoSEO/releases/download/v${packageVersion}/${archiveName}`;
+  const archiveUrl = `https://github.com/SafrowLabs/CodoSEO/releases/download/v${packageVersion}/${archiveName}`;
   const vendorDir = path.join(__dirname, "vendor", npmTarget);
   const binaryName = process.platform === "win32" ? "codoseo.exe" : "codoseo";
   const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codoseo-"));

@@ -9,22 +9,22 @@ class Codoseo < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/SafrowLabs/codoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/SafrowLabs/CodoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-aarch64-apple-darwin.tar.gz"
       sha256 "@SHA256_AARCH64_APPLE_DARWIN@"
     end
     on_intel do
-      url "https://github.com/SafrowLabs/codoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-x86_64-apple-darwin.tar.gz"
+      url "https://github.com/SafrowLabs/CodoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-x86_64-apple-darwin.tar.gz"
       sha256 "@SHA256_X86_64_APPLE_DARWIN@"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/SafrowLabs/codoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-aarch64-unknown-linux-musl.tar.gz"
+      url "https://github.com/SafrowLabs/CodoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-aarch64-unknown-linux-musl.tar.gz"
       sha256 "@SHA256_AARCH64_LINUX_MUSL@"
     end
     on_intel do
-      url "https://github.com/SafrowLabs/codoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-x86_64-unknown-linux-musl.tar.gz"
+      url "https://github.com/SafrowLabs/CodoSEO/releases/download/v@VERSION@/codoseo-v@VERSION@-x86_64-unknown-linux-musl.tar.gz"
       sha256 "@SHA256_X86_64_LINUX_MUSL@"
     end
   end

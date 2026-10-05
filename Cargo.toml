@@ -7,7 +7,7 @@ version = "0.0.1"
 edition = "2024"
 rust-version = "1.88"
 license = "AGPL-3.0-only"
-repository = "https://github.com/SafrowLabs/codoSEO"
+repository = "https://github.com/SafrowLabs/CodoSEO"
 homepage = "https://codoseo.com"
 
 [workspace.dependencies]

@@ -33,7 +33,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 LABEL org.opencontainers.image.title="CodoSEO" \
       org.opencontainers.image.description="A fast, polite SEO crawler and site auditor, with a web app that tells you the moment your SEO breaks." \
-      org.opencontainers.image.source="https://github.com/SafrowLabs/codoSEO" \
+      org.opencontainers.image.source="https://github.com/SafrowLabs/CodoSEO" \
       org.opencontainers.image.url="https://codoseo.com" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.vendor="SafrowLabs"

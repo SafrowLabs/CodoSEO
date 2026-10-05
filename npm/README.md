@@ -11,7 +11,7 @@ Requires Node.js 18 or newer and `tar` on PATH (included with supported Windows,
 
 For local development or offline installation, set `CODOSEO_SKIP_DOWNLOAD=1` during installation, then set `CODOSEO_BINARY` to the absolute path of a compiled native binary when running the CLI. Setting `CODOSEO_BINARY` also skips the installer download. Do not point it to the npm launcher.
 
-Project documentation: <https://github.com/SafrowLabs/codoSEO>
+Project documentation: <https://github.com/SafrowLabs/CodoSEO>
 
 ## Releasing
 
