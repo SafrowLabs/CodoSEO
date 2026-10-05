@@ -1,8 +1,17 @@
 name: npm wrapper
 
 on:
+  workflow_dispatch:
   push:
+    branches:
+      - "**"
+    paths:
+      - "npm/**"
+      - ".github/workflows/npm.yml"
   pull_request:
+    paths:
+      - "npm/**"
+      - ".github/workflows/npm.yml"
 
 permissions:
   contents: read

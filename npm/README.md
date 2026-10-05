@@ -21,3 +21,20 @@ Project documentation: <https://github.com/SafrowLabs/codoSEO>
 4. From `npm/`, run `npm publish --access public` using an authorized npm account. Publishing is manual; pushing the Git tag does not publish the npm package.
 
 Do not publish to npm before the matching GitHub release assets are available: users' postinstall downloads would fail. The checksums detect corruption; they are served alongside the archives and are not independent signatures.
+
+## GitHub Actions triggers
+
+- **npm wrapper** runs on branch pushes and pull requests that change `npm/**` or `.github/workflows/npm.yml`. It also supports a manual run.
+- **release binaries** validates pull requests changing `npm/**` or its workflow file. It builds and publishes GitHub release assets on `v*` tag pushes. A manual run on a branch builds artifacts only; a manual run on a `v*` tag also publishes the GitHub release assets.
+- The existing Rust workspace CI continues to run on pushes and pull requests.
+
+Once these workflows are merged into the default branch, trigger them manually from the repository root:
+
+```sh
+gh workflow run npm.yml --ref main
+gh workflow run release-binaries.yml --ref main
+# To build and publish GitHub release assets for an existing version tag:
+gh workflow run release-binaries.yml --ref v0.0.1
+```
+
+These workflows do not publish to the npm registry. Use the release steps above for npm publication.
