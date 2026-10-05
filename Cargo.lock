@@ -637,6 +637,7 @@ name = "codoseo-store"
 version = "0.0.1"
 dependencies = [
  "codoseo-core",
+ "futures-util",
  "proptest",
  "serde",
  "serde_json",
@@ -668,6 +669,7 @@ dependencies = [
  "bytes",
  "codoseo-checks",
  "codoseo-core",
+ "codoseo-crawler",
  "codoseo-store",
  "codoseo-testkit",
  "csv",

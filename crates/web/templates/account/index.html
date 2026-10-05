@@ -10,6 +10,12 @@
       <div class="field-row" style="border:0;padding:0"><span class="k">Theme</span><span class="v"><button class="btn btn-sm" data-action="theme"><svg class="icon"><use href="#i-moon"/></svg><span data-theme-label>System</span></button></span></div>
     </div>
   </div>
+  {% if is_admin %}
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><span class="card-title">Admin</span></div>
+    <div class="card-pad"><a class="btn" href="/admin">Open the admin page</a> <span class="hint" style="margin-left:8px">Funnel, audit queue and failed jobs</span></div>
+  </div>
+  {% endif %}
   {% if self_hosted && is_owner %}
   <div class="card" style="margin-top:16px">
     <div class="card-head"><span class="card-title">Instance</span><span class="card-aside">You're the owner of this CodoSEO</span></div>

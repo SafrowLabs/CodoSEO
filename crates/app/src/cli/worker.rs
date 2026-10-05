@@ -5,7 +5,9 @@ use codoseo_store::crawl_queue::CrawlQueue;
 use codoseo_store::jobs::JobQueue;
 use tokio_util::sync::CancellationToken;
 
-use crate::worker::{DEFAULT_MEMORY_BUDGET, requeue_stale_sweep, worker_loop};
+use crate::worker::{
+    DEFAULT_MEMORY_BUDGET, address_policy_from_env, requeue_stale_sweep, worker_loop,
+};
 
 use super::{CliError, EXIT_OK, Outcome};
 
@@ -46,6 +48,7 @@ pub async fn run(_args: WorkerArgs) -> Outcome {
         &job_queue,
         &worker_id,
         DEFAULT_MEMORY_BUDGET,
+        address_policy_from_env(),
         shutdown,
     )
     .await;

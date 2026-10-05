@@ -10,7 +10,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::web::{cancel_on_signal, prepare, serve};
 use super::{CliError, Outcome};
-use crate::worker::{DEFAULT_MEMORY_BUDGET, requeue_stale_sweep, worker_loop};
+use crate::worker::{
+    DEFAULT_MEMORY_BUDGET, address_policy_from_env, requeue_stale_sweep, worker_loop,
+};
 
 #[derive(Debug, Args)]
 pub struct AllArgs {
@@ -46,6 +48,7 @@ pub async fn run(args: AllArgs) -> Outcome {
                 &job_queue,
                 &worker_id,
                 DEFAULT_MEMORY_BUDGET,
+                address_policy_from_env(),
                 shutdown,
             )
             .await;

@@ -6,12 +6,14 @@ use axum::http::HeaderName;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Form, Router};
+use codoseo_core::crawl::AddressPolicy;
 use codoseo_core::plan::{Plan, PlanLimits, Schedule};
 use codoseo_store::sites::CreateOutcome;
 use serde::Deserialize;
 use url::Url;
 
 use crate::auth::CurrentUser;
+use crate::config::Mode;
 use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{Screen, Shell, initial};
@@ -109,6 +111,36 @@ pub fn parse_start_url(raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
+/// How often a new site on `plan` is crawled on a schedule: daily on paid plans, weekly on Free.
+pub fn schedule_for(plan: Plan) -> Option<&'static str> {
+    match PlanLimits::for_plan(plan).fastest_schedule {
+        Some(Schedule::Daily) if plan != Plan::Free => Some("daily"),
+        Some(_) => Some("weekly"),
+        None => None,
+    }
+}
+
+/// What the cloud says to an address it won't crawl.
+const PRIVATE_TARGET: &str = "That address is private or internal, so we can't audit it.";
+
+/// In the cloud, refuses addresses the crawler would refuse anyway, so the person hears it at
+/// the form instead of from a failed crawl. IP literals go through the crawler's own guard;
+/// host names are also checked when they are fetched, after DNS (and after every redirect).
+pub fn check_public_target(url: &Url) -> Result<(), String> {
+    if let Some(host) = url.host_str() {
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        let internal_name = host == "localhost"
+            || [".localhost", ".local", ".internal", ".localdomain", ".lan"]
+                .iter()
+                .any(|suffix| host.ends_with(suffix));
+        if internal_name {
+            return Err(PRIVATE_TARGET.to_owned());
+        }
+    }
+    codoseo_crawler::guard::check_url(url, AddressPolicy::Public)
+        .map_err(|_| PRIVATE_TARGET.to_owned())
+}
+
 async fn create(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -163,12 +195,13 @@ async fn create(
         Ok(u) => u,
         Err(msg) => return invalid(msg),
     };
+    if state.config.mode == Mode::Cloud
+        && let Err(msg) = check_public_target(&start)
+    {
+        return invalid(msg);
+    }
     let domain = start.host_str().unwrap_or_default().to_lowercase();
-    let schedule = match limits.fastest_schedule {
-        Some(Schedule::Daily) if user.account.plan != Plan::Free => Some("daily"),
-        Some(_) => Some("weekly"),
-        None => None,
-    };
+    let schedule = schedule_for(user.account.plan);
     let outcome = codoseo_store::sites::create_checked(
         &state.pool,
         user.id(),
@@ -191,6 +224,29 @@ async fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_targets() {
+        let ok = |s: &str| check_public_target(&Url::parse(s).unwrap());
+        assert!(ok("https://example.com/").is_ok());
+        assert!(ok("https://93.184.216.34/").is_ok());
+        for bad in [
+            "http://localhost/",
+            "http://app.localhost/",
+            "http://127.0.0.1/",
+            "http://10.1.2.3/",
+            "http://192.168.0.1/",
+            "http://172.16.0.1/",
+            "http://169.254.169.254/",
+            "http://[::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://2130706433/",
+            "http://nas.local/",
+            "http://db.internal/",
+        ] {
+            assert!(ok(bad).is_err(), "{bad} must be refused");
+        }
+    }
 
     #[test]
     fn start_urls() {

@@ -703,3 +703,53 @@ async fn add_site_over_htmx_redirects_or_retargets_the_form() {
         res.body
     );
 }
+
+#[tokio::test]
+async fn the_cloud_refuses_internal_addresses_but_self_hosted_allows_them() {
+    let cloud = TestApp::with_config(support::cloud_config()).await;
+    let (_, cookie) = cloud.login("ana@example.com").await;
+    for target in [
+        "localhost",
+        "http://127.0.0.1/",
+        "http://10.0.0.5/",
+        "http://169.254.169.254/latest/meta-data",
+        "http://[::1]/",
+        "http://2130706433/",
+        "http://printer.local/",
+    ] {
+        let res = add_site(&cloud, &cookie, target).await;
+        assert_eq!(
+            res.status,
+            StatusCode::BAD_REQUEST,
+            "{target}: {}",
+            res.body
+        );
+        // An IPv6 literal has no dot, so the form's own address check turns it away first.
+        assert!(
+            res.body.contains("private or internal") || res.body.contains("valid web address"),
+            "{target}: {}",
+            res.body
+        );
+    }
+    let sites: i64 = sqlx::query_scalar("SELECT count(*) FROM sites")
+        .fetch_one(cloud.pool())
+        .await
+        .unwrap();
+    assert_eq!(sites, 0, "nothing was created or queued");
+
+    // A public name is accepted in the cloud.
+    assert_eq!(
+        add_site(&cloud, &cookie, "example.com").await.status,
+        StatusCode::SEE_OTHER
+    );
+
+    // Self-hosted keeps allowing private addresses (intranet sites are the point).
+    let selfhost = TestApp::new().await;
+    let (_, cookie) = selfhost.login("ana@example.com").await;
+    assert_eq!(
+        add_site(&selfhost, &cookie, "http://127.0.0.1:9000/")
+            .await
+            .status,
+        StatusCode::SEE_OTHER
+    );
+}

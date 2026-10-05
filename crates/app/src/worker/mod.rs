@@ -5,6 +5,6 @@ pub mod budget;
 pub mod run;
 
 pub use run::{
-    DEFAULT_MEMORY_BUDGET, WorkerError, requeue_stale_sweep, resolve_limits, worker_loop,
-    worker_loop_once,
+    DEFAULT_MEMORY_BUDGET, WorkerError, address_policy_for_mode, address_policy_from_env,
+    requeue_stale_sweep, resolve_limits, worker_loop, worker_loop_once,
 };

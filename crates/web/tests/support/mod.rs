@@ -177,6 +177,24 @@ impl TestApp {
             .await
     }
 
+    /// A form POST with extra request headers (`CF-Connecting-IP`, ...).
+    pub async fn post_with_headers(
+        &self,
+        path: &str,
+        form: &str,
+        cookie: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> TestResponse {
+        let mut req = build(Method::POST, path, cookie, Some(form), false);
+        for (name, value) in headers {
+            req.headers_mut().insert(
+                header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        self.send(req).await
+    }
+
     /// A form POST (`application/x-www-form-urlencoded`).
     pub async fn post(&self, path: &str, form: &str, cookie: Option<&str>) -> TestResponse {
         self.send(build(Method::POST, path, cookie, Some(form), false))
@@ -263,8 +281,38 @@ impl TestApp {
         .fetch_one(self.pool())
         .await
         .expect("insert crawl");
+        self.finalize_crawl(crawl_id, pages, changes, StopReason::Completed)
+            .await;
+        crawl_id
+    }
 
-        let origin = Url::parse(&site.start_url).expect("start url");
+    /// Finishes a crawl that already exists (queued or running) as the worker would: claims it
+    /// for `test-worker`, runs the checks over `pages` and `finalize`s. For no-signup audits
+    /// and first crawls the test queued itself.
+    pub async fn finalize_crawl(
+        &self,
+        crawl_id: Uuid,
+        pages: Vec<PageRecord>,
+        changes: Vec<Change>,
+        stop: StopReason,
+    ) {
+        let (site_id, start_url): (Uuid, String) = sqlx::query_as(
+            "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
+        )
+        .bind(crawl_id)
+        .fetch_one(self.pool())
+        .await
+        .expect("crawl and site");
+        sqlx::query(
+            "UPDATE crawls SET status = 'running', worker_id = 'test-worker', \
+             started_at = now() - interval '95 seconds', heartbeat_at = now() WHERE id = $1",
+        )
+        .bind(crawl_id)
+        .execute(self.pool())
+        .await
+        .expect("claim crawl");
+
+        let origin = Url::parse(&start_url).expect("start url");
         let edges = (1..pages.len() as u32)
             .map(|to| Edge {
                 from: 0,
@@ -282,14 +330,14 @@ impl TestApp {
             },
             robots: None,
             sitemap: SitemapSummary::default(),
-            stop: StopReason::Completed,
+            stop,
             duration_ms: 95_000,
         };
         let report = codoseo_checks::run_checks(&mut out);
         codoseo_store::finalize::finalize(
             self.pool(),
             crawl_id,
-            site.id,
+            site_id,
             "test-worker",
             &out,
             &report,
@@ -297,8 +345,30 @@ impl TestApp {
         )
         .await
         .expect("finalize");
-        crawl_id
     }
+}
+
+/// A cloud-mode config: https base URL, plan limits and signup rules of codoseo.com.
+pub fn cloud_config() -> Config {
+    cloud_config_with(&[])
+}
+
+/// A cloud config with extra environment values (`TURNSTILE_SECRET`, `ADMIN_EMAILS`, ...).
+pub fn cloud_config_with(extra: &[(&str, &str)]) -> Config {
+    let extra: Vec<(String, String)> = extra
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    Config::from_lookup(|k| match k {
+        "CODOSEO_MODE" => Some("cloud".into()),
+        "BASE_URL" => Some("https://codoseo.com".into()),
+        "SECRET_KEY" => Some("test-secret".into()),
+        other => extra
+            .iter()
+            .find(|(n, _)| n == other)
+            .map(|(_, v)| v.clone()),
+    })
+    .expect("cloud config is valid")
 }
 
 pub async fn set_plan(pool: &PgPool, account_id: Uuid, plan: Plan) {

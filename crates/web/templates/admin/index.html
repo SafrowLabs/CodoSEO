@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page page-narrow">
+  <div class="page-head"><h1>Admin</h1></div>
+
+  <div class="card">
+    <div class="card-head"><span class="card-title">No-signup audit queue</span></div>
+    <div class="card-pad"><b class="mono" data-queue-depth="{{ queue_depth }}">{{ queue_depth }}</b> <span class="muted">audit{% if queue_depth != 1 %}s{% endif %} waiting for a crawler</span></div>
+  </div>
+
+  {% for t in tables %}
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><span class="card-title">Funnel · {{ t.title }}</span><span class="card-aside">counted per audit</span></div>
+    <table class="tbl" style="width:100%;border-collapse:collapse">
+      <thead><tr><th style="text-align:left;padding:8px 16px">Step</th><th style="text-align:right;padding:8px 16px">Audits</th><th style="text-align:right;padding:8px 16px">Events</th><th style="text-align:right;padding:8px 16px">From the step before</th></tr></thead>
+      <tbody>
+      {% for r in t.rows %}
+      <tr data-kind="{{ r.kind }}" data-unique="{{ r.raw }}" style="border-top:1px solid var(--line-soft)"><td style="padding:10px 16px">{{ r.label }}</td><td class="mono" style="text-align:right;padding:10px 16px">{{ r.unique }}</td><td class="mono muted" style="text-align:right;padding:10px 16px">{{ r.events }}</td><td class="mono" style="text-align:right;padding:10px 16px">{{ r.conversion }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><span class="card-title">Failed jobs</span><span class="card-aside">newest 20, kept 30 days</span></div>
+    {% if jobs.is_empty() %}
+    <div class="card-pad muted">None. Nothing has run out of retries.</div>
+    {% else %}
+    <ul style="list-style:none">
+      {% for j in jobs %}
+      <li class="card-pad" style="border-top:1px solid var(--line-soft);display:grid;gap:4px"><span><b class="mono">{{ j.kind }}</b> <span class="muted">· {{ j.attempts }} attempts · {{ j.when }}</span></span><span class="mono" style="font-size:12.5px;overflow-wrap:anywhere">{{ j.error }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

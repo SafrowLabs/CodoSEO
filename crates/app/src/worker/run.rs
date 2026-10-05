@@ -60,9 +60,17 @@ pub async fn worker_loop_once(
     job_queue: &JobQueue,
     worker_id: &str,
     default_budget: u64,
+    policy: AddressPolicy,
 ) -> Result<bool, WorkerError> {
-    let Some((crawl_id, handle)) =
-        claim_and_spawn(pool, crawl_queue, job_queue, worker_id, default_budget).await?
+    let Some((crawl_id, handle)) = claim_and_spawn(
+        pool,
+        crawl_queue,
+        job_queue,
+        worker_id,
+        default_budget,
+        policy,
+    )
+    .await?
     else {
         return Ok(false);
     };
@@ -84,6 +92,7 @@ async fn claim_and_spawn(
     _job_queue: &JobQueue,
     worker_id: &str,
     default_budget: u64,
+    policy: AddressPolicy,
 ) -> Result<Option<(uuid::Uuid, JoinHandle<Result<(), String>>)>, WorkerError> {
     let claimed = match crawl_queue.claim(worker_id).await {
         Ok(Some(claimed)) => claimed,
@@ -101,6 +110,7 @@ async fn claim_and_spawn(
             &crawl_queue_for_task,
             &worker_id,
             default_budget,
+            policy,
             claimed,
         )
         .await
@@ -143,6 +153,20 @@ async fn handle_outcome(
             Ok(())
         }
     }
+}
+
+/// The address policy for a `CODOSEO_MODE` value: the cloud (`cloud`) refuses private and
+/// internal addresses, everything else (self-hosted, unset) allows them.
+pub fn address_policy_for_mode(mode: Option<&str>) -> AddressPolicy {
+    match mode {
+        Some("cloud") => AddressPolicy::Public,
+        _ => AddressPolicy::AllowPrivate,
+    }
+}
+
+/// The policy for this process, from the `CODOSEO_MODE` environment variable.
+pub fn address_policy_from_env() -> AddressPolicy {
+    address_policy_for_mode(std::env::var("CODOSEO_MODE").ok().as_deref())
 }
 
 /// Resolves the crawl limits that actually govern this run: a quick (unclaimed) audit uses
@@ -194,6 +218,7 @@ async fn run_one_crawl(
     crawl_queue: &CrawlQueue,
     worker_id: &str,
     default_budget: u64,
+    policy: AddressPolicy,
     claimed: ClaimedCrawl,
 ) -> Result<(), String> {
     // Test-only panic seam: lets integration tests prove a panicking crawl is isolated to its
@@ -229,9 +254,8 @@ async fn run_one_crawl(
             ..CrawlLimits::default()
         },
         politeness: Politeness::default(),
-        // Self-hosted default for now: the cloud/self-hosted split (`CODOSEO_MODE`) lands in
-        // M9. Until then the worker behaves like the CLI and local MCP.
-        address_policy: AddressPolicy::AllowPrivate,
+        // The cloud refuses private and internal addresses; self-hosted behaves like the CLI.
+        address_policy: policy,
         user_agent: USER_AGENT.to_owned(),
     };
 
@@ -354,6 +378,7 @@ pub async fn worker_loop(
     job_queue: &JobQueue,
     worker_id: &str,
     default_budget: u64,
+    policy: AddressPolicy,
     shutdown: CancellationToken,
 ) {
     let mut backoff = Duration::from_secs(1);
@@ -363,8 +388,15 @@ pub async fn worker_loop(
             break;
         }
 
-        let claimed =
-            claim_and_spawn(pool, crawl_queue, job_queue, worker_id, default_budget).await;
+        let claimed = claim_and_spawn(
+            pool,
+            crawl_queue,
+            job_queue,
+            worker_id,
+            default_budget,
+            policy,
+        )
+        .await;
         match claimed {
             Ok(Some((crawl_id, mut handle))) => {
                 backoff = Duration::from_secs(1);

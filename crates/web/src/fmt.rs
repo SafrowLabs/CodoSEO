@@ -72,6 +72,17 @@ pub fn pct1(part: u64, whole: u64) -> String {
     format!("{}.{}", tenths / 10, tenths % 10)
 }
 
+/// `66.7%`, or `100%` without a pointless `.0`.
+pub fn percent(part: i64, whole: i64) -> String {
+    let p = pct1(part.max(0) as u64, whole.max(0) as u64);
+    format!("{}%", p.strip_suffix(".0").unwrap_or(&p))
+}
+
+/// `1 page`, `1,284 pages`.
+pub fn pages(n: u32) -> String {
+    format!("{} page{}", thousands(n), if n == 1 { "" } else { "s" })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,6 +112,11 @@ mod tests {
         assert_eq!(duration(Duration::seconds(102)), "1m 42s");
         assert_eq!(duration(Duration::seconds(7500)), "2h 05m");
         assert_eq!(pct1(1158, 1284), "90.2");
+        assert_eq!(percent(2, 3), "66.7%");
+        assert_eq!(percent(5, 5), "100%");
+        assert_eq!(percent(0, 0), "0%");
+        assert_eq!(pages(1), "1 page");
+        assert_eq!(pages(1284), "1,284 pages");
         assert_eq!(pct1(1, 0), "0");
     }
 }

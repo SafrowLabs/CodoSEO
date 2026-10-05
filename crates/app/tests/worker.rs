@@ -3,7 +3,8 @@
 
 mod support;
 
-use codoseo::worker::{DEFAULT_MEMORY_BUDGET, worker_loop_once};
+use codoseo::worker::{DEFAULT_MEMORY_BUDGET, address_policy_for_mode, worker_loop_once};
+use codoseo_core::crawl::AddressPolicy;
 use codoseo_store::crawl_queue::{CrawlQueue, CrawlTrigger};
 use codoseo_store::jobs::JobQueue;
 use codoseo_testkit::SiteBuilder;
@@ -36,6 +37,7 @@ async fn worker_loop_once_crawls_and_finalizes_a_claimed_site() {
         &job_queue,
         "test-worker",
         DEFAULT_MEMORY_BUDGET,
+        AddressPolicy::AllowPrivate,
     )
     .await
     .expect("worker_loop_once");
@@ -68,6 +70,7 @@ async fn worker_loop_once_crawls_and_finalizes_a_claimed_site() {
         &job_queue,
         "test-worker",
         DEFAULT_MEMORY_BUDGET,
+        AddressPolicy::AllowPrivate,
     )
     .await
     .expect("worker_loop_once");
@@ -108,6 +111,7 @@ async fn a_panicking_crawl_is_isolated_and_the_loop_keeps_serving_later_crawls()
         &job_queue,
         "test-worker",
         DEFAULT_MEMORY_BUDGET,
+        AddressPolicy::AllowPrivate,
     )
     .await
     .expect("worker_loop_once must not itself error on a panicking crawl");
@@ -147,6 +151,7 @@ async fn a_panicking_crawl_is_isolated_and_the_loop_keeps_serving_later_crawls()
         &job_queue,
         "test-worker",
         DEFAULT_MEMORY_BUDGET,
+        AddressPolicy::AllowPrivate,
     )
     .await
     .expect("worker_loop_once");
@@ -177,9 +182,16 @@ async fn a_crawl_that_exceeds_the_memory_budget_is_not_run() {
         .await
         .expect("enqueue crawl");
 
-    let claimed = worker_loop_once(&db.pool, &crawl_queue, &job_queue, "test-worker", 1)
-        .await
-        .expect("worker_loop_once must not itself error on a budget rejection");
+    let claimed = worker_loop_once(
+        &db.pool,
+        &crawl_queue,
+        &job_queue,
+        "test-worker",
+        1,
+        AddressPolicy::AllowPrivate,
+    )
+    .await
+    .expect("worker_loop_once must not itself error on a budget rejection");
     assert!(claimed);
 
     let (status, failure_reason): (String, Option<String>) =
@@ -265,4 +277,76 @@ async fn resolve_limits_uses_the_sites_account_plan_not_the_free_default() {
         Some(10_000),
         "crawl_settings must not be able to exceed the plan's cap"
     );
+}
+
+#[tokio::test]
+async fn a_cloud_worker_never_connects_to_a_private_address() {
+    let db = TestDb::new().await;
+    // The fixture site listens on 127.0.0.1, which the cloud must refuse to crawl.
+    let site = SiteBuilder::new()
+        .html("/", "Home", &["/a"])
+        .html("/a", "A", &[])
+        .start()
+        .await;
+    let site_id = db.seed_site("internal.test", site.url("/").as_str()).await;
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let job_queue = JobQueue::new(db.pool.clone());
+    crawl_queue
+        .enqueue(
+            site_id,
+            "internal.test",
+            CrawlTrigger::Quick,
+            0,
+            Some("web"),
+            None,
+        )
+        .await
+        .expect("enqueue crawl");
+
+    let claimed = worker_loop_once(
+        &db.pool,
+        &crawl_queue,
+        &job_queue,
+        "test-worker",
+        DEFAULT_MEMORY_BUDGET,
+        AddressPolicy::Public,
+    )
+    .await
+    .expect("worker_loop_once");
+    assert!(claimed);
+
+    assert_eq!(
+        site.hits(),
+        0,
+        "the cloud worker must not send a single request to 127.0.0.1"
+    );
+    let (reason, status, pages): (Option<String>, String, i64) = sqlx::query_as(
+        "SELECT c.failure_reason, c.status::text, (SELECT count(*) FROM pages p WHERE p.crawl_id = c.id) \
+         FROM crawls c WHERE c.site_id = $1",
+    )
+    .bind(site_id)
+    .fetch_one(&db.pool)
+    .await
+    .expect("read crawl row");
+    // A quick audit fails for good (no 15-minute retry): the visitor is watching it.
+    let reason = reason.expect("a refused address records why the crawl failed");
+    assert!(
+        reason.contains("address not allowed"),
+        "unexpected reason: {reason}"
+    );
+    assert_eq!(status, "failed");
+    assert_eq!(pages, 0);
+}
+
+#[test]
+fn the_worker_policy_follows_codoseo_mode() {
+    assert_eq!(
+        address_policy_for_mode(Some("cloud")),
+        AddressPolicy::Public
+    );
+    assert_eq!(
+        address_policy_for_mode(Some("selfhost")),
+        AddressPolicy::AllowPrivate
+    );
+    assert_eq!(address_policy_for_mode(None), AddressPolicy::AllowPrivate);
 }

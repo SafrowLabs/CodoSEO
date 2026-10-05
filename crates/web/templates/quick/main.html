@@ -1,0 +1,47 @@
+<section id="audit-main" class="q-main"{% if main.polling %} hx-get="/audit/{{ main.id }}/live" hx-trigger="every 2s" hx-swap="outerHTML" data-quiet{% endif %} aria-live="polite">
+{% if main.polling %}
+  <div class="q-wait" role="status">
+    <i class="dot running"></i>
+    {% if main.running %}
+      <div><b class="shimmer">Crawling {{ main.domain }}</b><p class="muted"><span class="q-count">{{ main.pages_done }}</span> pages checked so far. This takes about a minute.</p></div>
+    {% else %}
+      <div><b class="shimmer">Waiting for a crawler</b><p class="muted">{% if let Some(line) = main.line %}{{ line }} {% endif %}Your audit starts in a moment. This page updates by itself.</p></div>
+    {% endif %}
+  </div>
+{% else if let Some(done) = main.done %}
+  <div class="q-score">
+    <div class="ring" style="--p: {{ done.score }}"><b class="{{ done.tone }}">{{ done.score }}</b></div>
+    <div>
+      <h2>Health score {{ done.score }} out of 100</h2>
+      <p class="muted">{{ done.checks_chip }} · {{ done.pages_crawled }}</p>
+      {% if let Some(chip) = done.stop_chip %}<p class="chip" style="margin-top:8px;display:inline-block">{{ chip }}. A full crawl covers up to 500 pages.</p>{% endif %}
+    </div>
+  </div>
+
+  {% if done.all_clear %}
+    <p class="q-clear">No issues found in these pages. Nice work. Monitoring tells you the day that changes.</p>
+  {% else %}
+    <h3 class="q-h">Top issues</h3>
+    <ul class="q-issues">
+      {% for i in done.issues %}
+      <li class="issue-row {{ i.severity }}">
+        <span class="q-sev {{ i.severity }}">{{ i.label }}</span>
+        <span class="t">{{ i.title }}</span>
+        <span class="n mono">{{ i.detail }}</span>
+      </li>
+      {% endfor %}
+      {% if let Some(lock) = done.locked %}
+      <li class="issue-lock"><svg class="icon" style="width:14px;height:14px"><use href="#i-lock"/></svg> {{ lock }} in the full report</li>
+      {% endif %}
+    </ul>
+  {% endif %}
+  <p class="q-rankorg"><a href="{{ done.rankorg }}" target="_blank" rel="noopener">Take this site to RankOrg ↗</a> <span class="muted">We pass along your domain and its top pages.</span></p>
+  {% include "quick/unlock.html" %}
+{% else if let Some(n) = main.notice %}
+  <div class="q-notice" role="alert">
+    <h2>{{ n.title }}</h2>
+    <p>{{ n.message }}</p>
+    <p><a class="btn btn-primary" href="/">Audit another site</a> <a class="btn btn-ghost" href="/bot">About CodoSEObot</a></p>
+  </div>
+{% endif %}
+</section>

@@ -15,6 +15,18 @@ pub enum JobKind {
     Cleanup,
 }
 
+impl JobKind {
+    /// The `job_kind` label.
+    pub fn slug(self) -> &'static str {
+        match self {
+            JobKind::SendAlert => "send_alert",
+            JobKind::SendDigest => "send_digest",
+            JobKind::SendEmail => "send_email",
+            JobKind::Cleanup => "cleanup",
+        }
+    }
+}
+
 #[derive(Debug, FromRow)]
 pub struct ClaimedJob {
     pub id: Uuid,
@@ -90,4 +102,25 @@ impl JobQueue {
         .await?;
         Ok(())
     }
+}
+
+/// A job that ran out of attempts, for the admin page.
+#[derive(Debug, FromRow)]
+pub struct FailedJob {
+    pub id: Uuid,
+    pub kind: JobKind,
+    pub attempt: i16,
+    pub last_error: Option<String>,
+    pub created_at: time::OffsetDateTime,
+}
+
+/// The most recent failed jobs (kept 30 days), newest first.
+pub async fn failed_jobs(pool: &PgPool, limit: i64) -> Result<Vec<FailedJob>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, kind, attempt, last_error, created_at FROM jobs \
+         WHERE status = 'failed' ORDER BY created_at DESC, id LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
 }

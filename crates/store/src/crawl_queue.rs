@@ -38,6 +38,9 @@ pub struct ClaimedCrawl {
     pub crawl_settings: serde_json::Value,
 }
 
+/// No-signup audits running at once, across all workers.
+pub const MAX_CONCURRENT_QUICK: i64 = 8;
+
 #[derive(Clone)]
 pub struct CrawlQueue {
     pool: PgPool,
@@ -77,8 +80,17 @@ impl CrawlQueue {
     /// hour waited. A `NOT EXISTS` guard against another `running` row on the same domain keeps
     /// this from even attempting a row the partial unique index would reject; `FOR UPDATE SKIP
     /// LOCKED` is what makes concurrent claimers safe.
+    ///
+    /// At most [`MAX_CONCURRENT_QUICK`] no-signup audits run at once (spec section 8): while
+    /// that many are running, queued quick crawls are skipped and the next crawl of any other
+    /// kind is claimed instead. The count and the claim happen under one advisory lock, so two
+    /// workers can't both see 7 running and start two more.
     pub async fn claim(&self, worker_id: &str) -> Result<Option<ClaimedCrawl>, sqlx::Error> {
-        sqlx::query_as(
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.crawl_queue.claim'))")
+            .execute(&mut *tx)
+            .await?;
+        let claimed = sqlx::query_as(
             "UPDATE crawls c \
              SET status = 'running', started_at = now(), heartbeat_at = now(), worker_id = $1 \
              FROM sites s \
@@ -91,6 +103,9 @@ impl CrawlQueue {
                      SELECT 1 FROM crawls c2 \
                      WHERE c2.domain = crawls.domain AND c2.status = 'running' \
                    ) \
+                   AND (trigger <> 'quick' OR ( \
+                     SELECT count(*) FROM crawls r WHERE r.trigger = 'quick' AND r.status = 'running' \
+                   ) < $2) \
                  ORDER BY (priority - EXTRACT(EPOCH FROM (now() - queued_at)) / 3600.0), queued_at \
                  FOR UPDATE SKIP LOCKED \
                  LIMIT 1 \
@@ -99,8 +114,11 @@ impl CrawlQueue {
                        s.start_url, s.crawl_settings",
         )
         .bind(worker_id)
-        .fetch_optional(&self.pool)
-        .await
+        .bind(MAX_CONCURRENT_QUICK)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(claimed)
     }
 
     /// Records progress on a still-`running` crawl. A crawl that has already been requeued by
@@ -119,23 +137,35 @@ impl CrawlQueue {
     }
 
     /// Moves `running` crawls whose heartbeat is older than `older_than` back to `queued` (the
-    /// dead-worker path), and returns how many rows moved.
+    /// dead-worker path), and returns how many rows moved. A stale quick (no-signup) audit is
+    /// failed instead: like `finish_failed`, it is never retried, so a crawl that hangs every
+    /// time can't hold a quick slot, and a visitor's spinner, forever.
     pub async fn requeue_stale(&self, older_than: std::time::Duration) -> Result<u64, sqlx::Error> {
         let age = time::Duration::try_from(older_than).unwrap_or(time::Duration::ZERO);
         let threshold = OffsetDateTime::now_utc() - age;
-        let result = sqlx::query(
+        let failed = sqlx::query(
+            "UPDATE crawls SET status = 'failed', finished_at = now(), \
+               failure_reason = 'the crawler stopped before the audit finished' \
+             WHERE status = 'running' AND heartbeat_at < $1 AND trigger = 'quick'",
+        )
+        .bind(threshold)
+        .execute(&self.pool)
+        .await?;
+        let requeued = sqlx::query(
             "UPDATE crawls SET status = 'queued', worker_id = NULL, heartbeat_at = NULL \
              WHERE status = 'running' AND heartbeat_at < $1",
         )
         .bind(threshold)
         .execute(&self.pool)
         .await?;
-        Ok(result.rows_affected())
+        Ok(failed.rows_affected() + requeued.rows_affected())
     }
 
     /// First failure (`attempt = 0`): requeue once, gated 15 minutes out via `queued_at` (which
     /// `claim`'s `queued_at <= now()` filter already honours). Second failure: fail for good.
-    /// One statement, so there's no read-then-write race against a concurrent call.
+    /// A quick (no-signup) audit is never retried: the visitor is watching it, and a retry 15
+    /// minutes later would leave them on a spinner. One statement, so there's no read-then-write
+    /// race against a concurrent call.
     ///
     /// Guarded by `status = 'running' AND worker_id = $3`: a worker that was requeued (by
     /// `requeue_stale`) and reclaimed by someone else before this call lands is a no-op here,
@@ -148,11 +178,11 @@ impl CrawlQueue {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE crawls SET \
-               status = CASE WHEN attempt = 0 THEN 'queued'::crawl_status ELSE 'failed'::crawl_status END, \
-               attempt = CASE WHEN attempt = 0 THEN 1 ELSE attempt END, \
-               queued_at = CASE WHEN attempt = 0 THEN now() + interval '15 minutes' ELSE queued_at END, \
-               worker_id = CASE WHEN attempt = 0 THEN NULL ELSE worker_id END, \
-               heartbeat_at = CASE WHEN attempt = 0 THEN NULL ELSE heartbeat_at END, \
+               status = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN 'queued'::crawl_status ELSE 'failed'::crawl_status END, \
+               attempt = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN 1 ELSE attempt END, \
+               queued_at = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN now() + interval '15 minutes' ELSE queued_at END, \
+               worker_id = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN NULL ELSE worker_id END, \
+               heartbeat_at = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN NULL ELSE heartbeat_at END, \
                failure_reason = $2 \
              WHERE id = $1 AND status = 'running' AND worker_id = $3",
         )
@@ -171,7 +201,8 @@ impl CrawlQueue {
     pub async fn previous_snapshot(&self, site_id: Uuid) -> Result<Option<Snapshot>, sqlx::Error> {
         let row = sqlx::query(
             "SELECT id, finished_at, summary FROM crawls \
-             WHERE site_id = $1 AND status = 'done' ORDER BY finished_at DESC, id DESC LIMIT 1",
+             WHERE site_id = $1 AND status = 'done' AND trigger <> 'quick' \
+             ORDER BY finished_at DESC, id DESC LIMIT 1",
         )
         .bind(site_id)
         .fetch_optional(&self.pool)

@@ -1,0 +1,93 @@
+/* The cloud landing page, the public audit report and the bot page. Built on app.css's tokens,
+   so light and dark come for free. */
+
+.l-wrap { width: min(1040px, 100%); margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+.l-top { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.l-nav { display: flex; align-items: center; gap: 18px; font-size: 13.5px; color: var(--muted); }
+.l-nav a:not(.btn):hover { color: var(--ink); }
+
+.l-hero { padding-top: clamp(40px, 9vw, 96px); padding-bottom: 48px; }
+.l-eyebrow { font: 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 14px; }
+.l-hero h1 { font-size: clamp(34px, 6.4vw, 60px); line-height: 1.04; font-weight: 600; letter-spacing: -0.04em; max-width: 14em; text-wrap: balance; }
+.l-hero mark { background: linear-gradient(transparent 60%, color-mix(in oklab, var(--accent) 70%, transparent) 60%); color: inherit; padding: 0 2px; }
+.l-lead { margin-top: 18px; max-width: 38em; font-size: 17px; line-height: 1.55; color: var(--muted); }
+.l-form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; max-width: 560px; }
+.l-ts { flex-basis: 100%; min-height: 65px; }
+.l-form .input { flex: 1; min-width: 0; }
+.l-hint { margin-top: 12px; font-size: 12.5px; color: var(--faint-2); }
+@media (max-width: 560px) { .l-form { flex-direction: column; } .l-form .input { flex: none; } }
+
+.l-wrap h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 18px; }
+.l-steps, .l-cats, .l-oss, .l-foot {
+  padding-top: 40px; padding-bottom: 40px;
+  /* A divider as wide as the content, not the padded box. */
+  background: linear-gradient(var(--line), var(--line)) center top / calc(100% - 48px) 1px no-repeat;
+}
+.l-steps ol, .l-cats ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.l-steps li, .l-cats li { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-sm); }
+.l-steps li b, .l-cats li b { font-weight: 600; letter-spacing: -0.01em; }
+.l-steps li span, .l-cats li span { color: var(--muted-2); font-size: 14px; line-height: 1.5; }
+.l-oss p { max-width: 40em; color: var(--muted); line-height: 1.6; margin-bottom: 12px; }
+.l-oss code { font: 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+.l-foot { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; padding-top: 24px; padding-bottom: 36px; font-size: 12.5px; color: var(--faint-2); }
+.l-foot a { text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 780px) { .l-steps ol, .l-cats ul { grid-template-columns: 1fr; } }
+
+/* ── The public audit report ───────────────────────── */
+
+.q-page { padding-top: 32px; padding-bottom: 64px; max-width: 760px; }
+.q-title { font: 600 clamp(26px, 5vw, 38px)/1.1 var(--font); letter-spacing: -0.03em; margin-bottom: 24px; overflow-wrap: anywhere; }
+.q-wait { display: flex; align-items: center; gap: 14px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.q-wait b { font-size: 18px; letter-spacing: -0.02em; }
+.q-wait p { margin-top: 4px; }
+.q-count { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.q-score { display: flex; align-items: center; gap: 22px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
+.q-score h2 { font-size: 20px; margin: 0 0 4px; }
+.q-score .ring { width: 92px; height: 92px; flex: none; background: conic-gradient(var(--accent-strong) calc(var(--p) * 1%), var(--line) 0); }
+.q-score .ring b { width: 74px; height: 74px; background: var(--surface); font-size: 28px; }
+.q-h { font: 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin: 28px 0 10px; }
+.q-issues { list-style: none; padding: 0; margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.q-issues li { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--line-soft); font-size: 14px; }
+.q-issues li:first-child { border-top: 0; }
+.q-issues .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.q-issues .n { color: var(--muted-2); font-size: 12px; white-space: nowrap; }
+.q-sev { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: 0.04em; border-radius: 5px; padding: 3px 7px; flex: none; }
+.q-sev.critical { background: var(--err-bg); color: var(--err); }
+.q-sev.warning { background: var(--warn-bg); color: var(--warn); }
+.q-sev.notice { background: var(--notice-bg); color: var(--notice); }
+.q-issues .issue-lock { color: var(--muted); background: var(--surface-sunk); }
+.q-clear { margin-top: 24px; padding: 18px; background: var(--ok-bg); color: var(--ok); border-radius: var(--r-lg); }
+.q-unlock { margin-top: 24px; padding: 24px; background: var(--surface); border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--line)); border-radius: var(--r-lg); box-shadow: var(--shadow-md); }
+.q-unlock h3 { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 10px; }
+.q-perks { list-style: none; padding: 0; margin: 0 0 16px; display: grid; gap: 6px; font-size: 14px; color: var(--ink-2); }
+.q-perks li::before { content: "✓"; color: var(--ok); font-weight: 700; margin-right: 8px; }
+.q-unlock form { display: flex; gap: 10px; }
+.q-unlock form .input { flex: 1; min-width: 0; }
+@media (max-width: 560px) {
+  .q-unlock form { flex-direction: column; }
+  .q-unlock form .input { flex: none; }
+  .q-score { flex-direction: column; align-items: flex-start; }
+  .q-issues li { flex-wrap: wrap; row-gap: 6px; }
+  .q-issues .t { flex-basis: 100%; order: 3; }
+  .q-issues .n { margin-left: auto; }
+}
+.q-notice { padding: 26px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.q-notice h2 { font-size: 21px; margin-bottom: 8px; }
+.q-notice p { color: var(--muted); line-height: 1.55; margin-bottom: 16px; max-width: 34em; }
+
+/* ── Long-form pages (bot) ─────────────────────────── */
+
+.prose { line-height: 1.65; color: var(--ink-2); }
+.prose .q-title { color: var(--ink); }
+.prose h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; margin: 30px 0 8px; color: var(--ink); }
+.prose p, .prose ul, .prose pre { margin-bottom: 12px; }
+.prose ul { padding-left: 20px; }
+.prose li { margin-bottom: 6px; }
+.prose a { text-decoration: underline; text-underline-offset: 2px; }
+.prose code, .prose pre { font: 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; overflow-wrap: anywhere; }
+.prose pre { padding: 12px 14px; overflow-x: auto; }
+@media (prefers-reduced-motion: reduce) { .l-wrap * { animation: none !important; } }
+
+.q-rankorg { margin-top: 18px; font-size: 13.5px; }
+.q-rankorg a { text-decoration: underline; text-underline-offset: 2px; }
+.q-start { margin: -14px 0 20px; font: 12.5px var(--mono); overflow-wrap: anywhere; }
