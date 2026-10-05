@@ -102,6 +102,27 @@ impl JobQueue {
         .await?;
         Ok(())
     }
+
+    /// Moves `running` jobs claimed longer than `older_than` ago back to `queued` (the
+    /// dead-worker path) and returns how many moved. It counts as an attempt and backs off like
+    /// [`JobQueue::retry`], so a job that kills its worker every time still ends `failed`.
+    pub async fn requeue_stale(&self, older_than: std::time::Duration) -> Result<u64, sqlx::Error> {
+        let done = sqlx::query(
+            "UPDATE jobs SET \
+               attempt = attempt + 1, \
+               last_error = 'the worker stopped before the job finished', \
+               status = CASE WHEN attempt + 1 >= max_attempts THEN 'failed'::job_status \
+                             ELSE 'queued'::job_status END, \
+               run_after = now() + (power(2, attempt) * interval '1 minute'), \
+               claimed_by = NULL, \
+               claimed_at = NULL \
+             WHERE status = 'running' AND claimed_at < now() - make_interval(secs => $1)",
+        )
+        .bind(older_than.as_secs_f64())
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected())
+    }
 }
 
 /// A job that ran out of attempts, for the admin page.

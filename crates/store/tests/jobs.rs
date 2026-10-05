@@ -96,3 +96,88 @@ async fn retry_backs_off_1_2_4_8_16_minutes_then_fails() {
         }
     }
 }
+
+async fn age_claim(db: &TestDb, id: uuid::Uuid, minutes: i32) {
+    sqlx::query("UPDATE jobs SET claimed_at = now() - make_interval(mins => $2) WHERE id = $1")
+        .bind(id)
+        .bind(minutes)
+        .execute(&db.pool)
+        .await
+        .expect("age the claim");
+}
+
+async fn job_state(db: &TestDb, id: uuid::Uuid) -> (String, i16, Option<String>) {
+    sqlx::query("SELECT status::text, attempt, claimed_by FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await
+        .map(|row| (row.get(0), row.get(1), row.get(2)))
+        .expect("fetch job")
+}
+
+#[tokio::test]
+async fn requeue_stale_moves_old_running_jobs_back_and_counts_an_attempt() {
+    let db = TestDb::new().await;
+    let queue = JobQueue::new(db.pool.clone());
+    let stale = queue.enqueue(JobKind::SendEmail, json!({})).await.unwrap();
+    let fresh = queue.enqueue(JobKind::SendEmail, json!({})).await.unwrap();
+    let waiting = queue.enqueue(JobKind::Cleanup, json!({})).await.unwrap();
+    queue.claim("w").await.unwrap().unwrap();
+    queue.claim("w").await.unwrap().unwrap();
+    age_claim(&db, stale, 11).await;
+    age_claim(&db, fresh, 9).await;
+
+    let moved = queue
+        .requeue_stale(std::time::Duration::from_secs(600))
+        .await
+        .expect("requeue");
+    assert_eq!(moved, 1);
+
+    let (status, attempt, claimed_by) = job_state(&db, stale).await;
+    assert_eq!((status.as_str(), attempt, claimed_by), ("queued", 1, None));
+    assert_eq!(
+        job_state(&db, fresh).await.0,
+        "running",
+        "9 minutes is not stale"
+    );
+    assert_eq!(job_state(&db, waiting).await.0, "queued");
+    let run_after: OffsetDateTime = sqlx::query_scalar("SELECT run_after FROM jobs WHERE id = $1")
+        .bind(stale)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert!(
+        run_after > OffsetDateTime::now_utc(),
+        "it backs off like a failed attempt"
+    );
+    let error: Option<String> = sqlx::query_scalar("SELECT last_error FROM jobs WHERE id = $1")
+        .bind(stale)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert!(error.unwrap().contains("stopped"));
+}
+
+#[tokio::test]
+async fn a_job_that_always_kills_its_worker_ends_failed() {
+    let db = TestDb::new().await;
+    let queue = JobQueue::new(db.pool.clone());
+    let id = queue.enqueue(JobKind::SendEmail, json!({})).await.unwrap();
+    for round in 1..=5 {
+        sqlx::query("UPDATE jobs SET run_after = now() WHERE id = $1")
+            .bind(id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        queue.claim("doomed").await.unwrap().expect("claimable");
+        age_claim(&db, id, 11).await;
+        let moved = queue
+            .requeue_stale(std::time::Duration::from_secs(600))
+            .await
+            .unwrap();
+        assert_eq!(moved, 1, "round {round}");
+    }
+    let (status, attempt, _) = job_state(&db, id).await;
+    assert_eq!((status.as_str(), attempt), ("failed", 5));
+    assert!(queue.claim("w").await.unwrap().is_none());
+}

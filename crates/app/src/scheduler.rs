@@ -5,9 +5,19 @@
 
 use std::time::Duration;
 
+use codoseo_core::plan::{Plan, PlanLimits, Schedule};
+use codoseo_store::jobs::JobQueue;
+use codoseo_store::plans;
+use codoseo_store::schedule::{self, DueSite};
+use codoseo_web::auth::session;
+use codoseo_web::{Config, Mode};
 use jiff::civil::{Time, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
+use sqlx::PgPool;
+use time::OffsetDateTime;
+use tokio_util::sync::CancellationToken;
+use url::Url;
 use uuid::Uuid;
 
 const WEEK_SECS: i64 = 7 * 24 * 3600;
@@ -84,6 +94,284 @@ pub fn next_digest_due(tz: &TimeZone, last_digest_at: Option<Timestamp>, now: Ti
         return false;
     };
     last_digest_at.is_none_or(|last| last < start.timestamp())
+}
+
+/// How often the scheduler loop ticks.
+pub const TICK_INTERVAL: Duration = Duration::from_secs(60);
+/// A `running` job claimed longer ago than this belongs to a worker that died.
+const STALE_JOB_AFTER: Duration = Duration::from_secs(600);
+/// Due sites claimed per transaction.
+const DUE_BATCH: i64 = 100;
+/// Free-plan crawls queue behind paid ones: scheduled lanes 3 (paid) and 5 (free).
+const PAID_SCHEDULED_PRIORITY: i16 = 3;
+const FREE_SCHEDULED_PRIORITY: i16 = 5;
+
+/// Everything a tick needs besides the time.
+#[derive(Clone)]
+pub struct SchedulerContext {
+    pub pool: PgPool,
+    /// Inactivity pausing only applies to the cloud.
+    pub mode: Mode,
+    /// For the link in the "Keep monitoring?" email.
+    pub base_url: Url,
+    /// `SCHEDULER_HEARTBEAT_URL`: pinged with a GET after each tick (a dead-man's switch).
+    pub heartbeat_url: Option<Url>,
+    pub http: reqwest::Client,
+}
+
+impl SchedulerContext {
+    /// The context for a process configured by `config`; `SCHEDULER_HEARTBEAT_URL` is read from
+    /// the environment (an invalid value is logged and ignored).
+    pub fn from_config(pool: PgPool, config: &Config) -> SchedulerContext {
+        let heartbeat_url = std::env::var("SCHEDULER_HEARTBEAT_URL")
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .and_then(|v| match Url::parse(&v) {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    tracing::warn!(error = %e, "SCHEDULER_HEARTBEAT_URL is not a URL; ignoring it");
+                    None
+                }
+            });
+        SchedulerContext {
+            pool,
+            mode: config.mode,
+            base_url: config.base_url.clone(),
+            heartbeat_url,
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .user_agent(concat!("CodoSEO/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .expect("http client builds"),
+        }
+    }
+}
+
+/// `CODOSEO_SCHEDULER=off` turns the scheduler off (for a second web container).
+pub fn enabled() -> bool {
+    !std::env::var("CODOSEO_SCHEDULER").is_ok_and(|v| v.trim().eq_ignore_ascii_case("off"))
+}
+
+/// Ticks every [`TICK_INTERVAL`] until `shutdown` is cancelled. A slow tick delays the next one
+/// instead of piling up.
+pub async fn scheduler_loop(ctx: SchedulerContext, shutdown: CancellationToken) {
+    let mut interval = tokio::time::interval(TICK_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {}
+            _ = shutdown.cancelled() => return,
+        }
+        let report = tick(&ctx, Timestamp::now()).await;
+        tracing::debug!(?report, "scheduler tick");
+    }
+}
+
+/// What one tick did, for logs and tests.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct TickReport {
+    /// Stuck `running` jobs put back in the queue.
+    pub jobs_requeued: u64,
+    /// `schedule` crawls queued.
+    pub crawls_queued: u64,
+    /// Sites given their first slot without a crawl.
+    pub sites_initialised: u64,
+    /// Accounts moved to Free because their plan ran out.
+    pub downgraded: u64,
+    pub digests_queued: u64,
+    pub cleanup_queued: bool,
+    /// "Keep monitoring?" emails queued.
+    pub warned: u64,
+    pub paused: u64,
+    pub active_events: u64,
+    /// Steps that failed, by name. The other steps still ran.
+    pub failures: Vec<(&'static str, String)>,
+}
+
+/// Runs every scheduler step once at `now`. A failing step is recorded and logged; the rest
+/// still run, and the heartbeat is only written (and pinged) if the database took it.
+pub async fn tick(ctx: &SchedulerContext, now: Timestamp) -> TickReport {
+    let mut report = TickReport::default();
+    let at = to_odt(now);
+
+    match JobQueue::new(ctx.pool.clone())
+        .requeue_stale(STALE_JOB_AFTER)
+        .await
+    {
+        Ok(n) => report.jobs_requeued = n,
+        Err(e) => report.fail("requeue_stale_jobs", e),
+    }
+    match schedule_due_sites(&ctx.pool, now).await {
+        Ok((queued, initialised)) => {
+            report.crawls_queued = queued;
+            report.sites_initialised = initialised;
+        }
+        Err(e) => report.fail("schedule_sites", e),
+    }
+    match plans::downgrade_expired(&ctx.pool, at).await {
+        Ok(n) => report.downgraded = n,
+        Err(e) => report.fail("downgrade_expired", e),
+    }
+    match queue_digests(&ctx.pool, now).await {
+        Ok(n) => report.digests_queued = n,
+        Err(e) => report.fail("digests", e),
+    }
+    let today = now.to_zoned(TimeZone::UTC).date().to_string();
+    match schedule::enqueue_daily_cleanup(&ctx.pool, &today, at).await {
+        Ok(queued) => report.cleanup_queued = queued,
+        Err(e) => report.fail("cleanup", e),
+    }
+    if ctx.mode == Mode::Cloud {
+        match warn_inactive(ctx, at).await {
+            Ok(n) => report.warned = n,
+            Err(e) => report.fail("inactivity_warnings", e),
+        }
+        match schedule::pause_unresponsive(&ctx.pool, at).await {
+            Ok(n) => report.paused = n,
+            Err(e) => report.fail("inactivity_pause", e),
+        }
+    }
+    match schedule::record_active_after_4_weeks(&ctx.pool, at).await {
+        Ok(n) => report.active_events = n,
+        Err(e) => report.fail("active_after_4_weeks", e),
+    }
+    match schedule::record_heartbeat(&ctx.pool, at).await {
+        Ok(()) => ping_heartbeat(ctx).await,
+        Err(e) => report.fail("heartbeat", e),
+    }
+    report
+}
+
+impl TickReport {
+    fn fail(&mut self, step: &'static str, error: impl std::fmt::Display) {
+        tracing::warn!(step, %error, "scheduler step failed");
+        self.failures.push((step, error.to_string()));
+    }
+}
+
+fn to_odt(ts: Timestamp) -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp_nanos(ts.as_nanosecond())
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
+
+fn to_timestamp(t: OffsetDateTime) -> Timestamp {
+    Timestamp::from_nanosecond(t.unix_timestamp_nanos()).unwrap_or(Timestamp::UNIX_EPOCH)
+}
+
+/// The priority lane of a scheduled crawl. Self-hosted counts as paid.
+pub fn crawl_priority(plan: Plan) -> i16 {
+    match plan {
+        Plan::Free => FREE_SCHEDULED_PRIORITY,
+        Plan::Pro | Plan::Agency | Plan::SelfHosted => PAID_SCHEDULED_PRIORITY,
+    }
+}
+
+/// The schedule a site really runs at: what it asked for, capped by what its plan allows.
+fn effective_schedule(site: &DueSite) -> Schedule {
+    let allowed = PlanLimits::for_plan(site.plan)
+        .fastest_schedule
+        .unwrap_or(Schedule::Weekly);
+    match (site.schedule, allowed) {
+        (Some(Schedule::Daily), Schedule::Daily) => Schedule::Daily,
+        _ => Schedule::Weekly,
+    }
+}
+
+/// The slot after `now` for a site on `schedule`. Sites are never back-filled: a site that was
+/// due three weeks ago gets one crawl now and the next slot ahead of `now`.
+fn next_slot(site: &DueSite, schedule: Schedule, now: Timestamp) -> Timestamp {
+    match schedule {
+        Schedule::Weekly => next_weekly(site.id, now),
+        Schedule::Daily => {
+            let hour = site.scheduled_hour.unwrap_or_else(|| default_hour(site.id));
+            next_daily(hour, &parse_tz(&site.timezone), now)
+        }
+    }
+}
+
+/// Queues a `schedule` crawl for each due site that has none waiting, and moves every due site
+/// to its next slot. Returns (crawls queued, sites given their first slot).
+async fn schedule_due_sites(pool: &PgPool, now: Timestamp) -> Result<(u64, u64), sqlx::Error> {
+    let at = to_odt(now);
+    let (mut queued, mut initialised) = (0, 0);
+    loop {
+        let mut batch = schedule::claim_due_sites(pool, at, DUE_BATCH).await?;
+        let sites = std::mem::take(&mut batch.sites);
+        for site in &sites {
+            let next = to_odt(next_slot(site, effective_schedule(site), now));
+            // A site that has never had a slot just had its first crawl; it only needs one.
+            let priority = site.next_crawl_at.map(|_| crawl_priority(site.plan));
+            if priority.is_none() {
+                initialised += 1;
+            }
+            if batch.advance(site, priority, next).await? {
+                queued += 1;
+            }
+        }
+        batch.commit().await?;
+        if (sites.len() as i64) < DUE_BATCH {
+            return Ok((queued, initialised));
+        }
+    }
+}
+
+/// Queues `send_digest` for each account whose Monday 08:00 (local) has come and gone without
+/// one. Returns how many were queued.
+async fn queue_digests(pool: &PgPool, now: Timestamp) -> Result<u64, sqlx::Error> {
+    let at = to_odt(now);
+    let mut queued = 0;
+    for candidate in schedule::digest_candidates(pool, at).await? {
+        let tz = parse_tz(&candidate.timezone);
+        let last = candidate.last_digest_at.map(to_timestamp);
+        if next_digest_due(&tz, last, now) && schedule::enqueue_digest(pool, &candidate, at).await?
+        {
+            queued += 1;
+        }
+    }
+    Ok(queued)
+}
+
+/// Emails the "Keep monitoring?" link to Free accounts that have been silent for 30 days.
+async fn warn_inactive(ctx: &SchedulerContext, now: OffsetDateTime) -> Result<u64, sqlx::Error> {
+    let mut warned = 0;
+    for account in schedule::accounts_to_warn(&ctx.pool, now, DUE_BATCH).await? {
+        let token = session::random_token();
+        let mut link = ctx.base_url.clone();
+        link.set_path(&format!("/monitoring/resume/{token}"));
+        let email = serde_json::json!({
+            "to": account.email,
+            "subject": "Keep monitoring your site on CodoSEO?",
+            "text": format!(
+                "We haven't seen you on CodoSEO for 30 days.\n\n\
+                 Do you want us to keep monitoring your site? Open this link and we will:\n\n\
+                 {link}\n\n\
+                 If we don't hear from you within 7 days we'll pause monitoring. Nothing is \
+                 deleted, and signing in again turns it back on.\n\n\
+                 The link works once and expires in 7 days."
+            ),
+        });
+        if schedule::send_keep_monitoring(&ctx.pool, account.id, now, &session::hash(&token), email)
+            .await?
+        {
+            warned += 1;
+        }
+    }
+    Ok(warned)
+}
+
+/// Pings `SCHEDULER_HEARTBEAT_URL`, if set. A failure is logged and nothing more.
+async fn ping_heartbeat(ctx: &SchedulerContext) {
+    let Some(url) = &ctx.heartbeat_url else {
+        return;
+    };
+    match ctx.http.get(url.clone()).send().await {
+        Ok(res) if res.status().is_success() => {}
+        Ok(res) => {
+            tracing::warn!(status = %res.status(), "scheduler heartbeat URL answered with an error")
+        }
+        Err(e) => tracing::warn!(error = %e, "could not reach the scheduler heartbeat URL"),
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! Login tokens (magic links, start-monitoring confirmations) and sessions. Only hashes are
 //! stored: the web crate hashes the random token or session ID before it reaches here.
 
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, PgExecutor, PgPool};
 use time::Duration;
 use uuid::Uuid;
 
@@ -12,6 +12,8 @@ use crate::accounts::{ACCOUNT_COLUMNS, Account};
 pub enum TokenPurpose {
     MagicLink,
     StartMonitoring,
+    /// The "Keep monitoring?" email's link, for an inactive Free account.
+    ResumeMonitoring,
 }
 
 impl TokenPurpose {
@@ -19,13 +21,14 @@ impl TokenPurpose {
         match self {
             TokenPurpose::MagicLink => "magic_link",
             TokenPurpose::StartMonitoring => "start_monitoring",
+            TokenPurpose::ResumeMonitoring => "resume_monitoring",
         }
     }
 }
 
 /// Stores a single-use token that expires after `ttl`.
 pub async fn create_token(
-    pool: &PgPool,
+    executor: impl PgExecutor<'_>,
     purpose: TokenPurpose,
     token_hash: &[u8],
     account_id: Option<Uuid>,
@@ -42,7 +45,7 @@ pub async fn create_token(
     .bind(token_hash)
     .bind(payload)
     .bind(ttl.as_seconds_f64())
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
 }
 
@@ -55,7 +58,7 @@ pub struct ConsumedToken {
 /// Marks a token used and returns it, in one statement, so a token works exactly once even
 /// when two requests race. Returns `None` for an unknown, used or expired token.
 pub async fn consume_token(
-    pool: &PgPool,
+    executor: impl PgExecutor<'_>,
     purpose: TokenPurpose,
     token_hash: &[u8],
 ) -> Result<Option<ConsumedToken>, sqlx::Error> {
@@ -67,7 +70,7 @@ pub async fn consume_token(
     )
     .bind(token_hash)
     .bind(purpose.slug())
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await
 }
 

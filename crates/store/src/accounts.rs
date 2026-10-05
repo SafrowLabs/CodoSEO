@@ -2,7 +2,7 @@
 //! computes it), so `Ana@Gmail.com` and `a.na+seo@gmail.com` are one account.
 
 use codoseo_core::plan::Plan;
-use sqlx::{FromRow, PgPool, Postgres, Transaction};
+use sqlx::{FromRow, PgExecutor, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -199,11 +199,39 @@ async fn find_where(
     Ok(row.map(Account::from))
 }
 
+/// Records a sign-in. Coming back clears a pending "Keep monitoring?" warning and lifts an
+/// inactivity pause (Free accounts only; a paid account is never paused).
 pub async fn touch_login(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE accounts SET last_login_at = now() WHERE id = $1")
+    sqlx::query(
+        "UPDATE accounts SET last_login_at = now(), keep_monitoring_sent_at = NULL, \
+           paused = CASE WHEN plan = 'free' THEN false ELSE paused END \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// A click on a link in one of our emails (magic link, resume link) counts as activity.
+pub async fn record_email_click(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE accounts SET last_email_click_at = now() WHERE id = $1")
         .bind(id)
         .execute(pool)
         .await?;
+    Ok(())
+}
+
+/// The "Keep monitoring?" link was used: monitoring is back on, and it counts as an email
+/// click.
+pub async fn resume_monitoring(executor: impl PgExecutor<'_>, id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE accounts SET paused = false, last_email_click_at = now(), \
+           keep_monitoring_sent_at = NULL WHERE id = $1",
+    )
+    .bind(id)
+    .execute(executor)
+    .await?;
     Ok(())
 }
 
