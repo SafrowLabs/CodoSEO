@@ -11,6 +11,7 @@ pub mod crawls;
 pub mod explorer;
 pub mod export;
 pub mod landing;
+pub mod mcp;
 pub mod monitoring;
 pub mod quick;
 pub mod rankorg;

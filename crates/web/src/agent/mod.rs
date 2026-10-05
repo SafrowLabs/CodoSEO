@@ -5,4 +5,5 @@
 pub mod auth;
 pub mod error;
 pub mod keys;
+pub mod mcp;
 pub mod service;

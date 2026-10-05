@@ -12,9 +12,10 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 /// Exact paths that take machine-to-machine POSTs authenticated some other way (signatures,
-/// API keys): Dodo's billing webhook, which is signed. An exact match, so nothing under or
-/// beside these paths is exempt by accident.
-const EXEMPT_PATHS: &[&str] = &["/billing/webhook"];
+/// API keys): Dodo's billing webhook, which is signed, and the MCP server, which takes a Bearer
+/// key and never a cookie. An exact match, so nothing under or beside these paths is exempt by
+/// accident.
+const EXEMPT_PATHS: &[&str] = &["/billing/webhook", "/mcp"];
 
 /// The REST API: Bearer-authenticated, it never looks at cookies, so a cross-site form post has
 /// nothing to ride on. Under this prefix (with the slash) only.

@@ -37,6 +37,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .merge(auth::router())
         .merge(routes::router())
+        .merge(routes::mcp::routes(&state))
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/assets/{file}", get(assets::serve))
