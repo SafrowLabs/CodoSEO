@@ -147,6 +147,17 @@ pub enum SiteNote {
     PlanFull { max_sites: u32 },
 }
 
+/// A `mcpServers` entry for MCP clients that take JSON, written out so the keys stay in the
+/// order a person reads them.
+fn mcp_servers_json(mcp_url: &str, key: &str) -> String {
+    // The URL and the key are plain ASCII with no quotes or backslashes.
+    format!(
+        "{{\n  \"mcpServers\": {{\n    \"codoseo\": {{\n      \"type\": \"http\",\n      \
+         \"url\": \"{mcp_url}\",\n      \"headers\": {{\n        \
+         \"Authorization\": \"Bearer {key}\"\n      }}\n    }}\n  }}\n}}"
+    )
+}
+
 /// The key as the result page shows it, once.
 pub struct ShownKey {
     pub key: String,
@@ -177,7 +188,7 @@ async fn start_confirm(
     )
     .await?;
     let Some(payload) = payload else {
-        return Ok(expired(token)?);
+        return expired(token);
     };
     let text = |k: &str| payload[k].as_str().unwrap_or_default().to_owned();
     let page = StartPage {
@@ -315,14 +326,7 @@ async fn start(
             "claude mcp add --transport http codoseo {mcp_url} --header \"Authorization: Bearer {}\"",
             key.plaintext
         ),
-        json: serde_json::to_string_pretty(&json!({
-            "mcpServers": { "codoseo": {
-                "type": "http",
-                "url": mcp_url,
-                "headers": { "Authorization": format!("Bearer {}", key.plaintext) },
-            } }
-        }))
-        .unwrap_or_default(),
+        json: mcp_servers_json(&mcp_url, &key.plaintext),
         key: key.plaintext,
     });
 
@@ -351,4 +355,23 @@ async fn start(
         html(&page)?,
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_json_snippet_is_valid_and_carries_the_url_and_the_bearer_key() {
+        let key = "cdo_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let json = mcp_servers_json("https://codoseo.com/mcp", key);
+        let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let server = &v["mcpServers"]["codoseo"];
+        assert_eq!(server["type"], "http");
+        assert_eq!(server["url"], "https://codoseo.com/mcp");
+        assert_eq!(server["headers"]["Authorization"], format!("Bearer {key}"));
+        // Written in reading order, not alphabetically.
+        assert!(json.find("\"type\"").unwrap() < json.find("\"url\"").unwrap());
+        assert!(json.find("\"url\"").unwrap() < json.find("\"headers\"").unwrap());
+    }
 }
