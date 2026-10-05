@@ -330,11 +330,12 @@ pub async fn send_keep_monitoring(
 }
 
 /// Clears `keep_monitoring_sent_at` for accounts whose latest warning email failed for good
-/// (the job ran out of attempts), so the next tick warns them again. Returns how many.
+/// (the job ran out of attempts), so the next tick warns them again. A paused account is
+/// skipped: there is nothing left to warn it about. Returns how many.
 pub async fn reset_failed_warnings(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let done = sqlx::query(&format!(
         "UPDATE accounts a SET keep_monitoring_sent_at = NULL \
-         WHERE a.plan = 'free' AND a.keep_monitoring_sent_at IS NOT NULL \
+         WHERE a.plan = 'free' AND NOT a.paused AND a.keep_monitoring_sent_at IS NOT NULL \
            AND {WARNING_JOB_STATUS} = 'failed'"
     ))
     .execute(pool)

@@ -531,3 +531,57 @@ async fn a_resume_token_works_once() {
             .is_none()
     );
 }
+
+// ---- the warning bookkeeping ---------------------------------------------------------------
+
+/// A warned Free account whose latest warning email job ended `status`.
+async fn warned_account(db: &TestDb, email: &str, paused: bool, status: &str) -> Uuid {
+    let id = account(db, email, "free", paused).await;
+    sqlx::query(
+        "UPDATE accounts SET keep_monitoring_sent_at = now() - interval '2 days' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO jobs (kind, payload, status) \
+         VALUES ('send_email', jsonb_build_object('keep_monitoring_for', $1::uuid), $2::job_status)",
+    )
+    .bind(id)
+    .bind(status)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    id
+}
+
+async fn warned_at(db: &TestDb, id: Uuid) -> Option<OffsetDateTime> {
+    sqlx::query_scalar("SELECT keep_monitoring_sent_at FROM accounts WHERE id = $1")
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_failed_warning_is_reset_for_active_accounts_but_not_paused_ones() {
+    let db = TestDb::new().await;
+    let active = warned_account(&db, "active@example.test", false, "failed").await;
+    let paused = warned_account(&db, "paused@example.test", true, "failed").await;
+    let delivered = warned_account(&db, "ok@example.test", false, "done").await;
+
+    let reset = codoseo_store::schedule::reset_failed_warnings(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(reset, 1);
+    assert!(
+        warned_at(&db, active).await.is_none(),
+        "warned again next tick"
+    );
+    assert!(
+        warned_at(&db, paused).await.is_some(),
+        "a paused account is left alone"
+    );
+    assert!(warned_at(&db, delivered).await.is_some());
+}
