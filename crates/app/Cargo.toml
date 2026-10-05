@@ -42,6 +42,11 @@ jiff.workspace = true
 time.workspace = true
 xxhash-rust.workspace = true
 
+# musl's malloc serialises threads on one lock; the static image would crawl under the
+# worker's concurrency. See the global allocator in main.rs.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = "0.1"
+
 [dev-dependencies]
 codoseo-testkit.workspace = true
 axum.workspace = true

@@ -6,6 +6,13 @@ use std::process::ExitCode;
 use clap::Parser;
 use codoseo::cli;
 
+/// musl's built-in allocator takes a global lock, which makes a multi-threaded crawler slow in
+/// the static (musl) image and release binaries. mimalloc is a drop-in replacement; glibc and
+/// the other platforms keep their system allocator.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() -> ExitCode {
     let args = cli::Cli::parse();
     let runtime = match tokio::runtime::Builder::new_multi_thread()

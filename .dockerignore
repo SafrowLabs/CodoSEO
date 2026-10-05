@@ -1,0 +1,14 @@
+# Keep the build context small: the image builds from crates/, Cargo.* and rust-toolchain.toml.
+target
+.git
+.github
+.env
+.env.*
+npm
+site
+deploy
+docs
+**/node_modules
+**/*.md
+!README.md
+*.secret

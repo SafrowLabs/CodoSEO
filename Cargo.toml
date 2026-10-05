@@ -71,3 +71,12 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
+
+# The profile the container image and release binaries are built with. Thin LTO plus one codegen
+# unit shrinks and speeds up the binary; symbols are stripped. Day-to-day `cargo build --release`
+# is unaffected.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = true
