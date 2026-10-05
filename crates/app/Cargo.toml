@@ -38,6 +38,9 @@ dirs.workspace = true
 sqlx.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
+jiff.workspace = true
+time.workspace = true
+xxhash-rust.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true

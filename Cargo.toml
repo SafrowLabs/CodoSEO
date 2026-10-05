@@ -62,6 +62,7 @@ lettre = { version = "0.11.23", default-features = false, features = ["builder",
 aes-gcm = "0.11.1"
 hmac = "0.13.0"
 hex = "0.4.3"
+jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
