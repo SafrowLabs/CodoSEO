@@ -4,11 +4,11 @@
   <div class="page-head"><h1>Alerts</h1><span class="chip">everything not instant goes in your Monday digest</span></div>
 
   {% if let Some(s) = secret %}
-  <div class="card callout" role="status">
+  <div class="card callout" role="status" hx-history="false">
     <div class="card-head"><span class="card-title">Signing secret for {{ s.channel }}</span><span class="card-aside">shown once</span></div>
     <div class="card-pad" style="display:grid;gap:8px">
       <code class="secret">{{ s.secret }}</code>
-      <p class="hint">Copy it now, it isn't shown again. Every delivery carries <span class="mono">X-CodoSEO-Signature: sha256=&lt;HMAC-SHA256 of "timestamp.body"&gt;</span> and <span class="mono">X-CodoSEO-Timestamp</span>; check the signature with this secret.</p>
+      <p class="hint">Copy it now, it isn't shown again. The whole <span class="mono">whsec_…</span> string, as plain text, is the HMAC key (don't strip the prefix or decode it). Every delivery carries <span class="mono">X-CodoSEO-Signature: sha256=&lt;HMAC-SHA256 of "timestamp.body"&gt;</span> and <span class="mono">X-CodoSEO-Timestamp</span>; check the signature with this key.</p>
     </div>
   </div>
   {% endif %}

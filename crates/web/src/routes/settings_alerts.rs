@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use codoseo_core::change::ChangeKind;
 use codoseo_core::plan::PlanLimits;
-use codoseo_notify::{AlertMessage, ChannelKind, ChannelTarget, deliver};
+use codoseo_notify::{AlertMessage, ChannelKind, ChannelTarget, DeliveryError, deliver};
 use codoseo_store::alert_rules::{self, ALL_KINDS};
 use codoseo_store::channels::{self, ChannelSummary, DeleteOutcome};
 use codoseo_store::events::{self, EventKind};
@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 use crate::auth::CurrentUser;
 use crate::auth::email;
+use crate::config::Mode;
 use crate::error::AppError;
 use crate::layout::{Screen, Shell};
 use crate::render::{Hx, ToastKind, html, toast};
@@ -133,6 +134,8 @@ pub struct AddChannelForm {
     pub error: Option<String>,
     /// Show "Upgrade to Pro": Slack, Discord and webhooks aren't on this plan.
     pub upgrade: bool,
+    /// Link the hint to `/billing` (cloud only; self-hosted has no billing pages).
+    pub upgrade_link: bool,
 }
 
 #[derive(Template)]
@@ -181,7 +184,7 @@ fn channel_view(c: &ChannelSummary) -> ChannelView {
     }
 }
 
-fn add_form(email_only: bool) -> AddChannelForm {
+fn add_form(state: &AppState, email_only: bool) -> AddChannelForm {
     let mut kinds = vec![("email", "Email")];
     if !email_only {
         kinds.extend([
@@ -197,6 +200,7 @@ fn add_form(email_only: bool) -> AddChannelForm {
         name: String::new(),
         error: None,
         upgrade: email_only,
+        upgrade_link: email_only && state.config.mode == Mode::Cloud,
     }
 }
 
@@ -284,7 +288,7 @@ fn email_only(user: &CurrentUser) -> bool {
 }
 
 async fn page(State(state): State<AppState>, user: CurrentUser) -> Result<Response, AppError> {
-    let form = add_form(email_only(&user));
+    let form = add_form(&state, email_only(&user));
     Ok(render_page(&state, &user, form, None)
         .await?
         .into_response())
@@ -329,7 +333,7 @@ async fn add_channel(
                 let page = render_page(
                     &state,
                     &user,
-                    add_form(email_only),
+                    add_form(&state, email_only),
                     Some(NewSecret {
                         channel: created.name,
                         secret,
@@ -362,7 +366,7 @@ async fn add_channel(
                     Refusal::Limit(m) => AppError::Limit(m),
                 });
             }
-            let mut again = add_form(email_only);
+            let mut again = add_form(&state, email_only);
             again.kind = form.kind.clone();
             again.target = form.target.trim().to_owned();
             again.name = form.name.trim().to_owned();
@@ -581,6 +585,12 @@ async fn test_channel(
     .await;
     match outcome {
         Ok(Ok(())) => result(None),
+        // Mail errors name our own SMTP host and its replies; they belong in the log, not on the
+        // page. A webhook's status or refusal is about the user's own endpoint, so it shows.
+        Ok(Err(DeliveryError::Mail(e))) => {
+            tracing::warn!(channel_id = %id, error = %e, "test email failed");
+            result(Some("Couldn't send the test message.".to_owned()))
+        }
         Ok(Err(e)) => result(Some(sentence(&e.to_string()))),
         Err(_) => result(Some("It didn't answer within 10 seconds.".to_owned())),
     }

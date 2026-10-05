@@ -18,6 +18,7 @@ use codoseo_notify::{ChannelKey, ChannelTarget, GuardedHttp};
 use codoseo_store::accounts::Account;
 use codoseo_store::{alert_rules, channels};
 use codoseo_testkit::TestServer;
+use codoseo_web::Config;
 use support::{TestApp, TestResponse, cloud_config};
 use uuid::Uuid;
 
@@ -136,6 +137,12 @@ async fn the_free_plan_is_offered_email_only_with_an_upgrade_hint() {
     let res = app.get("/settings/alerts", Some(&free)).await;
     assert!(!res.body.contains("value=\"slack\""));
     assert!(res.body.contains("Upgrade to Pro"));
+    assert!(
+        res.body
+            .contains(r#"<a href="/billing">Upgrade to Pro</a>"#),
+        "the hint links to billing: {}",
+        res.body
+    );
 
     let (_, pro) = app
         .login_with_plan("pro@example.com", Some(Plan::Pro))
@@ -302,6 +309,18 @@ async fn a_webhook_shows_its_signing_secret_once() {
     };
     assert!(secret.len() >= 32, "{secret}");
     assert!(res.body.contains(&secret), "shown on creation");
+    assert!(secret.starts_with("whsec_") && secret.len() == "whsec_".len() + 64);
+    assert!(
+        res.body.contains(r#"hx-history="false""#),
+        "htmx must not keep the secret in its history snapshot: {}",
+        res.body
+    );
+    assert!(
+        res.body.contains("The whole <span class=\"mono\">whsec_")
+            && res.body.contains("is the HMAC key"),
+        "says what the secret is: {}",
+        res.body
+    );
     assert_eq!(res.header("cache-control"), Some("no-store"));
 
     let later = app.get("/settings/alerts", Some(&cookie)).await;
@@ -496,6 +515,42 @@ async fn send_test_to_an_email_channel_sends_a_test_email() {
         mail[0].subject.contains("Test notification"),
         "{}",
         mail[0].subject
+    );
+}
+
+#[tokio::test]
+async fn send_test_to_an_email_channel_that_fails_hides_the_mail_error() {
+    // Nothing listens on port 9, so the send fails with a connection error naming the host.
+    let mailer = codoseo_notify::Mailer::from_config(
+        Some("smtp://smtp-internal.example.net:9"),
+        "CodoSEO <hello@codoseo.test>",
+    )
+    .unwrap();
+    let app = TestApp::with_mailer(Config::for_tests(), mailer).await;
+    let (_, cookie) = app.login("owner@example.com").await;
+    app.get("/settings/alerts", Some(&cookie)).await;
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM alert_channels WHERE is_default")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    let res = app
+        .post_hx(
+            &format!("/settings/alerts/channels/{id}/test"),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(
+        res.body.contains("Couldn&#39;t send the test message")
+            || res.body.contains("Couldn't send the test message"),
+        "{}",
+        res.body
+    );
+    assert!(
+        !res.body.contains("smtp-internal") && !res.body.contains("could not send"),
+        "the mail error stays in the log: {}",
+        res.body
     );
 }
 

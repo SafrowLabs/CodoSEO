@@ -128,18 +128,29 @@ impl TestApp {
     }
 
     pub async fn with_config(config: Config) -> TestApp {
-        TestApp::build(config, None).await
+        TestApp::build(config, None, None).await
+    }
+
+    /// Like [`with_config`](Self::with_config), with `mailer` instead of the capturing one
+    /// (`app.mail` then stays empty).
+    pub async fn with_mailer(config: Config, mailer: Mailer) -> TestApp {
+        TestApp::build(config, None, Some(mailer)).await
     }
 
     /// Like [`with_config`](Self::with_config), with the client that delivers to Slack, Discord
     /// and webhooks replaced (tests resolve names without DNS).
     pub async fn with_notify_http(config: Config, http: codoseo_notify::GuardedHttp) -> TestApp {
-        TestApp::build(config, Some(http)).await
+        TestApp::build(config, Some(http), None).await
     }
 
-    async fn build(config: Config, http: Option<codoseo_notify::GuardedHttp>) -> TestApp {
+    async fn build(
+        config: Config,
+        http: Option<codoseo_notify::GuardedHttp>,
+        mailer: Option<Mailer>,
+    ) -> TestApp {
         let db = TestDb::new().await;
-        let (mailer, mail) = Mailer::capture();
+        let (captured, mail) = Mailer::capture();
+        let mailer = mailer.unwrap_or(captured);
         let mut state = AppState::new(db.pool.clone(), config, mailer);
         if let Some(http) = http {
             state.notify_http = http;

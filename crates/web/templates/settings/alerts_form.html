@@ -18,5 +18,5 @@
   </div>
   {% if let Some(err) = error %}<span class="error-text" role="alert"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</span>{% endif %}
   <p class="hint">An email address, or the incoming-webhook URL for Slack, Discord or your own endpoint. URLs are stored encrypted and only their host is shown here.</p>
-  {% if upgrade %}<p class="hint upgrade-hint">Slack, Discord and webhooks are on Pro and Agency. <b>Upgrade to Pro</b> to send alerts there; email works on every plan.</p>{% endif %}
+  {% if upgrade %}<p class="hint upgrade-hint">Slack, Discord and webhooks are on Pro and Agency. {% if upgrade_link %}<a href="/billing">Upgrade to Pro</a>{% else %}<b>Upgrade to Pro</b>{% endif %} to send alerts there; email works on every plan.</p>{% endif %}
 </form>

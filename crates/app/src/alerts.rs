@@ -292,7 +292,17 @@ pub async fn deliver_alert(
             .await
             .map_err(|e: DeliveryError| e.to_string()),
         Ok(None) => return Ok(()),
-        Err(e) => Err(e.to_string()),
+        // A target that won't decrypt (SECRET_KEY changed, a damaged row) is the operator's
+        // problem, not the channel's: the job fails and shows up in the admin page, but the
+        // channel isn't blamed, switched off, or reported to the user.
+        Err(e) => {
+            tracing::error!(
+                channel_id = %delivery.channel_id,
+                error = %e,
+                "cannot read the channel target; check SECRET_KEY"
+            );
+            return Err(format!("cannot read the channel target: {e}"));
+        }
     };
     match outcome {
         Ok(()) => {

@@ -891,6 +891,43 @@ fn notices(w: &World) -> Vec<Email> {
 }
 
 #[tokio::test]
+async fn a_target_that_cannot_be_decrypted_is_ours_to_fix_not_the_channels_fault() {
+    let mut w = World::new("pro").await;
+    let (server, hook) = Hook::start(200).await;
+    let channel = w.http_channel("slack", server.url("/slack")).await;
+    let change = w.change(ChangeKind::ErrorSpike, None).await;
+    // The operator changed SECRET_KEY: what was stored can't be read any more.
+    w.ctx.channel_key = ChannelKey::derive("a different secret");
+    let delivery = alerts::Delivery {
+        crawl_id: w.crawl,
+        channel_id: channel,
+        change_ids: vec![change],
+        unreachable: false,
+    };
+
+    // Even the last attempt neither switches the channel off nor emails the user.
+    for last_attempt in [false, true] {
+        let outcome = alerts::deliver_alert(&w.ctx, &delivery, last_attempt).await;
+        assert!(outcome.is_err(), "the job still fails: {outcome:?}");
+    }
+    let state = channels::state(w.pool(), channel).await.unwrap().unwrap();
+    assert!(state.enabled, "still on");
+    let (failures, error): (i16, Option<String>) =
+        sqlx::query_as("SELECT consecutive_failures, last_error FROM alert_channels WHERE id = $1")
+            .bind(channel)
+            .fetch_one(w.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        (failures, error),
+        (0, None),
+        "not counted against the channel"
+    );
+    assert!(w.mail.lock().unwrap().is_empty(), "the user is not emailed");
+    assert!(hook.bodies().is_empty());
+}
+
+#[tokio::test]
 async fn the_default_email_channel_is_never_switched_off_by_failures() {
     let mut w = World::new("pro").await;
     // Nothing listens on port 9, so every send fails, like an SMTP outage.
