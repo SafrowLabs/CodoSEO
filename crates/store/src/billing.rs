@@ -70,6 +70,8 @@ pub struct AccountBilling {
     pub subscription_id: Option<String>,
     pub plan_expires_at: Option<OffsetDateTime>,
     pub updated_at: Option<OffsetDateTime>,
+    /// Set once the current subscription was cancelled: the plan ends at `plan_expires_at`.
+    pub cancelled_at: Option<OffsetDateTime>,
 }
 
 pub async fn account_billing(
@@ -78,7 +80,8 @@ pub async fn account_billing(
 ) -> Result<Option<AccountBilling>, sqlx::Error> {
     sqlx::query_as(
         "SELECT dodo_customer_id AS customer_id, dodo_subscription_id AS subscription_id, \
-                plan_expires_at, billing_updated_at AS updated_at \
+                plan_expires_at, billing_updated_at AS updated_at, \
+                plan_cancelled_at AS cancelled_at \
          FROM accounts WHERE id = $1",
     )
     .bind(account_id)
@@ -94,12 +97,17 @@ pub async fn apply_plan(
     plan: Plan,
     expires: Option<OffsetDateTime>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE accounts SET plan = $2::plan, plan_expires_at = $3 WHERE id = $1")
-        .bind(account_id)
-        .bind(plan_slug(plan))
-        .bind(expires)
-        .execute(&mut *conn)
-        .await?;
+    // A plan change is a fresh start for the cancellation mark: a paid-up subscription isn't
+    // cancelled, and a downgrade has nothing left to cancel.
+    sqlx::query(
+        "UPDATE accounts SET plan = $2::plan, plan_expires_at = $3, plan_cancelled_at = NULL \
+         WHERE id = $1",
+    )
+    .bind(account_id)
+    .bind(plan_slug(plan))
+    .bind(expires)
+    .execute(&mut *conn)
+    .await?;
     apply_plan_limits(conn, account_id).await
 }
 
@@ -176,12 +184,13 @@ pub async fn handle_event(
     struct Locked {
         plan: String,
         dodo_subscription_id: Option<String>,
+        plan_expires_at: Option<OffsetDateTime>,
         billing_updated_at: Option<OffsetDateTime>,
     }
     // The row lock serialises two webhooks for one account, so the timestamp check below is
     // made against the state the other one left.
     let account: Locked = sqlx::query_as(
-        "SELECT plan::text AS plan, dodo_subscription_id, billing_updated_at \
+        "SELECT plan::text AS plan, dodo_subscription_id, plan_expires_at, billing_updated_at \
          FROM accounts WHERE id = $1 FOR UPDATE",
     )
     .bind(account_id)
@@ -208,6 +217,24 @@ pub async fn handle_event(
         return Ok(Outcome::Unchanged("another subscription"));
     }
 
+    // A different subscription must not take over an account that is paid up on one already
+    // (a forged or misdirected `metadata.account_id` would otherwise swap the ids). Once the
+    // paid period has run out, a new subscription is welcome.
+    let paid_up = matches!(parse_plan(&account.plan), Plan::Pro | Plan::Agency)
+        && account.plan_expires_at.is_some_and(|expires| expires > now);
+    if other_subscription && paid_up && matches!(action, Action::Activate { .. }) {
+        tracing::warn!(
+            account = %account_id,
+            current = ?account.dodo_subscription_id,
+            offered = ?ev.subscription_id,
+            "ignoring a different subscription for an account that is already paid up"
+        );
+        tx.commit().await?;
+        return Ok(Outcome::Unchanged(
+            "account is paid up on another subscription",
+        ));
+    }
+
     let outcome = match action {
         Action::Activate {
             needs_active_status,
@@ -219,6 +246,18 @@ pub async fn handle_event(
             match (ev.plan, status_ok) {
                 (Some(plan), true) => {
                     let expires = ev.next_billing_date.unwrap_or(ev.at + FALLBACK_PERIOD) + GRACE;
+                    // A customer belongs to one account; if another already has this id, keep
+                    // the plan change and leave the id off rather than fail the delivery.
+                    let customer = match &ev.customer_id {
+                        Some(c) if customer_owned_elsewhere(&mut tx, c, account_id).await? => {
+                            tracing::warn!(
+                                account = %account_id,
+                                "customer id belongs to another account, not storing it"
+                            );
+                            None
+                        }
+                        other => other.clone(),
+                    };
                     sqlx::query(
                         "UPDATE accounts SET \
                            dodo_customer_id = COALESCE($2, dodo_customer_id), \
@@ -227,7 +266,7 @@ pub async fn handle_event(
                          WHERE id = $1",
                     )
                     .bind(account_id)
-                    .bind(&ev.customer_id)
+                    .bind(&customer)
                     .bind(&ev.subscription_id)
                     .execute(&mut *tx)
                     .await?;
@@ -238,7 +277,14 @@ pub async fn handle_event(
                 (_, false) => Outcome::Unchanged("subscription is not active"),
             }
         }
-        Action::Cancel => Outcome::Unchanged("cancelled: the plan runs to its expiry"),
+        Action::Cancel => {
+            sqlx::query("UPDATE accounts SET plan_cancelled_at = $2 WHERE id = $1")
+                .bind(account_id)
+                .bind(ev.at)
+                .execute(&mut *tx)
+                .await?;
+            Outcome::Unchanged("cancelled: the plan runs to its expiry")
+        }
         Action::Watch => Outcome::Unchanged("payment trouble: waiting for Dodo"),
         Action::End => {
             apply_plan(&mut tx, account_id, Plan::Free, None).await?;
@@ -256,12 +302,37 @@ pub async fn handle_event(
     Ok(outcome)
 }
 
-/// The account an event is about: the id the checkout carried, else the subscription, else the
-/// customer, else the customer's email.
+async fn customer_owned_elsewhere(
+    conn: &mut PgConnection,
+    customer_id: &str,
+    account_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM accounts WHERE dodo_customer_id = $1 AND id <> $2)",
+    )
+    .bind(customer_id)
+    .bind(account_id)
+    .fetch_one(conn)
+    .await
+}
+
+/// The account an event is about: the owner of the subscription if some account already has it
+/// (the metadata can't redirect a subscription away from its owner), else the id the checkout
+/// carried, else the customer, else the customer's email.
 async fn resolve_account(
     conn: &mut PgConnection,
     ev: &SubscriptionEvent,
 ) -> Result<Option<Uuid>, sqlx::Error> {
+    if let Some(sub) = &ev.subscription_id {
+        let owner: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM accounts WHERE dodo_subscription_id = $1")
+                .bind(sub)
+                .fetch_optional(&mut *conn)
+                .await?;
+        if owner.is_some() {
+            return Ok(owner);
+        }
+    }
     if let Some(id) = ev.account_hint {
         let found: Option<Uuid> = sqlx::query_scalar("SELECT id FROM accounts WHERE id = $1")
             .bind(id)
@@ -271,13 +342,9 @@ async fn resolve_account(
             return Ok(found);
         }
     }
-    let lookups: [(&str, &Option<String>); 3] = [
+    let lookups: [(&str, &Option<String>); 2] = [
         (
-            "SELECT id FROM accounts WHERE dodo_subscription_id = $1 LIMIT 1",
-            &ev.subscription_id,
-        ),
-        (
-            "SELECT id FROM accounts WHERE dodo_customer_id = $1 LIMIT 1",
+            "SELECT id FROM accounts WHERE dodo_customer_id = $1",
             &ev.customer_id,
         ),
         (

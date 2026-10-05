@@ -73,6 +73,8 @@ pub struct BillingPage {
     pub paid: bool,
     /// When the paid period ends (the next billing date), for a paid plan.
     pub period_end: Option<String>,
+    /// The subscription was cancelled: the plan ends on `period_end` instead of renewing.
+    pub cancelled: bool,
     pub has_customer: bool,
     pub cards: Vec<PlanCard>,
     pub success: bool,
@@ -149,6 +151,7 @@ async fn render_page(
             .and_then(|i| i.plan_expires_at)
             .filter(|_| paid)
             .map(|at| fmt::date(at - billing::GRACE)),
+        cancelled: info.as_ref().is_some_and(|i| i.cancelled_at.is_some()),
         has_customer: info.as_ref().is_some_and(|i| i.customer_id.is_some()),
         cards: vec![
             card(Plan::Pro, "pro", "Pro"),

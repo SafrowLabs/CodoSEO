@@ -32,7 +32,7 @@ pub struct TurnstileConfig {
 
 /// Dodo Payments billing (cloud only). All four keys are needed; with any missing, billing is
 /// off: the billing pages say so and checkout is disabled.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DodoConfig {
     /// Bearer token for the Dodo API (`DODO_API_KEY`).
     pub api_key: String,
@@ -43,6 +43,20 @@ pub struct DodoConfig {
     /// `https://test.dodopayments.com` or `https://live.dodopayments.com` (`DODO_ENV`), or
     /// `DODO_API_URL` when set (tests point it at a fake).
     pub api_url: Url,
+}
+
+/// Written by hand so a stray `{:?}` of the config can't put the API key or the webhook
+/// secret in a log.
+impl std::fmt::Debug for DodoConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DodoConfig")
+            .field("api_key", &"<redacted>")
+            .field("webhook_secret", &"<redacted>")
+            .field("product_pro", &self.product_pro)
+            .field("product_agency", &self.product_agency)
+            .field("api_url", &self.api_url.as_str())
+            .finish()
+    }
 }
 
 impl DodoConfig {
@@ -234,8 +248,6 @@ fn dodo_from(
     get: &impl Fn(&str) -> Option<String>,
     mode: Mode,
 ) -> Result<Option<DodoConfig>, ConfigError> {
-    use base64::Engine as _;
-
     let (Some(api_key), Some(webhook_secret), Some(product_pro), Some(product_agency)) = (
         get("DODO_API_KEY"),
         get("DODO_WEBHOOK_SECRET"),
@@ -251,18 +263,14 @@ fn dodo_from(
         name,
         reason: reason.to_owned(),
     };
-    let key = webhook_secret
-        .trim()
-        .strip_prefix("whsec_")
-        .ok_or_else(|| {
-            invalid(
-                "DODO_WEBHOOK_SECRET",
-                "expected the whsec_ secret from Dodo",
-            )
-        })?;
-    base64::engine::general_purpose::STANDARD
-        .decode(key)
-        .map_err(|_| invalid("DODO_WEBHOOK_SECRET", "the key after whsec_ is not base64"))?;
+    // The same check the webhook verifier makes, so a bad key fails at startup, not on the
+    // first delivery.
+    crate::billing::dodo::key(&webhook_secret).map_err(|_| {
+        invalid(
+            "DODO_WEBHOOK_SECRET",
+            "expected the whsec_ secret from Dodo (base64, at least 16 bytes)",
+        )
+    })?;
     let api_url = match get("DODO_API_URL") {
         Some(v) => v,
         None => match get("DODO_ENV").as_deref() {
@@ -300,7 +308,7 @@ mod tests {
     ];
     const DODO: [(&str, &str); 4] = [
         ("DODO_API_KEY", "key_1"),
-        ("DODO_WEBHOOK_SECRET", "whsec_c2VjcmV0"),
+        ("DODO_WEBHOOK_SECRET", "whsec_c2VjcmV0LTAxMjM0NTY3ODlhYg=="),
         ("DODO_PRODUCT_PRO", "pdt_pro"),
         ("DODO_PRODUCT_AGENCY", "pdt_agency"),
     ];
@@ -485,5 +493,12 @@ mod tests {
         assert!(cloud_with(&keys).is_err());
         keys[1] = ("DODO_WEBHOOK_SECRET", "whsec_%%%");
         assert!(cloud_with(&keys).is_err());
+        // An empty or tiny key would sign (and verify) anything cheaply.
+        for short in ["whsec_", "whsec_YQ==", "whsec_c2VjcmV0LTAxMjM0NQ=="] {
+            keys[1] = ("DODO_WEBHOOK_SECRET", short);
+            assert!(cloud_with(&keys).is_err(), "{short}");
+        }
+        keys[1] = ("DODO_WEBHOOK_SECRET", "whsec_MDEyMzQ1Njc4OWFiY2RlZg==");
+        assert!(cloud_with(&keys).unwrap().billing.is_some());
     }
 }

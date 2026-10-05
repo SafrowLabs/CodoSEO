@@ -33,6 +33,8 @@ pub async fn receive(
         .get("webhook-id")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
+    // Past this point the request is authentic: answer 200 unless the body isn't a JSON object
+    // at all. Fields of the wrong type were already treated as absent by `parse_event`.
     let (Ok(event), Ok(payload)) = (
         dodo::parse_event(id, &body),
         serde_json::from_slice::<serde_json::Value>(&body),

@@ -29,7 +29,7 @@ pub async fn downgrade_expired(pool: &PgPool, now: OffsetDateTime) -> Result<u64
         // The same conditions again, so a second scheduler (or a renewal that landed since the
         // list was read) leaves the account alone.
         let changed = sqlx::query(
-            "UPDATE accounts SET plan = 'free', plan_expires_at = NULL \
+            "UPDATE accounts SET plan = 'free', plan_expires_at = NULL, plan_cancelled_at = NULL \
              WHERE id = $1 AND plan IN ('pro', 'agency') AND plan_expires_at < $2",
         )
         .bind(id)

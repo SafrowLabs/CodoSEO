@@ -4,11 +4,16 @@
 ALTER TABLE accounts
   ADD COLUMN dodo_customer_id TEXT,
   ADD COLUMN dodo_subscription_id TEXT,
-  ADD COLUMN billing_updated_at TIMESTAMPTZ;
+  ADD COLUMN billing_updated_at TIMESTAMPTZ,
+  -- When `subscription.cancelled` arrived for the current subscription; the plan runs on to
+  -- `plan_expires_at`. Cleared when the subscription is active again or ends.
+  ADD COLUMN plan_cancelled_at TIMESTAMPTZ;
 
-CREATE INDEX accounts_dodo_subscription_idx ON accounts (dodo_subscription_id)
+-- One subscription and one customer belong to one account; the unique indexes also serve the
+-- webhook's lookups.
+CREATE UNIQUE INDEX accounts_dodo_subscription_idx ON accounts (dodo_subscription_id)
   WHERE dodo_subscription_id IS NOT NULL;
-CREATE INDEX accounts_dodo_customer_idx ON accounts (dodo_customer_id)
+CREATE UNIQUE INDEX accounts_dodo_customer_idx ON accounts (dodo_customer_id)
   WHERE dodo_customer_id IS NOT NULL;
 
 -- `event_id` is the `webhook-id` header: Dodo resends the same id on every retry.

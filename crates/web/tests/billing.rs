@@ -255,7 +255,7 @@ async fn forged_and_stale_requests_are_401_and_change_nothing() {
 
     // A wrong secret.
     let wrong = Hook {
-        secret: "whsec_b3RoZXItc2VjcmV0",
+        secret: "whsec_b3RoZXItc2VjcmV0LTAxMjM0NTY3ODk=",
         ..Hook::new("msg_1", &body)
     };
     assert_eq!(wrong.send(&app).await, StatusCode::UNAUTHORIZED);
@@ -312,7 +312,7 @@ async fn several_signatures_where_one_is_valid_pass() {
         .unwrap()
         .to_owned();
     let bad = dodo::sign(
-        "whsec_b3RoZXItc2VjcmV0",
+        "whsec_b3RoZXItc2VjcmV0LTAxMjM0NTY3ODk=",
         "msg_1",
         OffsetDateTime::now_utc().unix_timestamp(),
         body.as_bytes(),
@@ -720,7 +720,8 @@ async fn a_paid_account_sees_its_renewal_date_and_manage_billing() {
     assert!(res.body.contains("Manage billing"));
     assert!(res.body.contains("action=\"/billing/portal\""));
     assert!(res.body.contains("Current plan"));
-    assert!(res.body.contains("period ends"), "{}", res.body);
+    assert!(res.body.contains("Renews on"), "{}", res.body);
+    assert!(!res.body.contains("Your plan ends on"));
     assert!(
         !res.body.contains("action=\"/billing/checkout\""),
         "a paying account changes plan in the portal"
@@ -801,4 +802,92 @@ async fn the_sites_list_links_to_the_picker_when_a_site_was_stopped_by_the_plan(
         .unwrap();
     let res = app.get("/sites", Some(&cookie)).await;
     assert!(res.body.contains("href=\"/billing/sites\""), "{}", res.body);
+}
+
+#[tokio::test]
+async fn a_cancelled_subscription_says_when_the_plan_ends_until_it_is_renewed() {
+    let (app, _, _server) = billing_app().await;
+    let (account, cookie) = free_account(&app, "ana@example.com").await;
+    let t0 = OffsetDateTime::now_utc() - Duration::hours(1);
+    let active = event_body("subscription.active", Some(account.id), "pdt_pro", t0);
+    Hook::new("msg_1", &active).send(&app).await;
+    let date = codoseo_web::fmt::date(t0 + Duration::days(30));
+
+    let cancelled = event_body(
+        "subscription.cancelled",
+        Some(account.id),
+        "pdt_pro",
+        t0 + Duration::minutes(5),
+    );
+    assert_eq!(
+        Hook::new("msg_2", &cancelled).send(&app).await,
+        StatusCode::OK
+    );
+    let res = app.get("/billing", Some(&cookie)).await;
+    assert!(
+        res.body.contains(&format!("Your plan ends on {date}")),
+        "{}",
+        res.body
+    );
+    assert!(!res.body.contains("Renews on"));
+
+    let renewed = event_body(
+        "subscription.renewed",
+        Some(account.id),
+        "pdt_pro",
+        t0 + Duration::minutes(10),
+    );
+    Hook::new("msg_3", &renewed).send(&app).await;
+    let res = app.get("/billing", Some(&cookie)).await;
+    assert!(res.body.contains("Renews on"), "{}", res.body);
+    assert!(!res.body.contains("Your plan ends on"));
+}
+
+#[tokio::test]
+async fn a_verified_event_with_wrongly_typed_fields_is_stored_and_answered_200() {
+    let (app, _, _server) = billing_app().await;
+    let (account, _) = free_account(&app, "ana@example.com").await;
+    let body = serde_json::json!({
+        "type": "subscription.active",
+        "timestamp": 12345,
+        "data": {
+            "subscription_id": "sub_1",
+            "product_id": "pdt_pro",
+            "status": 7,
+            "customer": "cus_1",
+            "metadata": {"account_id": account.id.to_string()},
+        }
+    })
+    .to_string();
+    assert_eq!(Hook::new("msg_1", &body).send(&app).await, StatusCode::OK);
+    assert_eq!(events_stored(&app).await, 1);
+    // `status: 7` is unusable, so it counts as absent and an activating event takes it as active.
+    assert_eq!(account_state(&app, account.id).await.0, "pro");
+
+    // Only a body that isn't a JSON object is refused.
+    for (n, bad) in ["[1,2]", "\"x\"", "42"].iter().enumerate() {
+        let id = format!("msg_bad{n}");
+        assert_eq!(
+            Hook::new(&id, bad).send(&app).await,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+    assert_eq!(events_stored(&app).await, 1);
+}
+
+#[tokio::test]
+async fn extreme_webhook_timestamps_are_401_not_a_panic() {
+    let (app, _, _server) = billing_app().await;
+    let body = event_body("subscription.active", None, "pdt_pro", base());
+    for ts in [i64::MIN, i64::MAX] {
+        let mut req = Hook::new("msg_1", &body).request();
+        req.headers_mut()
+            .insert("webhook-timestamp", ts.to_string().parse().unwrap());
+        assert_eq!(
+            send_raw(&app, req).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "{ts}"
+        );
+    }
 }

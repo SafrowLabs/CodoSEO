@@ -10,6 +10,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
+use serde_json::Value;
 use sha2::Sha256;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -41,13 +42,21 @@ fn header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<&'a str, Sig
         .ok_or(SigError::MissingHeader(name))
 }
 
+/// The shortest webhook key accepted. HMAC takes a key of any length, an empty one included,
+/// so without a floor a `whsec_` secret with nothing after it would "verify" forgeries.
+pub const MIN_KEY_BYTES: usize = 16;
+
 /// The HMAC key behind a `whsec_<base64>` secret.
-fn key(secret: &str) -> Result<Vec<u8>, SigError> {
+pub fn key(secret: &str) -> Result<Vec<u8>, SigError> {
     let encoded = secret
         .trim()
         .strip_prefix("whsec_")
         .ok_or(SigError::BadSecret)?;
-    B64.decode(encoded).map_err(|_| SigError::BadSecret)
+    let key = B64.decode(encoded).map_err(|_| SigError::BadSecret)?;
+    if key.len() < MIN_KEY_BYTES {
+        return Err(SigError::BadSecret);
+    }
+    Ok(key)
 }
 
 fn mac(key: &[u8], id: &str, timestamp: &str, body: &[u8]) -> Hmac<Sha256> {
@@ -74,7 +83,8 @@ pub fn verify(
     let timestamp = header(headers, "webhook-timestamp")?;
     let signatures = header(headers, "webhook-signature")?;
     let sent: i64 = timestamp.parse().map_err(|_| SigError::BadTimestamp)?;
-    if (now.unix_timestamp() - sent).abs() > TOLERANCE_SECS {
+    // `abs_diff` can't overflow, whatever the sender put in the header.
+    if now.unix_timestamp().abs_diff(sent) > TOLERANCE_SECS as u64 {
         return Err(SigError::Stale);
     }
     let key = key(secret)?;
@@ -125,33 +135,6 @@ pub struct DodoEvent {
     pub subscription: Option<Subscription>,
 }
 
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Envelope {
-    #[serde(rename = "type")]
-    kind: String,
-    timestamp: Option<String>,
-    data: Option<Data>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Data {
-    subscription_id: Option<String>,
-    product_id: Option<String>,
-    status: Option<String>,
-    next_billing_date: Option<String>,
-    customer: Option<Customer>,
-    metadata: Option<serde_json::Map<String, serde_json::Value>>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Customer {
-    customer_id: Option<String>,
-    email: Option<String>,
-}
-
 /// ISO 8601 with an offset, or without one (taken as UTC).
 fn parse_time(text: &str) -> Option<OffsetDateTime> {
     let text = text.trim();
@@ -160,38 +143,66 @@ fn parse_time(text: &str) -> Option<OffsetDateTime> {
         .ok()
 }
 
-fn non_empty(s: Option<String>) -> Option<String> {
-    s.filter(|v| !v.trim().is_empty())
+/// A string field, or `None` when it is missing, null, empty, or not a string (logged: the
+/// signature was valid, so a surprise in the payload is worth a line, not a rejection).
+fn text(object: &serde_json::Map<String, Value>, field: &str) -> Option<String> {
+    match object.get(field) {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if !s.trim().is_empty() => Some(s.clone()),
+        Some(Value::String(_)) => None,
+        Some(_) => {
+            tracing::warn!(field, "billing webhook field is not a string, ignoring it");
+            None
+        }
+    }
 }
 
-/// Reads a verified webhook body. Fails only when it isn't a JSON object; everything inside is
-/// optional.
-pub fn parse_event(id: &str, body: &[u8]) -> Result<DodoEvent, serde_json::Error> {
-    let envelope: Envelope = serde_json::from_slice(body)?;
-    let subscription = envelope
-        .data
-        .filter(|d| envelope.kind.starts_with("subscription.") || d.subscription_id.is_some())
+/// An object field, or `None` (logged) when it is something else.
+fn object<'a>(
+    parent: &'a serde_json::Map<String, Value>,
+    field: &str,
+) -> Option<&'a serde_json::Map<String, Value>> {
+    match parent.get(field) {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(o)) => Some(o),
+        Some(_) => {
+            tracing::warn!(field, "billing webhook field is not an object, ignoring it");
+            None
+        }
+    }
+}
+
+/// The body wasn't a JSON object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the webhook body is not a JSON object")]
+pub struct NotAnObject;
+
+/// Reads a verified webhook body. Fails only when it isn't a JSON object; every field inside
+/// is optional, and one of the wrong type counts as absent.
+pub fn parse_event(id: &str, body: &[u8]) -> Result<DodoEvent, NotAnObject> {
+    let Ok(Value::Object(root)) = serde_json::from_slice::<Value>(body) else {
+        return Err(NotAnObject);
+    };
+    let kind = text(&root, "type").unwrap_or_default();
+    let timestamp = text(&root, "timestamp").as_deref().and_then(parse_time);
+    let subscription = object(&root, "data")
+        .filter(|d| kind.starts_with("subscription.") || d.contains_key("subscription_id"))
         .map(|d| {
-            let customer = d.customer.unwrap_or_default();
+            let customer = object(d, "customer");
             Subscription {
-                subscription_id: non_empty(d.subscription_id),
-                product_id: non_empty(d.product_id),
-                customer_id: non_empty(customer.customer_id),
-                customer_email: non_empty(customer.email),
-                status: non_empty(d.status),
-                next_billing_date: d.next_billing_date.as_deref().and_then(parse_time),
-                metadata_account_id: d
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| m.get("account_id"))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned),
+                subscription_id: text(d, "subscription_id"),
+                product_id: text(d, "product_id"),
+                customer_id: customer.and_then(|c| text(c, "customer_id")),
+                customer_email: customer.and_then(|c| text(c, "email")),
+                status: text(d, "status"),
+                next_billing_date: text(d, "next_billing_date").as_deref().and_then(parse_time),
+                metadata_account_id: object(d, "metadata").and_then(|m| text(m, "account_id")),
             }
         });
     Ok(DodoEvent {
         id: id.to_owned(),
-        kind: envelope.kind,
-        timestamp: envelope.timestamp.as_deref().and_then(parse_time),
+        kind,
+        timestamp,
         subscription,
     })
 }
@@ -317,7 +328,7 @@ mod tests {
     use super::*;
     use axum::http::HeaderValue;
 
-    const SECRET: &str = "whsec_dGVzdC1zZWNyZXQ=";
+    const SECRET: &str = "whsec_dGVzdC1zZWNyZXQtMDEyMzQ1Njc4OQ==";
     const BODY: &[u8] = br#"{"type":"subscription.active"}"#;
 
     fn now() -> OffsetDateTime {
@@ -360,7 +371,7 @@ mod tests {
     #[test]
     fn a_wrong_secret_is_refused() {
         let ts = now().unix_timestamp();
-        let other = "whsec_b3RoZXItc2VjcmV0";
+        let other = "whsec_b3RoZXItc2VjcmV0LTAxMjM0NTY3ODk=";
         assert_eq!(
             verify(other, &signed(ts), BODY, now()),
             Err(SigError::NoValidSignature)
@@ -441,7 +452,7 @@ mod tests {
     fn one_valid_signature_among_several_passes() {
         let ts = now().unix_timestamp();
         let good = sign(SECRET, "msg_1", ts, BODY).unwrap();
-        let bad = sign("whsec_b3RoZXItc2VjcmV0", "msg_1", ts, BODY).unwrap();
+        let bad = sign("whsec_b3RoZXItc2VjcmV0LTAxMjM0NTY3ODk=", "msg_1", ts, BODY).unwrap();
         for list in [
             format!("{bad} {good}"),
             format!("{good} {bad}"),
@@ -455,6 +466,90 @@ mod tests {
             verify(SECRET, &h, BODY, now()),
             Err(SigError::NoValidSignature)
         );
+    }
+
+    #[test]
+    fn an_empty_or_short_key_is_refused_even_with_a_matching_signature() {
+        let ts = now().unix_timestamp();
+        for short in ["whsec_", "whsec_YQ==", "whsec_c2VjcmV0LTAxMjM0NQ=="] {
+            // 0, 1 and 15 bytes: the HMAC would accept them, so `key` must not.
+            assert_eq!(
+                sign(short, "msg_1", ts, BODY),
+                Err(SigError::BadSecret),
+                "{short}"
+            );
+            let h = headers("msg_1", ts, "v1,AAAA");
+            assert_eq!(
+                verify(short, &h, BODY, now()),
+                Err(SigError::BadSecret),
+                "{short}"
+            );
+        }
+        // 16 bytes is the smallest accepted.
+        assert!(sign("whsec_MDEyMzQ1Njc4OWFiY2RlZg==", "msg_1", ts, BODY).is_ok());
+    }
+
+    #[test]
+    fn extreme_timestamps_are_refused_without_panicking() {
+        for extreme in [i64::MIN, i64::MAX, i64::MIN + 1, 0] {
+            let h = headers("msg_1", extreme, "v1,AAAA");
+            assert_eq!(
+                verify(SECRET, &h, BODY, now()),
+                Err(SigError::Stale),
+                "{extreme}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_field_of_the_wrong_type_is_treated_as_absent() {
+        let body = br#"{
+            "type": "subscription.active",
+            "timestamp": 1760000000,
+            "data": {
+                "subscription_id": "sub_1",
+                "product_id": ["pdt_pro"],
+                "status": 7,
+                "next_billing_date": {"at": "soon"},
+                "customer": "cus_1",
+                "metadata": "account"
+            }
+        }"#;
+        let ev = parse_event("m", body).unwrap();
+        assert_eq!(ev.kind, "subscription.active");
+        assert_eq!(ev.timestamp, None);
+        let sub = ev.subscription.unwrap();
+        assert_eq!(sub.subscription_id.as_deref(), Some("sub_1"));
+        assert_eq!(sub.product_id, None);
+        assert_eq!(sub.status, None);
+        assert_eq!(sub.next_billing_date, None);
+        assert_eq!(sub.customer_id, None);
+        assert_eq!(sub.metadata_account_id, None);
+
+        // Only something that isn't a JSON object at all is refused.
+        for bad in ["[]", "7", "\"text\"", "null", "not json"] {
+            assert!(parse_event("m", bad.as_bytes()).is_err(), "{bad}");
+        }
+        let ev = parse_event("m", br#"{"type": 5, "data": 5}"#).unwrap();
+        assert_eq!(ev.kind, "");
+        assert!(ev.subscription.is_none());
+    }
+
+    #[test]
+    fn the_config_does_not_print_its_secrets() {
+        let cfg = DodoConfig {
+            api_key: "dodo_key_SUPERSECRET".to_owned(),
+            webhook_secret: "whsec_WEBHOOKSECRET".to_owned(),
+            product_pro: "pdt_pro".to_owned(),
+            product_agency: "pdt_agency".to_owned(),
+            api_url: Url::parse("https://test.dodopayments.com").unwrap(),
+        };
+        let shown = format!("{cfg:?}");
+        assert!(
+            !shown.contains("SUPERSECRET") && !shown.contains("WEBHOOKSECRET"),
+            "{shown}"
+        );
+        assert!(shown.contains("pdt_pro") && shown.contains("test.dodopayments.com"));
     }
 
     #[test]

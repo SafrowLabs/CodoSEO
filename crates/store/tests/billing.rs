@@ -255,9 +255,15 @@ async fn the_end_of_an_old_subscription_does_not_downgrade_a_newer_one() {
     let db = TestDb::new().await;
     let id = account(&db, "ana@example.test", "free").await;
     handle(&db, &event("evt_1", "subscription.active", id, at(0))).await;
+    // The first subscription ran out (the scheduler hasn't downgraded the account yet).
+    sqlx::query("UPDATE accounts SET plan_expires_at = now() - interval '1 day' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
     let mut new = event("evt_2", "subscription.active", id, at(10));
     new.subscription_id = Some("sub_2".to_owned());
-    handle(&db, &new).await;
+    assert_eq!(handle(&db, &new).await, Outcome::Applied(Plan::Pro));
 
     let mut old_ends = event("evt_3", "subscription.expired", id, at(11));
     old_ends.subscription_id = Some("sub_1".to_owned());
@@ -287,9 +293,9 @@ async fn the_account_is_found_by_metadata_then_subscription_then_customer_then_e
         .unwrap();
 
     let mut ev = event("e1", "subscription.active", by_hint, at(0));
-    ev.subscription_id = Some("sub_x".to_owned());
+    ev.subscription_id = Some("sub_h".to_owned());
     handle(&db, &ev).await;
-    assert_eq!(plan_of(&db, by_hint).await.0, "pro", "the hint wins");
+    assert_eq!(plan_of(&db, by_hint).await.0, "pro", "the hint is used");
     assert_eq!(plan_of(&db, by_sub).await.0, "free");
 
     let mut ev = event("e2", "subscription.active", by_hint, at(0));
@@ -402,4 +408,151 @@ async fn the_owner_picks_which_sites_stay_monitored() {
         .unwrap();
     assert_eq!(outcome, SetMonitored::UnknownSite);
     assert!(site_state(&db, theirs).await.0);
+}
+
+#[tokio::test]
+async fn a_subscription_that_belongs_to_another_account_beats_the_metadata_hint() {
+    let db = TestDb::new().await;
+    let owner = account(&db, "owner@example.test", "free").await;
+    let other = account(&db, "other@example.test", "free").await;
+    handle(&db, &event("evt_1", "subscription.active", owner, at(0))).await;
+    assert_eq!(plan_of(&db, owner).await.0, "pro");
+
+    // A renewal for the owner's subscription whose metadata names someone else.
+    let mut ev = event("evt_2", "subscription.renewed", other, at(30));
+    ev.customer_id = Some("cus_1".to_owned());
+    assert_eq!(handle(&db, &ev).await, Outcome::Applied(Plan::Pro));
+    assert_eq!(
+        plan_of(&db, other).await.0,
+        "free",
+        "nothing leaks to the hinted account"
+    );
+    assert_eq!(plan_of(&db, owner).await.1, Some(at(63)));
+}
+
+#[tokio::test]
+async fn activating_a_different_subscription_does_not_replace_a_paid_unexpired_one() {
+    let db = TestDb::new().await;
+    let id = account(&db, "ana@example.test", "free").await;
+    handle(&db, &event("evt_1", "subscription.active", id, at(0))).await;
+    let before = plan_of(&db, id).await;
+
+    let mut other = event("evt_2", "subscription.active", id, at(5));
+    other.subscription_id = Some("sub_2".to_owned());
+    other.plan = Some(Plan::Agency);
+    assert!(matches!(handle(&db, &other).await, Outcome::Unchanged(_)));
+    assert_eq!(plan_of(&db, id).await, before);
+    let info = billing::account_billing(&db.pool, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(info.subscription_id.as_deref(), Some("sub_1"));
+    assert_eq!(
+        info.updated_at,
+        Some(at(0)),
+        "an ignored event doesn't move the mark"
+    );
+
+    // The same subscription still renews and changes plan.
+    let mut same = event("evt_3", "subscription.plan_changed", id, at(6));
+    same.plan = Some(Plan::Agency);
+    assert_eq!(handle(&db, &same).await, Outcome::Applied(Plan::Agency));
+}
+
+#[tokio::test]
+async fn a_new_subscription_is_taken_once_the_old_one_has_lapsed() {
+    let db = TestDb::new().await;
+    let id = account(&db, "ana@example.test", "free").await;
+    handle(&db, &event("evt_1", "subscription.active", id, at(0))).await;
+    sqlx::query("UPDATE accounts SET plan_expires_at = now() - interval '1 hour' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let mut new = event("evt_2", "subscription.active", id, at(40));
+    new.subscription_id = Some("sub_2".to_owned());
+    assert_eq!(handle(&db, &new).await, Outcome::Applied(Plan::Pro));
+    let info = billing::account_billing(&db.pool, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(info.subscription_id.as_deref(), Some("sub_2"));
+
+    // And a free account takes whatever it is sold.
+    let free = account(&db, "bo@example.test", "free").await;
+    let mut ev = event("evt_3", "subscription.active", free, at(0));
+    ev.subscription_id = Some("sub_9".to_owned());
+    ev.customer_id = Some("cus_9".to_owned());
+    assert_eq!(handle(&db, &ev).await, Outcome::Applied(Plan::Pro));
+}
+
+#[tokio::test]
+async fn a_customer_id_owned_by_another_account_is_not_assigned_and_nothing_fails() {
+    let db = TestDb::new().await;
+    let first = account(&db, "ana@example.test", "free").await;
+    let second = account(&db, "bo@example.test", "free").await;
+    handle(&db, &event("evt_1", "subscription.active", first, at(0))).await;
+
+    let mut ev = event("evt_2", "subscription.active", second, at(1));
+    ev.subscription_id = Some("sub_2".to_owned()); // new subscription, but cus_1 is the first account's
+    assert_eq!(handle(&db, &ev).await, Outcome::Applied(Plan::Pro));
+    let info = billing::account_billing(&db.pool, second)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(info.subscription_id.as_deref(), Some("sub_2"));
+    assert_eq!(info.customer_id, None);
+}
+
+#[tokio::test]
+async fn the_database_refuses_one_subscription_or_customer_on_two_accounts() {
+    let db = TestDb::new().await;
+    let a = account(&db, "ana@example.test", "free").await;
+    let b = account(&db, "bo@example.test", "free").await;
+    for column in ["dodo_subscription_id", "dodo_customer_id"] {
+        let set = format!("UPDATE accounts SET {column} = 'x' WHERE id = $1");
+        sqlx::query(&set).bind(a).execute(&db.pool).await.unwrap();
+        assert!(
+            sqlx::query(&set).bind(b).execute(&db.pool).await.is_err(),
+            "{column}"
+        );
+    }
+    // Several accounts without ids are fine.
+    let c = account(&db, "cy@example.test", "free").await;
+    let d = account(&db, "di@example.test", "free").await;
+    let _ = (c, d);
+}
+
+async fn cancelled(db: &TestDb, id: Uuid) -> Option<OffsetDateTime> {
+    billing::account_billing(&db.pool, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .cancelled_at
+}
+
+#[tokio::test]
+async fn cancelling_is_recorded_and_a_renewal_clears_it() {
+    let db = TestDb::new().await;
+    let id = account(&db, "ana@example.test", "free").await;
+    handle(&db, &event("evt_1", "subscription.active", id, at(0))).await;
+    assert_eq!(cancelled(&db, id).await, None);
+
+    // Another subscription's cancellation says nothing about this one.
+    let mut other = event("evt_2", "subscription.cancelled", id, at(2));
+    other.subscription_id = Some("sub_other".to_owned());
+    handle(&db, &other).await;
+    assert_eq!(cancelled(&db, id).await, None);
+
+    handle(&db, &event("evt_3", "subscription.cancelled", id, at(5))).await;
+    assert_eq!(cancelled(&db, id).await, Some(at(5)));
+    assert_eq!(plan_of(&db, id).await.0, "pro");
+
+    handle(&db, &event("evt_4", "subscription.renewed", id, at(6))).await;
+    assert_eq!(cancelled(&db, id).await, None, "it was resumed");
+
+    // And an end clears it too.
+    handle(&db, &event("evt_5", "subscription.cancelled", id, at(7))).await;
+    handle(&db, &event("evt_6", "subscription.expired", id, at(8))).await;
+    assert_eq!(cancelled(&db, id).await, None);
 }

@@ -15,8 +15,12 @@
     <div class="card-pad" style="display:grid;gap:14px">
       <div class="field-row" style="border:0;padding:0"><span class="k">Plan</span><span class="v">{{ plan_name }}</span></div>
       {% if let Some(end) = period_end %}
-      <div class="field-row" style="border:0;padding:0"><span class="k">Current period ends</span><span class="v">{{ end }}</span></div>
-      <p class="hint">It renews on that date. If you cancel, the plan stays until then.</p>
+      {% if cancelled %}
+      <div class="field-row" style="border:0;padding:0"><span class="k">Cancelled</span><span class="v">Your plan ends on {{ end }}</span></div>
+      <p class="hint">You keep everything until then. Manage billing to resume it.</p>
+      {% else %}
+      <div class="field-row" style="border:0;padding:0"><span class="k">Next billing</span><span class="v">Renews on {{ end }}</span></div>
+      {% endif %}
       {% endif %}
       {% if has_customer && configured %}
       <form method="post" action="/billing/portal" hx-boost="false"><button class="btn" type="submit"><svg class="icon"><use href="#i-external"/></svg>Manage billing</button> <span class="hint" style="margin-left:8px">Change plan, update your card, see invoices or cancel</span></form>
