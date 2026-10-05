@@ -114,7 +114,7 @@ pub trait CloudBackend: Send + Sync + 'static {
 /// How long the no-key `quick_audit` waits for a fresh audit before answering "still running".
 pub const DEFAULT_QUICK_AUDIT_WAIT: Duration = Duration::from_secs(45);
 /// How often it looks at the audit while waiting.
-pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The longest one tool call may take before the agent is told so. Above the 45 s the no-key
 /// `quick_audit` waits for a fresh audit.

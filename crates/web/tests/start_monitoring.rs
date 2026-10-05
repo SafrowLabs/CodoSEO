@@ -644,10 +644,16 @@ async fn a_direct_client_is_capped_per_ip_and_a_connector_is_not() {
 }
 
 #[tokio::test]
-async fn the_daily_email_cap_stops_everyone() {
+async fn the_daily_email_cap_stops_everyone_and_an_eighth_of_it_is_the_hourly_cap() {
     let app = TestApp::with_config(cloud_config_with(&[("MCP_ANON_DAILY_EMAILS", "2")])).await;
-    request(&app, "a@example.org").await;
-    request(&app, "b@example.org").await;
+    // An hourly share of 1: let each request leave the hour, not the day.
+    for email in ["a@example.org", "b@example.org"] {
+        request(&app, email).await;
+        sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
+            .execute(app.pool())
+            .await
+            .unwrap();
+    }
     let err = client(&app)
         .call_err(
             "start_monitoring",
@@ -656,8 +662,9 @@ async fn the_daily_email_cap_stops_everyone() {
         .await;
     assert!(err.contains("all the monitoring emails"), "{err}");
     assert_eq!(mails(&app), 2);
-    // Concurrent requests can't get past it either.
-    let app = TestApp::with_config(cloud_config_with(&[("MCP_ANON_DAILY_EMAILS", "4")])).await;
+
+    // 32 a day is 4 an hour; twelve at once get four, and the rest hear it is the hour's cap.
+    let app = TestApp::with_config(cloud_config_with(&[("MCP_ANON_DAILY_EMAILS", "32")])).await;
     let c = client(&app);
     let emails: Vec<String> = (0..12).map(|n| format!("p{n}@example.org")).collect();
     let results = futures_util::future::join_all(emails.iter().map(|e| {
@@ -668,5 +675,155 @@ async fn the_daily_email_cap_stops_everyone() {
     }))
     .await;
     assert_eq!(results.iter().filter(|(is_error, _)| !is_error).count(), 4);
+    assert!(
+        results
+            .iter()
+            .filter(|(is_error, _)| *is_error)
+            .all(|(_, text)| text.contains("this hour")),
+        "{results:?}"
+    );
     assert_eq!(mails(&app), 4);
+}
+
+#[tokio::test]
+async fn an_address_gets_five_emails_in_a_day_not_three_an_hour_all_day() {
+    let app = cloud().await;
+    for _ in 0..3 {
+        request(&app, "victim@example.org").await;
+    }
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        request(&app, "victim@example.org").await;
+    }
+    let err = client(&app)
+        .call_err(
+            "start_monitoring",
+            json!({"url": "example.com", "email": "Victim@example.org"}),
+        )
+        .await;
+    assert!(err.contains("for today"), "{err}");
+    assert_eq!(mails(&app), 5);
+}
+
+// ---- review fixes ----
+
+#[tokio::test]
+async fn a_confirmation_that_fails_half_way_leaves_the_link_usable_and_makes_nothing_twice() {
+    let app = cloud().await;
+    request(&app, "owner@example.org").await;
+    let path = link_for(&app, "owner@example.org");
+
+    // The key table is gone for a moment: the account and site are made, the key is not.
+    sqlx::query("ALTER TABLE api_keys RENAME TO api_keys_off")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let failed = app.post(&path, "", None).await;
+    assert_eq!(
+        failed.status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "{}",
+        failed.body
+    );
+    assert!(!failed.body.contains("cdo_"));
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM login_tokens WHERE used_at IS NULL"
+        )
+        .await,
+        1
+    );
+    // The link opens its confirm page again.
+    assert_eq!(app.get(&path, None).await.status, StatusCode::OK);
+    sqlx::query("ALTER TABLE api_keys_off RENAME TO api_keys")
+        .execute(app.pool())
+        .await
+        .unwrap();
+
+    // Pressing it again finishes the job: the site made before is reused, one key is made.
+    let res = app.post(&path, "", None).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert!(
+        res.body.contains("example.com is already monitored"),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains("cdo_"));
+    assert_eq!(count(&app, "SELECT count(*) FROM api_keys").await, 1);
+    assert_eq!(count(&app, "SELECT count(*) FROM sites").await, 1);
+    assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 1);
+    // And it is single use from then on.
+    assert_eq!(app.post(&path, "", None).await.status, StatusCode::GONE);
+}
+
+#[tokio::test]
+async fn the_first_crawl_is_an_agents_in_the_funnel_and_the_websites_funnel_stays_clean() {
+    let app = cloud().await;
+    request(&app, "owner@example.org").await;
+    app.post(&link_for(&app, "owner@example.org"), "", None)
+        .await;
+    let (crawl, source): (uuid::Uuid, Option<String>) =
+        sqlx::query_as("SELECT id, source FROM crawls WHERE trigger = 'first'")
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(source.as_deref(), Some("agent"));
+
+    // The worker finishes it: the funnel step is recorded, as an agent's.
+    app.finalize_crawl(
+        crawl,
+        vec![support::page(DOMAIN, "/")],
+        Vec::new(),
+        codoseo_core::output::StopReason::Completed,
+    )
+    .await;
+    let event: Value =
+        sqlx::query_scalar("SELECT payload FROM events WHERE kind = 'first_full_crawl'")
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(event["source"], "agent");
+
+    use codoseo_store::events::{self, EventKind};
+    let step = |counts: &[events::FunnelCount], kind| {
+        counts.iter().find(|c| c.kind == kind).unwrap().events
+    };
+    let web = events::funnel_counts(app.pool(), 30).await.unwrap();
+    let agents = events::agent_funnel_counts(app.pool(), 30).await.unwrap();
+    for kind in [
+        EventKind::EmailGiven,
+        EventKind::LinkClicked,
+        EventKind::FirstFullCrawl,
+    ] {
+        assert_eq!(step(&web, kind), 0, "{kind:?} is not the website's");
+        assert_eq!(step(&agents, kind), 1, "{kind:?} is the agents'");
+    }
+}
+
+#[tokio::test]
+async fn a_start_monitoring_site_with_a_trailing_dot_is_stored_without_it() {
+    let app = cloud().await;
+    client(&app)
+        .call_ok(
+            "start_monitoring",
+            json!({"url": "https://Example.com./blog", "email": "owner@example.org"}),
+        )
+        .await;
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM login_tokens")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(payload["domain"], "example.com");
+    assert_eq!(payload["start_url"], "https://example.com/blog");
+    app.post(&link_for(&app, "owner@example.org"), "", None)
+        .await;
+    let domain: String = sqlx::query_scalar("SELECT domain FROM sites")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(domain, "example.com");
 }

@@ -160,7 +160,12 @@ pub const MAX_CHANGE_TEXT: usize = 300;
 
 /// `text`, cut to [`MAX_CHANGE_TEXT`] characters with a final `…` when it is longer.
 pub fn clip_change_text(text: &str) -> String {
-    match text.char_indices().nth(MAX_CHANGE_TEXT) {
+    clip(text, MAX_CHANGE_TEXT)
+}
+
+/// `text`, cut to `max` characters with a final `…` when it is longer.
+pub fn clip(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
         None => text.to_owned(),
         Some((at, _)) => {
             let cut = text[..at].char_indices().last().map_or(0, |(i, _)| i);
@@ -244,7 +249,7 @@ pub struct QuickAuditSummary {
     /// A stable name to branch on: `completed`, `page_limit`, `time_limit`, ...
     pub stop_code: String,
     /// Most severe first, each with a count and up to 3 example URLs.
-    pub failing_checks: Vec<FailingCheck>,
+    pub failing_checks: Vec<AuditFailingCheck>,
     /// Failing checks not listed (cut by the size cap). `get_issue_urls` still takes any check.
     pub more_failing_checks: u16,
     /// The same report as a web page, to hand to the user.
@@ -253,15 +258,50 @@ pub struct QuickAuditSummary {
     pub note: String,
 }
 
+/// A failing check in a quick audit summary. The example URLs are text, since the size cap may
+/// shorten a very long one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuditFailingCheck {
+    pub check: CheckId,
+    pub title: String,
+    pub severity: Severity,
+    pub count: u32,
+    pub example_urls: Vec<String>,
+}
+
+impl From<FailingCheck> for AuditFailingCheck {
+    fn from(f: FailingCheck) -> AuditFailingCheck {
+        AuditFailingCheck {
+            check: f.check,
+            title: f.title,
+            severity: f.severity,
+            count: f.count,
+            example_urls: f.example_urls.iter().map(|u| u.to_string()).collect(),
+        }
+    }
+}
+
+/// The longest an example URL, the start URL or a stop reason may be in a summary.
+pub const MAX_SUMMARY_TEXT: usize = 300;
+
 /// The most JSON bytes a quick audit summary may take (spec section 9: an agent-sized answer).
 pub const MAX_SUMMARY_BYTES: usize = 4096;
 
 impl QuickAuditSummary {
-    /// Drops the least severe failing checks (counting them in `more_failing_checks`) until the
-    /// JSON is under [`MAX_SUMMARY_BYTES`], then, if the fixed fields alone are too big, nothing
-    /// more can be done: they are short by construction.
+    /// Keeps the summary under [`MAX_SUMMARY_BYTES`] whatever the site looks like: long texts
+    /// (each example URL, the start URL, the stop reason) are cut to [`MAX_SUMMARY_TEXT`]
+    /// characters, then the least severe failing checks are dropped (counted in
+    /// `more_failing_checks`), all of them if need be. What is left (ids, a domain of at most
+    /// 253 characters, the score and counts) is far below the cap.
     pub fn fit(mut self) -> QuickAuditSummary {
-        while self.failing_checks.len() > 1 && self.json_len() >= MAX_SUMMARY_BYTES {
+        self.start_url = clip(&self.start_url, MAX_SUMMARY_TEXT);
+        self.stop_reason = clip(&self.stop_reason, MAX_SUMMARY_TEXT);
+        for check in &mut self.failing_checks {
+            for url in &mut check.example_urls {
+                *url = clip(url, MAX_SUMMARY_TEXT);
+            }
+        }
+        while !self.failing_checks.is_empty() && self.json_len() >= MAX_SUMMARY_BYTES {
             self.failing_checks.pop();
             self.more_failing_checks = self.more_failing_checks.saturating_add(1);
         }
@@ -304,28 +344,24 @@ pub struct MonitoringRequested {
 mod tests {
     use super::*;
     use crate::types::MAX_FAILING_CHECKS;
-    use url::Url;
 
-    fn failing(n: usize, url_len: usize) -> Vec<FailingCheck> {
+    fn failing(n: usize, url_len: usize) -> Vec<AuditFailingCheck> {
         let all = CheckId::ALL;
         all[..n]
             .iter()
-            .map(|&check| FailingCheck {
+            .map(|&check| AuditFailingCheck {
                 check,
                 title: "A reasonably descriptive check title".to_owned(),
                 severity: Severity::Warning,
                 count: 100,
                 example_urls: (0..3)
-                    .map(|i| {
-                        Url::parse(&format!("https://example.com/{}{i}", "p".repeat(url_len)))
-                            .unwrap()
-                    })
+                    .map(|i| format!("https://example.com/{}{i}", "p".repeat(url_len)))
                     .collect(),
             })
             .collect()
     }
 
-    fn summary(failing_checks: Vec<FailingCheck>) -> QuickAuditSummary {
+    fn summary(failing_checks: Vec<AuditFailingCheck>) -> QuickAuditSummary {
         QuickAuditSummary {
             audit_id: Uuid::new_v4(),
             domain: "example.com".to_owned(),
@@ -360,7 +396,7 @@ mod tests {
 
     #[test]
     fn a_worst_case_summary_is_cut_under_4_kb_by_dropping_the_least_severe_checks() {
-        for url_len in [10, 40, 120, 400] {
+        for url_len in [10, 40, 120, 400, 20_000] {
             let fitted = summary(failing(MAX_FAILING_CHECKS, url_len)).fit();
             assert!(
                 size(&fitted) < MAX_SUMMARY_BYTES,
@@ -372,10 +408,35 @@ mod tests {
                 fitted.failing_checks.len() + usize::from(fitted.more_failing_checks),
                 MAX_FAILING_CHECKS
             );
-            // The most severe come first and are the ones kept.
+            // The most severe come first and are the ones kept; no text is longer than the cap.
+            assert!(fitted.failing_checks.iter().all(|f| {
+                f.example_urls
+                    .iter()
+                    .all(|u| u.chars().count() <= MAX_SUMMARY_TEXT)
+            }));
             let kept: Vec<CheckId> = fitted.failing_checks.iter().map(|f| f.check).collect();
             assert_eq!(kept, CheckId::ALL[..kept.len()]);
         }
+    }
+
+    #[test]
+    fn nothing_a_site_controls_can_push_a_summary_past_the_cap() {
+        let mut huge = summary(failing(MAX_FAILING_CHECKS, 50_000));
+        huge.start_url = format!("https://example.com/{}", "s".repeat(100_000));
+        huge.stop_reason = "site unreachable: ".to_owned() + &"x".repeat(100_000);
+        huge.domain = "d".repeat(253);
+        let fitted = huge.fit();
+        assert!(size(&fitted) < MAX_SUMMARY_BYTES, "{}", size(&fitted));
+        assert!(fitted.start_url.chars().count() <= MAX_SUMMARY_TEXT);
+        assert!(fitted.start_url.ends_with('…'));
+        assert!(fitted.stop_reason.chars().count() <= MAX_SUMMARY_TEXT);
+        // Even checks with nothing but huge URLs are dropped down to none when they must be.
+        let mut one = summary(failing(1, 10));
+        one.failing_checks[0].title = "t".repeat(10_000);
+        let fitted = one.fit();
+        assert!(fitted.failing_checks.is_empty());
+        assert_eq!(fitted.more_failing_checks, 1);
+        assert!(size(&fitted) < MAX_SUMMARY_BYTES);
     }
 
     #[test]

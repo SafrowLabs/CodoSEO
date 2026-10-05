@@ -385,6 +385,8 @@ async fn the_agent_budget_is_the_configured_daily_count_of_fresh_audits() {
     let client = Client::new(&app, Duration::ZERO, Some(SHARED_UA));
     for n in 0..3 {
         client.audit_id(&format!("site{n}.example.com")).await;
+        // The hourly share of 3 a day is 1: let each audit leave the hour, not the day.
+        age_crawls(&app, "2 hours").await;
     }
     let err = client
         .call_err("quick_audit", json!({"url": "site3.example.com"}))
@@ -395,14 +397,40 @@ async fn the_agent_budget_is_the_configured_daily_count_of_fresh_audits() {
     assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
 }
 
+async fn age_crawls(app: &TestApp, age: &str) {
+    sqlx::query("UPDATE crawls SET created_at = now() - $1::interval")
+        .bind(age)
+        .execute(app.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_spoofed_connector_cannot_spend_the_day_in_an_hour() {
+    // 16 a day: 2 in any hour, whatever the User-Agent says.
+    let app = TestApp::with_config(cloud_config_with(&[("MCP_ANON_DAILY_AUDITS", "16")])).await;
+    let client = Client::new(&app, Duration::ZERO, Some(SHARED_UA));
+    let first = client.audit_id("a.example.com").await;
+    client.audit_id("b.example.com").await;
+    let err = client
+        .call_err("quick_audit", json!({"url": "c.example.com"}))
+        .await;
+    assert!(err.contains("used up"), "{err}");
+    assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 2);
+    // Sites already audited are still handed back, and the next hour has room.
+    assert_eq!(client.audit_id("a.example.com").await, first);
+    age_crawls(&app, "90 minutes").await;
+    client.audit_id("c.example.com").await;
+}
+
 #[tokio::test]
 async fn twenty_concurrent_audits_with_five_slots_left_start_exactly_five() {
     let app = TestApp::with_config(cloud_config_with(&[("MCP_ANON_DAILY_AUDITS", "200")])).await;
     for n in 0..195 {
         sqlx::query(
             "WITH s AS (INSERT INTO sites (domain, start_url) VALUES ($1, $2) RETURNING id) \
-             INSERT INTO crawls (site_id, domain, trigger, priority, source, status, finished_at) \
-             SELECT id, $1, 'quick', 0, 'agent', 'done', now() FROM s",
+             INSERT INTO crawls (site_id, domain, trigger, priority, source, status, finished_at, created_at) \
+             SELECT id, $1, 'quick', 0, 'agent', 'done', now(), now() - interval '2 hours' FROM s",
         )
         .bind(format!("old{n}.example.com"))
         .bind(format!("https://old{n}.example.com/"))
@@ -589,4 +617,191 @@ async fn only_quick_audits_can_be_read_by_id() {
     assert!(messages[0].contains("No such audit"));
     // And nothing from the site leaked.
     assert!(!messages.iter().any(|m| m.contains("private.example.com")));
+}
+
+// ---- throttling, host spellings, resilience (M8 T4 review) ----
+
+#[tokio::test]
+async fn a_direct_client_gets_30_calls_a_minute_and_a_connector_is_not_counted() {
+    let app = cloud().await;
+    let direct = Client::new(&app, Duration::ZERO, Some(DIRECT_UA)).with_ip("203.0.113.20");
+    let nonsense = json!({"audit_id": "nope"});
+    for n in 0..30 {
+        let err = direct.call_err("get_audit", nonsense.clone()).await;
+        assert!(err.contains("No such audit"), "call {n}: {err}");
+    }
+    // The 31st, of any of the four tools, is told to wait.
+    for (tool, args) in [
+        ("get_audit", nonsense.clone()),
+        ("quick_audit", json!({"url": "example.com"})),
+        (
+            "get_issue_urls",
+            json!({"audit_id": "x", "check": "title_missing"}),
+        ),
+        (
+            "start_monitoring",
+            json!({"url": "example.com", "email": "a@example.org"}),
+        ),
+    ] {
+        let err = direct.call_err(tool, args).await;
+        assert!(err.contains("30 a minute"), "{tool}: {err}");
+    }
+    assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 0);
+    assert_eq!(count(&app, "SELECT count(*) FROM login_tokens").await, 0);
+    // Another address has its own minute, and a hosted connector behind the same address does not
+    // use this one up.
+    let other = Client::new(&app, Duration::ZERO, Some(DIRECT_UA)).with_ip("203.0.113.21");
+    assert!(
+        other
+            .call_err("get_audit", nonsense.clone())
+            .await
+            .contains("No such audit")
+    );
+    let shared = Client::new(&app, Duration::ZERO, Some(SHARED_UA)).with_ip("203.0.113.20");
+    for _ in 0..40 {
+        assert!(
+            shared
+                .call_err("get_audit", nonsense.clone())
+                .await
+                .contains("No such audit")
+        );
+    }
+}
+
+#[tokio::test]
+async fn only_a_fresh_audit_is_a_funnel_event_not_each_repeat_or_poll() {
+    let app = cloud().await;
+    let client = Client::new(&app, Duration::ZERO, Some(SHARED_UA));
+    let id = client.audit_id("example.com").await;
+    for _ in 0..3 {
+        assert_eq!(client.audit_id("https://example.com/").await, id);
+        client
+            .call_ok("get_audit", json!({"audit_id": id.to_string()}))
+            .await;
+    }
+    finish(&app, id, "example.com").await;
+    assert_eq!(client.audit_id("example.com").await, id);
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM events WHERE kind = 'audit_started'"
+        )
+        .await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn host_spellings_do_not_dodge_the_reuse_for_agents_or_the_website() {
+    let app = cloud().await;
+    let client = Client::new(&app, Duration::ZERO, Some(SHARED_UA));
+    let id = client.audit_id("example.com.").await;
+    let domain: String = sqlx::query_scalar("SELECT domain FROM crawls WHERE id = $1")
+        .bind(id)
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(domain, "example.com", "the trailing dot is gone");
+    for spelling in [
+        "example.com",
+        "EXAMPLE.com.",
+        "www.example.com",
+        "https://www.example.com./x",
+    ] {
+        assert_eq!(client.audit_id(spelling).await, id, "{spelling}");
+    }
+    assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 1);
+
+    // The website reuses the agent's audit the same way, and the other way round.
+    for spelling in ["example.com.", "www.example.com"] {
+        let res = app.post("/audit", &format!("url={spelling}"), None).await;
+        assert_eq!(
+            res.location(),
+            Some(format!("/audit/{id}").as_str()),
+            "{spelling}"
+        );
+    }
+    let web = app.post("/audit", "url=other.org.", None).await;
+    let web_id = Uuid::parse_str(web.location().unwrap().strip_prefix("/audit/").unwrap()).unwrap();
+    assert_eq!(client.audit_id("www.other.org").await, web_id);
+    assert_eq!(client.audit_id("other.org.").await, web_id);
+    assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 2);
+    let stored: Vec<String> = sqlx::query_scalar("SELECT domain FROM crawls ORDER BY domain")
+        .fetch_all(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(stored, ["example.com", "other.org"]);
+
+    // Adding a site by hand stores the dotless host as well.
+    let (_, cookie) = app.login("owner@example.org").await;
+    let res = app
+        .post("/sites", "url=mine.example.net.", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
+    let site: String = sqlx::query_scalar("SELECT domain FROM sites WHERE account_id IS NOT NULL")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(site, "mine.example.net");
+}
+
+#[tokio::test]
+async fn a_poll_that_fails_mid_wait_still_returns_the_audit_id() {
+    let app = cloud().await;
+    let client = Client::new(&app, Duration::from_secs(20), Some(SHARED_UA));
+    let breaker = async {
+        // Once the audit exists, the database stops answering for crawls.
+        loop {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if count(&app, "SELECT count(*) FROM crawls").await > 0 {
+                break;
+            }
+        }
+        sqlx::query("ALTER TABLE crawls RENAME TO crawls_off")
+            .execute(app.pool())
+            .await
+            .unwrap();
+    };
+    let (call, ()) = tokio::join!(
+        client.call("quick_audit", json!({"url": "example.com"})),
+        breaker
+    );
+    let (is_error, text) = call;
+    assert!(!is_error, "{text}");
+    let state: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(state["status"], "running", "{text}");
+    sqlx::query("ALTER TABLE crawls_off RENAME TO crawls")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let id = state["audit_id"].as_str().unwrap();
+    assert_eq!(
+        client.call_ok("get_audit", json!({"audit_id": id})).await["status"],
+        "running"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_ends_a_quick_audit_that_is_waiting() {
+    let app = cloud().await;
+    let client = Client::new(&app, Duration::from_secs(60), Some(SHARED_UA));
+    let state = app.state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        state.shutdown.cancel();
+    });
+    let started = std::time::Instant::now();
+    let res = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.post(jsonrpc(
+            "tools/call",
+            json!({"name": "quick_audit", "arguments": {"url": "example.com"}}),
+        )),
+    )
+    .await
+    .expect("answered once shutdown began, not after the 60 s wait");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(res.body.contains("error"), "{}", res.body);
+    // The audit was started and is there to be read later.
+    assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 1);
 }

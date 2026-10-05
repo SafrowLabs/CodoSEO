@@ -17,7 +17,9 @@ use axum::routing::get;
 use codoseo_core::plan::PlanLimits;
 use codoseo_store::accounts::{SignIn, SignInOutcome};
 use codoseo_store::api_keys::{self, CreateKeyOutcome};
-use codoseo_store::auth::{TokenPurpose, consume_token, live_token_payload, token_is_live};
+use codoseo_store::auth::{
+    TokenPurpose, consume_token, live_token_payload, token_is_live, unconsume_token,
+};
 use codoseo_store::events::{self, EventKind};
 use codoseo_store::sites::{self, CreateOutcome, Site};
 use serde_json::json;
@@ -214,27 +216,46 @@ fn expired(token: String) -> Result<Response, AppError> {
 }
 
 /// Confirms: uses the token (once), signs the person in, adds the site, mints a key and shows it.
+/// If anything fails after the token is used, the token is made usable again, so the link in
+/// their inbox still works; what had already been done (the account, the site) is reused by the
+/// retry.
 async fn start(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> Result<Response, AppError> {
     require_cloud(&state)?;
-    let used = consume_token(
-        &state.pool,
-        TokenPurpose::StartMonitoring,
-        &session::hash(&token),
-    )
-    .await?;
+    let hash = session::hash(&token);
+    let used = consume_token(&state.pool, TokenPurpose::StartMonitoring, &hash).await?;
     let Some(payload) = used.and_then(|u| u.payload) else {
         return expired(token);
     };
+    match confirm_start(&state, token, &payload).await {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            tracing::error!(%error, "start-monitoring confirmation failed; making its link usable again");
+            if let Err(e) = unconsume_token(&state.pool, TokenPurpose::StartMonitoring, &hash).await
+            {
+                tracing::error!(error = %e, "could not make the start-monitoring link usable again");
+            }
+            Err(error)
+        }
+    }
+}
+
+async fn confirm_start(
+    state: &AppState,
+    token: String,
+    payload: &serde_json::Value,
+) -> Result<Response, AppError> {
     let text = |k: &str| -> Result<String, AppError> {
         payload[k]
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| AppError::internal(format!("start-monitoring token without {k}")))
     };
-    let (address, domain, start_url) = (text("email")?, text("domain")?, text("start_url")?);
+    let (address, start_url) = (text("email")?, text("start_url")?);
+    // Defensive: a link is only ever issued for a host without a trailing dot.
+    let domain = text("domain")?.trim_end_matches('.').to_owned();
 
     let canonical = email::canonical(&address);
     let outcome = codoseo_store::accounts::sign_in(
@@ -244,7 +265,7 @@ async fn start(
             canonical: &canonical,
             github_id: None,
         },
-        signup_policy(&state),
+        signup_policy(state),
     )
     .await?;
     let account = match outcome {
@@ -268,12 +289,13 @@ async fn start(
                 schedule_for(account.plan),
                 max_sites.map(i64::from),
                 FIRST_CRAWL_PRIORITY,
+                // Marks the first crawl, so the funnel counts it as an agent's.
+                Some("agent"),
             )
             .await?;
             match created {
                 CreateOutcome::Created(new) => {
-                    super::settings_alerts::default_rules_for_site(&state, account.id, new.id)
-                        .await;
+                    super::settings_alerts::default_rules_for_site(state, account.id, new.id).await;
                     site = Some(new);
                     SiteNote::Added
                 }
@@ -311,6 +333,9 @@ async fn start(
         .join("mcp")
         .map_err(AppError::internal)?
         .to_string();
+    // The session first and the key last: the key is the one thing that can't be shown again,
+    // so nothing that can fail comes after it but rendering the page.
+    let cookie = session::start(state, account.id).await?;
     let key = keys::generate();
     let created = api_keys::create(
         &state.pool,
@@ -321,7 +346,11 @@ async fn start(
         api_keys::MAX_LIVE_KEYS,
     )
     .await?;
-    let shown = matches!(created, CreateKeyOutcome::Created(_)).then(|| ShownKey {
+    let new_key_id = match &created {
+        CreateKeyOutcome::Created(k) => Some(k.id),
+        CreateKeyOutcome::LimitReached => None,
+    };
+    let shown = new_key_id.map(|_| ShownKey {
         command: format!(
             "claude mcp add --transport http codoseo {mcp_url} --header \"Authorization: Bearer {}\"",
             key.plaintext
@@ -330,7 +359,6 @@ async fn start(
         key: key.plaintext,
     });
 
-    let cookie = session::start(&state, account.id).await?;
     let page = StartPage {
         view: StartView::Done(Box::new(StartDone {
             audit_href: site.as_ref().map(|s| format!("/s/{}/audit", s.id)),
@@ -343,6 +371,18 @@ async fn start(
         })),
         token,
     };
+    let body = match html(&page) {
+        Ok(body) => body,
+        Err(error) => {
+            // A key nobody saw is worthless: take it back, so the retry mints the one shown.
+            if let Some(id) = new_key_id
+                && let Err(e) = api_keys::revoke(&state.pool, account.id, id).await
+            {
+                tracing::error!(error = %e, "could not revoke a key that was never shown");
+            }
+            return Err(error);
+        }
+    };
     // The key is on this page, once: nothing may cache it, and the session cookie goes with it.
     Ok((
         AppendHeaders([
@@ -352,7 +392,7 @@ async fn start(
                 axum::http::HeaderValue::from_static("no-store"),
             ),
         ]),
-        html(&page)?,
+        body,
     )
         .into_response())
 }

@@ -101,6 +101,25 @@ impl<'a> AnonService<'a> {
         AnonService { state }
     }
 
+    /// Counts one call of a direct client against its per-minute allowance (shared connectors
+    /// and callers whose address can't be told are not limited here).
+    fn throttle(&self, who: &AnonCaller) -> Result<(), String> {
+        let Some((hash, _)) = who.ip_hashes(self.state) else {
+            return Ok(());
+        };
+        self.state
+            .anon_calls
+            .check(&hash, std::time::Instant::now())
+            .map_err(|wait| {
+                format!(
+                    "Too many calls from this client: the limit is {} a minute. Wait {} seconds \
+                     and try again.",
+                    super::limiter::ANON_CALLS_PER_WINDOW,
+                    wait.as_secs() + 1
+                )
+            })
+    }
+
     /// `{BASE_URL}{path}`.
     fn link(&self, path: &str) -> String {
         let mut link = self.state.config.base_url.clone();
@@ -115,6 +134,7 @@ impl<'a> AnonService<'a> {
         who: &AnonCaller,
         raw_url: &str,
     ) -> Result<QuickAuditState, String> {
+        self.throttle(who)?;
         let state = self.state;
         let url = public_target(raw_url)?;
         let domain = url.host_str().unwrap_or_default().to_ascii_lowercase();
@@ -137,6 +157,7 @@ impl<'a> AnonService<'a> {
         )
         .await
         .map_err(db)?;
+        let outcome_is_fresh = matches!(outcome, StartOutcome::Started { .. });
         let (crawl_id, how) = match outcome {
             StartOutcome::Started { crawl_id } => (crawl_id, "started"),
             StartOutcome::Cached { crawl_id } => (crawl_id, "cached"),
@@ -165,100 +186,101 @@ impl<'a> AnonService<'a> {
                 ));
             }
         };
-        events::record(
-            &state.pool,
-            EventKind::AuditStarted,
-            None,
-            None,
-            Some(json!({
-                "crawl_id": crawl_id, "domain": domain, "outcome": how, "source": "agent",
-            })),
-        )
-        .await
-        .map_err(db)?;
-        self.get_audit(who, &crawl_id.to_string()).await
+        // Only a fresh audit is a funnel step: repeats of cached and joined ones are free to
+        // ask for, and must not each leave a row in a table nothing prunes. The audit exists
+        // either way, so a failure to note it is logged and the agent still gets its id.
+        if outcome_is_fresh
+            && let Err(error) = events::record(
+                &state.pool,
+                EventKind::AuditStarted,
+                None,
+                None,
+                Some(json!({
+                    "crawl_id": crawl_id, "domain": domain, "outcome": how, "source": "agent",
+                })),
+            )
+            .await
+        {
+            tracing::error!(%error, %crawl_id, "could not record the audit_started event");
+        }
+        self.state_of(crawl_id).await
     }
 
     pub async fn get_audit(
         &self,
-        _who: &AnonCaller,
+        who: &AnonCaller,
         audit_id: &str,
     ) -> Result<QuickAuditState, String> {
-        let audit = self.audit(audit_id).await?;
-        let crawl = &audit.crawl;
-        let id = crawl.id;
-        match crawl.status {
-            CrawlStatus::Queued | CrawlStatus::Running => {
-                let pages_done = crawl.progress().map(|p| p.pages_done);
-                let line = match crawl.status {
-                    CrawlStatus::Queued => {
-                        match quick::queue_position(&self.state.pool, id)
-                            .await
-                            .map_err(db)?
-                        {
-                            Some(n) if n > 1 => format!("Waiting in line (number {n}). "),
-                            _ => "Waiting for a crawler. ".to_owned(),
-                        }
-                    }
-                    _ => "The crawl is running. ".to_owned(),
-                };
-                Ok(QuickAuditState::Running {
-                    audit_id: id,
-                    pages_done,
-                    message: format!(
-                        "{line}Call get_audit with this audit_id again in a few seconds."
-                    ),
-                })
-            }
-            CrawlStatus::Failed | CrawlStatus::Done => {
-                if let Some(notice) = no_report_notice(crawl) {
-                    return Ok(QuickAuditState::Failed {
-                        audit_id: id,
-                        reason: format!("{}. {}", notice.title, notice.message),
-                    });
-                }
-                let health = crawl_health(&self.state.pool, crawl)
-                    .await
-                    .map_err(|e| match e {
-                        AgentError::Unavailable => e.message(),
-                        other => internal(other),
-                    })?;
-                let report_url = self.link(&format!("/audit/{id}"));
-                Ok(QuickAuditState::Done(Box::new(
-                    QuickAuditSummary {
-                        audit_id: id,
-                        domain: audit.domain.clone(),
-                        start_url: audit.start_url.clone(),
-                        health_score: health.health_score,
-                        checks_passed: health.checks_passed,
-                        checks_total: health.checks_total,
-                        pages_crawled: health.pages_crawled,
-                        stop_reason: health.stop_reason,
-                        stop_code: health.stop_code,
-                        failing_checks: health.failing_checks,
-                        more_failing_checks: health.more_failing_checks,
-                        report_url,
-                        note: format!(
-                            "To monitor {} every week and get an email when something breaks, \
-                             call start_monitoring with the site's URL and the owner's email \
-                             address.",
-                            audit.domain
-                        ),
-                    }
-                    .fit(),
-                )))
-            }
+        self.throttle(who)?;
+        let id = Uuid::parse_str(audit_id.trim()).map_err(|_| NO_SUCH_AUDIT.to_owned())?;
+        self.state_of(id).await
+    }
+
+    /// Where the audit stands. A queued or running one is a single small read; the score, the
+    /// failing checks and their example URLs are only worked out once it has ended.
+    async fn state_of(&self, id: Uuid) -> Result<QuickAuditState, String> {
+        let (status, pages_done) = quick::status(&self.state.pool, id)
+            .await
+            .map_err(db)?
+            .ok_or_else(|| NO_SUCH_AUDIT.to_owned())?;
+        if matches!(status, CrawlStatus::Queued | CrawlStatus::Running) {
+            let line = match status {
+                CrawlStatus::Queued => "Waiting for a crawler. ",
+                _ => "The crawl is running. ",
+            };
+            return Ok(QuickAuditState::Running {
+                audit_id: id,
+                pages_done,
+                message: format!("{line}Call get_audit with this audit_id again in a few seconds."),
+            });
         }
+        let audit = self.audit(&id.to_string()).await?;
+        let crawl = &audit.crawl;
+        if let Some(notice) = no_report_notice(crawl) {
+            return Ok(QuickAuditState::Failed {
+                audit_id: id,
+                reason: format!("{}. {}", notice.title, notice.message),
+            });
+        }
+        let health = crawl_health(&self.state.pool, crawl)
+            .await
+            .map_err(|e| match e {
+                AgentError::Unavailable => e.message(),
+                other => internal(other),
+            })?;
+        Ok(QuickAuditState::Done(Box::new(
+            QuickAuditSummary {
+                audit_id: id,
+                domain: audit.domain.clone(),
+                start_url: audit.start_url.clone(),
+                health_score: health.health_score,
+                checks_passed: health.checks_passed,
+                checks_total: health.checks_total,
+                pages_crawled: health.pages_crawled,
+                stop_reason: health.stop_reason,
+                stop_code: health.stop_code,
+                failing_checks: health.failing_checks.into_iter().map(Into::into).collect(),
+                more_failing_checks: health.more_failing_checks,
+                report_url: self.link(&format!("/audit/{id}")),
+                note: format!(
+                    "To monitor {} every week and get an email when something breaks, call \
+                     start_monitoring with the site's URL and the owner's email address.",
+                    audit.domain
+                ),
+            }
+            .fit(),
+        )))
     }
 
     pub async fn audit_issue_urls(
         &self,
-        _who: &AnonCaller,
+        who: &AnonCaller,
         audit_id: &str,
         check: &str,
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<AuditIssueUrls, String> {
+        self.throttle(who)?;
         let audit = self.audit(audit_id).await?;
         let check = parse_check(check).map_err(|e| e.message())?;
         if audit.crawl.status != CrawlStatus::Done || no_report_notice(&audit.crawl).is_some() {
@@ -305,6 +327,7 @@ impl<'a> AnonService<'a> {
         raw_url: &str,
         raw_email: &str,
     ) -> Result<MonitoringRequested, String> {
+        self.throttle(who)?;
         let state = self.state;
         let url = public_target(raw_url)?;
         let address = email::parse(raw_email)
@@ -343,6 +366,20 @@ impl<'a> AnonService<'a> {
         .map_err(db)?;
         match slot {
             MonitoringSlot::Created => {}
+            MonitoringSlot::AddressDayCapReached => {
+                return Err(
+                    "We already sent that address its emails for today. Ask the user \
+                            to check their inbox and spam folder, or try again tomorrow."
+                        .to_owned(),
+                );
+            }
+            MonitoringSlot::HourlyCapReached => {
+                return Err(
+                    "CodoSEO has sent as many monitoring emails as it allows for AI \
+                            assistants this hour. Try again in an hour."
+                        .to_owned(),
+                );
+            }
             MonitoringSlot::AddressCapReached => {
                 return Err(
                     "We already sent several emails to that address in the last hour. \

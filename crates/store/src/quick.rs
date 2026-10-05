@@ -73,8 +73,9 @@ pub struct StartRequest<'a> {
     /// Per-IP limits; they only apply when there is an `ip_hash`.
     pub limits: Limits,
     pub source: Source,
-    /// The most fresh audits agents may start in any 24 hours, over all of them. Only applies
-    /// to `Source::Agent` requests; `None` is no budget. Cached and joined audits never count.
+    /// The most fresh audits agents may start in any 24 hours, over all of them, and an eighth
+    /// of it (see [`hourly_share`]) in any hour. Only applies to `Source::Agent` requests;
+    /// `None` is no budget. Cached and joined audits never count.
     pub agent_daily_budget: Option<i64>,
 }
 
@@ -86,9 +87,10 @@ pub enum StartOutcome {
     Cached { crawl_id: Uuid },
     /// An audit of this domain is queued or running: watch that one.
     Joined { crawl_id: Uuid },
-    /// The agent budget for the last 24 hours is spent. Nothing was started.
+    /// The agent budget for the last 24 hours, or its hourly share, is spent. Nothing was
+    /// started.
     AgentBudgetReached {
-        /// Seconds until the oldest agent audit in the window ages out.
+        /// Seconds until the oldest agent audit in the spent window ages out.
         retry_after_secs: i64,
     },
     /// This IP has used up its audits for the hour or the day. Nothing was started.
@@ -99,24 +101,41 @@ pub enum StartOutcome {
     },
 }
 
+/// The most fresh agent audits in any hour, for a daily budget: an eighth of it (at least 1), so
+/// a client that fakes a hosted connector's `User-Agent` can't spend the day's budget in
+/// minutes.
+pub fn hourly_share(daily: i64) -> i64 {
+    (daily / 8).max(1)
+}
+
+/// `example.com` for both `example.com` and `www.example.com`: the two spellings are one site
+/// as far as reusing an audit goes.
+fn bare_domain(domain: &str) -> &str {
+    domain.strip_prefix("www.").unwrap_or(domain)
+}
+
 /// Starts an audit unless the domain was audited in the last 24 h or is being audited now.
+/// `www.example.com` and `example.com` count as one domain for that; a new audit keeps the host
+/// that was asked for.
 ///
 /// An advisory lock on the domain makes two submits at the same moment agree: the second one
 /// waits, then finds the first one's crawl and joins it.
 pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    let bare = bare_domain(req.domain);
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.quick.start:' || $1))")
-        .bind(req.domain)
+        .bind(bare)
         .execute(&mut *tx)
         .await?;
 
+    let spellings = [bare.to_owned(), format!("www.{bare}")];
     let existing: Option<(Uuid, String)> = sqlx::query_as(&format!(
         "SELECT id, status::text FROM crawls \
-         WHERE trigger = 'quick' AND domain = $1 AND status IN ('queued', 'running', 'done') \
+         WHERE trigger = 'quick' AND domain = ANY($1) AND status IN ('queued', 'running', 'done') \
            AND created_at > now() - interval '{REUSE_WINDOW}' \
          ORDER BY created_at DESC LIMIT 1"
     ))
-    .bind(req.domain)
+    .bind(&spellings[..])
     .fetch_optional(&mut *tx)
     .await?;
     if let Some((crawl_id, status)) = existing {
@@ -135,18 +154,28 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.quick.agent'))")
             .execute(&mut *tx)
             .await?;
-        let (used, retry): (i64, Option<f64>) = sqlx::query_as(
-            "SELECT count(*), \
-                    EXTRACT(EPOCH FROM min(created_at) + interval '1 day' - now())::float8 \
-             FROM crawls \
-             WHERE trigger = 'quick' AND source = 'agent' \
-               AND created_at > now() - interval '1 day'",
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        if used >= budget {
+        let (day, hour, day_retry, hour_retry): (i64, i64, Option<f64>, Option<f64>) =
+            sqlx::query_as(
+                "SELECT count(*), \
+                        count(*) FILTER (WHERE created_at > now() - interval '1 hour'), \
+                        EXTRACT(EPOCH FROM min(created_at) + interval '1 day' - now())::float8, \
+                        EXTRACT(EPOCH FROM min(created_at) FILTER (WHERE created_at > now() - interval '1 hour') \
+                                           + interval '1 hour' - now())::float8 \
+                 FROM crawls \
+                 WHERE trigger = 'quick' AND source = 'agent' \
+                   AND created_at > now() - interval '1 day'",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+        let secs = |s: Option<f64>| s.map_or(1, |s| s.ceil().max(1.0) as i64);
+        if day >= budget {
             return Ok(StartOutcome::AgentBudgetReached {
-                retry_after_secs: retry.map_or(1, |s| s.ceil().max(1.0) as i64),
+                retry_after_secs: secs(day_retry),
+            });
+        }
+        if hour >= hourly_share(budget) {
+            return Ok(StartOutcome::AgentBudgetReached {
+                retry_after_secs: secs(hour_retry),
             });
         }
     }
@@ -214,6 +243,25 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
     .await?;
     tx.commit().await?;
     Ok(StartOutcome::Started { crawl_id })
+}
+
+/// Where a quick audit stands, in one cheap read: its status and, once it is crawling, the
+/// pages done so far. `None` when there is no quick audit with this id. For polling.
+pub async fn status(
+    pool: &PgPool,
+    crawl_id: Uuid,
+) -> Result<Option<(crawls::CrawlStatus, Option<u32>)>, sqlx::Error> {
+    let row: Option<(crawls::CrawlStatus, Option<serde_json::Value>)> =
+        sqlx::query_as("SELECT status, progress FROM crawls WHERE id = $1 AND trigger = 'quick'")
+            .bind(crawl_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|(status, progress)| {
+        let pages_done = progress
+            .and_then(|p| serde_json::from_value::<codoseo_core::output::Progress>(p).ok())
+            .map(|p| p.pages_done);
+        (status, pages_done)
+    }))
 }
 
 /// Where a waiting audit is in line: 1 means next. `None` when it isn't queued (running,
@@ -322,19 +370,27 @@ pub async fn create_unlock_token(
 pub struct MonitoringCaps {
     /// Per recipient (canonical address), per hour.
     pub per_address: i64,
+    /// Per recipient, per 24 hours: the hourly cap alone would let someone mail an address
+    /// three times an hour all day.
+    pub per_address_day: i64,
     /// Per client address (hash), per hour. Only applies when the caller has an `ip_hash`.
     pub per_ip: i64,
     /// Over everyone, per 24 hours.
     pub per_day: i64,
+    /// Over everyone, per hour, so the daily budget can't be drained in minutes.
+    pub per_hour: i64,
 }
 
 impl MonitoringCaps {
-    /// 3 per address and 3 per client address an hour; `per_day` is the configured daily cap.
+    /// 3 per address (5 a day) and 3 per client address an hour; `per_day` is the configured
+    /// daily cap, of which an eighth (at least 1) may go in any one hour.
     pub fn with_daily(per_day: i64) -> MonitoringCaps {
         MonitoringCaps {
             per_address: 3,
+            per_address_day: 5,
             per_ip: 3,
             per_day,
+            per_hour: hourly_share(per_day),
         }
     }
 }
@@ -344,8 +400,11 @@ pub enum MonitoringSlot {
     /// The token was stored: send the email.
     Created,
     AddressCapReached,
+    /// The address has had its emails for the last 24 hours.
+    AddressDayCapReached,
     IpCapReached,
     DailyCapReached,
+    HourlyCapReached,
 }
 
 /// Who asked for a start-monitoring email, as far as the per-IP cap is concerned: today's hash
@@ -395,8 +454,10 @@ pub async fn create_monitoring_token(
             .await?;
         payload["ip"] = serde_json::json!(hex(r.ip_hash));
     }
-    let (day, address, ip): (i64, i64, i64) = sqlx::query_as(
+    let (day, hour, address_day, address, ip): (i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT count(*), \
+                count(*) FILTER (WHERE created_at > now() - interval '1 hour'), \
+                count(*) FILTER (WHERE payload->>'canonical' = $1), \
                 count(*) FILTER (WHERE created_at > now() - interval '1 hour' \
                                    AND payload->>'canonical' = $1), \
                 count(*) FILTER (WHERE created_at > now() - interval '1 hour' \
@@ -411,8 +472,14 @@ pub async fn create_monitoring_token(
     if day >= caps.per_day {
         return Ok(MonitoringSlot::DailyCapReached);
     }
+    if hour >= caps.per_hour {
+        return Ok(MonitoringSlot::HourlyCapReached);
+    }
     if address >= caps.per_address {
         return Ok(MonitoringSlot::AddressCapReached);
+    }
+    if address_day >= caps.per_address_day {
+        return Ok(MonitoringSlot::AddressDayCapReached);
     }
     if requester.is_some() && ip >= caps.per_ip {
         return Ok(MonitoringSlot::IpCapReached);

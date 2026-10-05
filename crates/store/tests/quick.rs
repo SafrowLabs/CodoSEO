@@ -931,7 +931,8 @@ async fn an_agent_audit_is_marked_as_one_and_spends_the_budget_only_when_fresh()
         agent_start(&db.pool, "a.com", None, 1).await,
         StartOutcome::Joined { crawl_id } if crawl_id == first
     ));
-    set_status(&db.pool, first, "done", "1 minute").await;
+    // Older than the hour that the hourly share counts, still inside the 24 h reuse window.
+    set_status(&db.pool, first, "done", "2 hours").await;
     assert!(matches!(
         agent_start(&db.pool, "a.com", None, 1).await,
         StartOutcome::Cached { crawl_id } if crawl_id == first
@@ -1048,6 +1049,114 @@ async fn a_direct_agent_client_is_limited_per_ip_like_the_website_but_not_withou
     ));
 }
 
+#[tokio::test]
+async fn agents_get_an_eighth_of_the_daily_budget_in_any_hour() {
+    let db = TestDb::new().await;
+    // A budget of 16 a day is 2 an hour.
+    for n in 0..2 {
+        assert!(matches!(
+            agent_start(&db.pool, &format!("h{n}.com"), None, 16).await,
+            StartOutcome::Started { .. }
+        ));
+    }
+    let refused = agent_start(&db.pool, "h2.com", None, 16).await;
+    let StartOutcome::AgentBudgetReached { retry_after_secs } = refused else {
+        panic!("expected the hourly share to be spent: {refused:?}");
+    };
+    assert!(
+        (1..=3600).contains(&retry_after_secs),
+        "an hour at most: {retry_after_secs}"
+    );
+    // Reuse is free, and the next hour has room again.
+    assert!(matches!(
+        agent_start(&db.pool, "h0.com", None, 16).await,
+        StartOutcome::Joined { .. }
+    ));
+    age_all(&db.pool, "90 minutes").await;
+    assert!(matches!(
+        agent_start(&db.pool, "h2.com", None, 16).await,
+        StartOutcome::Started { .. }
+    ));
+    // The share is at least 1, however small the budget.
+    assert_eq!(quick::hourly_share(0), 1);
+    assert_eq!(quick::hourly_share(7), 1);
+    assert_eq!(quick::hourly_share(200), 25);
+}
+
+#[tokio::test]
+async fn www_and_the_bare_domain_are_one_site_for_reuse() {
+    let db = TestDb::new().await;
+    let first = crawl_id(&start(&db.pool, "www.example.com", b"a").await);
+    // Either spelling joins the running audit, and then reuses the finished one.
+    let bare = start(&db.pool, "example.com", b"b").await;
+    assert!(
+        matches!(bare, StartOutcome::Joined { crawl_id } if crawl_id == first),
+        "{bare:?}"
+    );
+    set_status(&db.pool, first, "done", "1 minute").await;
+    for domain in ["example.com", "www.example.com"] {
+        let out = start(&db.pool, domain, domain.as_bytes()).await;
+        assert!(
+            matches!(out, StartOutcome::Cached { crawl_id } if crawl_id == first),
+            "{domain}: {out:?}"
+        );
+    }
+    assert_eq!(crawl_count(&db.pool).await, 1);
+    // A different host that merely contains it is another site, and a new audit keeps the
+    // host that was asked for.
+    let other = start(&db.pool, "blog.example.com", b"c").await;
+    assert!(matches!(other, StartOutcome::Started { .. }));
+    let domain: String = sqlx::query_scalar("SELECT domain FROM crawls WHERE id = $1")
+        .bind(crawl_id(&other))
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(domain, "blog.example.com");
+    // And at the same moment, the two spellings still start one crawl.
+    let (a, b) = tokio::join!(
+        start(&db.pool, "www.race.com", b"r1"),
+        start(&db.pool, "race.com", b"r2")
+    );
+    assert_eq!(crawl_id(&a), crawl_id(&b), "{a:?} {b:?}");
+}
+
+#[tokio::test]
+async fn status_is_one_cheap_read_of_a_quick_audit() {
+    let db = TestDb::new().await;
+    let id = crawl_id(&start(&db.pool, "example.com", b"a").await);
+    let queued = quick::status(&db.pool, id).await.unwrap();
+    assert_eq!(
+        queued,
+        Some((codoseo_store::crawls::CrawlStatus::Queued, None))
+    );
+    sqlx::query(
+        "UPDATE crawls SET status = 'running', progress = $2 WHERE id = $1",
+    )
+    .bind(id)
+    .bind(serde_json::json!({"pages_done": 12, "queued": 3, "failures": 0, "depth": 1, "elapsed_ms": 100}))
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let (status, pages) = quick::status(&db.pool, id).await.unwrap().unwrap();
+    assert_eq!(status, codoseo_store::crawls::CrawlStatus::Running);
+    assert_eq!(pages, Some(12));
+    // Not a quick audit, or not there at all.
+    assert_eq!(quick::status(&db.pool, Uuid::new_v4()).await.unwrap(), None);
+    let site: Uuid = sqlx::query_scalar("SELECT site_id FROM crawls WHERE id = $1")
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    let other: Uuid = sqlx::query_scalar(
+        "INSERT INTO crawls (site_id, domain, trigger, priority) VALUES ($1, 'x.com', 'manual', 2) RETURNING id",
+    )
+    .bind(site)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(quick::status(&db.pool, other).await.unwrap(), None);
+}
+
 fn monitoring_payload(canonical: &str) -> serde_json::Value {
     serde_json::json!({ "email": canonical, "canonical": canonical, "domain": "example.com" })
 }
@@ -1078,7 +1187,11 @@ async fn monitoring(
 #[tokio::test]
 async fn monitoring_emails_are_capped_per_address_per_client_and_per_day() {
     let db = TestDb::new().await;
-    let caps = MonitoringCaps::with_daily(7);
+    let caps = MonitoringCaps {
+        per_day: 7,
+        per_hour: 100,
+        ..MonitoringCaps::with_daily(7)
+    };
 
     // Three to one address, the fourth is refused, whoever asks.
     for n in 0..3 {
@@ -1136,6 +1249,77 @@ async fn monitoring_emails_are_capped_per_address_per_client_and_per_day() {
         monitoring(&db.pool, "p@x.co", Some(b"ip-1"), 9, caps).await,
         MonitoringSlot::Created
     );
+}
+
+#[tokio::test]
+async fn an_address_gets_five_emails_in_24_hours_not_three_an_hour_all_day() {
+    let db = TestDb::new().await;
+    let caps = MonitoringCaps {
+        per_hour: 100,
+        ..MonitoringCaps::with_daily(1000)
+    };
+    for n in 0..3 {
+        assert_eq!(
+            monitoring(&db.pool, "victim@x.co", None, n, caps).await,
+            MonitoringSlot::Created
+        );
+    }
+    // The hour passes: two more fit, the sixth in the day does not.
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    for n in 3..5 {
+        assert_eq!(
+            monitoring(&db.pool, "victim@x.co", None, n, caps).await,
+            MonitoringSlot::Created
+        );
+    }
+    assert_eq!(
+        monitoring(&db.pool, "victim@x.co", None, 5, caps).await,
+        MonitoringSlot::AddressDayCapReached
+    );
+    // Spelling variants count as the same address (the canonical form is what is counted),
+    // other addresses are untouched, and the day rolls over.
+    assert_eq!(
+        monitoring(&db.pool, "other@x.co", None, 6, caps).await,
+        MonitoringSlot::Created
+    );
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '25 hours'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        monitoring(&db.pool, "victim@x.co", None, 7, caps).await,
+        MonitoringSlot::Created
+    );
+}
+
+#[tokio::test]
+async fn the_daily_email_budget_cannot_be_drained_in_one_hour() {
+    let db = TestDb::new().await;
+    // 16 a day is 2 an hour.
+    let caps = MonitoringCaps::with_daily(16);
+    assert_eq!(caps.per_hour, 2);
+    for n in 0..2 {
+        assert_eq!(
+            monitoring(&db.pool, &format!("p{n}@x.co"), None, n, caps).await,
+            MonitoringSlot::Created
+        );
+    }
+    assert_eq!(
+        monitoring(&db.pool, "p9@x.co", None, 9, caps).await,
+        MonitoringSlot::HourlyCapReached
+    );
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '90 minutes'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        monitoring(&db.pool, "p9@x.co", None, 9, caps).await,
+        MonitoringSlot::Created
+    );
+    assert_eq!(MonitoringCaps::with_daily(3).per_hour, 1);
 }
 
 #[tokio::test]

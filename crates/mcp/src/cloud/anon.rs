@@ -123,7 +123,15 @@ impl<B: AnonBackend> CloudMcp<B> {
                 break;
             }
             tokio::time::sleep(self.poll_interval).await;
-            state = self.backend.get_audit(who, &audit_id.to_string()).await?;
+            // A read that fails mid-wait must not lose the id the agent needs: say "running"
+            // and let it ask again with get_audit.
+            match self.backend.get_audit(who, &audit_id.to_string()).await {
+                Ok(next) => state = next,
+                Err(error) => {
+                    tracing::warn!(%error, %audit_id, "quick_audit poll failed, answering running");
+                    break;
+                }
+            }
         }
         to_json(&state)
     }

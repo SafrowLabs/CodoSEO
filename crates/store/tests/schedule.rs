@@ -532,6 +532,52 @@ async fn a_resume_token_works_once() {
     );
 }
 
+#[tokio::test]
+async fn a_used_token_can_be_made_usable_again_until_it_expires() {
+    use codoseo_store::auth::{
+        TokenPurpose, consume_token, create_token, token_is_live, unconsume_token,
+    };
+    let db = TestDb::new().await;
+    let purpose = TokenPurpose::StartMonitoring;
+    create_token(&db.pool, purpose, b"h", None, None, Duration::hours(24))
+        .await
+        .unwrap();
+    // Not used yet: nothing to undo.
+    assert!(!unconsume_token(&db.pool, purpose, b"h").await.unwrap());
+    consume_token(&db.pool, purpose, b"h")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!token_is_live(&db.pool, purpose, b"h").await.unwrap());
+    // Another purpose can't undo it.
+    assert!(
+        !unconsume_token(&db.pool, TokenPurpose::MagicLink, b"h")
+            .await
+            .unwrap()
+    );
+    assert!(unconsume_token(&db.pool, purpose, b"h").await.unwrap());
+    assert!(token_is_live(&db.pool, purpose, b"h").await.unwrap());
+    // And it works once again, once.
+    assert!(
+        consume_token(&db.pool, purpose, b"h")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        consume_token(&db.pool, purpose, b"h")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // An expired token stays dead.
+    sqlx::query("UPDATE login_tokens SET expires_at = now() - interval '1 minute'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert!(!unconsume_token(&db.pool, purpose, b"h").await.unwrap());
+}
+
 // ---- the warning bookkeeping ---------------------------------------------------------------
 
 /// A warned Free account whose latest warning email job ended `status`.
