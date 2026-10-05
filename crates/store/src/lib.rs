@@ -4,6 +4,7 @@
 pub mod accounts;
 pub mod alert_rules;
 pub mod auth;
+pub mod billing;
 pub mod channels;
 pub mod crawl_queue;
 pub mod crawls;

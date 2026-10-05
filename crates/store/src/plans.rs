@@ -1,10 +1,11 @@
-//! Plan changes that touch sites: what happens when a paid plan ends. Shared by the scheduler
-//! (plans that ran out) and billing (a subscription that expired or was downgraded).
+//! Plan changes that touch sites: what happens when a plan ends or changes. Shared by the
+//! scheduler (plans that ran out) and billing (a subscription that started, changed or ended).
 //!
 //! Nothing here deletes data. Sites beyond the new limit stop being monitored, and the owner
-//! chooses which ones stay.
+//! chooses which ones stay. An upgrade does not turn stopped sites back on; it only moves the
+//! sites that are monitored to the faster schedule.
 
-use codoseo_core::plan::{PlanLimits, Schedule};
+use codoseo_core::plan::{Plan, PlanLimits, Schedule};
 use sqlx::{PgConnection, PgPool};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -46,9 +47,10 @@ pub async fn downgrade_expired(pool: &PgPool, now: OffsetDateTime) -> Result<u64
 }
 
 /// Brings an account's sites in line with its current plan (read from the account row):
-/// monitored sites beyond `max_sites` are deactivated, keeping the oldest, and schedules faster
-/// than the plan allows are capped (their next crawl is recomputed by the scheduler). Run it in
-/// the same transaction as the plan change.
+/// monitored sites beyond `max_sites` are deactivated, keeping the oldest; schedules faster
+/// than the plan allows are capped; and on a paid plan the monitored sites move to daily (their
+/// next crawl is recomputed by the scheduler). Run it in the same transaction as the plan
+/// change.
 pub async fn apply_plan_limits(
     conn: &mut PgConnection,
     account_id: Uuid,
@@ -57,7 +59,8 @@ pub async fn apply_plan_limits(
         .bind(account_id)
         .fetch_one(&mut *conn)
         .await?;
-    let limits = PlanLimits::for_plan(parse_plan(&plan));
+    let plan = parse_plan(&plan);
+    let limits = PlanLimits::for_plan(plan);
 
     if let Some(max) = limits.max_sites {
         sqlx::query(
@@ -73,6 +76,18 @@ pub async fn apply_plan_limits(
 
     // `next_crawl_at = NULL` makes the scheduler pick the next slot of the new schedule.
     match limits.fastest_schedule {
+        // Paying is what makes a site daily (a Free site is weekly even though the Free
+        // limits are checked here too), so only the paid plans are moved up. Self-hosted
+        // sites keep whatever schedule their owner chose.
+        Some(Schedule::Daily) if matches!(plan, Plan::Pro | Plan::Agency) => {
+            sqlx::query(
+                "UPDATE sites SET schedule = 'daily', next_crawl_at = NULL \
+                 WHERE account_id = $1 AND monitoring_active AND schedule IS DISTINCT FROM 'daily'",
+            )
+            .bind(account_id)
+            .execute(&mut *conn)
+            .await?;
+        }
         Some(Schedule::Daily) => {}
         Some(Schedule::Weekly) => {
             sqlx::query(
