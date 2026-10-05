@@ -27,7 +27,7 @@ use serde_json::json;
 use super::quick::require_cloud;
 use super::sites::{FIRST_CRAWL_PRIORITY, schedule_for};
 use crate::agent::keys;
-use crate::auth::{email, magic, session, signup_policy};
+use crate::auth::{CurrentUser, email, magic, session, signup_policy};
 use crate::error::AppError;
 use crate::render::html;
 use crate::state::AppState;
@@ -122,8 +122,9 @@ pub enum StartView {
         domain: String,
         email: String,
     },
-    /// Unknown, expired or already used.
-    Expired,
+    /// Unknown, expired or already used. A signed-in visitor gets the settings link instead of
+    /// the sign-in button.
+    Expired { signed_in: bool },
     Done(Box<StartDone>),
 }
 
@@ -180,6 +181,7 @@ struct StartPage {
 /// Reads only.
 async fn start_confirm(
     State(state): State<AppState>,
+    user: Option<CurrentUser>,
     Path(token): Path<String>,
 ) -> Result<Response, AppError> {
     require_cloud(&state)?;
@@ -190,7 +192,7 @@ async fn start_confirm(
     )
     .await?;
     let Some(payload) = payload else {
-        return expired(token);
+        return expired(token, user.is_some());
     };
     let text = |k: &str| payload[k].as_str().unwrap_or_default().to_owned();
     let page = StartPage {
@@ -203,12 +205,12 @@ async fn start_confirm(
     Ok(([(header::CACHE_CONTROL, "no-store")], html(&page)?).into_response())
 }
 
-fn expired(token: String) -> Result<Response, AppError> {
+fn expired(token: String, signed_in: bool) -> Result<Response, AppError> {
     Ok((
         StatusCode::GONE,
         [(header::CACHE_CONTROL, "no-store")],
         html(&StartPage {
-            view: StartView::Expired,
+            view: StartView::Expired { signed_in },
             token,
         })?,
     )
@@ -221,13 +223,14 @@ fn expired(token: String) -> Result<Response, AppError> {
 /// retry.
 async fn start(
     State(state): State<AppState>,
+    user: Option<CurrentUser>,
     Path(token): Path<String>,
 ) -> Result<Response, AppError> {
     require_cloud(&state)?;
     let hash = session::hash(&token);
     let used = consume_token(&state.pool, TokenPurpose::StartMonitoring, &hash).await?;
     let Some(payload) = used.and_then(|u| u.payload) else {
-        return expired(token);
+        return expired(token, user.is_some());
     };
     match confirm_start(&state, token, &payload).await {
         Ok(response) => Ok(response),

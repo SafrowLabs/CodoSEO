@@ -157,6 +157,9 @@ async fn opening_the_link_shows_the_confirm_page_and_changes_nothing() {
                 .contains(&format!(r#"method="post" action="{path}""#))
         );
         assert!(res.body.contains("Start monitoring"));
+        // The button is swallowed after the first press, so a double click can't use the link
+        // up on a request whose answer (the key) the person never sees.
+        assert!(res.body.contains("data-once"), "{}", res.body);
         assert!(!res.body.contains("cdo_"));
         assert!(res.cookie("codoseo_session").is_none());
         assert_eq!(res.header("cache-control"), Some("no-store"));
@@ -331,6 +334,32 @@ async fn a_second_click_is_already_used_and_makes_no_second_key_or_site() {
     assert_eq!(count(&app, "SELECT count(*) FROM sites").await, 1);
     assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 1);
     assert_eq!(count(&app, "SELECT count(*) FROM sessions").await, 1);
+}
+
+#[tokio::test]
+async fn the_used_link_page_points_to_settings_and_a_signed_in_visitor_is_not_asked_to_sign_in() {
+    let app = cloud().await;
+    request(&app, "owner@example.org").await;
+    let path = link_for(&app, "owner@example.org");
+    let first = app.post(&path, "", None).await;
+    let session = first.cookie("codoseo_session").expect("signed in");
+
+    let note = "If you already confirmed, your key was shown once. You can create a new one \
+                under <a href=\"/settings/api-keys\">Settings";
+    let signed_out = app.get(&path, None).await;
+    assert_eq!(signed_out.status, StatusCode::GONE);
+    assert!(signed_out.body.contains(note), "{}", signed_out.body);
+    assert!(signed_out.body.contains(r#"href="/login""#));
+
+    for res in [
+        app.get(&path, Some(&session)).await,
+        app.post(&path, "", Some(&session)).await,
+    ] {
+        assert_eq!(res.status, StatusCode::GONE);
+        assert!(res.body.contains(note), "{}", res.body);
+        assert!(!res.body.contains(r#"href="/login""#), "{}", res.body);
+        assert!(!res.body.contains("cdo_"));
+    }
 }
 
 #[tokio::test]

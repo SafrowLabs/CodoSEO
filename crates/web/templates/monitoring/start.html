@@ -1,5 +1,5 @@
 {% extends "solo_base.html" %}
-{% block title %}{% match view %}{% when StartView::Confirm { domain, .. } %}Monitor {{ domain }}{% when StartView::Expired %}Link expired{% when StartView::Done(d) %}{% match d.site %}{% when SiteNote::PlanFull { .. } %}Your plan is full{% else %}Monitoring started{% endmatch %}{% endmatch %} — CodoSEO{% endblock %}
+{% block title %}{% match view %}{% when StartView::Confirm { domain, .. } %}Monitor {{ domain }}{% when StartView::Expired { .. } %}Link expired{% when StartView::Done(d) %}{% match d.site %}{% when SiteNote::PlanFull { .. } %}Your plan is full{% else %}Monitoring started{% endmatch %}{% endmatch %} — CodoSEO{% endblock %}
 {% block head %}<meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">{% endblock %}
 {% block body %}
 <div class="solo-page">
@@ -8,15 +8,16 @@
     {% match view %}
     {% when StartView::Confirm { domain, email } %}
     <h1>Monitor {{ domain }}?</h1>
-    <p>An AI assistant asked CodoSEO to watch <b>{{ domain }}</b> for <b>{{ email }}</b>. Press the button and CodoSEO creates your free account, crawls the site now and every week, and emails you when something important breaks.</p>
-    <form method="post" action="/monitoring/start/{{ token }}">
+    <p>An AI assistant asked CodoSEO to watch <b>{{ domain }}</b> for <b>{{ email }}</b>. Press the button and CodoSEO starts weekly monitoring on your free CodoSEO account (one is created if you don't have one), crawls the site now, and emails you when something important breaks.</p>
+    <form method="post" action="/monitoring/start/{{ token }}" data-once>
       <div class="actions"><button class="btn btn-primary btn-lg" type="submit">Start monitoring</button></div>
     </form>
     <p class="hint" style="margin-top:14px">Didn't ask for this? Close the page and nothing happens.</p>
-    {% when StartView::Expired %}
+    {% when StartView::Expired { signed_in } %}
     <h1>This link has run out</h1>
     <p>This link has expired or was already used. Ask your assistant to start monitoring again, or add your site yourself.</p>
-    <div class="actions"><a class="btn btn-primary" href="/login">Sign in</a></div>
+    <p class="hint">If you already confirmed, your key was shown once. You can create a new one under <a href="/settings/api-keys">Settings → API keys</a>.</p>
+    {% if !signed_in %}<div class="actions"><a class="btn btn-primary" href="/login">Sign in</a></div>{% endif %}
     {% when StartView::Done(d) %}
     {% match d.site %}
     {% when SiteNote::Added %}
