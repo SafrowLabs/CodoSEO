@@ -576,3 +576,102 @@ async fn the_diff_baseline_skips_quick_audits() {
         .expect("a baseline");
     assert_eq!(snapshot.pages.len(), 2);
 }
+
+fn change(kind: ChangeKind, path: &str) -> Change {
+    Change {
+        kind,
+        severity: Severity::Warning,
+        url: Some(Url::parse(&format!("https://example.com/{path}")).unwrap()),
+        before: "before".to_string(),
+        after: "after".to_string(),
+    }
+}
+
+async fn alert_jobs(pool: &sqlx::PgPool) -> Vec<serde_json::Value> {
+    sqlx::query_scalar("SELECT payload FROM jobs WHERE kind = 'send_alert' ORDER BY created_at")
+        .fetch_all(pool)
+        .await
+        .expect("read jobs")
+}
+
+#[tokio::test]
+async fn four_hundred_changes_queue_one_planning_job() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "storm.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "storm.example").await;
+    let changes: Vec<Change> = (0..400)
+        .map(|i| change(ChangeKind::NewUrl, &format!("p{i}")))
+        .collect();
+
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &empty_output(vec![sample_page(1)], StopReason::Completed),
+        &empty_report(),
+        &changes,
+    )
+    .await
+    .expect("finalize");
+
+    // One job for the crawl, whatever the kinds: the planner decides what is instant.
+    assert_eq!(
+        alert_jobs(&db.pool).await,
+        vec![serde_json::json!({ "crawl_id": crawl_id })]
+    );
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM changes WHERE alerted_at IS NULL")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        n, 400,
+        "nothing is marked alerted until the planner routes it"
+    );
+}
+
+#[tokio::test]
+async fn a_crawl_without_changes_queues_nothing() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "calm.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "calm.example").await;
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &empty_output(vec![sample_page(1)], StopReason::Completed),
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize");
+    assert!(alert_jobs(&db.pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_quick_crawl_never_alerts() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "quick.example").await;
+    let crawl_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id) \
+         VALUES ($1, 'quick.example', 'quick', 0, 'running', $2) RETURNING id",
+    )
+    .bind(site_id)
+    .bind(WORKER_ID)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &empty_output(vec![sample_page(1)], StopReason::Completed),
+        &empty_report(),
+        &[change(ChangeKind::ErrorSpike, "x")],
+    )
+    .await
+    .expect("finalize");
+    assert!(alert_jobs(&db.pool).await.is_empty());
+}

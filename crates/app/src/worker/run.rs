@@ -328,10 +328,11 @@ async fn run_one_crawl(
     let changes = match previous {
         Some(prev) => {
             let curr = codoseo_core::snapshot::Snapshot::from_output(&out);
-            // Starred key pages (`sites.key_pages`) aren't wired up yet; `key_pages` still
-            // promotes the origin and top-20-by-inlinks pages, matching every other caller
-            // (`cli/diff.rs`, `mcp/local.rs`).
-            let key = key_pages(&curr, &HashSet::new());
+            // Key pages: the origin, the top 20 by inlinks and the pages the user starred.
+            let starred = codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
+                .await
+                .map_err(|e| format!("could not load starred pages: {e}"))?;
+            let key = key_pages(&curr, &starred);
             diff(&prev, &curr, &key)
         }
         None => Vec::new(),

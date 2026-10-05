@@ -162,10 +162,12 @@ impl CrawlQueue {
     }
 
     /// First failure (`attempt = 0`): requeue once, gated 15 minutes out via `queued_at` (which
-    /// `claim`'s `queued_at <= now()` filter already honours). Second failure: fail for good.
-    /// A quick (no-signup) audit is never retried: the visitor is watching it, and a retry 15
-    /// minutes later would leave them on a spinner. One statement, so there's no read-then-write
-    /// race against a concurrent call.
+    /// `claim`'s `queued_at <= now()` filter already honours). Second failure: fail for good, and
+    /// queue a "couldn't reach your site" alert (`send_alert {crawl_id, unreachable: true}`).
+    /// A quick (no-signup) audit is never retried and never alerts: the visitor is watching it,
+    /// and a retry 15 minutes later would leave them on a spinner. One transaction, so the
+    /// alert exists exactly when the crawl ended `failed`, and there's no read-then-write race
+    /// against a concurrent call.
     ///
     /// Guarded by `status = 'running' AND worker_id = $3`: a worker that was requeued (by
     /// `requeue_stale`) and reclaimed by someone else before this call lands is a no-op here,
@@ -176,7 +178,8 @@ impl CrawlQueue {
         reason: &str,
         worker_id: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+        let mut tx = self.pool.begin().await?;
+        let outcome: Option<(String, String)> = sqlx::query_as(
             "UPDATE crawls SET \
                status = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN 'queued'::crawl_status ELSE 'failed'::crawl_status END, \
                attempt = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN 1 ELSE attempt END, \
@@ -184,13 +187,27 @@ impl CrawlQueue {
                worker_id = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN NULL ELSE worker_id END, \
                heartbeat_at = CASE WHEN attempt = 0 AND trigger <> 'quick' THEN NULL ELSE heartbeat_at END, \
                failure_reason = $2 \
-             WHERE id = $1 AND status = 'running' AND worker_id = $3",
+             WHERE id = $1 AND status = 'running' AND worker_id = $3 \
+             RETURNING status::text, trigger::text",
         )
         .bind(id)
         .bind(reason)
         .bind(worker_id)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?;
+        if let Some((status, trigger)) = outcome
+            && status == "failed"
+            && trigger != "quick"
+        {
+            sqlx::query(
+                "INSERT INTO jobs (kind, payload) \
+                 VALUES ('send_alert', jsonb_build_object('crawl_id', $1::uuid, 'unreachable', true))",
+            )
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 

@@ -350,3 +350,73 @@ fn the_worker_policy_follows_codoseo_mode() {
     );
     assert_eq!(address_policy_for_mode(None), AddressPolicy::AllowPrivate);
 }
+
+#[tokio::test]
+async fn a_starred_page_counts_as_a_key_page_in_the_diff() {
+    use codoseo_testkit::{Page, html_page};
+
+    // A 27-page site crawled twice. `/yyy` and `/zzz` sort last by URL, so they are outside the
+    // top 20 by inlinks (all pages have one inlink); only `/zzz` is starred. Both titles change
+    // between the crawls, and a key page's change is one severity step higher.
+    let db = TestDb::new().await;
+    let mut links: Vec<String> = (0..24).map(|i| format!("/p{i:02}")).collect();
+    links.extend(["/yyy".to_owned(), "/zzz".to_owned()]);
+    let link_refs: Vec<&str> = links.iter().map(String::as_str).collect();
+    let changing = |path: &str| {
+        Page::sequence(vec![
+            Page::html(&html_page(&format!("{path} before"), &[])),
+            Page::html(&html_page(&format!("{path} after"), &[])),
+        ])
+    };
+    let mut builder = SiteBuilder::new()
+        .html("/", "Home", &link_refs)
+        .page("/yyy", changing("yyy"))
+        .page("/zzz", changing("zzz"));
+    for l in &links[..24] {
+        builder = builder.html(l, l, &[]);
+    }
+    let site = builder.start().await;
+    let site_id = db.seed_site("example.test", site.url("/").as_str()).await;
+    let starred = codoseo_core::url::url_hash(&site.url("/zzz"));
+    sqlx::query("UPDATE sites SET key_pages = $2 WHERE id = $1")
+        .bind(site_id)
+        .bind(vec![codoseo_store::hash::to_db(starred)])
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let job_queue = JobQueue::new(db.pool.clone());
+    for _ in 0..2 {
+        crawl_queue
+            .enqueue(site_id, "example.test", CrawlTrigger::Manual, 2, None, None)
+            .await
+            .unwrap();
+        assert!(
+            worker_loop_once(
+                &db.pool,
+                &crawl_queue,
+                &job_queue,
+                "test-worker",
+                DEFAULT_MEMORY_BUDGET,
+                AddressPolicy::AllowPrivate,
+            )
+            .await
+            .unwrap()
+        );
+    }
+    let severity = |path: &'static str| {
+        let pool = db.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT severity::text FROM changes WHERE kind = 'title_changed' AND url LIKE $1",
+            )
+            .bind(format!("%{path}"))
+            .fetch_one(&pool)
+            .await
+            .expect("the title change was recorded")
+        }
+    };
+    assert_eq!(severity("/yyy").await, "notice");
+    assert_eq!(severity("/zzz").await, "warning");
+}

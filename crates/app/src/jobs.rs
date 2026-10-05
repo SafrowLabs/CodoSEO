@@ -1,11 +1,11 @@
-//! The job runner: drains the `jobs` table (`send_email`, `cleanup`, and later `send_alert` and
+//! The job runner: drains the `jobs` table (`send_email`, `send_alert`, `cleanup`, and later
 //! `send_digest`) beside the crawl loop. One job at a time; a failure or a panic fails only that
 //! job, which then retries with the queue's backoff.
 
 use std::time::Duration;
 
 use codoseo_core::crawl::AddressPolicy;
-use codoseo_notify::{ChannelKey, Email, Mailer};
+use codoseo_notify::{ChannelKey, Email, GuardedHttp, Mailer};
 use codoseo_store::jobs::{ClaimedJob, JobKind, JobQueue};
 use codoseo_web::Config;
 use codoseo_web::Mode;
@@ -25,10 +25,9 @@ pub struct JobContext {
     pub channel_key: ChannelKey,
     /// The public address of the app, for links in messages.
     pub base_url: Url,
-    /// The cloud refuses private and internal addresses for user-supplied URLs.
-    pub policy: AddressPolicy,
-    /// For outgoing deliveries (Slack, Discord, webhooks). Never follows redirects.
-    pub http: reqwest::Client,
+    /// For outgoing deliveries (Slack, Discord, webhooks): the guarded client with its address
+    /// policy (the cloud refuses private and internal addresses, self-hosted allows them).
+    pub http: GuardedHttp,
 }
 
 impl JobContext {
@@ -40,16 +39,11 @@ impl JobContext {
             mailer,
             channel_key: ChannelKey::derive(&config.secret_key),
             base_url: config.base_url.clone(),
-            policy: match config.mode {
+            http: GuardedHttp::new(match config.mode {
                 Mode::Cloud => AddressPolicy::Public,
                 Mode::SelfHost => AddressPolicy::AllowPrivate,
-            },
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .redirect(reqwest::redirect::Policy::none())
-                .user_agent(concat!("CodoSEO/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .expect("http client builds"),
+            })
+            .expect("http client builds"),
         }
     }
 }
@@ -125,7 +119,7 @@ pub async fn run_job(ctx: &JobContext, job: ClaimedJob) -> Result<(), String> {
     match job.kind {
         JobKind::SendEmail => send_email(ctx, &job.payload).await,
         JobKind::Cleanup => cleanup(ctx).await,
-        JobKind::SendAlert => Err("send_alert is not implemented".to_owned()),
+        JobKind::SendAlert => crate::alerts::send_alert(ctx, &job).await,
         JobKind::SendDigest => Err("send_digest is not implemented".to_owned()),
     }
 }

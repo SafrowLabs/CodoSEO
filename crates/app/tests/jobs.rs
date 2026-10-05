@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use codoseo::jobs::{JobContext, job_loop, run_job};
 use codoseo_core::crawl::AddressPolicy;
-use codoseo_notify::{ChannelKey, Email, Mailer};
+use codoseo_notify::{ChannelKey, Email, GuardedHttp, Mailer};
 use codoseo_store::jobs::{JobKind, JobQueue};
 use serde_json::json;
 use sqlx::PgPool;
@@ -24,8 +24,7 @@ fn context(pool: &PgPool) -> (JobContext, Arc<Mutex<Vec<Email>>>) {
         mailer,
         channel_key: ChannelKey::derive("test secret"),
         base_url: url::Url::parse("http://localhost:8080").unwrap(),
-        policy: AddressPolicy::AllowPrivate,
-        http: reqwest::Client::new(),
+        http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
     };
     (ctx, sent)
 }
@@ -220,11 +219,11 @@ async fn the_loop_stops_promptly_when_idle() {
 }
 
 #[tokio::test]
-async fn alert_and_digest_jobs_are_not_implemented_yet() {
+async fn digest_jobs_are_not_implemented_yet() {
     let db = TestDb::new().await;
     let (ctx, _sent) = context(&db.pool);
     let queue = JobQueue::new(db.pool.clone());
-    for kind in [JobKind::SendAlert, JobKind::SendDigest] {
+    for kind in [JobKind::SendDigest] {
         queue.enqueue(kind, json!({})).await.unwrap();
         let job = queue.claim("t").await.unwrap().expect("claimable");
         let err = run_job(&ctx, job).await.unwrap_err();

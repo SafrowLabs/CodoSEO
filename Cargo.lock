@@ -598,6 +598,7 @@ name = "codoseo"
 version = "0.0.1"
 dependencies = [
  "assert_cmd",
+ "axum",
  "clap",
  "codoseo-checks",
  "codoseo-core",

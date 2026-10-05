@@ -2,6 +2,7 @@
 //! and account queries the web app uses.
 
 pub mod accounts;
+pub mod alert_rules;
 pub mod auth;
 pub mod channels;
 pub mod crawl_queue;

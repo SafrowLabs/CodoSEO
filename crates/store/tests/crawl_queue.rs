@@ -475,3 +475,81 @@ async fn finish_failed_by_a_stale_worker_does_not_clobber_the_new_owner() {
         "worker-a's failure reason must not have landed on worker-b's row"
     );
 }
+
+async fn alert_jobs(pool: &sqlx::PgPool) -> Vec<serde_json::Value> {
+    sqlx::query_scalar("SELECT payload FROM jobs WHERE kind = 'send_alert' ORDER BY created_at")
+        .fetch_all(pool)
+        .await
+        .expect("read jobs")
+}
+
+/// Claims `id` and fails it with `reason`.
+async fn claim_and_fail(queue: &CrawlQueue, id: Uuid, reason: &str) {
+    queue.claim("w").await.unwrap().expect("claimable");
+    queue.finish_failed(id, reason, "w").await.unwrap();
+}
+
+#[tokio::test]
+async fn the_second_failure_queues_an_unreachable_alert_and_the_first_does_not() {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let site_id = make_site(&db.pool, "down.example").await;
+    let id = queue
+        .enqueue(
+            site_id,
+            "down.example",
+            CrawlTrigger::Schedule,
+            5,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    claim_and_fail(&queue, id, "site unreachable: dns").await;
+    assert!(
+        alert_jobs(&db.pool).await.is_empty(),
+        "the retry is still to come"
+    );
+
+    sqlx::query("UPDATE crawls SET queued_at = now() - interval '1 minute' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    claim_and_fail(&queue, id, "site unreachable: dns").await;
+    assert_eq!(
+        alert_jobs(&db.pool).await,
+        vec![serde_json::json!({ "crawl_id": id, "unreachable": true })]
+    );
+
+    // A stale worker repeating the failure changes nothing and queues nothing.
+    queue.finish_failed(id, "again", "w").await.unwrap();
+    assert_eq!(alert_jobs(&db.pool).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_failed_quick_audit_never_alerts() {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let site_id = make_site(&db.pool, "quick-down.example").await;
+    let id = queue
+        .enqueue(
+            site_id,
+            "quick-down.example",
+            CrawlTrigger::Quick,
+            0,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    claim_and_fail(&queue, id, "site unreachable: dns").await;
+    let status: String = sqlx::query_scalar("SELECT status::text FROM crawls WHERE id = $1")
+        .bind(id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "failed");
+    assert!(alert_jobs(&db.pool).await.is_empty());
+}

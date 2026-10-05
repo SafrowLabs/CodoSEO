@@ -44,6 +44,7 @@ xxhash-rust.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true
+axum.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true

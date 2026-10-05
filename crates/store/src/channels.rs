@@ -47,6 +47,15 @@ pub enum DeleteOutcome {
     DefaultChannel,
 }
 
+/// What the delivery job needs to know about a channel before sending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelState {
+    pub account_id: Uuid,
+    pub kind: ChannelKind,
+    pub enabled: bool,
+    pub muted: bool,
+}
+
 #[derive(FromRow)]
 struct Row {
     id: Uuid,
@@ -83,7 +92,7 @@ fn short_error(error: &str) -> String {
 
 /// Saves a channel. `is_default` marks the account's own-address email channel (at most one per
 /// account; a second is an error). Validate URL targets with
-/// [`codoseo_notify::validate_target`] first.
+/// [`codoseo_notify::GuardedHttp::validate_target`] first.
 pub async fn create(
     pool: &PgPool,
     key: &ChannelKey,
@@ -211,6 +220,43 @@ pub async fn set_muted(
     Ok(n == 1)
 }
 
+/// One channel's owner, kind and switches; `None` when it doesn't exist (deleted since the
+/// delivery job was planned).
+pub async fn state(pool: &PgPool, id: Uuid) -> Result<Option<ChannelState>, ChannelError> {
+    let row: Option<(Uuid, String, bool, bool)> = sqlx::query_as(
+        "SELECT account_id, kind::text, enabled, muted FROM alert_channels WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|(account_id, kind, enabled, muted)| {
+        Ok(ChannelState {
+            account_id,
+            kind: kind_of(&kind)?,
+            enabled,
+            muted,
+        })
+    })
+    .transpose()
+}
+
+/// The account's channels alerts may go to right now: enabled and not muted. Each with its kind.
+pub async fn deliverable(
+    pool: &PgPool,
+    account_id: Uuid,
+) -> Result<Vec<(Uuid, ChannelKind)>, ChannelError> {
+    let rows: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, kind::text FROM alert_channels \
+         WHERE account_id = $1 AND enabled AND NOT muted ORDER BY is_default DESC, created_at, id",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|(id, kind)| Ok((id, kind_of(&kind)?)))
+        .collect()
+}
+
 /// The account's default email channel (its own address), created on first use. Safe to call
 /// from several places at once: there is exactly one per account.
 pub async fn ensure_default_email(
@@ -279,16 +325,34 @@ pub async fn record_failure(pool: &PgPool, id: Uuid, error: &str) -> Result<(), 
     Ok(())
 }
 
-/// Switches the channel off after delivery kept failing; `last_error` says why.
-pub async fn disable(pool: &PgPool, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE alert_channels SET enabled = FALSE, last_error = $2, last_failure_at = now() WHERE id = $1",
+/// Switches a channel the account owns back on after it was turned off, and forgets the failures
+/// and the last error. `false` when it isn't theirs.
+pub async fn reenable(pool: &PgPool, account_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error> {
+    let n = sqlx::query(
+        "UPDATE alert_channels SET enabled = TRUE, consecutive_failures = 0, last_error = NULL \
+         WHERE id = $1 AND account_id = $2",
+    )
+    .bind(id)
+    .bind(account_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(n == 1)
+}
+
+/// Switches the channel off after delivery kept failing; `last_error` says why. Returns whether
+/// this call did it (`false` when it was already off), so the account is told once.
+pub async fn disable(pool: &PgPool, id: Uuid, error: &str) -> Result<bool, sqlx::Error> {
+    let n = sqlx::query(
+        "UPDATE alert_channels SET enabled = FALSE, last_error = $2, last_failure_at = now() \
+         WHERE id = $1 AND enabled",
     )
     .bind(id)
     .bind(short_error(error))
     .execute(pool)
-    .await?;
-    Ok(())
+    .await?
+    .rows_affected();
+    Ok(n == 1)
 }
 
 #[cfg(test)]
