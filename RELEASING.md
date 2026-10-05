@@ -63,7 +63,8 @@ Use it to check the install paths: `npx codoseo@next`, `docker run ghcr.io/safro
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
-Order: version gate, binaries and image in parallel, GitHub release, then crates.io, npm and the
+Order: version gate, binaries and image digests in parallel, GitHub release, then the image tags,
+crates.io, npm and the
 Homebrew tap (they need the release because the npm installer and the formula download from it).
 Check afterwards: `brew install safrowlabs/tap/codoseo && codoseo --version`, `npx codoseo --version`,
 `cargo install codoseo`.

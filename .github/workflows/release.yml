@@ -142,7 +142,10 @@ jobs:
           case "$TARGET" in
             *linux-musl)
               # Static means it runs on any distribution, glibc or musl.
-              ldd "$bin" 2>&1 | grep -qE 'not a dynamic executable|statically linked' ;;
+              # ldd exits non-zero on a static binary, which pipefail would turn into a failure.
+              out="$(ldd "$bin" 2>&1 || true)"
+              echo "$out"
+              grep -qE 'not a dynamic executable|statically linked' <<< "$out" ;;
           esac
       - name: Package and checksum
         shell: bash
@@ -155,7 +158,9 @@ jobs:
           cp "target/${TARGET}/dist/${BINARY}" "staging/${BINARY}"
           archive="codoseo-${TAG}-${TARGET}.tar.gz"
           tar -czf "$archive" -C staging "${BINARY}"
-          python3 - "$archive" <<'PY'
+          # Windows runners may only have `python`.
+          py="$(command -v python3 || command -v python)"
+          "$py" - "$archive" <<'PY'
           import hashlib, pathlib, sys
           archive = pathlib.Path(sys.argv[1])
           digest = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -222,10 +227,12 @@ jobs:
           path: digests/*
           if-no-files-found: error
 
+  # Runs after the GitHub release, so a failed binary build or release leaves no public tag
+  # (`latest` included) behind; the digests pushed before that are untagged.
   image-manifest:
     name: Image manifest
     if: needs.meta.outputs.publish == 'true'
-    needs: [meta, image]
+    needs: [meta, image, release]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -299,7 +306,7 @@ jobs:
   release:
     name: GitHub release
     if: needs.meta.outputs.publish == 'true'
-    needs: [meta, binaries]
+    needs: [meta, binaries, image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
