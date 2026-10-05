@@ -43,6 +43,11 @@ pub enum LimitWindow {
 
 /// Who asked for an audit: a visitor on the website or an agent over the no-key MCP tier.
 /// Stored in `crawls.source`; the agent daily budget counts the second kind.
+///
+/// `crawls.source` (its comment in migration 0001 predates the agent tier and can't be edited
+/// now) holds: `'web'` and `'agent'` for quick audits, as below; `'agent'` also for the first
+/// crawl of a site added by `start_monitoring` (`sites::create_checked`); `'audit'` for the
+/// first crawl of a site added from a website audit (`quick::claim`); NULL otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Web,

@@ -155,8 +155,10 @@ pub enum CreateOutcome {
 /// The account row is locked (`FOR UPDATE`) around the checks and the inserts, so two submits
 /// at once can't go past the limit or add the same domain twice.
 ///
-/// `first_source` marks where the first crawl came from (`crawls.source`, `"agent"` for a site
-/// added by `start_monitoring`); the funnel reads it when that crawl finishes.
+/// `first_source` marks where the first crawl came from (`crawls.source`: `"agent"` for a site
+/// added by `start_monitoring`, `"audit"` for one added from a website audit, `None` for a site
+/// added by hand; see `quick::Source` for the other values); the funnel reads it when that crawl
+/// finishes.
 #[allow(clippy::too_many_arguments)] // one transaction's worth of inputs, all plain values
 pub async fn create_checked(
     pool: &PgPool,

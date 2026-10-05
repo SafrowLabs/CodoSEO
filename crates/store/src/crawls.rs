@@ -90,7 +90,8 @@ pub async fn latest_done(pool: &PgPool, site_id: Uuid) -> Result<Option<Crawl>, 
 }
 
 /// For each of the account's sites with a finished crawl: `(site, health score, finished at)` of
-/// the latest one.
+/// the latest one, chosen like [`latest_done`] (`finished_at DESC`, then `number DESC`; `number`
+/// is the crawl's place by `created_at, id`, so the ties break the same way).
 pub async fn latest_done_for_account(
     pool: &PgPool,
     account_id: Uuid,
