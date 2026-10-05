@@ -64,7 +64,7 @@ pub async fn job_loop(
 ) {
     while !shutdown.is_cancelled() {
         match queue.claim(&worker_id).await {
-            Ok(Some(job)) => settle(&ctx, &queue, job).await,
+            Ok(Some(job)) => settle(&ctx, &queue, &worker_id, job).await,
             Ok(None) => idle(&shutdown).await,
             Err(e) => {
                 tracing::warn!(error = %e, "could not claim a job");
@@ -83,7 +83,7 @@ async fn idle(shutdown: &CancellationToken) {
 
 /// Runs one claimed job in its own task, so a panic fails that job and nothing else, then
 /// records the outcome.
-async fn settle(ctx: &JobContext, queue: &JobQueue, job: ClaimedJob) {
+async fn settle(ctx: &JobContext, queue: &JobQueue, worker_id: &str, job: ClaimedJob) {
     let id = job.id;
     let kind = job.kind;
     let task_ctx = ctx.clone();
@@ -93,14 +93,20 @@ async fn settle(ctx: &JobContext, queue: &JobQueue, job: ClaimedJob) {
         Err(_) => Err("the job was cancelled".to_owned()),
     };
     let recorded = match outcome {
-        Ok(()) => queue.complete(id).await,
+        Ok(()) => queue.complete(id, worker_id).await,
         Err(error) => {
             tracing::warn!(job = %id, kind = kind.slug(), %error, "job failed");
-            queue.retry(id, &error).await
+            queue.retry(id, worker_id, &error).await
         }
     };
-    if let Err(e) = recorded {
-        tracing::error!(job = %id, error = %e, "could not record the job outcome");
+    match recorded {
+        Ok(true) => {}
+        // The job was requeued as stale while this worker still held it, so another run owns
+        // it now; this outcome is dropped rather than overwriting that run.
+        Ok(false) => {
+            tracing::warn!(job = %id, kind = kind.slug(), "the job was taken over; its result is ignored");
+        }
+        Err(e) => tracing::error!(job = %id, error = %e, "could not record the job outcome"),
     }
 }
 

@@ -201,6 +201,8 @@ pub struct TickReport {
     pub cleanup_queued: bool,
     /// "Keep monitoring?" emails queued.
     pub warned: u64,
+    /// Warnings whose email failed for good, cleared so a new one goes out.
+    pub warnings_reset: u64,
     pub paused: u64,
     pub active_events: u64,
     /// Steps that failed, by name. The other steps still ran.
@@ -241,6 +243,10 @@ pub async fn tick(ctx: &SchedulerContext, now: Timestamp) -> TickReport {
         Err(e) => report.fail("cleanup", e),
     }
     if ctx.mode == Mode::Cloud {
+        match schedule::reset_failed_warnings(&ctx.pool).await {
+            Ok(n) => report.warnings_reset = n,
+            Err(e) => report.fail("reset_failed_warnings", e),
+        }
         match warn_inactive(ctx, at).await {
             Ok(n) => report.warned = n,
             Err(e) => report.fail("inactivity_warnings", e),

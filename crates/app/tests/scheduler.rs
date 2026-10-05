@@ -109,6 +109,14 @@ async fn done_crawl_at(db: &TestDb, site: Uuid, domain: &str, finished: Timestam
     .unwrap();
 }
 
+/// The mail worker's side: every queued `send_email` job gets delivered.
+async fn deliver_mail(pool: &PgPool) {
+    sqlx::query("UPDATE jobs SET status = 'done' WHERE kind = 'send_email'")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 fn assert_clean(report: &TickReport) {
     assert!(
         report.failures.is_empty(),
@@ -448,7 +456,8 @@ async fn a_free_account_inactive_for_31_days_is_asked_once_and_paused_a_week_lat
         .unwrap();
     assert!(!paused, "still inside the 7 days");
 
-    // Day 38 with no click: paused.
+    // Day 38 with no click, and the email was delivered: paused.
+    deliver_mail(&db.pool).await;
     let report = tick(&c, noon() + SignedDuration::from_hours(7 * 24)).await;
     assert_eq!(report.paused, 1);
     let paused: bool = sqlx::query_scalar("SELECT paused FROM accounts WHERE id = $1")
@@ -462,6 +471,135 @@ async fn a_free_account_inactive_for_31_days_is_asked_once_and_paused_a_week_lat
         1,
         "no second email"
     );
+}
+
+#[tokio::test]
+async fn a_warning_that_was_not_delivered_does_not_start_the_pause_clock() {
+    let db = TestDb::new().await;
+    let id = quiet_free_account(&db, "quiet@example.test", 31).await;
+    let c = ctx(&db, Mode::Cloud);
+    assert_eq!(tick(&c, noon()).await.warned, 1);
+    let paused = |db: &TestDb| {
+        let pool = db.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>("SELECT paused FROM accounts WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // A week on, the email is still waiting (a mail outage): not paused.
+    let week = noon() + SignedDuration::from_hours(7 * 24);
+    let report = tick(&c, week).await;
+    assert_eq!((report.paused, report.warnings_reset), (0, 0));
+    assert!(!paused(&db).await);
+    // Still queued after two weeks: still not paused.
+    assert_eq!(
+        tick(&c, week + SignedDuration::from_hours(7 * 24))
+            .await
+            .paused,
+        0
+    );
+
+    // It finally goes out; the week counts from the warning, so the next tick pauses.
+    deliver_mail(&db.pool).await;
+    assert_eq!(
+        tick(&c, week + SignedDuration::from_hours(7 * 24 + 1))
+            .await
+            .paused,
+        1
+    );
+    assert!(paused(&db).await);
+}
+
+#[tokio::test]
+async fn a_warning_email_that_failed_for_good_is_sent_again() {
+    let db = TestDb::new().await;
+    let id = quiet_free_account(&db, "quiet@example.test", 31).await;
+    let c = ctx(&db, Mode::Cloud);
+    assert_eq!(tick(&c, noon()).await.warned, 1);
+    sqlx::query("UPDATE jobs SET status = 'failed', attempt = 5 WHERE kind = 'send_email'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    let later = noon() + SignedDuration::from_hours(8 * 24);
+    let report = tick(&c, later).await;
+    assert_clean(&report);
+    assert_eq!(
+        (report.warnings_reset, report.warned, report.paused),
+        (1, 1, 0)
+    );
+    let statuses: Vec<String> = sqlx::query_scalar(
+        "SELECT status::text FROM jobs WHERE kind = 'send_email' ORDER BY created_at",
+    )
+    .fetch_all(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(statuses, vec!["failed", "queued"]);
+    let sent: Option<time::OffsetDateTime> =
+        sqlx::query_scalar("SELECT keep_monitoring_sent_at FROM accounts WHERE id = $1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        sent.unwrap().unix_timestamp(),
+        later.as_second(),
+        "the clock restarts"
+    );
+    // Delivered this time: paused only a week after the new warning.
+    deliver_mail(&db.pool).await;
+    assert_eq!(
+        tick(&c, later + SignedDuration::from_hours(6 * 24))
+            .await
+            .paused,
+        0
+    );
+    assert_eq!(
+        tick(&c, later + SignedDuration::from_hours(7 * 24))
+            .await
+            .paused,
+        1
+    );
+}
+
+#[tokio::test]
+async fn using_the_app_counts_as_activity() {
+    let db = TestDb::new().await;
+    // No sign-in for 40 days, but a session seen yesterday.
+    let id = quiet_free_account(&db, "busy@example.test", 40).await;
+    sqlx::query(
+        "INSERT INTO sessions (account_id, session_hash, expires_at, last_seen_at) \
+         VALUES ($1, 'h1', $2::timestamptz + interval '1 day', $2::timestamptz - interval '1 day')",
+    )
+    .bind(id)
+    .bind(noon().to_string())
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let c = ctx(&db, Mode::Cloud);
+    assert_eq!(
+        tick(&c, noon()).await.warned,
+        0,
+        "seen yesterday, so not inactive"
+    );
+
+    // Thirty-one days after that visit, they are.
+    let later = noon() + SignedDuration::from_hours(31 * 24);
+    assert_eq!(tick(&c, later).await.warned, 1);
+    // A visit after the warning stops the pause.
+    deliver_mail(&db.pool).await;
+    sqlx::query("UPDATE sessions SET last_seen_at = $1::timestamptz WHERE account_id = $2")
+        .bind((later + SignedDuration::from_hours(48)).to_string())
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let report = tick(&c, later + SignedDuration::from_hours(7 * 24)).await;
+    assert_eq!(report.paused, 0);
 }
 
 #[tokio::test]
@@ -492,6 +630,7 @@ async fn paid_and_self_hosted_accounts_are_never_warned_or_paused() {
     let cloud = ctx(&db, Mode::Cloud);
     let report = tick(&cloud, noon()).await;
     assert_eq!(report.warned, 1, "only the Free account");
+    deliver_mail(&db.pool).await;
     tick(&cloud, noon() + SignedDuration::from_hours(8 * 24)).await;
     let paused: Vec<(Uuid, bool)> = sqlx::query_as("SELECT id, paused FROM accounts")
         .fetch_all(&db.pool)

@@ -404,6 +404,46 @@ async fn the_daily_cleanup_is_enqueued_once_per_day() {
 }
 
 #[tokio::test]
+async fn the_cleanup_day_only_moves_forward() {
+    use codoseo_store::schedule::enqueue_daily_cleanup;
+    let db = TestDb::new().await;
+    let now = OffsetDateTime::now_utc();
+    assert!(
+        enqueue_daily_cleanup(&db.pool, "2026-10-06", now)
+            .await
+            .unwrap()
+    );
+    // A scheduler whose clock is still on the 5th must not flip the day back (which would let
+    // the 6th queue a second cleanup).
+    assert!(
+        !enqueue_daily_cleanup(&db.pool, "2026-10-05", now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !enqueue_daily_cleanup(&db.pool, "2026-10-06", now)
+            .await
+            .unwrap()
+    );
+    let day: serde_json::Value =
+        sqlx::query_scalar("SELECT value FROM instance_settings WHERE key = 'last_cleanup_on'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(day, "2026-10-06");
+    assert!(
+        enqueue_daily_cleanup(&db.pool, "2026-10-07", now)
+            .await
+            .unwrap()
+    );
+    let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'cleanup'")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(queued, 2);
+}
+
+#[tokio::test]
 async fn signing_in_again_clears_the_warning_and_unpauses_free_accounts_only() {
     let db = TestDb::new().await;
     let free = account(&db, "free@example.test", "free", true).await;

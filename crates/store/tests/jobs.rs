@@ -27,7 +27,7 @@ async fn enqueue_claim_and_complete_happy_path() {
     assert_eq!(claimed.id, id);
     assert_eq!(claimed.payload["crawl_id"], "x");
 
-    queue.complete(id).await.expect("complete");
+    assert!(queue.complete(id, "worker-a").await.expect("complete"));
     let status: String = sqlx::query("SELECT status::text FROM jobs WHERE id = $1")
         .bind(id)
         .fetch_one(&db.pool)
@@ -68,11 +68,19 @@ async fn retry_backs_off_1_2_4_8_16_minutes_then_fails() {
 
     let expected_minutes = [1.0, 2.0, 4.0, 8.0, 16.0];
     for (i, expected) in expected_minutes.iter().enumerate() {
-        let before = OffsetDateTime::now_utc();
-        queue
-            .retry(id, &format!("failure {i}"))
+        sqlx::query("UPDATE jobs SET run_after = now() WHERE id = $1")
+            .bind(id)
+            .execute(&db.pool)
             .await
-            .expect("retry");
+            .unwrap();
+        queue.claim("worker-a").await.unwrap().expect("claimable");
+        let before = OffsetDateTime::now_utc();
+        assert!(
+            queue
+                .retry(id, "worker-a", &format!("failure {i}"))
+                .await
+                .expect("retry")
+        );
 
         let (status, run_after, attempt): (String, OffsetDateTime, i16) =
             sqlx::query("SELECT status::text, run_after, attempt FROM jobs WHERE id = $1")
@@ -180,4 +188,45 @@ async fn a_job_that_always_kills_its_worker_ends_failed() {
     let (status, attempt, _) = job_state(&db, id).await;
     assert_eq!((status.as_str(), attempt), ("failed", 5));
     assert!(queue.claim("w").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_worker_that_lost_its_job_cannot_complete_or_retry_it() {
+    let db = TestDb::new().await;
+    let queue = JobQueue::new(db.pool.clone());
+    let id = queue.enqueue(JobKind::Cleanup, json!({})).await.unwrap();
+
+    // Worker A is slow; the job is judged stale, requeued, and worker B claims it.
+    queue.claim("worker-a").await.unwrap().unwrap();
+    age_claim(&db, id, 11).await;
+    assert_eq!(
+        queue
+            .requeue_stale(std::time::Duration::from_secs(600))
+            .await
+            .unwrap(),
+        1
+    );
+    sqlx::query("UPDATE jobs SET run_after = now() WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let reclaimed = queue.claim("worker-b").await.unwrap().expect("B claims it");
+    assert_eq!(reclaimed.id, id);
+
+    // A finally finishes: both outcomes are ignored.
+    assert!(!queue.complete(id, "worker-a").await.unwrap());
+    assert!(!queue.retry(id, "worker-a", "late failure").await.unwrap());
+    let (status, attempt, claimed_by) = job_state(&db, id).await;
+    assert_eq!(
+        (status.as_str(), attempt, claimed_by.as_deref()),
+        ("running", 1, Some("worker-b")),
+        "B's run is untouched"
+    );
+
+    assert!(queue.complete(id, "worker-b").await.unwrap());
+    assert_eq!(job_state(&db, id).await.0, "done");
+    // Once done, nobody can retry it either.
+    assert!(!queue.retry(id, "worker-b", "again").await.unwrap());
+    assert_eq!(job_state(&db, id).await.0, "done");
 }

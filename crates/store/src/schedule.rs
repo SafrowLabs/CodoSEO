@@ -59,7 +59,8 @@ pub async fn claim_due_sites(
         "SELECT s.id, s.domain, a.plan::text AS plan, s.schedule, s.scheduled_hour, \
                 a.timezone, s.next_crawl_at \
          FROM sites s JOIN accounts a ON a.id = s.account_id \
-         WHERE s.monitoring_active AND s.schedule IS NOT NULL AND NOT a.paused \
+         WHERE s.monitoring_active AND s.account_id IS NOT NULL AND s.schedule IS NOT NULL \
+           AND NOT a.paused \
            AND (s.next_crawl_at IS NULL OR s.next_crawl_at <= $1) \
          ORDER BY s.next_crawl_at NULLS FIRST, s.id \
          LIMIT $2 \
@@ -197,12 +198,13 @@ pub async fn enqueue_daily_cleanup(
     now: OffsetDateTime,
 ) -> Result<bool, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    // Inserts the first day, and moves a later day in; the `WHERE` makes a repeat of `today` a
-    // no-op, whichever scheduler asks.
+    // Inserts the first day and moves a later day in. The `WHERE` makes a repeat of `today`, or an
+    // earlier day from a scheduler with a slow clock, a no-op, so the day never flips back.
+    // (ISO dates compare correctly as text.)
     let claimed = sqlx::query(
         "INSERT INTO instance_settings (key, value, updated_at) VALUES ('last_cleanup_on', $1, $2) \
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at \
-         WHERE instance_settings.value <> EXCLUDED.value",
+         WHERE instance_settings.value::text < EXCLUDED.value::text",
     )
     .bind(serde_json::Value::String(today.to_owned()))
     .bind(now)
@@ -238,15 +240,27 @@ pub const WARNING_GRACE: Duration = Duration::days(7);
 /// How long a "Keep monitoring?" link works.
 pub const RESUME_LINK_TTL: Duration = Duration::days(7);
 
-/// The last time the person was seen: the latest sign-in, email click or, failing both, the day
-/// they signed up.
-const LAST_ACTIVITY: &str = "GREATEST(a.last_login_at, a.last_email_click_at, a.created_at)";
+/// The last time the person was seen: the latest sign-in, email click, or visit with a session
+/// (`sessions.last_seen_at`, refreshed by the web app at most every 5 minutes), failing all of
+/// those the day they signed up.
+const LAST_ACTIVITY: &str = "GREATEST(a.last_login_at, a.last_email_click_at, a.created_at, \
+     (SELECT max(se.last_seen_at) FROM sessions se WHERE se.account_id = a.id))";
+
+/// The same without the sessions lookup: cheap, so it narrows the accounts first.
+const LAST_LOGIN_OR_CLICK: &str = "GREATEST(a.last_login_at, a.last_email_click_at, a.created_at)";
+
+/// What happened to the account's latest "Keep monitoring?" email job. The job payload carries
+/// `keep_monitoring_for`, the account id.
+const WARNING_JOB_STATUS: &str = "(SELECT j.status::text FROM jobs j \
+     WHERE j.kind = 'send_email' AND j.payload->>'keep_monitoring_for' = a.id::text \
+     ORDER BY j.created_at DESC LIMIT 1)";
 
 /// Whether a Free account is due its warning at `$now`: inactive for [`INACTIVE_AFTER`], with
 /// something to monitor, and not warned since it was last active.
 fn due_for_warning(now: &str) -> String {
     format!(
         "a.plan = 'free' AND NOT a.paused \
+         AND {LAST_LOGIN_OR_CLICK} < {now} - interval '30 days' \
          AND {LAST_ACTIVITY} < {now} - interval '30 days' \
          AND (a.keep_monitoring_sent_at IS NULL OR a.keep_monitoring_sent_at < {LAST_ACTIVITY}) \
          AND EXISTS (SELECT 1 FROM sites s WHERE s.account_id = a.id AND s.monitoring_active)"
@@ -308,19 +322,36 @@ pub async fn send_keep_monitoring(
         RESUME_LINK_TTL,
     )
     .await?;
+    let mut email = email;
+    email["keep_monitoring_for"] = serde_json::json!(account_id);
     insert_job(&mut tx, "send_email", email).await?;
     tx.commit().await?;
     Ok(true)
 }
 
-/// Pauses Free accounts that were warned at least [`WARNING_GRACE`] ago and haven't been seen
-/// since. Returns how many were paused.
+/// Clears `keep_monitoring_sent_at` for accounts whose latest warning email failed for good
+/// (the job ran out of attempts), so the next tick warns them again. Returns how many.
+pub async fn reset_failed_warnings(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query(&format!(
+        "UPDATE accounts a SET keep_monitoring_sent_at = NULL \
+         WHERE a.plan = 'free' AND a.keep_monitoring_sent_at IS NOT NULL \
+           AND {WARNING_JOB_STATUS} = 'failed'"
+    ))
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
+}
+
+/// Pauses Free accounts that were warned at least [`WARNING_GRACE`] ago, whose warning email was
+/// delivered, and who haven't been seen since. A warning still queued or retrying does not count
+/// (a mail outage must not pause anyone). Returns how many were paused.
 pub async fn pause_unresponsive(pool: &PgPool, now: OffsetDateTime) -> Result<u64, sqlx::Error> {
     let done = sqlx::query(&format!(
         "UPDATE accounts a SET paused = true \
          WHERE a.plan = 'free' AND NOT a.paused \
            AND a.keep_monitoring_sent_at <= $1 - interval '7 days' \
-           AND {LAST_ACTIVITY} <= a.keep_monitoring_sent_at"
+           AND {LAST_ACTIVITY} <= a.keep_monitoring_sent_at \
+           AND {WARNING_JOB_STATUS} = 'done'"
     ))
     .bind(now)
     .execute(pool)
