@@ -337,6 +337,23 @@ async fn a_second_click_is_already_used_and_makes_no_second_key_or_site() {
 }
 
 #[tokio::test]
+async fn the_confirm_page_does_not_set_a_no_referrer_policy() {
+    // Under `no-referrer` browsers send `Origin: null` on a same-site form POST, which the
+    // Origin check refuses, so the button would answer 403 in a real browser. The app-wide
+    // `strict-origin-when-cross-origin` already keeps the token path from other sites.
+    let app = cloud().await;
+    request(&app, "owner@example.org").await;
+    let path = link_for(&app, "owner@example.org");
+    let res = app.get(&path, None).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(!res.body.contains("no-referrer"), "{}", res.body);
+    assert_eq!(
+        res.header("referrer-policy"),
+        Some("strict-origin-when-cross-origin")
+    );
+}
+
+#[tokio::test]
 async fn the_used_link_page_points_to_settings_and_a_signed_in_visitor_is_not_asked_to_sign_in() {
     let app = cloud().await;
     request(&app, "owner@example.org").await;

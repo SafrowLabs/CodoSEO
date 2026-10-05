@@ -1,6 +1,6 @@
 {% extends "solo_base.html" %}
 {% block title %}{% match view %}{% when StartView::Confirm { domain, .. } %}Monitor {{ domain }}{% when StartView::Expired { .. } %}Link expired{% when StartView::Done(d) %}{% match d.site %}{% when SiteNote::PlanFull { .. } %}Your plan is full{% else %}Monitoring started{% endmatch %}{% endmatch %} — CodoSEO{% endblock %}
-{% block head %}<meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 {% block body %}
 <div class="solo-page">
   <div class="solo-card solo-card-wide">

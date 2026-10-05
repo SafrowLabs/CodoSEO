@@ -861,7 +861,7 @@ body.solo { overflow: auto; }
 .upgrade-hint { color: var(--warn); }
 .key-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .key-actions .btn { gap: 6px; }
-.snippet { margin: 0; padding: 10px 12px; font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.snippet { margin: 0; padding: 10px 12px; font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); white-space: pre-wrap; word-break: normal; overflow-wrap: normal; overflow-x: auto; user-select: all; }
 .rules-site { padding: 14px 18px 6px; border-bottom: 1px solid var(--line-faint); }
 .rules-site-name { margin-bottom: 8px; font-size: 13.5px; }
 .rules-site-name b { font-weight: 500; }
