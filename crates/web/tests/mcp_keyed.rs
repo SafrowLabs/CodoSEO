@@ -717,13 +717,28 @@ fn rpc_init() -> Value {
 async fn a_session_cookie_without_a_key_is_not_a_keyed_caller() {
     let f = setup(Plan::Pro).await;
     let (_, cookie) = f.app.login("owner@example.com").await;
-    // Cloud: no key means the no-key tier, which has none of the keyed tools.
+    // Cloud: no key means the no-key tier (four tools), which has none of the keyed tools.
     let rpc = Rpc {
         cookie: Some(&cookie),
         ..Rpc::new(&f.app, None)
     };
     rpc.initialize().await;
-    assert!(rpc.tools().await.is_empty());
+    let mut names: Vec<String> = rpc
+        .tools()
+        .await
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "get_audit",
+            "get_issue_urls",
+            "quick_audit",
+            "start_monitoring"
+        ]
+    );
     let res = rpc.post(rpc_call("list_sites")).await;
     assert!(res.body.contains("tool not found"), "{}", res.body);
     assert_eq!(calls_today(&f.app, &f.account).await, 0);
@@ -848,10 +863,12 @@ async fn a_real_mcp_client_lists_and_calls_tools_with_a_key_over_tcp() {
 
 // ---- review fixes ----
 
+use codoseo_mcp::cloud::types::{AuditIssueUrls, MonitoringRequested, QuickAuditState};
 use codoseo_mcp::cloud::types::{
     ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
 };
-use codoseo_mcp::cloud::{CloudBackend, CloudMcp};
+use codoseo_mcp::cloud::{AnonBackend, CloudBackend, CloudMcp};
+use codoseo_web::agent::anon::AnonCaller;
 use codoseo_web::agent::auth::ApiCaller;
 
 /// A backend whose `list_sites` panics or stalls, to see what the HTTP caller gets.
@@ -862,7 +879,7 @@ struct Faulty {
 
 impl CloudBackend for Faulty {
     type Keyed = ApiCaller;
-    type Anon = ();
+    type Anon = AnonCaller;
 
     async fn list_sites(&self, _: &ApiCaller) -> Result<Vec<SiteInfo>, String> {
         if self.panics {
@@ -901,6 +918,33 @@ impl CloudBackend for Faulty {
         unimplemented!()
     }
     async fn reject(&self, _: &ApiCaller, _: String) -> Result<std::convert::Infallible, String> {
+        unimplemented!()
+    }
+}
+
+impl AnonBackend for Faulty {
+    async fn quick_audit(&self, _: &AnonCaller, _: &str) -> Result<QuickAuditState, String> {
+        unimplemented!()
+    }
+    async fn get_audit(&self, _: &AnonCaller, _: &str) -> Result<QuickAuditState, String> {
+        unimplemented!()
+    }
+    async fn audit_issue_urls(
+        &self,
+        _: &AnonCaller,
+        _: &str,
+        _: &str,
+        _: Option<u32>,
+        _: Option<u32>,
+    ) -> Result<AuditIssueUrls, String> {
+        unimplemented!()
+    }
+    async fn start_monitoring(
+        &self,
+        _: &AnonCaller,
+        _: &str,
+        _: &str,
+    ) -> Result<MonitoringRequested, String> {
         unimplemented!()
     }
 }

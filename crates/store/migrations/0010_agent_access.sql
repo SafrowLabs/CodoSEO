@@ -27,3 +27,11 @@ CREATE TABLE api_usage (
 -- every crawl and filters, which is slow for a check few pages fail in a big table.
 DROP INDEX pages_crawl_id_idx;
 CREATE INDEX pages_crawl_id_id_idx ON pages (crawl_id, id);
+
+-- The agents' daily budget of fresh no-key audits counts the last 24 hours of agent quick crawls
+-- under a global lock (`quick::start`), so it reads only them.
+CREATE INDEX crawls_quick_agent_idx ON crawls (created_at) WHERE trigger = 'quick' AND source = 'agent';
+
+-- The start-monitoring token caps count a purpose's recent tokens (per address, per client
+-- address hash, overall); the table is small, but a partial index keeps them off the magic links.
+CREATE INDEX login_tokens_start_monitoring_idx ON login_tokens (created_at) WHERE purpose = 'start_monitoring';

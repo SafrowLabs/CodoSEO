@@ -208,9 +208,193 @@ pub struct Usage {
     pub resets_at: OffsetDateTime,
 }
 
+/// The no-key tools' view of a quick audit (`quick_audit` and `get_audit`): the audit is still
+/// going, it finished with a report, or it could not produce one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum QuickAuditState {
+    /// Queued or crawling. Call `get_audit` with the id again in a few seconds.
+    Running {
+        audit_id: Uuid,
+        /// Pages crawled so far, once the crawl has started.
+        pages_done: Option<u32>,
+        message: String,
+    },
+    Done(Box<QuickAuditSummary>),
+    /// The audit ended without a report (site unreachable or blocked, nothing to audit).
+    Failed {
+        audit_id: Uuid,
+        reason: String,
+    },
+}
+
+/// A finished quick audit, agent-sized: [`QuickAuditSummary::fit`] keeps it under
+/// [`MAX_SUMMARY_BYTES`] however many checks fail and however long their URLs are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuickAuditSummary {
+    pub audit_id: Uuid,
+    pub domain: String,
+    pub start_url: String,
+    pub health_score: Option<u8>,
+    pub checks_passed: Option<u16>,
+    pub checks_total: Option<u16>,
+    pub pages_crawled: u32,
+    /// Human words, e.g. "completed" or "page limit reached" (the audit crawls up to 100 pages).
+    pub stop_reason: String,
+    /// A stable name to branch on: `completed`, `page_limit`, `time_limit`, ...
+    pub stop_code: String,
+    /// Most severe first, each with a count and up to 3 example URLs.
+    pub failing_checks: Vec<FailingCheck>,
+    /// Failing checks not listed (cut by the size cap). `get_issue_urls` still takes any check.
+    pub more_failing_checks: u16,
+    /// The same report as a web page, to hand to the user.
+    pub report_url: String,
+    /// One line about monitoring this site, pointing at `start_monitoring`.
+    pub note: String,
+}
+
+/// The most JSON bytes a quick audit summary may take (spec section 9: an agent-sized answer).
+pub const MAX_SUMMARY_BYTES: usize = 4096;
+
+impl QuickAuditSummary {
+    /// Drops the least severe failing checks (counting them in `more_failing_checks`) until the
+    /// JSON is under [`MAX_SUMMARY_BYTES`], then, if the fixed fields alone are too big, nothing
+    /// more can be done: they are short by construction.
+    pub fn fit(mut self) -> QuickAuditSummary {
+        while self.failing_checks.len() > 1 && self.json_len() >= MAX_SUMMARY_BYTES {
+            self.failing_checks.pop();
+            self.more_failing_checks = self.more_failing_checks.saturating_add(1);
+        }
+        self
+    }
+
+    fn json_len(&self) -> usize {
+        serde_json::to_string(&QuickAuditState::Done(Box::new(self.clone())))
+            .map_or(0, |json| json.len())
+    }
+}
+
+/// `get_issue_urls` for a quick audit: one page of the pages that fail a check.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuditIssueUrls {
+    pub audit_id: Uuid,
+    pub check: CheckId,
+    pub title: String,
+    /// Pages failing the check in the audit.
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
+    pub urls: Vec<UrlRow>,
+    /// Pass as `offset` for the next page; none on the last page.
+    pub next_offset: Option<u32>,
+}
+
+/// `start_monitoring`: the confirmation email is on its way. The same answer whether or not the
+/// address already has an account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitoringRequested {
+    /// Always `confirmation_sent`.
+    pub status: String,
+    pub domain: String,
+    /// What to tell the user.
+    pub message: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::MAX_FAILING_CHECKS;
+    use url::Url;
+
+    fn failing(n: usize, url_len: usize) -> Vec<FailingCheck> {
+        let all = CheckId::ALL;
+        all[..n]
+            .iter()
+            .map(|&check| FailingCheck {
+                check,
+                title: "A reasonably descriptive check title".to_owned(),
+                severity: Severity::Warning,
+                count: 100,
+                example_urls: (0..3)
+                    .map(|i| {
+                        Url::parse(&format!("https://example.com/{}{i}", "p".repeat(url_len)))
+                            .unwrap()
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    fn summary(failing_checks: Vec<FailingCheck>) -> QuickAuditSummary {
+        QuickAuditSummary {
+            audit_id: Uuid::new_v4(),
+            domain: "example.com".to_owned(),
+            start_url: "https://example.com/".to_owned(),
+            health_score: Some(12),
+            checks_passed: Some(3),
+            checks_total: Some(45),
+            pages_crawled: 100,
+            stop_reason: "page limit reached".to_owned(),
+            stop_code: "page_limit".to_owned(),
+            failing_checks,
+            more_failing_checks: 0,
+            report_url: format!("https://codoseo.com/audit/{}", Uuid::new_v4()),
+            note: "To keep monitoring example.com weekly and get an email when something \
+                   breaks, call start_monitoring with this site's URL and the user's email."
+                .to_owned(),
+        }
+    }
+
+    fn size(summary: &QuickAuditSummary) -> usize {
+        serde_json::to_string(&QuickAuditState::Done(Box::new(summary.clone())))
+            .unwrap()
+            .len()
+    }
+
+    #[test]
+    fn a_summary_with_few_short_urls_is_kept_whole() {
+        let fitted = summary(failing(5, 20)).fit();
+        assert_eq!(fitted.failing_checks.len(), 5);
+        assert_eq!(fitted.more_failing_checks, 0);
+    }
+
+    #[test]
+    fn a_worst_case_summary_is_cut_under_4_kb_by_dropping_the_least_severe_checks() {
+        for url_len in [10, 40, 120, 400] {
+            let fitted = summary(failing(MAX_FAILING_CHECKS, url_len)).fit();
+            assert!(
+                size(&fitted) < MAX_SUMMARY_BYTES,
+                "{url_len}: {}",
+                size(&fitted)
+            );
+            assert!(!fitted.failing_checks.is_empty());
+            assert_eq!(
+                fitted.failing_checks.len() + usize::from(fitted.more_failing_checks),
+                MAX_FAILING_CHECKS
+            );
+            // The most severe come first and are the ones kept.
+            let kept: Vec<CheckId> = fitted.failing_checks.iter().map(|f| f.check).collect();
+            assert_eq!(kept, CheckId::ALL[..kept.len()]);
+        }
+    }
+
+    #[test]
+    fn the_audit_state_is_tagged_by_status() {
+        let id = Uuid::new_v4();
+        let running = QuickAuditState::Running {
+            audit_id: id,
+            pages_done: None,
+            message: "wait".to_owned(),
+        };
+        let json = serde_json::to_value(&running).unwrap();
+        assert_eq!(json["status"], "running");
+        assert_eq!(json["audit_id"], id.to_string());
+        let done = serde_json::to_value(QuickAuditState::Done(Box::new(summary(vec![])))).unwrap();
+        assert_eq!(done["status"], "done");
+        assert_eq!(done["domain"], "example.com");
+        let back: QuickAuditState = serde_json::from_value(done).unwrap();
+        assert!(matches!(back, QuickAuditState::Done(_)));
+    }
 
     #[test]
     fn change_text_is_cut_to_300_characters_with_an_ellipsis() {

@@ -41,6 +41,23 @@ pub enum LimitWindow {
     Day,
 }
 
+/// Who asked for an audit: a visitor on the website or an agent over the no-key MCP tier.
+/// Stored in `crawls.source`; the agent daily budget counts the second kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Web,
+    Agent,
+}
+
+impl Source {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Source::Web => "web",
+            Source::Agent => "agent",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StartRequest<'a> {
     /// The lowercase host the audit is about (`www.example.com` and `example.com` differ).
@@ -55,6 +72,10 @@ pub struct StartRequest<'a> {
     pub previous_ip_hash: Option<&'a [u8]>,
     /// Per-IP limits; they only apply when there is an `ip_hash`.
     pub limits: Limits,
+    pub source: Source,
+    /// The most fresh audits agents may start in any 24 hours, over all of them. Only applies
+    /// to `Source::Agent` requests; `None` is no budget. Cached and joined audits never count.
+    pub agent_daily_budget: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +86,11 @@ pub enum StartOutcome {
     Cached { crawl_id: Uuid },
     /// An audit of this domain is queued or running: watch that one.
     Joined { crawl_id: Uuid },
+    /// The agent budget for the last 24 hours is spent. Nothing was started.
+    AgentBudgetReached {
+        /// Seconds until the oldest agent audit in the window ages out.
+        retry_after_secs: i64,
+    },
     /// This IP has used up its audits for the hour or the day. Nothing was started.
     Limited {
         window: LimitWindow,
@@ -100,6 +126,29 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
         } else {
             StartOutcome::Joined { crawl_id }
         });
+    }
+
+    if let (Source::Agent, Some(budget)) = (req.source, req.agent_daily_budget) {
+        // Taken after the domain lock and before any IP lock (always in that order, so two
+        // starts can't wait on each other): every fresh agent audit passes through here one at
+        // a time, so no number of concurrent starts gets past the budget.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.quick.agent'))")
+            .execute(&mut *tx)
+            .await?;
+        let (used, retry): (i64, Option<f64>) = sqlx::query_as(
+            "SELECT count(*), \
+                    EXTRACT(EPOCH FROM min(created_at) + interval '1 day' - now())::float8 \
+             FROM crawls \
+             WHERE trigger = 'quick' AND source = 'agent' \
+               AND created_at > now() - interval '1 day'",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if used >= budget {
+            return Ok(StartOutcome::AgentBudgetReached {
+                retry_after_secs: retry.map_or(1, |s| s.ceil().max(1.0) as i64),
+            });
+        }
     }
 
     if let Some(ip) = req.ip_hash {
@@ -154,12 +203,13 @@ pub async fn start(pool: &PgPool, req: &StartRequest<'_>) -> Result<StartOutcome
     .await?;
     let crawl_id: Uuid = sqlx::query_scalar(
         "INSERT INTO crawls (site_id, domain, trigger, priority, source, requester_ip_hash) \
-         VALUES ($1, $2, $3, 0, 'web', $4) RETURNING id",
+         VALUES ($1, $2, $3, 0, $5, $4) RETURNING id",
     )
     .bind(site_id)
     .bind(req.domain)
     .bind(CrawlTrigger::Quick)
     .bind(req.ip_hash)
+    .bind(req.source.as_str())
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -263,6 +313,121 @@ pub async fn create_unlock_token(
     .await?;
     tx.commit().await?;
     Ok(UnlockSlot::Created)
+}
+
+/// How many start-monitoring emails the no-key MCP tool may trigger. The tool mails an address
+/// an agent chose, so the caps are what stops it flooding someone's inbox, and the daily total
+/// bounds what a stolen or misused connector can send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonitoringCaps {
+    /// Per recipient (canonical address), per hour.
+    pub per_address: i64,
+    /// Per client address (hash), per hour. Only applies when the caller has an `ip_hash`.
+    pub per_ip: i64,
+    /// Over everyone, per 24 hours.
+    pub per_day: i64,
+}
+
+impl MonitoringCaps {
+    /// 3 per address and 3 per client address an hour; `per_day` is the configured daily cap.
+    pub fn with_daily(per_day: i64) -> MonitoringCaps {
+        MonitoringCaps {
+            per_address: 3,
+            per_ip: 3,
+            per_day,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonitoringSlot {
+    /// The token was stored: send the email.
+    Created,
+    AddressCapReached,
+    IpCapReached,
+    DailyCapReached,
+}
+
+/// Who asked for a start-monitoring email, as far as the per-IP cap is concerned: today's hash
+/// (stored in the token's payload) and yesterday's (also counted, since an hour window can
+/// span the salt change at midnight UTC).
+#[derive(Debug, Clone, Copy)]
+pub struct Requester<'a> {
+    pub ip_hash: &'a [u8],
+    pub previous_ip_hash: Option<&'a [u8]>,
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Stores a start-monitoring token (`payload` holds `email`, `canonical`, `start_url` and
+/// `domain`) unless a cap is reached. Counts and insert happen under advisory locks, always
+/// taken global first, then address, then client, so concurrent requests can't all pass the
+/// counts before any of them inserts. With a `requester` the token's payload also carries its
+/// IP hash (`ip`), which later counts read.
+pub async fn create_monitoring_token(
+    pool: &PgPool,
+    canonical: &str,
+    requester: Option<Requester<'_>>,
+    token_hash: &[u8],
+    mut payload: serde_json::Value,
+    ttl: time::Duration,
+    caps: MonitoringCaps,
+) -> Result<MonitoringSlot, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.monitor.global'))")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.monitor.address:' || $1))")
+        .bind(canonical)
+        .execute(&mut *tx)
+        .await?;
+    let ips: Vec<String> = requester
+        .iter()
+        .flat_map(|r| std::iter::once(r.ip_hash).chain(r.previous_ip_hash))
+        .map(hex)
+        .collect();
+    if let Some(r) = requester {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.monitor.ip:' || $1))")
+            .bind(hex(r.ip_hash))
+            .execute(&mut *tx)
+            .await?;
+        payload["ip"] = serde_json::json!(hex(r.ip_hash));
+    }
+    let (day, address, ip): (i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*), \
+                count(*) FILTER (WHERE created_at > now() - interval '1 hour' \
+                                   AND payload->>'canonical' = $1), \
+                count(*) FILTER (WHERE created_at > now() - interval '1 hour' \
+                                   AND payload->>'ip' = ANY($2)) \
+         FROM login_tokens \
+         WHERE purpose = 'start_monitoring' AND created_at > now() - interval '1 day'",
+    )
+    .bind(canonical)
+    .bind(&ips)
+    .fetch_one(&mut *tx)
+    .await?;
+    if day >= caps.per_day {
+        return Ok(MonitoringSlot::DailyCapReached);
+    }
+    if address >= caps.per_address {
+        return Ok(MonitoringSlot::AddressCapReached);
+    }
+    if requester.is_some() && ip >= caps.per_ip {
+        return Ok(MonitoringSlot::IpCapReached);
+    }
+    sqlx::query(
+        "INSERT INTO login_tokens (purpose, token_hash, payload, expires_at) \
+         VALUES ('start_monitoring', $1, $2, now() + make_interval(secs => $3))",
+    )
+    .bind(token_hash)
+    .bind(payload)
+    .bind(ttl.as_seconds_f64())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(MonitoringSlot::Created)
 }
 
 /// A quick audit as the public report page reads it.

@@ -92,6 +92,26 @@ pub async fn token_is_live(
     .await
 }
 
+/// The payload of a token that could still be consumed, without using it: for the confirm page
+/// of a link that must not change anything on a GET. `None` when the token is unknown, used or
+/// expired; a live token without a payload gives `Some(Value::Null)`.
+pub async fn live_token_payload(
+    executor: impl PgExecutor<'_>,
+    purpose: TokenPurpose,
+    token_hash: &[u8],
+) -> Result<Option<serde_json::Value>, sqlx::Error> {
+    let row: Option<(Option<serde_json::Value>,)> = sqlx::query_as(
+        "SELECT payload FROM login_tokens \
+         WHERE token_hash = $1 AND purpose = $2::login_token_purpose \
+           AND used_at IS NULL AND expires_at > now()",
+    )
+    .bind(token_hash)
+    .bind(purpose.slug())
+    .fetch_optional(executor)
+    .await?;
+    Ok(row.map(|(payload,)| payload.unwrap_or(serde_json::Value::Null)))
+}
+
 pub async fn create_session(
     pool: &PgPool,
     account_id: Uuid,

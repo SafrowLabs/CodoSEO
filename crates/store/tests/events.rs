@@ -171,6 +171,8 @@ async fn queue_depth_counts_waiting_quick_audits_only() {
                 claim_hash: d.as_bytes(),
                 ip_hash: None,
                 limits: quick::Limits::NONE,
+                source: quick::Source::Web,
+                agent_daily_budget: None,
                 previous_ip_hash: None,
             },
         )

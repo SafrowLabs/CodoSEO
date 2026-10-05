@@ -10,17 +10,19 @@
 //! (see [`AgentBackend`]). The route is exempt from the `Origin` check (no cookie reaches it),
 //! and in the cloud rmcp itself refuses a `Host` that isn't this app's (DNS rebinding).
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderValue, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use codoseo_mcp::cloud::{Caller, CloudBackend, CloudMcp};
+use codoseo_mcp::cloud::{AnonBackend, Caller, CloudMcp};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 
+use crate::agent::anon::AnonCaller;
 use crate::agent::auth::{self, ApiCaller};
 use crate::agent::mcp::AgentBackend;
 use crate::config::{Config, Mode};
@@ -30,7 +32,7 @@ use crate::state::AppState;
 pub const PATH: &str = "/mcp";
 
 /// The caller as the middleware resolves it for [`AgentBackend`].
-type McpCaller = Caller<ApiCaller, ()>;
+type McpCaller = Caller<ApiCaller, AnonCaller>;
 
 /// The most a request body may hold: a tool call is a few hundred bytes.
 const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -42,7 +44,7 @@ pub fn routes(state: &AppState) -> Router<AppState> {
 /// `/mcp` in front of `handler` (a test serves one with a faulty backend).
 pub fn router_for<B>(state: &AppState, handler: CloudMcp<B>) -> Router<AppState>
 where
-    B: CloudBackend<Keyed = ApiCaller, Anon = ()> + Clone,
+    B: AnonBackend<Keyed = ApiCaller, Anon = AnonCaller> + Clone,
 {
     let config = StreamableHttpServerConfig::default()
         // No sessions: every request stands alone, so any instance can answer it.
@@ -90,7 +92,13 @@ fn allowed_hosts(config: &Config) -> Vec<String> {
 async fn resolve_caller(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let headers = req.headers();
     let caller: McpCaller = match auth::bearer_key(headers) {
-        Ok(None) if state.config.mode == Mode::Cloud => Caller::Anon(()),
+        Ok(None) if state.config.mode == Mode::Cloud => {
+            let peer = req
+                .extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|c| c.0.ip());
+            Caller::Anon(AnonCaller::from_request(&state, headers, peer))
+        }
         // A key, a bad key, or no key where one is required: `authenticate` says which.
         _ => match auth::authenticate(&state, headers).await {
             Ok(keyed) => Caller::Keyed(keyed),

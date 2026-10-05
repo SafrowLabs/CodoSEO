@@ -3,8 +3,8 @@
 //!
 //! * A caller holding an API key gets the keyed tools ([`crate::cloud::keyed`]): the user's own
 //!   monitored sites, charged to the key's daily allowance.
-//! * A caller without a key (cloud only) gets the no-key tools, which a later task fills in
-//!   (see [`CloudMcp::anon_router`]).
+//! * A caller without a key (cloud only) gets the no-key tools ([`crate::cloud::anon`]): a free
+//!   quick audit of any public site, its results, and `start_monitoring`.
 //!
 //! The web crate decides who is calling, once per HTTP request, and puts a [`Caller`] in the
 //! request's extensions; rmcp copies the request's `http::request::Parts` into every tool
@@ -32,6 +32,7 @@ use rmcp::service::RequestContext;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use super::anon::AnonBackend;
 use super::types::{ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo};
 
 /// Who is calling, as the HTTP layer resolved it for one request. The web crate inserts one into
@@ -110,6 +111,11 @@ pub trait CloudBackend: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Infallible, String>> + Send;
 }
 
+/// How long the no-key `quick_audit` waits for a fresh audit before answering "still running".
+pub const DEFAULT_QUICK_AUDIT_WAIT: Duration = Duration::from_secs(45);
+/// How often it looks at the audit while waiting.
+pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
 /// The longest one tool call may take before the agent is told so. Above the 45 s the no-key
 /// `quick_audit` waits for a fresh audit.
 pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(75);
@@ -122,16 +128,28 @@ pub struct CloudMcp<B: CloudBackend> {
     keyed_tools: ToolRouter<Self>,
     anon_tools: ToolRouter<Self>,
     call_timeout: Duration,
+    pub(super) quick_audit_wait: Duration,
+    pub(super) poll_interval: Duration,
 }
 
-impl<B: CloudBackend> CloudMcp<B> {
+impl<B: AnonBackend> CloudMcp<B> {
     pub fn new(backend: B) -> CloudMcp<B> {
         CloudMcp {
             backend,
             keyed_tools: Self::keyed_router(),
             anon_tools: Self::anon_router(),
             call_timeout: DEFAULT_CALL_TIMEOUT,
+            quick_audit_wait: DEFAULT_QUICK_AUDIT_WAIT,
+            poll_interval: DEFAULT_POLL_INTERVAL,
         }
+    }
+
+    /// How long `quick_audit` waits for a fresh audit (45 s by default) and how often it looks
+    /// while it waits. For tests.
+    pub fn with_quick_audit_wait(mut self, wait: Duration, poll: Duration) -> CloudMcp<B> {
+        self.quick_audit_wait = wait;
+        self.poll_interval = poll;
+        self
     }
 
     /// For tests: a shorter limit than [`DEFAULT_CALL_TIMEOUT`] on one tool call.
@@ -139,14 +157,9 @@ impl<B: CloudBackend> CloudMcp<B> {
         self.call_timeout = timeout;
         self
     }
+}
 
-    /// The no-key tools: `quick_audit`, `get_audit`, `get_issue_urls` and `start_monitoring`.
-    /// Empty until the no-key tier lands; build it here like [`Self::keyed_router`] (a
-    /// `#[tool_router(router = anon_router)]` impl in its own file) and drop this stub.
-    fn anon_router() -> ToolRouter<Self> {
-        ToolRouter::new()
-    }
-
+impl<B: CloudBackend> CloudMcp<B> {
     /// The caller of this request, as the web layer resolved it.
     fn caller<'c>(
         &self,
@@ -164,6 +177,14 @@ impl<B: CloudBackend> CloudMcp<B> {
         match parts.extensions.get::<Caller<B::Keyed, B::Anon>>() {
             Some(Caller::Keyed(who)) => Ok(who),
             _ => Err("This tool needs an API key.".to_owned()),
+        }
+    }
+
+    /// The no-key caller behind a no-key tool call.
+    pub(super) fn anon<'p>(&self, parts: &'p Parts) -> Result<&'p B::Anon, String> {
+        match parts.extensions.get::<Caller<B::Keyed, B::Anon>>() {
+            Some(Caller::Anon(who)) => Ok(who),
+            _ => Err("This tool is only available without an API key.".to_owned()),
         }
     }
 
@@ -193,7 +214,7 @@ pub(super) fn to_json<T: Serialize>(value: &T) -> Result<String, String> {
         .map_err(|_| "Something went wrong on our side. Try again in a moment.".to_owned())
 }
 
-impl<B: CloudBackend> ServerHandler for CloudMcp<B> {
+impl<B: AnonBackend> ServerHandler for CloudMcp<B> {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("codoseo", env!("CARGO_PKG_VERSION")))

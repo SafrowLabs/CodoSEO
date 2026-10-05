@@ -52,6 +52,8 @@ async fn admins_see_the_funnel_the_queue_and_failed_jobs() {
                 claim_hash: d.as_bytes(),
                 ip_hash: None,
                 limits: codoseo_store::quick::Limits::NONE,
+                source: codoseo_store::quick::Source::Web,
+                agent_daily_budget: None,
                 previous_ip_hash: None,
             },
         )

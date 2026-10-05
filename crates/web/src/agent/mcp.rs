@@ -1,15 +1,18 @@
 //! The cloud MCP server's backend: [`CloudBackend`] over the shared [`AgentService`], so a keyed
-//! tool call returns the JSON the REST API returns and is charged to the same daily allowance.
+//! tool call returns the JSON the REST API returns and is charged to the same daily allowance,
+//! and [`AnonBackend`] over [`AnonService`] for the no-key tools.
 //! Errors become the message the agent reads as a tool error (`AgentError::message`, never raw
 //! internal text; quota exhaustion reads the same as over REST).
 
 use std::convert::Infallible;
 
-use codoseo_mcp::cloud::CloudBackend;
 use codoseo_mcp::cloud::types::{
-    ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
+    AuditIssueUrls, ChangesPage, CrawlQueued, IssueUrlsPage, MonitoringRequested, PageInfo,
+    QuickAuditState, SiteHealth, SiteInfo,
 };
+use codoseo_mcp::cloud::{AnonBackend, CloudBackend};
 
+use super::anon::{AnonCaller, AnonService};
 use super::auth::ApiCaller;
 use super::error::AgentError;
 use super::service::{AgentService, Reply};
@@ -45,8 +48,7 @@ fn outcome<T>(reply: Reply<T>) -> Result<T, String> {
 
 impl CloudBackend for AgentBackend {
     type Keyed = ApiCaller;
-    /// The no-key tier has nothing to know about its callers yet.
-    type Anon = ();
+    type Anon = AnonCaller;
 
     async fn list_sites(&self, who: &ApiCaller) -> Result<Vec<SiteInfo>, String> {
         outcome(self.service().list_sites(who).await)
@@ -100,5 +102,39 @@ impl CloudBackend for AgentBackend {
             .await
             .into_result()
             .map_err(tool_error)
+    }
+}
+
+impl AnonBackend for AgentBackend {
+    async fn quick_audit(&self, who: &AnonCaller, url: &str) -> Result<QuickAuditState, String> {
+        AnonService::new(&self.state).quick_audit(who, url).await
+    }
+
+    async fn get_audit(&self, who: &AnonCaller, audit_id: &str) -> Result<QuickAuditState, String> {
+        AnonService::new(&self.state).get_audit(who, audit_id).await
+    }
+
+    async fn audit_issue_urls(
+        &self,
+        who: &AnonCaller,
+        audit_id: &str,
+        check: &str,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<AuditIssueUrls, String> {
+        AnonService::new(&self.state)
+            .audit_issue_urls(who, audit_id, check, limit, offset)
+            .await
+    }
+
+    async fn start_monitoring(
+        &self,
+        who: &AnonCaller,
+        url: &str,
+        email: &str,
+    ) -> Result<MonitoringRequested, String> {
+        AnonService::new(&self.state)
+            .start_monitoring(who, url, email)
+            .await
     }
 }
