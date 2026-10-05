@@ -10,12 +10,14 @@ homepage.workspace = true
 
 [dependencies]
 codoseo-core.workspace = true
+codoseo-notify.workspace = true
 sqlx.workspace = true
 time.workspace = true
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

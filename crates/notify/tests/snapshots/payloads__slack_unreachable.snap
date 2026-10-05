@@ -1,0 +1,29 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: "json(&slack::payload(&down))"
+---
+{
+  "blocks": [
+    {
+      "text": {
+        "text": "We couldn't reach example.com: connection refused",
+        "type": "plain_text"
+      },
+      "type": "header"
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Open in CodoSEO",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://codoseo.com/sites/abc"
+        }
+      ],
+      "type": "actions"
+    }
+  ],
+  "text": "We couldn't reach example.com: connection refused"
+}

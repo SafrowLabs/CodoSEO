@@ -702,10 +702,13 @@ name = "codoseo-notify"
 version = "0.0.1"
 dependencies = [
  "aes-gcm",
+ "axum",
  "base64 0.23.1",
+ "codoseo-core",
  "codoseo-crawler",
  "hex",
  "hmac 0.13.0",
+ "insta",
  "lettre",
  "rand 0.10.3",
  "reqwest",
@@ -716,6 +719,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -723,11 +727,13 @@ name = "codoseo-store"
 version = "0.0.1"
 dependencies = [
  "codoseo-core",
+ "codoseo-notify",
  "futures-util",
  "proptest",
  "serde",
  "serde_json",
  "sqlx",
+ "thiserror",
  "time",
  "tokio",
  "url",

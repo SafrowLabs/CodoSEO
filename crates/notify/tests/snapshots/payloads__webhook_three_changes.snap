@@ -1,0 +1,37 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: "json(&webhook::payload(&changes(3)))"
+---
+{
+  "changes": [
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-0"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-1"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "title_changed",
+      "label": "Title changed",
+      "severity": "notice",
+      "url": "https://example.com/page-2"
+    }
+  ],
+  "crawl_id": "12345678-9abc-def0-1234-56789abcdef0",
+  "dashboard_url": "https://codoseo.com/sites/abc",
+  "event": "changes",
+  "more": 0,
+  "site": "example.com"
+}

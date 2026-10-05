@@ -10,6 +10,7 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+codoseo-core.workspace = true
 codoseo-crawler.workspace = true
 lettre.workspace = true
 aes-gcm.workspace = true
@@ -25,9 +26,12 @@ thiserror.workspace = true
 tracing.workspace = true
 url.workspace = true
 tokio.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["io-util"] }
+axum.workspace = true
+insta.workspace = true
 
 [lints]
 workspace = true

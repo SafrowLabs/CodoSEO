@@ -1,0 +1,45 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: "json(&slack::payload(&changes(400)))"
+---
+{
+  "blocks": [
+    {
+      "text": {
+        "text": "400 changes on example.com",
+        "type": "plain_text"
+      },
+      "type": "header"
+    },
+    {
+      "text": {
+        "text": ":red_circle: *Became noindex* <https://example.com/page-0|example.com/page-0>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-1|example.com/page-1>: 200 → 500\n:large_blue_circle: *Title changed* <https://example.com/page-2|example.com/page-2>: index → noindex\n:red_circle: *Became noindex* <https://example.com/page-3|example.com/page-3>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-4|example.com/page-4>: 200 → 500\n:large_blue_circle: *Title changed* <https://example.com/page-5|example.com/page-5>: index → noindex\n:red_circle: *Became noindex* <https://example.com/page-6|example.com/page-6>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-7|example.com/page-7>: 200 → 500\n:large_blue_circle: *Title changed* <https://example.com/page-8|example.com/page-8>: index → noindex\n:red_circle: *Became noindex* <https://example.com/page-9|example.com/page-9>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-10|example.com/page-10>: 200 → 500\n:large_blue_circle: *Title changed* <https://example.com/page-11|example.com/page-11>: index → noindex\n:red_circle: *Became noindex* <https://example.com/page-12|example.com/page-12>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-13|example.com/page-13>: 200 → 500\n:large_blue_circle: *Title changed* <https://example.com/page-14|example.com/page-14>: index → noindex\n:red_circle: *Became noindex* <https://example.com/page-15|example.com/page-15>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-16|example.com/page-16>: 200 → 500\n:large_blue_circle: *Title changed* <https://example.com/page-17|example.com/page-17>: index → noindex\n:red_circle: *Became noindex* <https://example.com/page-18|example.com/page-18>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-19|example.com/page-19>: 200 → 500",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "and 380 more",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Open in CodoSEO",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://codoseo.com/sites/abc"
+        }
+      ],
+      "type": "actions"
+    }
+  ],
+  "text": "400 changes on example.com"
+}

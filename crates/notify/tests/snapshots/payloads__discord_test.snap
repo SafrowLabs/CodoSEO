@@ -1,0 +1,17 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: "json(&discord::payload(&test))"
+---
+{
+  "allowed_mentions": {
+    "parse": []
+  },
+  "content": "Test notification from CodoSEO for example.com",
+  "embeds": [
+    {
+      "color": 4088797,
+      "title": "example.com",
+      "url": "https://codoseo.com/sites/abc"
+    }
+  ]
+}

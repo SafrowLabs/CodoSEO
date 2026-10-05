@@ -55,3 +55,20 @@ fn the_same_secret_derives_the_same_key() {
     let sealed = ChannelKey::derive("stable").encrypt(b"x");
     assert_eq!(ChannelKey::derive("stable").decrypt(&sealed).unwrap(), b"x");
 }
+
+/// Pins the key derivation and the stored layout: if either changes, targets saved by an earlier
+/// version silently stop decrypting. Generated once with the code as it stands.
+#[test]
+fn a_fixed_ciphertext_decrypts_under_a_fixed_secret() {
+    const CIPHERTEXT_HEX: &str = "de7e0b5114ad4441d5f6400608c67ae448c3a9bbf59d73befe4f2e35985ba11d14594c508f04ce3971fa11c672c18a931434d5f0b8d2337634a6d8cd3dd373d7448583841914c8d18fca88c0050fad17bf";
+    let sealed: Vec<u8> = (0..CIPHERTEXT_HEX.len() / 2)
+        .map(|i| u8::from_str_radix(&CIPHERTEXT_HEX[2 * i..2 * i + 2], 16).unwrap())
+        .collect();
+    let plain = ChannelKey::derive("test-secret")
+        .decrypt(&sealed)
+        .expect("the pinned ciphertext decrypts");
+    assert_eq!(
+        plain,
+        br#"{"url":"https://hooks.example/abc","secret":"s3cr3t"}"#
+    );
+}

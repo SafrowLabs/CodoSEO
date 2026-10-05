@@ -3,6 +3,7 @@
 
 pub mod accounts;
 pub mod auth;
+pub mod channels;
 pub mod crawl_queue;
 pub mod crawls;
 mod dbenum;
