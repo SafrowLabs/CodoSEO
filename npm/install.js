@@ -29,7 +29,14 @@ function download(url, destination, redirects = 0) {
         reject(new Error(`download returned HTTP ${response.statusCode}`));
         return;
       }
-      pipeline(response, fs.createWriteStream(destination, { flags: "wx" })).then(resolve, reject);
+      const output = fs.createWriteStream(destination, { flags: "wx" });
+      // pipeline can reject before an asynchronously opening file has closed.
+      // Wait for close so installer cleanup is safe on Windows as well.
+      const closed = new Promise((done) => output.once("close", done));
+      pipeline(response, output).then(resolve, async (error) => {
+        await closed;
+        reject(error);
+      });
     });
     request.setTimeout(30_000, () => request.destroy(new Error("download timed out")));
     request.on("error", reject);
