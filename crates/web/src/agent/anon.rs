@@ -415,9 +415,10 @@ impl<'a> AnonService<'a> {
         let text = format!(
             "An AI assistant you are working with asked CodoSEO to monitor {domain}.\n\n\
              To confirm, open this link and press the button:\n\n{link}\n\n\
-             CodoSEO then creates your free account, crawls {domain} now and every week, and \
-             emails you when something important breaks. It also shows you an API key once, \
-             which lets your assistant read your site's results.\n\n\
+             CodoSEO then starts weekly monitoring on your free CodoSEO account (one is created \
+             if you don't have one), crawls {domain} now, and emails you when something \
+             important breaks. It also shows you an API key once, which lets your assistant \
+             read your site's results.\n\n\
              The link works once and expires in 24 hours. If you didn't ask for this, ignore \
              this email and nothing happens."
         );
@@ -434,7 +435,9 @@ impl<'a> AnonService<'a> {
             // The answer is the same either way; a broken mail server is for the operator.
             tracing::error!(error = %e, "could not send the start-monitoring link");
         }
-        events::record(
+        // The email is out, so the agent is told it was sent even when this note can't be kept:
+        // an error here would make it ask again and mail the address a second time.
+        if let Err(error) = events::record(
             &state.pool,
             EventKind::EmailGiven,
             None,
@@ -442,7 +445,9 @@ impl<'a> AnonService<'a> {
             Some(json!({ "source": "agent", "domain": domain })),
         )
         .await
-        .map_err(db)?;
+        {
+            tracing::error!(%error, "could not record the email_given event");
+        }
         Ok(MonitoringRequested {
             status: "confirmation_sent".to_owned(),
             domain: domain.clone(),
