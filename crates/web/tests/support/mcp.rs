@@ -48,8 +48,8 @@ impl<'a> Client<'a> {
 
     /// Looks at a waiting audit every `poll` instead of every 50 ms.
     pub fn with_poll(mut self, wait: Duration, poll: Duration) -> Client<'a> {
-        let handler = CloudMcp::new(AgentBackend::new(self.state.clone()))
-            .with_quick_audit_wait(wait, poll);
+        let handler =
+            CloudMcp::new(AgentBackend::new(self.state.clone())).with_quick_audit_wait(wait, poll);
         self.router = codoseo_web::routes::mcp::router_for(&self.state, handler)
             .with_state(self.state.clone());
         self

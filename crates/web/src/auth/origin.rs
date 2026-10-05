@@ -31,8 +31,7 @@ fn under(path: &str, prefix: &str) -> bool {
 pub async fn check_origin(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let unsafe_method = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
     let path = req.uri().path();
-    let exempt =
-        EXEMPT_PATHS.contains(&path) || EXEMPT_PREFIXES.iter().any(|p| under(path, p));
+    let exempt = EXEMPT_PATHS.contains(&path) || EXEMPT_PREFIXES.iter().any(|p| under(path, p));
     if unsafe_method && !exempt && !same_origin(&req, &state.config.origin()) {
         return AppError::Forbidden(
             "This request came from another site, so it was blocked.".to_owned(),

@@ -124,7 +124,9 @@ pub enum StartView {
     },
     /// Unknown, expired or already used. A signed-in visitor gets the settings link instead of
     /// the sign-in button.
-    Expired { signed_in: bool },
+    Expired {
+        signed_in: bool,
+    },
     Done(Box<StartDone>),
 }
 
