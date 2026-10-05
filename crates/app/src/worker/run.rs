@@ -2,14 +2,15 @@
 //! around it ([`worker_loop`]) with Postgres-down backoff and a graceful-shutdown drain.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use codoseo_checks::run_checks;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
-use codoseo_core::output::{Progress, StopReason};
+use codoseo_core::output::{
+    BLOCKED_REASON_PREFIX, Progress, StopReason, UNREACHABLE_REASON_PREFIX,
+};
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_crawler::crawl::crawl;
 use codoseo_diff::{diff, key_pages};
@@ -328,10 +329,11 @@ async fn run_one_crawl(
     let changes = match previous {
         Some(prev) => {
             let curr = codoseo_core::snapshot::Snapshot::from_output(&out);
-            // Starred key pages (`sites.key_pages`) aren't wired up yet; `key_pages` still
-            // promotes the origin and top-20-by-inlinks pages, matching every other caller
-            // (`cli/diff.rs`, `mcp/local.rs`).
-            let key = key_pages(&curr, &HashSet::new());
+            // Key pages: the origin, the top 20 by inlinks and the pages the user starred.
+            let starred = codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
+                .await
+                .map_err(|e| format!("could not load starred pages: {e}"))?;
+            let key = key_pages(&curr, &starred);
             diff(&prev, &curr, &key)
         }
         None => Vec::new(),
@@ -354,8 +356,8 @@ async fn run_one_crawl(
 
 fn stop_reason_message(stop: &StopReason) -> String {
     match stop {
-        StopReason::Unreachable(reason) => format!("site unreachable: {reason}"),
-        StopReason::Blocked(reason) => format!("site blocked our crawler: {reason}"),
+        StopReason::Unreachable(reason) => format!("{UNREACHABLE_REASON_PREFIX}: {reason}"),
+        StopReason::Blocked(reason) => format!("{BLOCKED_REASON_PREFIX}: {reason}"),
         other => format!("{other:?}"),
     }
 }

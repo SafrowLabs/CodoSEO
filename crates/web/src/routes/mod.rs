@@ -3,16 +3,19 @@
 pub mod account;
 pub mod admin;
 pub mod audit;
+pub mod billing;
 pub mod bot;
 pub mod changes;
 pub mod crawls;
 pub mod explorer;
 pub mod export;
 pub mod landing;
+pub mod monitoring;
 pub mod quick;
 pub mod rankorg;
 pub mod search;
 pub mod seo;
+pub mod settings_alerts;
 pub mod sites;
 
 use axum::Router;
@@ -37,6 +40,9 @@ pub fn router() -> Router<AppState> {
         .merge(export::routes())
         .merge(search::routes())
         .merge(quick::routes())
+        .merge(monitoring::routes())
+        .merge(settings_alerts::routes())
+        .merge(billing::routes())
         .merge(admin::routes())
         .merge(rankorg::routes())
         .route("/bot", get(bot::page))

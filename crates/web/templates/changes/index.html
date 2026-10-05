@@ -67,7 +67,7 @@
         <div class="rows">
           {% for r in c.rules %}<div class="row-item" style="grid-template-columns:minmax(0,1fr) auto"><span>{{ r.label }}</span><span class="badge {% if r.instant %}t-accent{% else %}t-muted{% endif %}">{{ r.mode }}</span></div>{% endfor %}
         </div>
-        <div class="card-pad hint" style="padding-top:12px;padding-bottom:14px">Alert channels arrive with monitoring (M7).</div>
+        <div class="card-pad hint" style="padding-top:12px;padding-bottom:14px"><a href="/settings/alerts">Choose what is sent at once, and where</a>.</div>
       </div>
     </div>
   </div>

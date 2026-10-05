@@ -1,0 +1,38 @@
+[package]
+name = "codoseo-notify"
+description = "CodoSEO's outgoing messages: SMTP email, Slack, Discord and signed webhooks, plus channel-target encryption."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+codoseo-core.workspace = true
+codoseo-crawler.workspace = true
+askama.workspace = true
+lettre.workspace = true
+aes-gcm.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hex.workspace = true
+base64.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+url.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util"] }
+axum.workspace = true
+insta.workspace = true
+
+[lints]
+workspace = true

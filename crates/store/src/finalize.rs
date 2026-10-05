@@ -1,11 +1,11 @@
 //! Writing a finished crawl in one transaction: pages and inlinks via `COPY` (batched, so
 //! memory stays flat on a large crawl), one `site_files` row, `changes`, the crawl's own
-//! `done`/summary update, the 2-crawl retention cleanup, and default-rule alert jobs. A
+//! `done`/summary update, the 2-crawl retention cleanup, and the alert planning job. A
 //! failure partway rolls the whole transaction back, so a crawl never ends up half-written.
 
 use std::collections::HashSet;
 
-use codoseo_core::change::{Change, ChangeKind};
+use codoseo_core::change::Change;
 use codoseo_core::output::CrawlOutput;
 use codoseo_core::page::{Indexability, PageRecord};
 use codoseo_core::report::CrawlReport;
@@ -72,7 +72,7 @@ pub async fn finalize(
         sqlx::query(&sql).bind(site_id).execute(&mut *tx).await?;
     }
 
-    enqueue_alert_jobs(&mut tx, crawl_id, changes).await?;
+    enqueue_alert_job(&mut tx, crawl_id, changes).await?;
     record_funnel_event(&mut tx, crawl_id, site_id, report).await?;
 
     tx.commit().await?;
@@ -176,32 +176,25 @@ async fn insert_changes(
     Ok(())
 }
 
-/// Default instant-alert shape from spec section 10 (key page noindex, 4xx/5xx spike, robots.txt
-/// changed, sitemap shrank 10%+). Key-page filtering for `BecameNoindex` needs `sites.key_pages`,
-/// which isn't available here — M7 narrows this once `alert_rules` exist; for now every
-/// `BecameNoindex` change queues an alert job.
-async fn enqueue_alert_jobs(
+/// One `send_alert` planning job for the crawl when it recorded any change. The planner (the
+/// worker's `plan_alert`) matches the changes against the site's rules, so a crawl with 400
+/// changes is still one job. A no-signup audit never alerts: nobody has subscribed to it.
+async fn enqueue_alert_job(
     tx: &mut Transaction<'_, Postgres>,
     crawl_id: Uuid,
     changes: &[Change],
 ) -> Result<(), sqlx::Error> {
-    for (i, c) in changes.iter().enumerate() {
-        let is_default_instant = matches!(
-            c.kind,
-            ChangeKind::BecameNoindex
-                | ChangeKind::ErrorSpike
-                | ChangeKind::RobotsTxtChanged
-                | ChangeKind::SitemapShrank
-        );
-        if !is_default_instant {
-            continue;
-        }
-        let payload = json!({ "crawl_id": crawl_id, "change_index": i });
-        sqlx::query("INSERT INTO jobs (kind, payload) VALUES ('send_alert', $1)")
-            .bind(payload)
-            .execute(&mut **tx)
-            .await?;
+    if changes.is_empty() {
+        return Ok(());
     }
+    sqlx::query(
+        "INSERT INTO jobs (kind, payload) \
+         SELECT 'send_alert', jsonb_build_object('crawl_id', c.id) \
+         FROM crawls c WHERE c.id = $1 AND c.trigger <> 'quick'",
+    )
+    .bind(crawl_id)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 

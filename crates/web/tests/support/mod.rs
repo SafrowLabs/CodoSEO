@@ -128,9 +128,33 @@ impl TestApp {
     }
 
     pub async fn with_config(config: Config) -> TestApp {
+        TestApp::build(config, None, None).await
+    }
+
+    /// Like [`with_config`](Self::with_config), with `mailer` instead of the capturing one
+    /// (`app.mail` then stays empty).
+    pub async fn with_mailer(config: Config, mailer: Mailer) -> TestApp {
+        TestApp::build(config, None, Some(mailer)).await
+    }
+
+    /// Like [`with_config`](Self::with_config), with the client that delivers to Slack, Discord
+    /// and webhooks replaced (tests resolve names without DNS).
+    pub async fn with_notify_http(config: Config, http: codoseo_notify::GuardedHttp) -> TestApp {
+        TestApp::build(config, Some(http), None).await
+    }
+
+    async fn build(
+        config: Config,
+        http: Option<codoseo_notify::GuardedHttp>,
+        mailer: Option<Mailer>,
+    ) -> TestApp {
         let db = TestDb::new().await;
-        let (mailer, mail) = Mailer::capture();
-        let state = AppState::new(db.pool.clone(), config, mailer);
+        let (captured, mail) = Mailer::capture();
+        let mailer = mailer.unwrap_or(captured);
+        let mut state = AppState::new(db.pool.clone(), config, mailer);
+        if let Some(http) = http {
+            state.notify_http = http;
+        }
         let router = codoseo_web::app(state.clone());
         TestApp {
             db,
@@ -363,6 +387,7 @@ pub fn cloud_config_with(extra: &[(&str, &str)]) -> Config {
         "CODOSEO_MODE" => Some("cloud".into()),
         "BASE_URL" => Some("https://codoseo.com".into()),
         "SECRET_KEY" => Some("test-secret".into()),
+        "SMTP_URL" => Some("smtp://127.0.0.1:2525".into()),
         other => extra
             .iter()
             .find(|(n, _)| n == other)

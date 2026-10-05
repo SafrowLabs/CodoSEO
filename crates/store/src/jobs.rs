@@ -73,19 +73,29 @@ impl JobQueue {
         .await
     }
 
-    pub async fn complete(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE jobs SET status = 'done', completed_at = now() WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+    /// Marks the job done, if `worker_id` still holds it. Returns `false` when it doesn't: the
+    /// job was requeued as stale (and may be running elsewhere) or already finished, so this
+    /// late result must not overwrite the current run.
+    pub async fn complete(&self, id: Uuid, worker_id: &str) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(
+            "UPDATE jobs SET status = 'done', completed_at = now() \
+             WHERE id = $1 AND status = 'running' AND claimed_by = $2",
+        )
+        .bind(id)
+        .bind(worker_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() == 1)
     }
 
     /// Backs off `2^attempt` minutes (1, 2, 4, 8, 16 for attempts 1..=5), failing for good once
     /// `attempt >= max_attempts`. Failed jobs are left in place for retention (T4.5) to delete
     /// after 30 days, not deleted here.
-    pub async fn retry(&self, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
-        sqlx::query(
+    ///
+    /// Like [`JobQueue::complete`], only the worker that holds the job can retry it; returns
+    /// whether a row changed.
+    pub async fn retry(&self, id: Uuid, worker_id: &str, error: &str) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(
             "UPDATE jobs SET \
                attempt = attempt + 1, \
                last_error = $2, \
@@ -94,13 +104,35 @@ impl JobQueue {
                run_after = now() + (power(2, attempt) * interval '1 minute'), \
                claimed_by = NULL, \
                claimed_at = NULL \
-             WHERE id = $1",
+             WHERE id = $1 AND status = 'running' AND claimed_by = $3",
         )
         .bind(id)
         .bind(error)
+        .bind(worker_id)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(done.rows_affected() == 1)
+    }
+
+    /// Moves `running` jobs claimed longer than `older_than` ago back to `queued` (the
+    /// dead-worker path) and returns how many moved. It counts as an attempt and backs off like
+    /// [`JobQueue::retry`], so a job that kills its worker every time still ends `failed`.
+    pub async fn requeue_stale(&self, older_than: std::time::Duration) -> Result<u64, sqlx::Error> {
+        let done = sqlx::query(
+            "UPDATE jobs SET \
+               attempt = attempt + 1, \
+               last_error = 'the worker stopped before the job finished', \
+               status = CASE WHEN attempt + 1 >= max_attempts THEN 'failed'::job_status \
+                             ELSE 'queued'::job_status END, \
+               run_after = now() + (power(2, attempt) * interval '1 minute'), \
+               claimed_by = NULL, \
+               claimed_at = NULL \
+             WHERE status = 'running' AND claimed_at < now() - make_interval(secs => $1)",
+        )
+        .bind(older_than.as_secs_f64())
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected())
     }
 }
 

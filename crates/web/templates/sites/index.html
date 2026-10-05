@@ -15,6 +15,7 @@
 {% else %}
 <div class="page">
   <div class="page-head"><h1>Sites</h1>{% if let Some(note) = limit_note %}<span class="chip">{{ note }}</span>{% endif %}</div>
+  {% if stopped_by_plan %}<p class="plan-banner" role="status"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg><span>Some of your sites aren't being monitored because of your plan. <a href="/billing/sites">Choose which sites stay monitored</a>.</span></p>{% endif %}
   <div class="site-cards">
     {% for c in cards %}
       <a class="site-card" href="{{ c.href }}"><span class="avatar">{{ c.initial }}</span><span style="flex:1;min-width:0"><b class="trunc" style="display:block;font-weight:500">{{ c.domain }}</b><span class="faint mono" style="font-size:11.5px">added {{ c.added }}</span></span><svg class="icon go" style="opacity:1;transform:none"><use href="#i-arrow"/></svg></a>

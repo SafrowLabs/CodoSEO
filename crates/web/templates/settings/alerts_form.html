@@ -1,0 +1,22 @@
+<form id="add-channel" class="channel-form" method="post" action="/settings/alerts/channels" hx-disabled-elt="find button[type=submit]">
+  <div class="channel-form-row">
+    <div class="field channel-kind">
+      <label class="label" for="channel-kind">Send to</label>
+      <select class="select" id="channel-kind" name="kind">
+        {% for (value, label) in kinds %}<option value="{{ value }}"{% if *value == kind.as_str() %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field channel-target">
+      <label class="label" for="channel-target">Address or URL</label>
+      <input class="input" id="channel-target" name="target" value="{{ target }}" placeholder="you@example.com or a webhook URL" autocomplete="off" spellcheck="false" required>
+    </div>
+    <div class="field channel-name">
+      <label class="label" for="channel-name">Name <span class="faint">(optional)</span></label>
+      <input class="input" id="channel-name" name="name" value="{{ name }}" maxlength="60" autocomplete="off">
+    </div>
+    <button class="btn btn-primary" type="submit">Add channel</button>
+  </div>
+  {% if let Some(err) = error %}<span class="error-text" role="alert"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</span>{% endif %}
+  <p class="hint">An email address, or the incoming-webhook URL for Slack, Discord or your own endpoint. URLs are stored encrypted and only their host is shown here.</p>
+  {% if upgrade %}<p class="hint upgrade-hint">Slack, Discord and webhooks are on Pro and Agency. {% if upgrade_link %}<a href="/billing">Upgrade to Pro</a>{% else %}<b>Upgrade to Pro</b>{% endif %} to send alerts there; email works on every plan.</p>{% endif %}
+</form>

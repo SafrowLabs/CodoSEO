@@ -41,6 +41,8 @@ pub struct SitesPage {
     pub cards: Vec<SiteCard>,
     pub form: AddSiteForm,
     pub limit_note: Option<String>,
+    /// Cloud only: a site was stopped by the plan, so link to the picker.
+    pub stopped_by_plan: bool,
 }
 
 #[derive(Template)]
@@ -73,11 +75,14 @@ async fn index(State(state): State<AppState>, user: CurrentUser) -> Result<Respo
         can_add: shell.can_add_site,
         first: cards.is_empty(),
     };
+    let stopped_by_plan =
+        state.config.mode == Mode::Cloud && super::billing::has_stopped_sites(&sites);
     Ok(html(&SitesPage {
         shell,
         cards,
         form,
         limit_note,
+        stopped_by_plan,
     })?
     .into_response())
 }
@@ -214,6 +219,7 @@ async fn create(
     .await?;
     match outcome {
         CreateOutcome::Created(site) => {
+            super::settings_alerts::default_rules_for_site(&state, user.id(), site.id).await;
             Ok(Redirect::to(&format!("/s/{}/audit", site.id)).into_response())
         }
         CreateOutcome::LimitReached => over_limit(limit_reached()),

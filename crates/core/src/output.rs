@@ -59,6 +59,34 @@ impl StopReason {
     }
 }
 
+/// Start of a crawl's `failure_reason` when the site never answered (`StopReason::Unreachable`).
+pub const UNREACHABLE_REASON_PREFIX: &str = "site unreachable";
+/// Start of a crawl's `failure_reason` when the site refused our crawler (`StopReason::Blocked`).
+pub const BLOCKED_REASON_PREFIX: &str = "site blocked our crawler";
+
+/// Whose fault a failed crawl was, read back from its stored `failure_reason`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiteFault {
+    /// The site didn't answer.
+    Unreachable,
+    /// The site answered with errors or a challenge page.
+    Blocked,
+}
+
+impl SiteFault {
+    /// `Some` only for the reasons the crawler's stop messages produce; internal failures
+    /// (database errors, memory budget, ...) are ours, not the site's, and give `None`.
+    pub fn from_failure_reason(reason: &str) -> Option<SiteFault> {
+        if reason.starts_with(UNREACHABLE_REASON_PREFIX) {
+            Some(SiteFault::Unreachable)
+        } else if reason.starts_with(BLOCKED_REASON_PREFIX) {
+            Some(SiteFault::Blocked)
+        } else {
+            None
+        }
+    }
+}
+
 /// A snapshot of a running crawl, for progress display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {

@@ -21,6 +21,7 @@ codoseo-crawler.workspace = true
 codoseo-checks.workspace = true
 codoseo-diff.workspace = true
 codoseo-mcp.workspace = true
+codoseo-notify.workspace = true
 codoseo-store.workspace = true
 codoseo-web.workspace = true
 tokio.workspace = true
@@ -36,9 +37,14 @@ rmcp.workspace = true
 dirs.workspace = true
 sqlx.workspace = true
 uuid.workspace = true
+reqwest.workspace = true
+jiff.workspace = true
+time.workspace = true
+xxhash-rust.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true
+axum.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true

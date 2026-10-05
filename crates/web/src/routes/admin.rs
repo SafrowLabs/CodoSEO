@@ -80,6 +80,7 @@ fn label(kind: EventKind) -> &'static str {
         EventKind::FirstFullCrawl => "First full crawl",
         EventKind::ActiveAfter4Weeks => "Active after 4 weeks",
         EventKind::RankorgClick => "RankOrg click",
+        EventKind::ChannelTest => "Channel test",
     }
 }
 

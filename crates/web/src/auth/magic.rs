@@ -187,14 +187,20 @@ pub async fn issue_link(
             ),
         ),
     };
-    state
+    if let Err(e) = state
         .mailer
         .send(Email {
             to: address.to_owned(),
             subject,
             text,
+            html: None,
         })
-        .await;
+        .await
+    {
+        // The page says "if the address is registered we sent a link" either way; a broken mail
+        // server is for the operator to see in the logs, not for the visitor to probe.
+        tracing::error!(error = %e, "could not send the sign-in link");
+    }
     Ok(LinkOutcome::Sent)
 }
 
@@ -246,6 +252,8 @@ pub async fn consume(
         SignInOutcome::SignupsClosed => return Err(signups_closed()),
     };
     let cookie = session::start(&state, account.id).await?;
+    // Opening a link from one of our emails counts as activity for the inactivity check.
+    codoseo_store::accounts::record_email_click(&state.pool, account.id).await?;
 
     // A link from the no-signup audit also attaches the audited site to the account.
     let audit = payload["audit"]

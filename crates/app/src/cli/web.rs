@@ -17,10 +17,27 @@ pub struct WebArgs {
     pub bind: Option<SocketAddr>,
 }
 
+/// The warning for a process running on the built-in development `SECRET_KEY`, if it is.
+/// Every role that stores or reads channel secrets prints it at startup.
+pub fn secret_key_warning(secret_key_set: bool) -> Option<&'static str> {
+    (!secret_key_set).then_some(
+        "warning: SECRET_KEY is not set; using the built-in development key. Set it so \
+         stored channel secrets are protected.",
+    )
+}
+
+/// Prints [`secret_key_warning`] for this process's environment.
+pub fn warn_if_dev_secret_key() {
+    if let Some(warning) = secret_key_warning(std::env::var("SECRET_KEY").is_ok()) {
+        eprintln!("{warning}");
+    }
+}
+
 /// Reads the web configuration and opens a lazy pool, so the web role starts (and serves its
 /// 503 page) even while Postgres is down.
 pub fn prepare(bind: Option<SocketAddr>) -> Result<AppState, CliError> {
     let mut config = Config::from_env().map_err(|e| CliError::msg(e.to_string()))?;
+    warn_if_dev_secret_key();
     if let Some(bind) = bind {
         config.bind = bind;
         if std::env::var("BASE_URL").is_err() {
@@ -32,7 +49,14 @@ pub fn prepare(bind: Option<SocketAddr>) -> Result<AppState, CliError> {
         std::env::var("DATABASE_URL").map_err(|_| CliError::msg("DATABASE_URL is not set"))?;
     let pool = codoseo_web::state::lazy_pool(&database_url)
         .map_err(|e| CliError::msg(format!("invalid DATABASE_URL: {e}")))?;
-    Ok(AppState::new(pool, config, Mailer::Log))
+    let mailer = mailer_for(&config)?;
+    Ok(AppState::new(pool, config, mailer))
+}
+
+/// The mailer for `SMTP_URL` and `MAIL_FROM`; a bad value stops the process at startup.
+pub fn mailer_for(config: &Config) -> Result<Mailer, CliError> {
+    Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from)
+        .map_err(|e| CliError::msg(e.to_string()))
 }
 
 pub async fn serve(state: AppState, shutdown: CancellationToken) -> Outcome {
@@ -80,5 +104,27 @@ pub async fn run(args: WebArgs) -> Outcome {
     let state = prepare(args.bind)?;
     let shutdown = CancellationToken::new();
     cancel_on_signal(shutdown.clone());
-    serve(state, shutdown).await
+    // The scheduler runs in the web role; `CODOSEO_SCHEDULER=off` leaves it to another container.
+    let scheduler = crate::scheduler::spawn(&state.pool, &state.config, &shutdown);
+    let outcome = serve(state, shutdown.clone()).await;
+    shutdown.cancel();
+    if let Some(scheduler) = scheduler {
+        let _ = scheduler.await;
+    }
+    outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_development_key_is_warned_about_only_when_secret_key_is_unset() {
+        assert!(
+            secret_key_warning(false)
+                .unwrap()
+                .contains("SECRET_KEY is not set")
+        );
+        assert_eq!(secret_key_warning(true), None);
+    }
 }

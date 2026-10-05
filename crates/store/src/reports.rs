@@ -75,7 +75,7 @@ impl ResponseBuckets {
 }
 
 /// Parses an enum label read back as text (`kind::text`) into its Rust enum.
-fn from_slug<T: DeserializeOwned>(slug: &str) -> Option<T> {
+pub(crate) fn from_slug<T: DeserializeOwned>(slug: &str) -> Option<T> {
     serde_json::from_value(serde_json::Value::String(slug.to_owned())).ok()
 }
 
@@ -90,7 +90,7 @@ pub async fn changes_for_crawl(
     let rows: Vec<(String, String, Option<String>, String, String)> = sqlx::query_as(
         "SELECT kind::text, severity::text, url, before_value, after_value FROM changes \
          WHERE crawl_id = $1 AND ($2::text IS NULL OR severity::text = $2) \
-         ORDER BY severity, id LIMIT $3",
+         ORDER BY changes.severity, id LIMIT $3",
     )
     .bind(crawl_id)
     .bind(severity.map(|s| enum_slug(&s)))

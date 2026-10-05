@@ -428,7 +428,7 @@ async fn changes_render_the_comparison() {
     assert!(body.contains("spark"), "{body}");
     assert!(body.contains("Key page becomes noindex"), "{body}");
     assert!(
-        body.contains("Alert channels arrive with monitoring (M7)."),
+        body.contains("href=\"/settings/alerts\">Choose what is sent at once"),
         "{body}"
     );
 }

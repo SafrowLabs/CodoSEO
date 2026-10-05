@@ -1,7 +1,7 @@
 //! Daily cleanup: trims old crawl history past each plan's retention window, deletes
-//! unclaimed no-signup audits after 7 days, and clears out expired tokens/sessions and
-//! old failed jobs. Each step is its own statement — these are independent cleanup
-//! passes, not one atomic unit (unlike `finalize`, which must be all-or-nothing).
+//! unclaimed no-signup audits after 7 days, and clears out expired tokens/sessions and old
+//! failed (30 days) and finished (14 days) jobs. Each step is its own statement — these are
+//! independent cleanup passes, not one atomic unit (unlike `finalize`, which must be all-or-nothing).
 
 use codoseo_core::plan::{Plan, PlanLimits};
 use sqlx::PgPool;
@@ -16,6 +16,7 @@ pub struct RetentionReport {
     pub tokens_deleted: u64,
     pub sessions_deleted: u64,
     pub failed_jobs_deleted: u64,
+    pub done_jobs_deleted: u64,
 }
 
 /// Runs every cleanup pass once. `self_hosted_history_days` overrides the self-hosted
@@ -65,12 +66,31 @@ pub async fn run(
     .await?
     .rows_affected();
 
+    // Finished jobs only matter for a few days (a retry, the admin page), except the "Keep
+    // monitoring?" warning job the pause rule reads: it is created when the warning goes out,
+    // the pause comes 7 days later, and a scheduler that was down for another week must still
+    // find it. So a warning job of a Free account that is warned and not yet paused stays.
+    let done_jobs_deleted = sqlx::query(
+        "DELETE FROM jobs j WHERE j.status = 'done' \
+           AND COALESCE(j.completed_at, j.claimed_at, j.created_at) < now() - interval '14 days' \
+           AND NOT (j.kind = 'send_email' \
+                    AND j.payload->>'keep_monitoring_for' IS NOT NULL \
+                    AND EXISTS (SELECT 1 FROM accounts a \
+                                WHERE a.id::text = j.payload->>'keep_monitoring_for' \
+                                  AND a.plan = 'free' AND NOT a.paused \
+                                  AND a.keep_monitoring_sent_at IS NOT NULL))",
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+
     Ok(RetentionReport {
         crawls_trimmed,
         unclaimed_sites_deleted,
         tokens_deleted,
         sessions_deleted,
         failed_jobs_deleted,
+        done_jobs_deleted,
     })
 }
 

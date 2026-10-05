@@ -1,0 +1,14 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: email_snapshot(&down)
+---
+to: owner@example.com
+subject: CodoSEO: We couldn't reach example.com: connection refused
+--- text ---
+We couldn't reach example.com: connection refused
+
+Open in CodoSEO: https://codoseo.com/sites/abc
+
+--- html ---
+<h2 style="font-size:18px">We couldn&#39;t reach example.com: connection refused</h2>
+<p><a href="https://codoseo.com/sites/abc">Open in CodoSEO</a></p>

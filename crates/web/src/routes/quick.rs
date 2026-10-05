@@ -378,7 +378,7 @@ fn start_page(start_url: &str, domain: &str) -> Option<String> {
 
 fn failure_notice(reason: Option<&str>) -> Notice {
     let reason = reason.unwrap_or_default();
-    if reason.starts_with("site blocked our crawler") {
+    if reason.starts_with(codoseo_core::output::BLOCKED_REASON_PREFIX) {
         Notice {
             title: "This site blocked our crawler",
             message: "It answered our requests with errors or a challenge page, so we couldn't \
@@ -386,7 +386,7 @@ fn failure_notice(reason: Option<&str>) -> Notice {
                       try again."
                 .to_owned(),
         }
-    } else if reason.starts_with("site unreachable") {
+    } else if reason.starts_with(codoseo_core::output::UNREACHABLE_REASON_PREFIX) {
         Notice {
             title: "We couldn't reach this site",
             message: "It didn't answer, or the address doesn't exist. Check the address and \
@@ -612,6 +612,11 @@ pub async fn attach_after_login(
         ClaimOutcome::LimitReached(s) => ("limit", s),
         ClaimOutcome::NotFound => ("expired", None),
     };
+    if matches!(how, "attached" | "created")
+        && let Some(s) = &site
+    {
+        super::settings_alerts::default_rules_for_site(state, account.id, s.id).await;
+    }
     events::record(
         &state.pool,
         EventKind::LinkClicked,

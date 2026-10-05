@@ -1,0 +1,29 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: email_snapshot(&changes(3))
+---
+to: owner@example.com
+subject: CodoSEO: 3 changes on example.com
+--- text ---
+3 changes on example.com
+
+[Critical] Became noindex
+  https://example.com/page-0
+  index → noindex
+[Warning] Status changed
+  https://example.com/page-1
+  200 → 500
+[Notice] Title changed
+  https://example.com/page-2
+  index → noindex
+
+Open in CodoSEO: https://codoseo.com/sites/abc
+
+--- html ---
+<h2 style="font-size:18px">3 changes on example.com</h2>
+<ul>
+<li><strong>Became noindex</strong> (critical)<br><a href="https://example.com/page-0">https://example.com/page-0</a><br>index → noindex</li>
+<li><strong>Status changed</strong> (warning)<br><a href="https://example.com/page-1">https://example.com/page-1</a><br>200 → 500</li>
+<li><strong>Title changed</strong> (notice)<br><a href="https://example.com/page-2">https://example.com/page-2</a><br>index → noindex</li>
+</ul>
+<p><a href="https://codoseo.com/sites/abc">Open in CodoSEO</a></p>

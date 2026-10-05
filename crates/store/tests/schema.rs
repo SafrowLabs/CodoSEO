@@ -86,7 +86,7 @@ async fn migrations_apply_and_every_table_accepts_a_row() {
     .expect("insert alert_channel")
     .get(0);
 
-    sqlx::query("INSERT INTO alert_rules (site_id, channel_id, mode) VALUES ($1, $2, 'instant')")
+    sqlx::query("INSERT INTO alert_rules (site_id, change_kind, channel_id, mode) VALUES ($1, 'error_spike', $2, 'instant')")
         .bind(site_id)
         .bind(channel_id)
         .execute(pool)
@@ -131,4 +131,27 @@ async fn migrations_apply_and_every_table_accepts_a_row() {
         .execute(pool)
         .await
         .expect("insert api_key");
+}
+
+#[tokio::test]
+async fn the_jobs_table_has_the_indexes_the_scheduler_reads() {
+    let db = TestDb::new().await;
+    let defs: Vec<(String, String)> =
+        sqlx::query_as("SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'jobs'")
+            .fetch_all(&db.pool)
+            .await
+            .unwrap();
+    let def = |name: &str| {
+        defs.iter()
+            .find(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("no index {name}: {defs:?}"))
+            .1
+            .clone()
+    };
+    let warning = def("jobs_keep_monitoring_idx");
+    assert!(warning.contains("keep_monitoring_for"), "{warning}");
+    assert!(warning.contains("send_email"), "{warning}");
+    let running = def("jobs_running_idx");
+    assert!(running.contains("claimed_at"), "{running}");
+    assert!(running.contains("running"), "{running}");
 }

@@ -18,6 +18,7 @@ codoseo-diff = { path = "crates/diff", version = "0.0.1" }
 codoseo-mcp = { path = "crates/mcp", version = "0.0.1" }
 codoseo-store = { path = "crates/store", version = "0.0.1" }
 codoseo-web = { path = "crates/web", version = "0.0.1" }
+codoseo-notify = { path = "crates/notify", version = "0.0.1" }
 codoseo-testkit = { path = "crates/testkit" }
 url = { version = "2.5.8", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -50,13 +51,18 @@ schemars = "1.1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "7.0.0"
 sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "tls-rustls", "migrate", "time", "uuid"] }
-time = { version = "0.3.55", features = ["serde", "formatting", "macros"] }
+time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macros"] }
 askama = "0.16.1"
 askama_web = { version = "0.16.0", features = ["axum-0.8"] }
 sha2 = "0.11.0"
 rand = "0.10.3"
 base64 = "0.23.1"
 tower = { version = "0.5.3", features = ["util"] }
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "hostname", "tokio1-rustls-tls"] }
+aes-gcm = "0.11.1"
+hmac = "0.13.0"
+hex = "0.4.3"
+jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

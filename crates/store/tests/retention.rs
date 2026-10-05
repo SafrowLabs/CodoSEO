@@ -295,3 +295,115 @@ async fn old_failed_jobs_are_deleted_after_30_days() {
         .unwrap();
     assert_eq!(remaining, 1);
 }
+
+/// A `done` job of `kind` that finished `days` days ago, optionally a "Keep monitoring?" warning
+/// for `warned`.
+async fn seed_done_job(pool: &PgPool, kind: &str, days: i32, warned: Option<Uuid>) {
+    let payload = match warned {
+        Some(id) => serde_json::json!({ "keep_monitoring_for": id }),
+        None => serde_json::json!({}),
+    };
+    sqlx::query(
+        "INSERT INTO jobs (kind, payload, status, created_at, completed_at) \
+         VALUES ($1::job_kind, $2, 'done', now() - make_interval(days => $3), \
+                 now() - make_interval(days => $3))",
+    )
+    .bind(kind)
+    .bind(payload)
+    .bind(days)
+    .execute(pool)
+    .await
+    .expect("insert done job");
+}
+
+async fn job_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM jobs")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn done_jobs_are_deleted_after_14_days() {
+    let db = TestDb::new().await;
+    seed_done_job(&db.pool, "send_alert", 15, None).await;
+    seed_done_job(&db.pool, "send_email", 15, None).await;
+    seed_done_job(&db.pool, "send_alert", 13, None).await;
+    // Queued and running work is never touched, however old.
+    sqlx::query(
+        "INSERT INTO jobs (kind, payload, status, created_at) \
+         VALUES ('cleanup', '{}', 'queued', now() - interval '40 days'), \
+                ('cleanup', '{}', 'running', now() - interval '40 days')",
+    )
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let report = retention::run(&db.pool, None).await.expect("run retention");
+    assert_eq!(report.done_jobs_deleted, 2);
+    assert_eq!(job_count(&db.pool).await, 3);
+}
+
+#[tokio::test]
+async fn a_pending_keep_monitoring_warning_job_outlives_the_14_days() {
+    let db = TestDb::new().await;
+    // The pause rule reads the latest warning job of a warned, unpaused Free account, so that
+    // job stays until the account is paused or has answered.
+    let waiting = seed_account(&db.pool, "free").await;
+    let paused = seed_account(&db.pool, "free").await;
+    let answered = seed_account(&db.pool, "free").await;
+    sqlx::query(
+        "UPDATE accounts SET keep_monitoring_sent_at = now() - interval '20 days' \
+         WHERE id = ANY($1)",
+    )
+    .bind(vec![waiting, paused])
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE accounts SET paused = true WHERE id = $1")
+        .bind(paused)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    for id in [waiting, paused, answered] {
+        seed_done_job(&db.pool, "send_email", 20, Some(id)).await;
+    }
+
+    let report = retention::run(&db.pool, None).await.expect("run retention");
+    assert_eq!(
+        report.done_jobs_deleted, 2,
+        "the paused and the answered account's"
+    );
+    let left: Vec<serde_json::Value> = sqlx::query_scalar("SELECT payload FROM jobs")
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        left,
+        vec![serde_json::json!({ "keep_monitoring_for": waiting })]
+    );
+}
+
+#[tokio::test]
+async fn the_week_long_pause_window_is_inside_the_14_days() {
+    use time::OffsetDateTime;
+    let db = TestDb::new().await;
+    let id = seed_account(&db.pool, "free").await;
+    // Warned 8 days ago, the mail went out then: pause is due, the job is 8 days old.
+    sqlx::query(
+        "UPDATE accounts SET keep_monitoring_sent_at = now() - interval '8 days', \
+                created_at = now() - interval '60 days' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    seed_done_job(&db.pool, "send_email", 8, Some(id)).await;
+
+    retention::run(&db.pool, None).await.expect("run retention");
+    assert_eq!(job_count(&db.pool).await, 1, "the warning is still there");
+    let paused = codoseo_store::schedule::pause_unresponsive(&db.pool, OffsetDateTime::now_utc())
+        .await
+        .unwrap();
+    assert_eq!(paused, 1);
+}

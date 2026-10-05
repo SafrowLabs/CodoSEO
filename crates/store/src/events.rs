@@ -14,6 +14,9 @@ pub enum EventKind {
     FirstFullCrawl,
     ActiveAfter4Weeks,
     RankorgClick,
+    /// A "Send test" on the alerts screen. Not a funnel step (not in [`EventKind::ALL`]); the
+    /// rows are what rate-limits the button.
+    ChannelTest,
 }
 
 impl EventKind {
@@ -38,6 +41,7 @@ impl EventKind {
             EventKind::FirstFullCrawl => "first_full_crawl",
             EventKind::ActiveAfter4Weeks => "active_after_4_weeks",
             EventKind::RankorgClick => "rankorg_click",
+            EventKind::ChannelTest => "channel_test",
         }
     }
 }
@@ -58,6 +62,42 @@ pub async fn record(
         .execute(executor)
         .await?;
     Ok(())
+}
+
+/// Takes one of `limit` allowances per `window_minutes` for this account, by recording an event
+/// of `kind`. `Ok(Err(minutes))` when none is left: the whole minutes until the oldest one in
+/// the window expires (at least 1). The check and the insert share a lock, so concurrent calls
+/// can't both take the last allowance.
+pub async fn take_allowance(
+    pool: &PgPool,
+    kind: EventKind,
+    account_id: Uuid,
+    limit: i64,
+    window_minutes: i64,
+) -> Result<Result<(), i64>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(format!("allowance:{}:{account_id}", kind.as_str()))
+        .execute(&mut *tx)
+        .await?;
+    let (used, wait_secs): (i64, Option<f64>) = sqlx::query_as(
+        "SELECT count(*), \
+                EXTRACT(EPOCH FROM (min(created_at) + make_interval(mins => $3) - now()))::float8 \
+         FROM events WHERE kind = $1 AND account_id = $2 \
+           AND created_at > now() - make_interval(mins => $3)",
+    )
+    .bind(kind.as_str())
+    .bind(account_id)
+    .bind(window_minutes as i32)
+    .fetch_one(&mut *tx)
+    .await?;
+    if used >= limit {
+        let minutes = (wait_secs.unwrap_or(0.0) / 60.0).ceil().max(1.0) as i64;
+        return Ok(Err(minutes));
+    }
+    record(&mut *tx, kind, Some(account_id), None, None).await?;
+    tx.commit().await?;
+    Ok(Ok(()))
 }
 
 /// One step of the funnel over a window.

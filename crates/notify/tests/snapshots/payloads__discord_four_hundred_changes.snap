@@ -1,0 +1,18 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: "json(&discord::payload(&changes(400)))"
+---
+{
+  "allowed_mentions": {
+    "parse": []
+  },
+  "content": "400 changes on example.com",
+  "embeds": [
+    {
+      "color": 15026253,
+      "description": ":red_circle: **Became noindex** <https://example.com/page-0>: index → noindex\n:orange_circle: **Status changed** <https://example.com/page-1>: 200 → 500\n:blue_circle: **Title changed** <https://example.com/page-2>: index → noindex\n:red_circle: **Became noindex** <https://example.com/page-3>: index → noindex\n:orange_circle: **Status changed** <https://example.com/page-4>: 200 → 500\n:blue_circle: **Title changed** <https://example.com/page-5>: index → noindex\n:red_circle: **Became noindex** <https://example.com/page-6>: index → noindex\n:orange_circle: **Status changed** <https://example.com/page-7>: 200 → 500\n:blue_circle: **Title changed** <https://example.com/page-8>: index → noindex\n:red_circle: **Became noindex** <https://example.com/page-9>: index → noindex\n:orange_circle: **Status changed** <https://example.com/page-10>: 200 → 500\n:blue_circle: **Title changed** <https://example.com/page-11>: index → noindex\n:red_circle: **Became noindex** <https://example.com/page-12>: index → noindex\n:orange_circle: **Status changed** <https://example.com/page-13>: 200 → 500\n:blue_circle: **Title changed** <https://example.com/page-14>: index → noindex\n:red_circle: **Became noindex** <https://example.com/page-15>: index → noindex\n:orange_circle: **Status changed** <https://example.com/page-16>: 200 → 500\n:blue_circle: **Title changed** <https://example.com/page-17>: index → noindex\n:red_circle: **Became noindex** <https://example.com/page-18>: index → noindex\n:orange_circle: **Status changed** <https://example.com/page-19>: 200 → 500\n\nand 380 more",
+      "title": "example.com",
+      "url": "https://codoseo.com/sites/abc"
+    }
+  ]
+}

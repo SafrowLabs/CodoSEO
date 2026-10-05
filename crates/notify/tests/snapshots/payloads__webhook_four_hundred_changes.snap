@@ -1,0 +1,173 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: "json(&webhook::payload(&changes(400)))"
+---
+{
+  "changes": [
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-0"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-1"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "title_changed",
+      "label": "Title changed",
+      "severity": "notice",
+      "url": "https://example.com/page-2"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-3"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-4"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "title_changed",
+      "label": "Title changed",
+      "severity": "notice",
+      "url": "https://example.com/page-5"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-6"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-7"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "title_changed",
+      "label": "Title changed",
+      "severity": "notice",
+      "url": "https://example.com/page-8"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-9"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-10"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "title_changed",
+      "label": "Title changed",
+      "severity": "notice",
+      "url": "https://example.com/page-11"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-12"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-13"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "title_changed",
+      "label": "Title changed",
+      "severity": "notice",
+      "url": "https://example.com/page-14"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-15"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-16"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "title_changed",
+      "label": "Title changed",
+      "severity": "notice",
+      "url": "https://example.com/page-17"
+    },
+    {
+      "after": "noindex",
+      "before": "index",
+      "kind": "became_noindex",
+      "label": "Became noindex",
+      "severity": "critical",
+      "url": "https://example.com/page-18"
+    },
+    {
+      "after": "500",
+      "before": "200",
+      "kind": "status_changed",
+      "label": "Status changed",
+      "severity": "warning",
+      "url": "https://example.com/page-19"
+    }
+  ],
+  "crawl_id": "12345678-9abc-def0-1234-56789abcdef0",
+  "dashboard_url": "https://codoseo.com/sites/abc",
+  "event": "changes",
+  "more": 380,
+  "site": "example.com"
+}

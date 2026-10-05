@@ -51,6 +51,22 @@ impl From<SiteRow> for Site {
 pub(crate) const COLUMNS: &str =
     "id, account_id, domain, start_url, schedule, monitoring_active, key_pages, created_at";
 
+/// The starred key pages of a site (URL hashes), for the diff. Empty when the site is gone.
+pub async fn starred_key_pages(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<std::collections::HashSet<u64>, sqlx::Error> {
+    let hashes: Option<Vec<i64>> = sqlx::query_scalar("SELECT key_pages FROM sites WHERE id = $1")
+        .bind(site_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(hashes
+        .unwrap_or_default()
+        .into_iter()
+        .map(hash::from_db)
+        .collect())
+}
+
 /// The account's sites, oldest first (the first one is the default after login).
 pub async fn list_for_account(pool: &PgPool, account_id: Uuid) -> Result<Vec<Site>, sqlx::Error> {
     let rows: Vec<SiteRow> = sqlx::query_as(&format!(

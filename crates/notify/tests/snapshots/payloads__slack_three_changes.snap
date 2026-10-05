@@ -1,0 +1,36 @@
+---
+source: crates/notify/tests/payloads.rs
+expression: "json(&slack::payload(&changes(3)))"
+---
+{
+  "blocks": [
+    {
+      "text": {
+        "text": "3 changes on example.com",
+        "type": "plain_text"
+      },
+      "type": "header"
+    },
+    {
+      "text": {
+        "text": ":red_circle: *Became noindex* <https://example.com/page-0|example.com/page-0>: index → noindex\n:large_orange_circle: *Status changed* <https://example.com/page-1|example.com/page-1>: 200 → 500\n:large_blue_circle: *Title changed* <https://example.com/page-2|example.com/page-2>: index → noindex",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Open in CodoSEO",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://codoseo.com/sites/abc"
+        }
+      ],
+      "type": "actions"
+    }
+  ],
+  "text": "3 changes on example.com"
+}
