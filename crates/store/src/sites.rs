@@ -94,6 +94,22 @@ pub async fn get_for_account(
     Ok(row.map(Site::from))
 }
 
+/// When the scheduler crawls the site next. `None` when it has no slot yet, no schedule or
+/// monitoring is off.
+pub async fn next_crawl_at(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<OffsetDateTime>, sqlx::Error> {
+    let next: Option<Option<OffsetDateTime>> = sqlx::query_scalar(
+        "SELECT CASE WHEN monitoring_active AND schedule IS NOT NULL THEN next_crawl_at END \
+         FROM sites WHERE id = $1",
+    )
+    .bind(site_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(next.flatten())
+}
+
 pub async fn count_for_account(pool: &PgPool, account_id: Uuid) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar("SELECT count(*) FROM sites WHERE account_id = $1")
         .bind(account_id)

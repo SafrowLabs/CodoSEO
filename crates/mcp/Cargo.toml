@@ -16,6 +16,7 @@ codoseo-diff.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
 uuid.workspace = true
+time.workspace = true
 dirs.workspace = true
 tokio.workspace = true
 serde.workspace = true

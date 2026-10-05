@@ -12,13 +12,19 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 /// Exact paths that take machine-to-machine POSTs authenticated some other way (signatures,
-/// API keys): Dodo's billing webhook, which is signed. M8's API adds its own. An exact match,
-/// so nothing under or beside these paths is exempt by accident.
+/// API keys): Dodo's billing webhook, which is signed. An exact match, so nothing under or
+/// beside these paths is exempt by accident.
 const EXEMPT_PATHS: &[&str] = &["/billing/webhook"];
+
+/// The REST API: Bearer-authenticated, it never looks at cookies, so a cross-site form post has
+/// nothing to ride on. Under this prefix (with the slash) only.
+const EXEMPT_PREFIXES: &[&str] = &["/api/v1/"];
 
 pub async fn check_origin(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let unsafe_method = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    let exempt = EXEMPT_PATHS.contains(&req.uri().path());
+    let path = req.uri().path();
+    let exempt =
+        EXEMPT_PATHS.contains(&path) || EXEMPT_PREFIXES.iter().any(|p| path.starts_with(p));
     if unsafe_method && !exempt && !same_origin(&req, &state.config.origin()) {
         return AppError::Forbidden(
             "This request came from another site, so it was blocked.".to_owned(),

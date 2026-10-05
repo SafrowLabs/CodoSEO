@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod admin;
+pub mod api;
 pub mod audit;
 pub mod billing;
 pub mod bot;
@@ -44,6 +45,7 @@ pub fn router() -> Router<AppState> {
         .merge(monitoring::routes())
         .merge(settings_alerts::routes())
         .merge(settings_keys::routes())
+        .merge(api::routes())
         .merge(billing::routes())
         .merge(admin::routes())
         .merge(rankorg::routes())

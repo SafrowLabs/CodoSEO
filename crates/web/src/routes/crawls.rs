@@ -299,7 +299,7 @@ fn allowance_phrase(allowance: ManualAllowance) -> Option<String> {
 
 /// The refusal when the allowance is used up, e.g. "Your Free plan includes 1 manual crawl a
 /// week. The next one is available in 3 days."
-fn limit_message(plan: Plan, allowance: ManualAllowance, wait: Duration) -> String {
+pub(crate) fn limit_message(plan: Plan, allowance: ManualAllowance, wait: Duration) -> String {
     let phrase = allowance_phrase(allowance).unwrap_or_else(|| "manual crawls".to_owned());
     format!(
         "Your {} plan includes {phrase}. The next one is available {}.",

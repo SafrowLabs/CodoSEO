@@ -3,6 +3,7 @@
 
 pub mod backend;
 pub mod cache;
+pub mod cloud;
 pub mod local;
 pub mod tools;
 pub mod types;

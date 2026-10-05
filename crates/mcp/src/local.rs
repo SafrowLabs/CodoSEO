@@ -268,7 +268,8 @@ fn now_secs() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-fn stop_reason_words(stop: &StopReason) -> String {
+/// A stop reason in the words summaries use.
+pub fn stop_reason_words(stop: &StopReason) -> String {
     match stop {
         StopReason::Completed => "completed".to_owned(),
         StopReason::PageLimit => "page limit reached".to_owned(),

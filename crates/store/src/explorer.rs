@@ -282,6 +282,62 @@ pub async fn rows(
     Ok(rows.into_iter().map(GridRow::from).collect())
 }
 
+/// Like [`rows`] without a search term, paged by `offset` instead of a keyset cursor (the API's
+/// `limit` and `offset`), in `id` order.
+pub async fn rows_at(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    filter: PageFilter,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<GridRow>, sqlx::Error> {
+    let rows: Vec<GridRowDb> = sqlx::query_as(&format!(
+        "SELECT p.id, p.url, p.url_hash, p.status, p.indexability::text AS indexability, \
+                p.content_type, p.title, p.word_count, p.depth, p.inlinks, p.response_ms \
+         FROM pages p \
+         WHERE p.crawl_id = $1 AND ({}) \
+         ORDER BY p.id LIMIT $2 OFFSET $3",
+        filter.predicate(),
+    ))
+    .bind(crawl_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(GridRow::from).collect())
+}
+
+/// Up to `per_check` URLs (in `id` order) of the crawl's pages that fail each of `checks`, in one
+/// query. A check with no failing page is missing from the map.
+pub async fn example_urls(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    checks: &[CheckId],
+    per_check: i64,
+) -> Result<std::collections::HashMap<CheckId, Vec<String>>, sqlx::Error> {
+    let bits: Vec<i32> = checks.iter().map(|c| i32::from(*c as u8)).collect();
+    let rows: Vec<(i32, String)> = sqlx::query_as(
+        "SELECT b.bit, e.url FROM unnest($2::int[]) AS b(bit) \
+         CROSS JOIN LATERAL ( \
+             SELECT p.url FROM pages p \
+             WHERE p.crawl_id = $1 AND (p.issues & (1::bigint << b.bit)) <> 0 \
+             ORDER BY p.id LIMIT $3) e \
+         ORDER BY b.bit",
+    )
+    .bind(crawl_id)
+    .bind(&bits)
+    .bind(per_check)
+    .fetch_all(pool)
+    .await?;
+    let mut out: std::collections::HashMap<CheckId, Vec<String>> = Default::default();
+    for (bit, url) in rows {
+        if let Some(check) = u8::try_from(bit).ok().and_then(CheckId::from_bit) {
+            out.entry(check).or_default().push(url);
+        }
+    }
+    Ok(out)
+}
+
 /// `(matching, total)`: how many of the crawl's pages match `filter` and `q`, and how many
 /// pages the crawl has.
 pub async fn match_count(
