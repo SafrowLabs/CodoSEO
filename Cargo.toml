@@ -51,7 +51,7 @@ schemars = "1.1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "7.0.0"
 sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "tls-rustls", "migrate", "time", "uuid"] }
-time = { version = "0.3.55", features = ["serde", "formatting", "macros"] }
+time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macros"] }
 askama = "0.16.1"
 askama_web = { version = "0.16.0", features = ["axum-0.8"] }
 sha2 = "0.11.0"

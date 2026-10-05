@@ -190,7 +190,9 @@ pub async fn handle_event(
 
     if parse_plan(&account.plan) == Plan::SelfHosted {
         tx.commit().await?;
-        return Ok(Outcome::Unchanged("self-hosted accounts have no subscription"));
+        return Ok(Outcome::Unchanged(
+            "self-hosted accounts have no subscription",
+        ));
     }
     if account.billing_updated_at.is_some_and(|last| ev.at < last) {
         tx.commit().await?;
@@ -301,7 +303,9 @@ async fn resolve_account(
 pub enum SetMonitored {
     Saved,
     /// More sites than the plan allows.
-    TooMany { max: u32 },
+    TooMany {
+        max: u32,
+    },
     /// One of the ids isn't a site of this account.
     UnknownSite,
 }
@@ -314,10 +318,11 @@ pub async fn set_monitored(
     keep: &[Uuid],
 ) -> Result<SetMonitored, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    let plan: String = sqlx::query_scalar("SELECT plan::text FROM accounts WHERE id = $1 FOR UPDATE")
-        .bind(account_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let plan: String =
+        sqlx::query_scalar("SELECT plan::text FROM accounts WHERE id = $1 FOR UPDATE")
+            .bind(account_id)
+            .fetch_one(&mut *tx)
+            .await?;
     let keep: Vec<Uuid> = keep
         .iter()
         .copied()

@@ -12,6 +12,7 @@ use codoseo_store::sites::Site;
 use uuid::Uuid;
 
 use crate::auth::CurrentUser;
+use crate::config::Mode;
 use crate::error::AppError;
 use crate::fmt;
 use crate::state::AppState;
@@ -26,6 +27,7 @@ pub enum Screen {
     Sites,
     Account,
     Alerts,
+    Billing,
     Admin,
 }
 
@@ -39,6 +41,7 @@ impl Screen {
             Screen::Sites => "Sites",
             Screen::Account => "Account",
             Screen::Alerts => "Alerts",
+            Screen::Billing => "Billing",
             Screen::Admin => "Admin",
         }
     }
@@ -183,32 +186,47 @@ impl Shell {
                 )],
             });
         }
+        let mut account_items = vec![
+            workspace_item(
+                "Alerts",
+                "/settings/alerts",
+                screen == Screen::Alerts,
+                "",
+                "i-bell",
+            ),
+            NavItem {
+                soon: true,
+                ..workspace_item("Schedule", "#", false, "", "i-calendar")
+            },
+        ];
+        // Billing exists on the cloud only; a free account is nudged toward the upgrade.
+        if state.config.mode == Mode::Cloud {
+            let mut billing = workspace_item(
+                "Billing",
+                "/billing",
+                screen == Screen::Billing,
+                "",
+                "i-card",
+            );
+            if user.account.plan == Plan::Free {
+                billing.count = "upgrade".to_owned();
+            }
+            account_items.push(billing);
+        }
+        account_items.push(workspace_item(
+            "Settings",
+            "/account",
+            screen == Screen::Account,
+            "G S",
+            "i-settings",
+        ));
         nav.push(NavGroup {
             title: if site.is_some() {
                 "WORKSPACE"
             } else {
                 "ACCOUNT"
             },
-            items: vec![
-                workspace_item(
-                    "Alerts",
-                    "/settings/alerts",
-                    screen == Screen::Alerts,
-                    "",
-                    "i-bell",
-                ),
-                NavItem {
-                    soon: true,
-                    ..workspace_item("Schedule", "#", false, "", "i-calendar")
-                },
-                workspace_item(
-                    "Settings",
-                    "/account",
-                    screen == Screen::Account,
-                    "G S",
-                    "i-settings",
-                ),
-            ],
+            items: account_items,
         });
 
         let sites = sites

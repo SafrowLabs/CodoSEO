@@ -4,6 +4,7 @@
 pub mod abuse;
 pub mod assets;
 pub mod auth;
+pub mod billing;
 pub mod config;
 pub mod error;
 pub mod fmt;

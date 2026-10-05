@@ -11,15 +11,14 @@ use url::Url;
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Paths that take machine-to-machine POSTs authenticated some other way (signatures, API
-/// keys). Empty in M5; M7's billing webhook and M8's API add theirs here.
-const EXEMPT_PREFIXES: &[&str] = &[];
+/// Exact paths that take machine-to-machine POSTs authenticated some other way (signatures,
+/// API keys): Dodo's billing webhook, which is signed. M8's API adds its own. An exact match,
+/// so nothing under or beside these paths is exempt by accident.
+const EXEMPT_PATHS: &[&str] = &["/billing/webhook"];
 
 pub async fn check_origin(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let unsafe_method = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    let exempt = EXEMPT_PREFIXES
-        .iter()
-        .any(|p| req.uri().path().starts_with(p));
+    let exempt = EXEMPT_PATHS.contains(&req.uri().path());
     if unsafe_method && !exempt && !same_origin(&req, &state.config.origin()) {
         return AppError::Forbidden(
             "This request came from another site, so it was blocked.".to_owned(),

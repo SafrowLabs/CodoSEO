@@ -101,7 +101,10 @@ async fn an_active_subscription_sets_the_plan_expiry_ids_and_daily_schedules() {
     assert_eq!(plan, "pro");
     // next billing date plus three days of grace
     assert_eq!(expires, Some(at(33)));
-    let info = billing::account_billing(&db.pool, id).await.unwrap().unwrap();
+    let info = billing::account_billing(&db.pool, id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(info.customer_id.as_deref(), Some("cus_1"));
     assert_eq!(info.subscription_id.as_deref(), Some("sub_1"));
     assert_eq!(info.updated_at, Some(at(0)));
@@ -387,11 +390,16 @@ async fn the_owner_picks_which_sites_stay_monitored() {
 
     let outcome = billing::set_monitored(&db.pool, id, &[a, b]).await.unwrap();
     assert_eq!(outcome, SetMonitored::TooMany { max: 1 });
-    assert!(site_state(&db, c).await.0, "a refused change changes nothing");
+    assert!(
+        site_state(&db, c).await.0,
+        "a refused change changes nothing"
+    );
 
     let other = account(&db, "bo@example.test", "free").await;
     let theirs = site(&db, other, "theirs.test", 5, "weekly").await;
-    let outcome = billing::set_monitored(&db.pool, id, &[theirs]).await.unwrap();
+    let outcome = billing::set_monitored(&db.pool, id, &[theirs])
+        .await
+        .unwrap();
     assert_eq!(outcome, SetMonitored::UnknownSite);
     assert!(site_state(&db, theirs).await.0);
 }

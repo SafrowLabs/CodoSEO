@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use codoseo_core::plan::Plan;
 use url::Url;
 
 /// `CODOSEO_MODE`: self-hosted (the default) or the codoseo.com cloud.
@@ -29,6 +30,43 @@ pub struct TurnstileConfig {
     pub verify_url: Url,
 }
 
+/// Dodo Payments billing (cloud only). All four keys are needed; with any missing, billing is
+/// off: the billing pages say so and checkout is disabled.
+#[derive(Debug, Clone)]
+pub struct DodoConfig {
+    /// Bearer token for the Dodo API (`DODO_API_KEY`).
+    pub api_key: String,
+    /// `whsec_<base64 key>` the webhooks are signed with (`DODO_WEBHOOK_SECRET`).
+    pub webhook_secret: String,
+    pub product_pro: String,
+    pub product_agency: String,
+    /// `https://test.dodopayments.com` or `https://live.dodopayments.com` (`DODO_ENV`), or
+    /// `DODO_API_URL` when set (tests point it at a fake).
+    pub api_url: Url,
+}
+
+impl DodoConfig {
+    /// The plan a Dodo product sells, or `None` for a product that isn't ours.
+    pub fn plan_for_product(&self, product_id: &str) -> Option<Plan> {
+        if product_id == self.product_pro {
+            Some(Plan::Pro)
+        } else if product_id == self.product_agency {
+            Some(Plan::Agency)
+        } else {
+            None
+        }
+    }
+
+    /// The Dodo product that sells `plan`.
+    pub fn product_for(&self, plan: Plan) -> Option<&str> {
+        match plan {
+            Plan::Pro => Some(&self.product_pro),
+            Plan::Agency => Some(&self.product_agency),
+            Plan::Free | Plan::SelfHosted => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub mode: Mode,
@@ -53,6 +91,8 @@ pub struct Config {
     pub admin_emails: Vec<String>,
     /// Where RankOrg links go (`RANKORG_URL`).
     pub rankorg_url: Url,
+    /// Billing through Dodo Payments; `None` in self-hosted mode or when keys are missing.
+    pub billing: Option<DodoConfig>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -154,6 +194,8 @@ impl Config {
                     reason: e.to_string(),
                 })?;
 
+        let billing = dodo_from(&get, mode)?;
+
         Ok(Config {
             mode,
             base_url,
@@ -168,6 +210,7 @@ impl Config {
                 .unwrap_or_else(|| "CF-Connecting-IP".to_owned()),
             admin_emails,
             rankorg_url,
+            billing,
         })
     }
 
@@ -187,10 +230,85 @@ impl Config {
     }
 }
 
+fn dodo_from(
+    get: &impl Fn(&str) -> Option<String>,
+    mode: Mode,
+) -> Result<Option<DodoConfig>, ConfigError> {
+    use base64::Engine as _;
+
+    let (Some(api_key), Some(webhook_secret), Some(product_pro), Some(product_agency)) = (
+        get("DODO_API_KEY"),
+        get("DODO_WEBHOOK_SECRET"),
+        get("DODO_PRODUCT_PRO"),
+        get("DODO_PRODUCT_AGENCY"),
+    ) else {
+        return Ok(None);
+    };
+    if mode != Mode::Cloud {
+        return Ok(None);
+    }
+    let invalid = |name, reason: &str| ConfigError::Invalid {
+        name,
+        reason: reason.to_owned(),
+    };
+    let key = webhook_secret
+        .trim()
+        .strip_prefix("whsec_")
+        .ok_or_else(|| {
+            invalid(
+                "DODO_WEBHOOK_SECRET",
+                "expected the whsec_ secret from Dodo",
+            )
+        })?;
+    base64::engine::general_purpose::STANDARD
+        .decode(key)
+        .map_err(|_| invalid("DODO_WEBHOOK_SECRET", "the key after whsec_ is not base64"))?;
+    let api_url = match get("DODO_API_URL") {
+        Some(v) => v,
+        None => match get("DODO_ENV").as_deref() {
+            None | Some("test") => "https://test.dodopayments.com".to_owned(),
+            Some("live") => "https://live.dodopayments.com".to_owned(),
+            Some(other) => {
+                return Err(ConfigError::Invalid {
+                    name: "DODO_ENV",
+                    reason: format!("expected test or live, got {other:?}"),
+                });
+            }
+        },
+    };
+    Ok(Some(DodoConfig {
+        api_key,
+        webhook_secret: webhook_secret.trim().to_owned(),
+        product_pro,
+        product_agency,
+        api_url: Url::parse(&api_url).map_err(|e| ConfigError::Invalid {
+            name: "DODO_API_URL",
+            reason: e.to_string(),
+        })?,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    const CLOUD: [(&str, &str); 3] = [
+        ("CODOSEO_MODE", "cloud"),
+        ("BASE_URL", "https://codoseo.com"),
+        ("SECRET_KEY", "k"),
+    ];
+    const DODO: [(&str, &str); 4] = [
+        ("DODO_API_KEY", "key_1"),
+        ("DODO_WEBHOOK_SECRET", "whsec_c2VjcmV0"),
+        ("DODO_PRODUCT_PRO", "pdt_pro"),
+        ("DODO_PRODUCT_AGENCY", "pdt_agency"),
+    ];
+
+    fn cloud_with(extra: &[(&str, &str)]) -> Result<Config, ConfigError> {
+        let all: Vec<_> = CLOUD.iter().chain(extra.iter()).copied().collect();
+        cfg(&all)
+    }
 
     fn cfg(pairs: &[(&str, &str)]) -> Result<Config, ConfigError> {
         let map: HashMap<String, String> = pairs
@@ -302,5 +420,70 @@ mod tests {
                 .github
                 .is_some()
         );
+    }
+
+    #[test]
+    fn billing_needs_all_four_keys_and_the_cloud() {
+        let d = cloud_with(&DODO).unwrap().billing.expect("configured");
+        assert_eq!(d.api_key, "key_1");
+        assert_eq!(d.plan_for_product("pdt_pro"), Some(Plan::Pro));
+        assert_eq!(d.plan_for_product("pdt_agency"), Some(Plan::Agency));
+        assert_eq!(d.plan_for_product("pdt_other"), None);
+        assert_eq!(d.product_for(Plan::Pro), Some("pdt_pro"));
+        assert_eq!(d.product_for(Plan::Free), None);
+        for skip in 0..DODO.len() {
+            let some: Vec<_> = DODO
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != skip)
+                .map(|(_, kv)| *kv)
+                .collect();
+            assert!(
+                cloud_with(&some).unwrap().billing.is_none(),
+                "without {skip}"
+            );
+        }
+        // Self-hosted never bills, even with every key set.
+        assert!(cfg(&DODO).unwrap().billing.is_none());
+    }
+
+    #[test]
+    fn dodo_runs_against_test_mode_unless_told_otherwise() {
+        let url = |extra: &[(&str, &str)]| {
+            let all: Vec<_> = DODO.iter().chain(extra.iter()).copied().collect();
+            cloud_with(&all)
+                .unwrap()
+                .billing
+                .unwrap()
+                .api_url
+                .to_string()
+        };
+        assert_eq!(url(&[]), "https://test.dodopayments.com/");
+        assert_eq!(
+            url(&[("DODO_ENV", "live")]),
+            "https://live.dodopayments.com/"
+        );
+        assert_eq!(
+            url(&[
+                ("DODO_ENV", "live"),
+                ("DODO_API_URL", "http://127.0.0.1:9/")
+            ]),
+            "http://127.0.0.1:9/"
+        );
+        let bad: Vec<_> = DODO
+            .iter()
+            .chain([("DODO_ENV", "prod")].iter())
+            .copied()
+            .collect();
+        assert!(cloud_with(&bad).is_err());
+    }
+
+    #[test]
+    fn the_webhook_secret_must_be_a_whsec_key() {
+        let mut keys = DODO.to_vec();
+        keys[1] = ("DODO_WEBHOOK_SECRET", "not-a-secret");
+        assert!(cloud_with(&keys).is_err());
+        keys[1] = ("DODO_WEBHOOK_SECRET", "whsec_%%%");
+        assert!(cloud_with(&keys).is_err());
     }
 }

@@ -870,3 +870,26 @@ body.solo { overflow: auto; }
   .channel-actions { width: 100%; }
   .channel-kind { flex: 1 1 100%; }
 }
+
+/* ── Billing ────────────────────────────────────────── */
+
+.plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.plan-card.is-current { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
+.plan-features { list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.plan-features li { display: flex; align-items: flex-start; gap: 8px; }
+.plan-features .icon { flex: none; margin-top: 3px; color: var(--ok); }
+.callout-error { border-color: color-mix(in oklab, var(--err) 45%, var(--line)); background: var(--err-soft); }
+.plan-banner { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--warn-bar) 55%, var(--line)); border-radius: var(--r); background: var(--warn-bg); color: var(--warn); }
+.plan-banner .icon { flex: none; margin-top: 3px; }
+.plan-banner a { text-decoration: underline; }
+.page > .plan-banner { margin-bottom: 16px; }
+.site-picks { display: grid; }
+.site-pick { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-top: 1px solid var(--line-faint); cursor: pointer; font-size: 13.5px; }
+.site-pick b { font-weight: 500; }
+.site-pick .faint { margin-left: auto; white-space: nowrap; }
+.site-pick:hover { background: var(--surface-hover); }
+@media (max-width: 767px) {
+  .plans { grid-template-columns: 1fr; }
+  .site-pick { flex-wrap: wrap; }
+  .site-pick .faint { margin-left: 30px; flex-basis: 100%; }
+}
