@@ -100,6 +100,12 @@ impl TryFrom<Row> for ExportRow {
     }
 }
 
+/// The `statement_timeout` an export batch runs under. The web role is created with a short one
+/// (5 s, see `deploy/postgres-role.sql`) so a stuck request query cannot hold a connection;
+/// a batch of a 50,000-page export, filtered or searched on a busy server, is a legitimate
+/// exception, so each batch lifts the limit for its own transaction only (`SET LOCAL`).
+pub const BATCH_STATEMENT_TIMEOUT: &str = "120s";
+
 /// Up to `limit` pages of the crawl with `id > after`, in `id` order, matching `filter` and,
 /// when given, `q` (case-insensitive, anywhere in the URL or title, wildcards literal). An
 /// empty batch means the export is done.
@@ -123,12 +129,19 @@ pub async fn batch(
          ORDER BY p.id LIMIT $4",
         filter.predicate()
     );
+    let mut tx = pool.begin().await?;
+    sqlx::query(&format!(
+        "SET LOCAL statement_timeout = '{BATCH_STATEMENT_TIMEOUT}'"
+    ))
+    .execute(&mut *tx)
+    .await?;
     let rows: Vec<Row> = sqlx::query_as(&sql)
         .bind(crawl_id)
         .bind(after)
         .bind(q.map(contains_pattern))
         .bind(limit)
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await?;
+    tx.commit().await?;
     rows.into_iter().map(ExportRow::try_from).collect()
 }

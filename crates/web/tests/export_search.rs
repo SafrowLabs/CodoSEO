@@ -363,6 +363,92 @@ async fn export_of_50k_pages_streams_in_bounded_frames() {
     assert!(largest <= 1 << 20, "largest frame {largest} bytes");
 }
 
+/// Production's web role has `statement_timeout = 5s` (deploy/postgres-role.sql). This runs the
+/// export on a pool whose sessions have a 1 s timeout, makes every batch wait about 2 s (another
+/// session holds an exclusive lock on `pages`) and reads the body slowly, as a slow client does.
+/// The export must still complete: it lifts the timeout for its own queries.
+#[tokio::test]
+async fn export_completes_under_a_short_statement_timeout_with_a_slow_database_and_client() {
+    use std::time::Duration;
+
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+
+    const PAGES: i32 = 2500;
+    let app = TestApp::new().await;
+    let (account, cookie) = app.login("a@x.com").await;
+    let site = app.site(&account, "slow.example").await;
+    let crawl_id: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, started_at, finished_at) \
+         VALUES ($1, $2, 'manual', 2, 'done', now() - interval '5 minutes', now()) RETURNING id",
+    )
+    .bind(site.id)
+    .bind(&site.domain)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pages (crawl_id, site_id, url, url_hash, status, response_ms, size_bytes, \
+           content_type, depth, in_sitemap, indexability, title, h1, word_count, inlinks, issues) \
+         SELECT $1, $2, 'https://slow.example/p/' || g, g, 200, 90, 18000, 'text/html', 2, \
+           true, 'indexable', 'Page ' || g, jsonb_build_array('H ' || g), 480, 3, 0 \
+         FROM generate_series(1, $3) g",
+    )
+    .bind(crawl_id)
+    .bind(site.id)
+    .bind(PAGES)
+    .execute(app.pool())
+    .await
+    .unwrap();
+
+    // The app's own sessions get the production web role's kind of limit, 1 s here.
+    let options: PgConnectOptions = app.db.url.parse::<PgConnectOptions>().unwrap();
+    let limited = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_with(options.options([("statement_timeout", "1000")]))
+        .await
+        .unwrap();
+    let state = codoseo_web::AppState::new(
+        limited,
+        (*app.state.config).clone(),
+        codoseo_web::auth::mailer::Mailer::Log,
+    );
+    let router = codoseo_web::app(state);
+
+    // Every read of `pages` now waits for this transaction.
+    let mut lock = app.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE pages IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        lock.commit().await.unwrap();
+    });
+
+    let req = Request::get(format!("/s/{}/export.csv", site.id))
+        .header(header::COOKIE, &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = router.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let mut body = res.into_body().into_data_stream();
+    let (mut frames, mut records) = (0, 0);
+    while let Some(frame) = body.next().await {
+        let frame = frame.expect("the export must not be cut off by statement_timeout");
+        frames += 1;
+        records += csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(&frame[..])
+            .records()
+            .count();
+        // A slow client: longer than the timeout between frames.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+    }
+    release.await.unwrap();
+    assert_eq!(records, PAGES as usize + 1, "header plus one row per page");
+    assert!(frames >= 3, "{frames} frames");
+}
+
 // ── ⌘K search ────────────────────────────────────────────
 
 /// The `href`s of the returned palette items, in order.

@@ -23,6 +23,10 @@
 -- The limits add up to 15, which is the most CodoSEO may take from a shared server whatever
 -- the deployment does.
 --
+-- The 5 second limit suits request queries. The CSV export is the one deliberate exception: it
+-- reads in batches of 1,000 rows, and each batch lifts the limit for its own transaction
+-- (SET LOCAL statement_timeout), so a large or filtered export is not cancelled.
+--
 -- codoseo_web is not a member of codoseo. It gets data access only: SELECT, INSERT, UPDATE and
 -- DELETE on every table, and use of every sequence, in the public schema, including tables the
 -- migrations add later (default privileges). It cannot create, alter or drop anything, so a
