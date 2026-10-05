@@ -400,6 +400,15 @@ async fn create(
     if email_only && kind != ChannelKind::Email {
         return Ok(Err(Refusal::Limit(UPGRADE.to_owned())));
     }
+    let held = channels::count_for_account(&state.pool, user.id())
+        .await
+        .map_err(AppError::internal)?;
+    if held >= channels::MAX_CHANNELS_PER_ACCOUNT {
+        return Ok(Err(Refusal::Limit(format!(
+            "You can have up to {} alert channels. Delete one you don't use to add another.",
+            channels::MAX_CHANNELS_PER_ACCOUNT
+        ))));
+    }
     let raw = form.target.trim();
     let mut secret = None;
     let target = match kind {

@@ -43,11 +43,32 @@ async fn state(app: &TestApp, id: Uuid) -> (bool, Option<OffsetDateTime>, Option
 }
 
 #[tokio::test]
-async fn the_resume_link_turns_monitoring_back_on_once() {
+async fn opening_the_resume_link_only_asks_and_changes_nothing() {
     let app = TestApp::with_config(cloud_config()).await;
     let id = paused_account(&app, "resume-token").await;
 
-    let res = app.get("/monitoring/resume/resume-token", None).await;
+    // A mail scanner may open the link any number of times.
+    for _ in 0..3 {
+        let res = app.get("/monitoring/resume/resume-token", None).await;
+        assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+        assert!(res.body.contains("Keep monitoring"), "{}", res.body);
+        assert!(
+            res.body
+                .contains(r#"action="/monitoring/resume/resume-token""#)
+                && res.body.contains(r#"method="post""#),
+            "a form that posts back: {}",
+            res.body
+        );
+        assert!(!res.body.contains("Monitoring is back on"));
+        let (paused, sent, click) = state(&app, id).await;
+        assert!(
+            paused && sent.is_some() && click.is_none(),
+            "GET changed state"
+        );
+    }
+
+    // The button consumes the token, once, without signing anyone in.
+    let res = app.post("/monitoring/resume/resume-token", "", None).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
     assert!(res.body.contains("Monitoring is back on"));
     assert!(res.body.contains(r#"href="/""#), "a link to the dashboard");
@@ -64,11 +85,31 @@ async fn the_resume_link_turns_monitoring_back_on_once() {
         .execute(app.pool())
         .await
         .unwrap();
-    let again = app.get("/monitoring/resume/resume-token", None).await;
+    let again = app.post("/monitoring/resume/resume-token", "", None).await;
     assert_eq!(again.status, StatusCode::GONE);
     assert!(again.body.contains("expired or was already used"));
     assert!(again.body.contains("/login"));
     assert!(state(&app, id).await.0, "a spent token changes nothing");
+    // And a GET of the spent link no longer offers the button.
+    let page = app.get("/monitoring/resume/resume-token", None).await;
+    assert_eq!(page.status, StatusCode::GONE);
+    assert!(page.body.contains("expired or was already used"));
+}
+
+#[tokio::test]
+async fn a_cross_origin_post_cannot_resume() {
+    let app = TestApp::with_config(cloud_config()).await;
+    let id = paused_account(&app, "resume-token").await;
+    let res = app
+        .post_with_headers(
+            "/monitoring/resume/resume-token",
+            "",
+            None,
+            &[("origin", "https://evil.example")],
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN);
+    assert!(state(&app, id).await.0, "still paused");
 }
 
 #[tokio::test]
@@ -96,9 +137,11 @@ async fn a_bad_expired_or_foreign_token_gets_a_friendly_page() {
     .await
     .unwrap();
     for token in ["nonsense", "old", "magic", "%20", "a".repeat(500).as_str()] {
-        let res = app.get(&format!("/monitoring/resume/{token}"), None).await;
-        assert_eq!(res.status, StatusCode::GONE, "{token}: {}", res.body);
-        assert!(res.body.contains("expired or was already used"));
+        let path = format!("/monitoring/resume/{token}");
+        for res in [app.get(&path, None).await, app.post(&path, "", None).await] {
+            assert_eq!(res.status, StatusCode::GONE, "{token}: {}", res.body);
+            assert!(res.body.contains("expired or was already used"));
+        }
     }
     assert!(state(&app, id).await.0, "still paused");
 }

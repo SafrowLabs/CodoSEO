@@ -118,6 +118,17 @@ pub async fn create(
     Ok(id)
 }
 
+/// Most channels one account may hold (its own address included).
+pub const MAX_CHANNELS_PER_ACCOUNT: i64 = 10;
+
+/// How many channels the account has.
+pub async fn count_for_account(pool: &PgPool, account_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT count(*) FROM alert_channels WHERE account_id = $1")
+        .bind(account_id)
+        .fetch_one(pool)
+        .await
+}
+
 /// The account's channels, default first. A target that can't be decrypted (wrong `SECRET_KEY`)
 /// still lists, with a placeholder instead of the target.
 pub async fn list_for_account(

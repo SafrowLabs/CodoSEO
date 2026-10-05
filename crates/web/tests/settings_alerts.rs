@@ -708,6 +708,35 @@ async fn a_cross_origin_post_is_rejected() {
     );
 }
 
+// ---- the channel cap -------------------------------------------------------------------------
+
+#[tokio::test]
+async fn an_account_holds_at_most_ten_channels() {
+    let app = self_hosted().await;
+    let (account, cookie) = app.login("owner@example.com").await;
+    // Opening the page creates the default email channel: nine more make ten.
+    app.get("/settings/alerts", Some(&cookie)).await;
+    for n in 0..9 {
+        let res = add_channel(&app, &cookie, "email", &format!("extra{n}@example.com")).await;
+        assert_eq!(res.status, StatusCode::SEE_OTHER, "channel {n}");
+    }
+    assert_eq!(channel_ids(&app, &account).await.len(), 10);
+
+    let res = add_channel(&app, &cookie, "email", "one-too-many@example.com").await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN);
+    let res = app
+        .post_hx(
+            "/settings/alerts/channels",
+            &format!("kind=email&target={}", enc("one-too-many@example.com")),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN);
+    assert_eq!(res.header("hx-retarget"), Some("#add-channel"));
+    assert!(res.body.contains("10 alert channels"), "{}", res.body);
+    assert_eq!(channel_ids(&app, &account).await.len(), 10);
+}
+
 // ---- default rules when a site is added -------------------------------------------------------
 
 #[tokio::test]

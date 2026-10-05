@@ -1,18 +1,25 @@
 {% extends "solo_base.html" %}
-{% block title %}{% if resumed %}Monitoring is back on{% else %}Link expired{% endif %} — CodoSEO{% endblock %}
+{% block title %}{% match view %}{% when ResumeView::Confirm %}Keep monitoring?{% when ResumeView::Resumed %}Monitoring is back on{% when ResumeView::Expired %}Link expired{% endmatch %} — CodoSEO{% endblock %}
 {% block body %}
 <div class="solo-page">
   <div class="solo-card">
     <div style="display:flex;justify-content:center;margin-bottom:18px"><span class="owl" style="width:44px;height:44px;border-radius:12px 12px 16px 16px;gap:3px;padding-bottom:6px"><i style="width:16px;height:16px"></i><i style="width:16px;height:16px"></i></span></div>
-    {% if resumed %}
+    {% match view %}
+    {% when ResumeView::Confirm %}
+    <h1>Keep monitoring your sites?</h1>
+    <p>Press the button and CodoSEO keeps crawling your sites and emailing you when something important breaks.</p>
+    <form method="post" action="/monitoring/resume/{{ token }}">
+      <div class="actions"><button class="btn btn-primary btn-lg" type="submit">Keep monitoring</button></div>
+    </form>
+    {% when ResumeView::Resumed %}
     <h1>Monitoring is back on</h1>
     <p>Thanks for letting us know. CodoSEO keeps crawling your site and emails you when something important breaks.</p>
     <div class="actions"><a class="btn btn-primary" href="/">Go to your dashboard</a></div>
-    {% else %}
+    {% when ResumeView::Expired %}
     <h1>This link has run out</h1>
     <p>This link has expired or was already used. If monitoring is paused, signing in turns it back on.</p>
     <div class="actions"><a class="btn btn-primary" href="/login">Sign in</a></div>
-    {% endif %}
+    {% endmatch %}
   </div>
 </div>
 {% endblock %}
