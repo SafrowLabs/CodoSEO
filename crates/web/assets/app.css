@@ -875,12 +875,13 @@ body.solo { overflow: auto; }
 
 .plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .plan-card.is-current { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
-.plan-features { list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.plan-features { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .plan-features li { display: flex; align-items: flex-start; gap: 8px; }
 .plan-features .icon { flex: none; margin-top: 3px; color: var(--ok); }
 .callout-error { border-color: color-mix(in oklab, var(--err) 45%, var(--line)); background: var(--err-soft); }
 .plan-banner { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--warn-bar) 55%, var(--line)); border-radius: var(--r); background: var(--warn-bg); color: var(--warn); }
 .plan-banner .icon { flex: none; margin-top: 3px; }
+.billing-manage { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .plan-banner a { text-decoration: underline; }
 .page > .plan-banner { margin-bottom: 16px; }
 .site-picks { display: grid; }

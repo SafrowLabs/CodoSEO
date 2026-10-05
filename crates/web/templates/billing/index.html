@@ -23,7 +23,7 @@
       {% endif %}
       {% endif %}
       {% if has_customer && configured %}
-      <form method="post" action="/billing/portal" hx-boost="false"><button class="btn" type="submit"><svg class="icon"><use href="#i-external"/></svg>Manage billing</button> <span class="hint" style="margin-left:8px">Change plan, update your card, see invoices or cancel</span></form>
+      <form class="billing-manage" method="post" action="/billing/portal" hx-boost="false"><button class="btn" type="submit"><svg class="icon"><use href="#i-external"/></svg>Manage billing</button><span class="hint">Change plan, update your card, see invoices or cancel</span></form>
       {% endif %}
       {% if stopped_sites %}
       <p class="plan-banner"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg><span>Some of your sites aren't being monitored because of your plan. <a href="/billing/sites">Choose which sites stay monitored</a>.</span></p>
