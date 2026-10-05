@@ -2,6 +2,7 @@
 //! `codoseo` binary serves as its `web` role.
 
 pub mod abuse;
+pub mod agent;
 pub mod assets;
 pub mod auth;
 pub mod billing;
