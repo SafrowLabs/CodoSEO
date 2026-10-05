@@ -22,7 +22,7 @@ Settings you may want in `.env` (all optional; [configuration.md](configuration.
 |---|---|---|
 | `CODOSEO_VERSION` | `latest` | Image tag. Pin a release such as `0.1.0` for repeatable upgrades. |
 | `CODOSEO_PORT` | `8080` | Host port. |
-| `BASE_URL` | `http://localhost:8080` | The address people open the app at. Set it when you use a domain or a proxy. |
+| `BASE_URL` | `http://localhost:<CODOSEO_PORT>` | The address people open the app at. Set it when you use a domain or a proxy. |
 | `SMTP_URL`, `MAIL_FROM` | none | Outgoing mail. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | none | GitHub sign-in. |
 | `ADMIN_EMAILS` | none | Admin pages. |

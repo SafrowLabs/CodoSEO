@@ -19,13 +19,15 @@ services:
     image: ${CODOSEO_IMAGE:-ghcr.io/safrowlabs/codoseo}:${CODOSEO_VERSION:-latest}
     command: ["all"]
     restart: unless-stopped
+    # The worker drains running crawls for up to 60 s on SIGTERM.
+    stop_grace_period: 75s
     ports:
       - "${CODOSEO_PORT:-8080}:8080"
     environment:
       CODOSEO_MODE: selfhost
       DATABASE_URL: postgres://codoseo:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/codoseo
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (openssl rand -hex 32)}
-      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      BASE_URL: ${BASE_URL:-http://localhost:${CODOSEO_PORT:-8080}}
       # Optional: outgoing mail for sign-in links and alerts. Unset, mail is only logged.
       SMTP_URL: ${SMTP_URL:-}
       MAIL_FROM: ${MAIL_FROM:-}

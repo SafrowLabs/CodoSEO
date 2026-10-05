@@ -88,7 +88,7 @@ If `indisvalid` is false, `DROP INDEX pages_crawl_id_id_idx;` and run the build 
 
 ## Postgres roles for a shared server
 
-If CodoSEO shares a Postgres server with other apps, `deploy/postgres-role.sql` sets up the database and two login roles. Run it once as a superuser (or a role with `CREATEROLE` and `CREATEDB`); it is safe to re-run, for example after a password rotation.
+If CodoSEO shares a Postgres server with other apps, `deploy/postgres-role.sql` sets up the database and two login roles. Run it once as a superuser (`CREATEROLE` and `CREATEDB` are not enough: it revokes privileges on the public schema and sets default privileges for the `codoseo` role); it is safe to re-run, for example after a password rotation.
 
 ```sh
 psql "postgres://postgres:...@db.internal:5432/postgres" \

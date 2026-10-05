@@ -7,7 +7,7 @@ Two ways to run CodoSEO on [Coolify](https://coolify.io): the one-click self-hos
 `deploy/coolify/template.yml` is a Coolify service template: a `codoseo` container running `all`, and a `postgres:18-alpine` container with a persistent volume.
 
 1. In Coolify, create a **Docker Compose** service (or add the template to your Coolify templates) and paste the contents of `deploy/coolify/template.yml`.
-2. Coolify generates the secrets from the template's magic variables: the database password (`SERVICE_PASSWORD_POSTGRES`) and `SECRET_KEY` (`SERVICE_BASE64_64_SECRETKEY`). It also assigns a domain (`SERVICE_FQDN_CODOSEO_8080`) and routes it to container port 8080; `BASE_URL` is set from that domain.
+2. Coolify generates the secrets from the template's magic variables: the database password (`SERVICE_PASSWORD_POSTGRES`) and `SECRET_KEY` (`SERVICE_BASE64_64_SECRETKEY`). It also assigns a domain (`SERVICE_FQDN_CODOSEO_8080`) and routes it to container port 8080; `BASE_URL` is set from that domain. If `BASE_URL` comes out empty after the import, set it to the service's public URL by hand.
 3. Optional settings appear as environment variables on the service: `SMTP_URL`, `MAIL_FROM`, `ADMIN_EMAILS`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RETENTION_DAYS_SELFHOST`. See [configuration.md](configuration.md).
 4. Deploy, open the domain and sign in. The first account becomes the owner.
 
@@ -27,7 +27,7 @@ Both `web` and `worker` depend on `migrate` completing successfully, so one depl
 
 ### Steps
 
-1. Create the database and roles. `deploy/postgres-role.sql` makes a `codoseo` role (worker and migrations) and a `codoseo_web` role (web, with a 5 s `statement_timeout`), and caps their connections at 15 together. See [operations.md](operations.md#postgres-roles-for-a-shared-server) for how to run it.
+1. Create the database and roles. `deploy/postgres-role.sql` makes a `codoseo` role (worker and migrations) and a `codoseo_web` role (web, with a 5 s `statement_timeout`), and caps their connections at 15 together. Run it as a superuser; see [operations.md](operations.md#postgres-roles-for-a-shared-server) for how to run it.
 2. Create a Docker Compose resource in Coolify from `deploy/compose.cloud.yml`.
 3. Set the environment variables:
    - Required: `DATABASE_URL` (as the `codoseo` role), `BASE_URL` (the public `https://` address), `SECRET_KEY` (`openssl rand -hex 32`), `SMTP_URL`.

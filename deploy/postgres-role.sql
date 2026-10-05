@@ -1,6 +1,7 @@
 -- Roles and database for running CodoSEO's cloud layout on a Postgres shared with other apps.
--- Run once as a superuser (or a role with CREATEROLE and CREATEDB), connected to the
--- maintenance database, and again whenever you rotate a password. Safe to re-run.
+-- Run once as a superuser, connected to the maintenance database, and again whenever you
+-- rotate a password. Safe to re-run. A superuser is needed: CREATEROLE and CREATEDB are not
+-- enough for the REVOKE on the public schema and ALTER DEFAULT PRIVILEGES FOR ROLE codoseo.
 --
 --   psql "postgres://postgres:...@db.internal:5432/postgres" \
 --        -v ON_ERROR_STOP=1 \
@@ -23,9 +24,10 @@
 -- The limits add up to 15, which is the most CodoSEO may take from a shared server whatever
 -- the deployment does.
 --
--- The 5 second limit suits request queries. The CSV export is the one deliberate exception: it
--- reads in batches of 1,000 rows, and each batch lifts the limit for its own transaction
--- (SET LOCAL statement_timeout), so a large or filtered export is not cancelled.
+-- The 5 second limit suits request queries. A few queries are deliberate exceptions and lift
+-- the limit for their own transaction (SET LOCAL statement_timeout, `pool::begin_long`): each
+-- batch of the CSV export (1,000 rows), the admin funnels and the scheduler's
+-- active_after_4_weeks scan, so none of them is cancelled on a busy server.
 --
 -- codoseo_web is not a member of codoseo. It gets data access only: SELECT, INSERT, UPDATE and
 -- DELETE on every table, and use of every sequence, in the public schema, including tables the

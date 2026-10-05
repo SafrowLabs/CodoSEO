@@ -9,6 +9,8 @@ services:
   codoseo:
     image: ghcr.io/safrowlabs/codoseo:latest
     command: ["all"]
+    # The worker drains running crawls for up to 60 s on SIGTERM.
+    stop_grace_period: 75s
     environment:
       # Coolify assigns the domain and routes it to container port 8080.
       - SERVICE_FQDN_CODOSEO_8080
