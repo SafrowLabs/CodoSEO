@@ -127,6 +127,8 @@ pub async fn agent_funnel_counts(
 }
 
 async fn funnel(pool: &PgPool, days: i64, agents: bool) -> Result<Vec<FunnelCount>, sqlx::Error> {
+    // A month of events can outlast the web role's short statement_timeout; see `begin_long`.
+    let mut tx = crate::pool::begin_long(pool).await?;
     let rows: Vec<(String, i64, i64)> = sqlx::query_as(
         "SELECT kind, count(*), \
                 count(DISTINCT COALESCE(payload->>'crawl_id', site_id::text, id::text)) \
@@ -135,8 +137,9 @@ async fn funnel(pool: &PgPool, days: i64, agents: bool) -> Result<Vec<FunnelCoun
     )
     .bind(days.to_string())
     .bind(agents)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(EventKind::ALL
         .into_iter()
         .map(|kind| {

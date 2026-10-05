@@ -92,7 +92,9 @@ impl Mailer {
     pub async fn send(&self, email: Email) -> Result<(), MailError> {
         match self {
             Mailer::Log => {
-                tracing::info!(to = %email.to, subject = %email.subject, "email (no SMTP configured)");
+                // Only the fact is logged: the recipient is personal data and the text below already
+                // carries everything a self-hoster needs.
+                tracing::info!("email not sent: no SMTP is configured; printed to stdout instead");
                 // The login link must be findable even when tracing isn't initialised.
                 println!(
                     "\n── email to {} ──\n{}\n{}\n",
