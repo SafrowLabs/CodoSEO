@@ -114,6 +114,12 @@ impl AnonBackend for AgentBackend {
         AnonService::new(&self.state).get_audit(who, audit_id).await
     }
 
+    /// `quick_audit` looks at its audit every second or so while it waits; those looks are part
+    /// of the one tool call the client's allowance already counted.
+    async fn poll_audit(&self, _: &AnonCaller, audit_id: &str) -> Result<QuickAuditState, String> {
+        AnonService::new(&self.state).poll_audit(audit_id).await
+    }
+
     async fn audit_issue_urls(
         &self,
         who: &AnonCaller,

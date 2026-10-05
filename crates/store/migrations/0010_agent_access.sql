@@ -25,8 +25,14 @@ CREATE TABLE api_usage (
 -- The pages of one crawl in id order: the explorer and the API page through a crawl's pages
 -- `ORDER BY id`, and with only `(crawl_id)` indexed the planner walks the primary key across
 -- every crawl and filters, which is slow for a check few pages fail in a big table.
-DROP INDEX pages_crawl_id_idx;
-CREATE INDEX pages_crawl_id_id_idx ON pages (crawl_id, id);
+--
+-- The new index is built before the old one goes, so `pages` is never without an index for the
+-- crawl lookup. sqlx runs this file in one transaction, so the build holds a lock that blocks
+-- writes to `pages`. On a large production table, build the index first by hand with
+-- `CREATE INDEX CONCURRENTLY IF NOT EXISTS pages_crawl_id_id_idx ON pages (crawl_id, id);`
+-- so the migration only does the quick drop.
+CREATE INDEX IF NOT EXISTS pages_crawl_id_id_idx ON pages (crawl_id, id);
+DROP INDEX IF EXISTS pages_crawl_id_idx;
 
 -- The agents' daily budget of fresh no-key audits counts the last 24 hours of agent quick crawls
 -- under a global lock (`quick::start`), so it reads only them.

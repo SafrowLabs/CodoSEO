@@ -216,6 +216,12 @@ impl<'a> AnonService<'a> {
         self.state_of(id).await
     }
 
+    /// `get_audit` without the per-client throttle, for `quick_audit`'s wait loop.
+    pub async fn poll_audit(&self, audit_id: &str) -> Result<QuickAuditState, String> {
+        let id = Uuid::parse_str(audit_id.trim()).map_err(|_| NO_SUCH_AUDIT.to_owned())?;
+        self.state_of(id).await
+    }
+
     /// Where the audit stands. A queued or running one is a single small read; the score, the
     /// failing checks and their example URLs are only worked out once it has ended.
     async fn state_of(&self, id: Uuid) -> Result<QuickAuditState, String> {

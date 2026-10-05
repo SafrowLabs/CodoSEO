@@ -8,6 +8,7 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use codoseo_mcp::cloud::CloudMcp;
 use codoseo_web::agent::mcp::AgentBackend;
+use codoseo_web::state::AppState;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -25,6 +26,7 @@ pub fn jsonrpc(method: &str, params: Value) -> Value {
 
 /// A no-key MCP client: one JSON-RPC POST per call, as a connector sends it.
 pub struct Client<'a> {
+    state: AppState,
     router: Router,
     user_agent: Option<&'a str>,
     ip: Option<&'a str>,
@@ -36,11 +38,21 @@ impl<'a> Client<'a> {
         let handler = CloudMcp::new(AgentBackend::new(app.state.clone()))
             .with_quick_audit_wait(wait, Duration::from_millis(50));
         Client {
+            state: app.state.clone(),
             router: codoseo_web::routes::mcp::router_for(&app.state, handler)
                 .with_state(app.state.clone()),
             user_agent,
             ip: None,
         }
+    }
+
+    /// Looks at a waiting audit every `poll` instead of every 50 ms.
+    pub fn with_poll(mut self, wait: Duration, poll: Duration) -> Client<'a> {
+        let handler = CloudMcp::new(AgentBackend::new(self.state.clone()))
+            .with_quick_audit_wait(wait, poll);
+        self.router = codoseo_web::routes::mcp::router_for(&self.state, handler)
+            .with_state(self.state.clone());
+        self
     }
 
     pub fn with_ip(mut self, ip: &'a str) -> Client<'a> {

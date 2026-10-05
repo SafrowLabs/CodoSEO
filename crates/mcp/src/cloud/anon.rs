@@ -39,6 +39,17 @@ pub trait AnonBackend: CloudBackend {
         audit_id: &str,
     ) -> impl Future<Output = Result<QuickAuditState, String>> + Send;
 
+    /// The same read as [`get_audit`](Self::get_audit), for `quick_audit`'s own wait loop. A
+    /// backend that limits calls per client counts the tool call once, not each look inside it,
+    /// so it overrides this to skip that limit; the default is `get_audit`.
+    fn poll_audit(
+        &self,
+        who: &Self::Anon,
+        audit_id: &str,
+    ) -> impl Future<Output = Result<QuickAuditState, String>> + Send {
+        self.get_audit(who, audit_id)
+    }
+
     /// The pages of a finished quick audit that fail one check.
     fn audit_issue_urls(
         &self,
@@ -125,7 +136,7 @@ impl<B: AnonBackend> CloudMcp<B> {
             tokio::time::sleep(self.poll_interval).await;
             // A read that fails mid-wait must not lose the id the agent needs: say "running"
             // and let it ask again with get_audit.
-            match self.backend.get_audit(who, &audit_id.to_string()).await {
+            match self.backend.poll_audit(who, &audit_id.to_string()).await {
                 Ok(next) => state = next,
                 Err(error) => {
                     tracing::warn!(%error, %audit_id, "quick_audit poll failed, answering running");

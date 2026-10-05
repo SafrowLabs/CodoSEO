@@ -669,6 +669,29 @@ async fn a_direct_client_gets_30_calls_a_minute_and_a_connector_is_not_counted()
 }
 
 #[tokio::test]
+async fn a_waiting_quick_audit_does_not_spend_its_own_polls_from_the_minute() {
+    let app = cloud().await;
+    // The audit stays running for the whole wait, which looks at it ~50 times (more than the
+    // 30 calls a minute a direct client has).
+    let direct = Client::new(&app, Duration::ZERO, Some(DIRECT_UA))
+        .with_ip("203.0.113.30")
+        .with_poll(Duration::from_secs(3), Duration::from_millis(50));
+    let state = direct
+        .call_ok("quick_audit", json!({"url": "example.com"}))
+        .await;
+    assert_eq!(state["status"], "running");
+    let id = state["audit_id"].as_str().unwrap().to_owned();
+    // The agent's follow-up is not refused, and the minute has counted two calls: 28 more are
+    // allowed and the 31st is told to wait.
+    for n in 0..29 {
+        let again = direct.call_ok("get_audit", json!({"audit_id": id})).await;
+        assert_eq!(again["status"], "running", "call {n}");
+    }
+    let err = direct.call_err("get_audit", json!({"audit_id": id})).await;
+    assert!(err.contains("30 a minute"), "{err}");
+}
+
+#[tokio::test]
 async fn only_a_fresh_audit_is_a_funnel_event_not_each_repeat_or_poll() {
     let app = cloud().await;
     let client = Client::new(&app, Duration::ZERO, Some(SHARED_UA));
