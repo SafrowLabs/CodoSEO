@@ -1,6 +1,6 @@
 //! Daily cleanup: trims old crawl history past each plan's retention window, deletes
 //! unclaimed no-signup audits after 7 days, and clears out expired tokens/sessions and old
-//! failed (30 days) and finished (14 days) jobs. Each step is its own statement — these are
+//! failed (30 days) and finished (14 days) jobs, and API usage counters past 35 days. Each step is its own statement — these are
 //! independent cleanup passes, not one atomic unit (unlike `finalize`, which must be all-or-nothing).
 
 use codoseo_core::plan::{Plan, PlanLimits};
@@ -17,6 +17,7 @@ pub struct RetentionReport {
     pub sessions_deleted: u64,
     pub failed_jobs_deleted: u64,
     pub done_jobs_deleted: u64,
+    pub api_usage_deleted: u64,
 }
 
 /// Runs every cleanup pass once. `self_hosted_history_days` overrides the self-hosted
@@ -84,6 +85,8 @@ pub async fn run(
     .await?
     .rows_affected();
 
+    let api_usage_deleted = crate::api_keys::delete_old_usage(pool).await?;
+
     Ok(RetentionReport {
         crawls_trimmed,
         unclaimed_sites_deleted,
@@ -91,6 +94,7 @@ pub async fn run(
         sessions_deleted,
         failed_jobs_deleted,
         done_jobs_deleted,
+        api_usage_deleted,
     })
 }
 
