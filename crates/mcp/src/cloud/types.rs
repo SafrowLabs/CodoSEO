@@ -40,6 +40,9 @@ pub struct CrawlHealth {
     pub pages_crawled: u32,
     /// Human words, e.g. "completed" or "page limit reached".
     pub stop_reason: String,
+    /// A stable name to branch on: `completed`, `page_limit`, `time_limit`, `unreachable`,
+    /// `blocked` or `robots_blocked`.
+    pub stop_code: String,
     /// Most severe first, at most 15, each with 3 example URLs.
     pub failing_checks: Vec<FailingCheck>,
     /// Failing checks beyond the 15 listed.
@@ -92,6 +95,14 @@ pub struct IssueUrlsPage {
     pub next_offset: Option<u32>,
 }
 
+/// One hop of a redirect chain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedirectHop {
+    pub status: u16,
+    /// The URL that answered with `status`.
+    pub url: String,
+}
+
 /// A page's issue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PageIssue {
@@ -107,8 +118,8 @@ pub struct PageInfo {
     pub crawl_number: i64,
     pub url: String,
     pub status: u16,
-    /// Every redirect hop in order: the status and the URL that returned it.
-    pub redirect_chain: Vec<(u16, String)>,
+    /// Every redirect hop in order.
+    pub redirect_chain: Vec<RedirectHop>,
     pub redirect_target: Option<String>,
     pub response_ms: Option<u32>,
     pub size_bytes: Option<u64>,
@@ -138,8 +149,24 @@ pub struct ChangeInfo {
     pub severity: Severity,
     /// The page the change is about; none for site-wide changes (robots.txt, sitemap, spike).
     pub url: Option<String>,
+    /// The old value, cut to [`MAX_CHANGE_TEXT`] characters (with a final `…`) when longer.
     pub before: String,
+    /// The new value, cut the same way.
     pub after: String,
+}
+
+/// Longest `before` / `after` a change carries.
+pub const MAX_CHANGE_TEXT: usize = 300;
+
+/// `text`, cut to [`MAX_CHANGE_TEXT`] characters with a final `…` when it is longer.
+pub fn clip_change_text(text: &str) -> String {
+    match text.char_indices().nth(MAX_CHANGE_TEXT) {
+        None => text.to_owned(),
+        Some((at, _)) => {
+            let cut = text[..at].char_indices().last().map_or(0, |(i, _)| i);
+            format!("{}…", &text[..cut])
+        }
+    }
 }
 
 /// `get_changes`: the latest finished crawl's changes, most severe first.
@@ -152,7 +179,11 @@ pub struct ChangesPage {
     pub crawl_finished_at: Option<OffsetDateTime>,
     /// Changes matching the severity filter, which may be more than `changes` holds.
     pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
     pub changes: Vec<ChangeInfo>,
+    /// Pass as `offset` for the next page; none on the last page.
+    pub next_offset: Option<u32>,
 }
 
 /// `run_crawl`: the crawl that was queued.
@@ -175,4 +206,21 @@ pub struct Usage {
     /// The next 00:00 UTC, when the count starts again.
     #[serde(with = "time::serde::rfc3339")]
     pub resets_at: OffsetDateTime,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn change_text_is_cut_to_300_characters_with_an_ellipsis() {
+        assert_eq!(clip_change_text("short"), "short");
+        let exact = "a".repeat(MAX_CHANGE_TEXT);
+        assert_eq!(clip_change_text(&exact), exact);
+        let long = "é".repeat(MAX_CHANGE_TEXT + 50);
+        let clipped = clip_change_text(&long);
+        assert_eq!(clipped.chars().count(), MAX_CHANGE_TEXT);
+        assert!(clipped.ends_with('…'));
+        assert!(clipped.starts_with("éé"));
+    }
 }

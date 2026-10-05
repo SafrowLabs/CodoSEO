@@ -19,6 +19,9 @@ pub enum AgentError {
     NotFound(String),
     #[error("{0}")]
     BadRequest(String),
+    /// The path exists but not for this HTTP method (REST only).
+    #[error("{0}")]
+    MethodNotAllowed(String),
     /// The site already has a crawl queued or running.
     #[error("{0}")]
     CrawlInProgress(String),
@@ -41,6 +44,7 @@ impl AgentError {
             AgentError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             AgentError::NotFound(_) => StatusCode::NOT_FOUND,
             AgentError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AgentError::MethodNotAllowed(_) => StatusCode::METHOD_NOT_ALLOWED,
             AgentError::CrawlInProgress(_) => StatusCode::CONFLICT,
             AgentError::PlanLimit(_) => StatusCode::FORBIDDEN,
             AgentError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
@@ -54,7 +58,7 @@ impl AgentError {
         match self {
             AgentError::Unauthorized(_) => "unauthorized",
             AgentError::NotFound(_) => "not_found",
-            AgentError::BadRequest(_) => "bad_request",
+            AgentError::BadRequest(_) | AgentError::MethodNotAllowed(_) => "bad_request",
             AgentError::CrawlInProgress(_) => "crawl_in_progress",
             AgentError::PlanLimit(_) => "plan_limit",
             AgentError::QuotaExceeded { .. } => "quota_exceeded",
@@ -74,9 +78,7 @@ impl AgentError {
 
 impl From<sqlx::Error> for AgentError {
     fn from(e: sqlx::Error) -> AgentError {
-        if matches!(e, sqlx::Error::RowNotFound) {
-            AgentError::site_not_found()
-        } else if crate::error::is_unavailable(&e) {
+        if crate::error::is_unavailable(&e) {
             AgentError::Unavailable
         } else {
             AgentError::Internal(e.to_string())
@@ -112,5 +114,18 @@ impl IntoResponse for AgentError {
             _ => {}
         }
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_row_is_our_bug_not_a_missing_site() {
+        let e = AgentError::from(sqlx::Error::RowNotFound);
+        assert_eq!(e.code(), "internal");
+        assert_eq!(e.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!e.message().contains("site"));
     }
 }

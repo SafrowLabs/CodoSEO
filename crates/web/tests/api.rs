@@ -4,6 +4,8 @@
 
 mod support;
 
+use std::collections::HashSet;
+
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use codoseo_core::change::{Change, ChangeKind};
@@ -270,7 +272,13 @@ async fn an_unknown_endpoint_is_a_json_404() {
 async fn list_sites_lists_only_this_accounts_sites_with_their_latest_score() {
     let f = setup(Plan::Pro).await;
     let (other, _) = f.app.login("other@example.com").await;
-    f.app.site(&other, "other.example").await;
+    let theirs = f.app.site(&other, "other.example").await;
+    // Another account's finished crawl, scored and failing, must not leak into this list.
+    let mut bad = page("other.example", "/");
+    bad.fields.title = None;
+    bad.fields.title_count = 0;
+    bad.key_hash = bad.compute_key_hash();
+    f.app.finished_crawl(&theirs, vec![bad], vec![]).await;
     let fresh = f.app.site(&f.account, "fresh.example").await;
 
     let list: Vec<SiteInfo> = parsed(&get(&f.app, "/api/v1/sites", &f.key).await);
@@ -305,6 +313,7 @@ async fn site_health_has_the_score_failing_checks_with_three_examples_and_the_au
     assert_eq!(latest.number, 1);
     assert_eq!(latest.pages_crawled, 6);
     assert_eq!(latest.stop_reason, "completed");
+    assert_eq!(latest.stop_code, "completed");
     assert!(latest.health_score.is_some());
     assert!(latest.checks_total.unwrap() > 0);
     assert!(latest.checks_passed.unwrap() < latest.checks_total.unwrap());
@@ -871,4 +880,132 @@ async fn self_hosted_manual_crawls_are_unlimited() {
         )
         .await;
     }
+}
+
+// ---- review fixes ----
+
+#[tokio::test]
+async fn a_malformed_query_is_a_400_that_costs_one_call_and_a_401_costs_none() {
+    let f = setup(Plan::Free).await;
+    let path = format!("/api/v1/sites/{}/issues/title_missing?limit=abc", f.site.id);
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(&res), "bad_request");
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("99"));
+    let usage: Usage = parsed(&get(&f.app, "/api/v1/usage", &f.key).await);
+    assert_eq!(usage.calls_today, 1);
+
+    // The same for the other endpoints that take a query.
+    let res = get(
+        &f.app,
+        &format!("/api/v1/sites/{}/changes?offset=-1", f.site.id),
+        &f.key,
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    let usage: Usage = parsed(&get(&f.app, "/api/v1/usage", &f.key).await);
+    assert_eq!(usage.calls_today, 2);
+
+    // Refused at the door: no key, a bad key, nothing counted.
+    for key in [None, Some("cdo_nope")] {
+        let res = f.app.send(request(Method::GET, &path, key)).await;
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+    }
+    let usage: Usage = parsed(&get(&f.app, "/api/v1/usage", &f.key).await);
+    assert_eq!(usage.calls_today, 2);
+
+    // And over quota a malformed query is the 429, not a free 400.
+    set_calls_today(&f.app, &f.account, 100).await;
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn the_wrong_method_is_a_json_405() {
+    let f = setup(Plan::Pro).await;
+    for (method, path) in [
+        (Method::POST, "/api/v1/sites".to_owned()),
+        (Method::DELETE, format!("/api/v1/sites/{}", f.site.id)),
+        (Method::GET, format!("/api/v1/sites/{}/crawls", f.site.id)),
+        (Method::POST, "/api/v1/usage".to_owned()),
+    ] {
+        let res = f
+            .app
+            .send(request(method.clone(), &path, Some(&f.key)))
+            .await;
+        assert_eq!(
+            res.status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method} {path}"
+        );
+        assert_eq!(error_code(&res), "bad_request");
+        assert!(res.body.contains("not allowed"));
+    }
+}
+
+#[tokio::test]
+async fn changes_page_and_clip_long_values() {
+    let app = cloud().await;
+    let (account, _) = app.login("owner@example.com").await;
+    let (key, _) = make_key(&app, &account).await;
+    let site = app.site(&account, DOMAIN).await;
+    let mut changes = fixture_changes();
+    changes[0].before = "x".repeat(5_000);
+    changes[0].after = "short".to_owned();
+    app.finished_crawl(&site, fixture_pages(), changes).await;
+    let base = format!("/api/v1/sites/{}/changes", site.id);
+
+    let first: ChangesPage = parsed(&get(&app, &format!("{base}?limit=3"), &key).await);
+    assert_eq!((first.limit, first.offset, first.total), (3, 0, 4));
+    assert_eq!(first.changes.len(), 3);
+    assert_eq!(first.next_offset, Some(3));
+    assert_eq!(first.changes[0].before.chars().count(), 300);
+    assert!(first.changes[0].before.ends_with('…'));
+    assert_eq!(first.changes[0].after, "short");
+
+    let last: ChangesPage = parsed(&get(&app, &format!("{base}?limit=3&offset=3"), &key).await);
+    assert_eq!(last.changes.len(), 1);
+    assert_eq!(last.next_offset, None);
+    let all: HashSet<_> = first
+        .changes
+        .iter()
+        .chain(&last.changes)
+        .map(|c| (c.kind, c.url.clone()))
+        .collect();
+    assert_eq!(all.len(), 4, "pages don't overlap");
+
+    let past: ChangesPage = parsed(&get(&app, &format!("{base}?offset=10"), &key).await);
+    assert!(past.changes.is_empty());
+    assert_eq!(past.next_offset, None);
+}
+
+#[tokio::test]
+async fn a_redirecting_page_lists_its_hops_as_objects() {
+    let app = cloud().await;
+    let (account, _) = app.login("owner@example.com").await;
+    let (key, _) = make_key(&app, &account).await;
+    let site = app.site(&account, DOMAIN).await;
+    let mut moved = PageRecord {
+        status: 301,
+        indexability: Indexability::Redirected,
+        redirect_chain: vec![(301, Url::parse("https://example.com/old").unwrap())],
+        redirect_target: Some(Url::parse("https://example.com/").unwrap()),
+        ..page(DOMAIN, "/old")
+    };
+    moved.key_hash = moved.compute_key_hash();
+    app.finished_crawl(&site, vec![page(DOMAIN, "/"), moved], vec![])
+        .await;
+    let res = get(
+        &app,
+        &format!("/api/v1/sites/{}/page?url=%2Fold", site.id),
+        &key,
+    )
+    .await;
+    let body = json(&res);
+    assert_eq!(
+        body["redirect_chain"],
+        serde_json::json!([{ "status": 301, "url": "https://example.com/old" }])
+    );
+    let info: PageInfo = parsed(&res);
+    assert_eq!(info.redirect_chain[0].status, 301);
 }

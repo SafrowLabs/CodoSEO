@@ -191,6 +191,33 @@ pub async fn usage_today(pool: &PgPool, account_id: Uuid) -> Result<i64, sqlx::E
     Ok(calls.map_or(0, i64::from))
 }
 
+/// When the day containing `at` ends, and the whole seconds from `at` to then (at least 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DayEnd {
+    /// The next 00:00 UTC.
+    pub resets_at: OffsetDateTime,
+    pub seconds_left: i64,
+}
+
+/// The end of the quota day (UTC) that `at` falls in, or of the current one for `None`,
+/// worked out by Postgres from the same clock the charge uses, so a refusal's `Retry-After`
+/// can't disagree with the day it was refused in.
+pub async fn day_end(pool: &PgPool, at: Option<OffsetDateTime>) -> Result<DayEnd, sqlx::Error> {
+    let (resets_at, seconds_left): (OffsetDateTime, i64) = sqlx::query_as(
+        "SELECT t.end_at, greatest(1, ceil(extract(epoch FROM t.end_at - t.at)))::bigint \
+         FROM (SELECT coalesce($1::timestamptz, now()) AS at, \
+                      ((coalesce($1::timestamptz, now()) AT TIME ZONE 'utc')::date + 1)::timestamp \
+                          AT TIME ZONE 'utc' AS end_at) t",
+    )
+    .bind(at)
+    .fetch_one(pool)
+    .await?;
+    Ok(DayEnd {
+        resets_at,
+        seconds_left,
+    })
+}
+
 /// Deletes usage rows older than [`USAGE_RETENTION_DAYS`] days. Returns how many.
 pub async fn delete_old_usage(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let done =

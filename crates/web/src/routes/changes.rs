@@ -120,12 +120,7 @@ pub struct ChangesQuery {
 }
 
 fn parse_severity(raw: Option<&str>) -> Option<Severity> {
-    match raw? {
-        "critical" => Some(Severity::Critical),
-        "warning" => Some(Severity::Warning),
-        "notice" => Some(Severity::Notice),
-        _ => None,
-    }
+    raw.and_then(Severity::from_slug)
 }
 
 async fn page(

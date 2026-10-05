@@ -35,7 +35,8 @@ pub fn routes() -> Router<AppState> {
         .route("/sites/{site}/changes", get(changes))
         .route("/sites/{site}/crawls", post(run_crawl))
         .route("/usage", get(usage))
-        .fallback(unknown);
+        .fallback(unknown)
+        .method_not_allowed_fallback(wrong_method);
     Router::new().nest(PREFIX, api)
 }
 
@@ -44,20 +45,42 @@ async fn unknown() -> AgentError {
     AgentError::NotFound("No such API endpoint.".to_owned())
 }
 
-/// A query string whose problems are the API's JSON 400, not axum's plain text.
-struct ApiQuery<T>(T);
+/// A known path with the wrong HTTP method is a JSON error too, not an empty 405.
+async fn wrong_method() -> AgentError {
+    AgentError::MethodNotAllowed("That HTTP method is not allowed for this endpoint.".to_owned())
+}
+
+/// A query string, parsed but not yet judged: a malformed one is the API's JSON 400, which
+/// still costs the authenticated caller one call, so the verdict waits for [`counted`].
+struct ApiQuery<T>(Result<T, AgentError>);
 
 impl<T: serde::de::DeserializeOwned> FromRequestParts<AppState> for ApiQuery<T> {
-    type Rejection = AgentError;
+    type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
-    ) -> Result<ApiQuery<T>, AgentError> {
-        Query::<T>::from_request_parts(parts, state)
-            .await
-            .map(|Query(q)| ApiQuery(q))
-            .map_err(|e| AgentError::BadRequest(e.body_text()))
+    ) -> Result<ApiQuery<T>, Self::Rejection> {
+        Ok(ApiQuery(
+            Query::<T>::from_request_parts(parts, state)
+                .await
+                .map(|Query(q)| q)
+                .map_err(|e| AgentError::BadRequest(e.body_text())),
+        ))
+    }
+}
+
+/// Runs `call` with the parsed query, or charges one call and answers the 400 when the query
+/// didn't parse.
+async fn counted<Q, T: Serialize, F: Future<Output = Reply<T>>>(
+    service: &AgentService<'_>,
+    caller: &ApiCaller,
+    query: ApiQuery<Q>,
+    call: impl FnOnce(Q) -> F,
+) -> Response {
+    match query.0 {
+        Ok(q) => respond(StatusCode::OK, call(q).await),
+        Err(e) => respond(StatusCode::OK, service.refuse(caller, e).await),
     }
 }
 
@@ -108,14 +131,13 @@ async fn issue_urls(
     State(state): State<AppState>,
     caller: ApiCaller,
     Path((site, check)): Path<(String, String)>,
-    ApiQuery(q): ApiQuery<PagingQuery>,
+    q: ApiQuery<PagingQuery>,
 ) -> Response {
-    respond(
-        StatusCode::OK,
-        AgentService::new(&state)
-            .issue_urls(&caller, &site, &check, q.limit, q.offset)
-            .await,
-    )
+    let service = AgentService::new(&state);
+    counted(&service, &caller, q, |q| {
+        service.issue_urls(&caller, &site, &check, q.limit, q.offset)
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -127,34 +149,36 @@ async fn page(
     State(state): State<AppState>,
     caller: ApiCaller,
     Path(site): Path<String>,
-    ApiQuery(q): ApiQuery<PageQuery>,
+    q: ApiQuery<PageQuery>,
 ) -> Response {
-    respond(
-        StatusCode::OK,
-        AgentService::new(&state)
-            .page(&caller, &site, q.url.as_deref().unwrap_or(""))
-            .await,
-    )
+    let service = AgentService::new(&state);
+    let (svc, who, site) = (&service, &caller, &site);
+    counted(&service, &caller, q, move |q| async move {
+        svc.page(who, site, q.url.as_deref().unwrap_or("")).await
+    })
+    .await
 }
 
 #[derive(Deserialize)]
 struct ChangesQuery {
     severity: Option<String>,
     limit: Option<u32>,
+    offset: Option<u32>,
 }
 
 async fn changes(
     State(state): State<AppState>,
     caller: ApiCaller,
     Path(site): Path<String>,
-    ApiQuery(q): ApiQuery<ChangesQuery>,
+    q: ApiQuery<ChangesQuery>,
 ) -> Response {
-    respond(
-        StatusCode::OK,
-        AgentService::new(&state)
-            .changes(&caller, &site, q.severity.as_deref(), q.limit)
-            .await,
-    )
+    let service = AgentService::new(&state);
+    let (svc, who, site) = (&service, &caller, &site);
+    counted(&service, &caller, q, move |q| async move {
+        svc.changes(who, site, q.severity.as_deref(), q.limit, q.offset)
+            .await
+    })
+    .await
 }
 
 async fn run_crawl(

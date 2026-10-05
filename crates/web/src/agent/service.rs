@@ -8,7 +8,6 @@
 //! are validated here, after the charge, so a malformed call costs the same as any other.
 //! Another account's site is the same `NotFound` as an unknown id.
 
-use std::cmp::Reverse;
 use std::collections::HashMap;
 
 use codoseo_checks::def;
@@ -16,22 +15,23 @@ use codoseo_core::check::{CheckId, IssueBits, Severity};
 use codoseo_core::plan::PlanLimits;
 use codoseo_mcp::cloud::types::{
     ActiveCrawl, ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, PageInfo,
-    PageIssue, SiteHealth, SiteInfo, Usage,
+    PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip_change_text,
 };
-use codoseo_mcp::local::stop_reason_words;
-use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow};
+use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
+use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
 use codoseo_store::api_keys::{self, Charge};
 use codoseo_store::crawls::{self, Crawl, CrawlStatus, ManualOutcome, ManualWindow};
 use codoseo_store::explorer::{self, PageFilter};
 use codoseo_store::reports;
 use codoseo_store::sites::{self, Site};
-use time::{OffsetDateTime, Time};
+use sqlx::PgPool;
+use time::OffsetDateTime;
 use url::Url;
 use uuid::Uuid;
 
 use super::auth::ApiCaller;
 use super::error::AgentError;
-use crate::routes::crawls::{limit_message, manual_priority};
+use crate::crawl_policy::{limit_message, manual_priority};
 use crate::state::AppState;
 
 /// Rows a list returns when the caller doesn't say.
@@ -63,12 +63,6 @@ impl<T> Reply<T> {
     }
 }
 
-/// The next 00:00 UTC after `now`, when the daily count starts again.
-pub fn next_reset(now: OffsetDateTime) -> OffsetDateTime {
-    let now = now.to_offset(time::UtcOffset::UTC);
-    now.replace_time(Time::MIDNIGHT) + time::Duration::days(1)
-}
-
 pub struct AgentService<'a> {
     state: &'a AppState,
 }
@@ -91,16 +85,23 @@ impl<'a> AgentService<'a> {
                 quota: None,
                 outcome: Err(e.into()),
             },
-            Ok(Charge::OverQuota { limit }) => Reply {
-                quota: Some(Quota {
-                    limit: Some(limit),
-                    remaining: Some(0),
-                }),
-                outcome: Err(AgentError::QuotaExceeded {
-                    limit,
-                    retry_after_secs: seconds_until_reset(),
-                }),
-            },
+            Ok(Charge::OverQuota { limit }) => {
+                // The reset comes from Postgres' clock, the one the day was counted by.
+                let outcome = match api_keys::day_end(&self.state.pool, None).await {
+                    Ok(end) => Err(AgentError::QuotaExceeded {
+                        limit,
+                        retry_after_secs: u64::try_from(end.seconds_left).unwrap_or(1),
+                    }),
+                    Err(e) => Err(e.into()),
+                };
+                Reply {
+                    quota: Some(Quota {
+                        limit: Some(limit),
+                        remaining: Some(0),
+                    }),
+                    outcome,
+                }
+            }
             Ok(Charge::Ok { used, limit }) => Reply {
                 quota: Some(Quota {
                     limit,
@@ -109,6 +110,12 @@ impl<'a> AgentService<'a> {
                 outcome: work.await,
             },
         }
+    }
+
+    /// Counts a call that the caller's own arguments already made unanswerable (a query string
+    /// that doesn't parse) and answers with `error`: every authenticated request costs one.
+    pub async fn refuse(&self, caller: &ApiCaller, error: AgentError) -> Reply<()> {
+        self.metered(caller, async { Err(error) }).await
     }
 
     pub async fn list_sites(&self, caller: &ApiCaller) -> Reply<Vec<SiteInfo>> {
@@ -146,9 +153,13 @@ impl<'a> AgentService<'a> {
         site: &str,
         severity: Option<&str>,
         limit: Option<u32>,
+        offset: Option<u32>,
     ) -> Reply<ChangesPage> {
-        self.metered(caller, self.changes_work(caller, site, severity, limit))
-            .await
+        self.metered(
+            caller,
+            self.changes_work(caller, site, severity, limit, offset),
+        )
+        .await
     }
 
     /// Queues a manual crawl exactly as the Run crawl button does: the plan's allowance and
@@ -161,18 +172,18 @@ impl<'a> AgentService<'a> {
     /// Today's calls and the allowance. Free: it isn't counted.
     pub async fn usage(&self, caller: &ApiCaller) -> Reply<Usage> {
         let limit = PlanLimits::for_plan(caller.account.plan).api_calls_per_day;
-        let outcome = api_keys::usage_today(&self.state.pool, caller.account.id)
-            .await
-            .map_err(AgentError::from)
-            .map(|calls| {
-                let calls = clamp_u32(calls);
-                Usage {
-                    calls_today: calls,
-                    limit,
-                    remaining: limit.map(|l| l.saturating_sub(calls)),
-                    resets_at: next_reset(OffsetDateTime::now_utc()),
-                }
-            });
+        let pool = &self.state.pool;
+        let outcome = async {
+            let calls = clamp_u32(api_keys::usage_today(pool, caller.account.id).await?);
+            let end = api_keys::day_end(pool, None).await?;
+            Ok::<_, AgentError>(Usage {
+                calls_today: calls,
+                limit,
+                remaining: limit.map(|l| l.saturating_sub(calls)),
+                resets_at: end.resets_at,
+            })
+        }
+        .await;
         Reply {
             quota: outcome.as_ref().ok().map(|u| Quota {
                 limit: u.limit,
@@ -227,7 +238,7 @@ impl<'a> AgentService<'a> {
         let pool = &self.state.pool;
         let site = self.site(caller, site).await?;
         let latest = match crawls::latest_done(pool, site.id).await? {
-            Some(crawl) => Some(self.crawl_health(&crawl).await?),
+            Some(crawl) => Some(crawl_health(pool, &crawl).await?),
             None => None,
         };
         let active = crawls::active(pool, site.id).await?.map(|c| ActiveCrawl {
@@ -260,60 +271,6 @@ impl<'a> AgentService<'a> {
         })
     }
 
-    /// A finished crawl's score, counts and failing checks (most severe first, with example
-    /// URLs fetched in one query).
-    async fn crawl_health(&self, crawl: &Crawl) -> Result<CrawlHealth, AgentError> {
-        let summary = crawl.summary();
-        let mut failing: Vec<(CheckId, u32)> = summary
-            .as_ref()
-            .map(|s| {
-                s.counts
-                    .iter()
-                    .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        failing.sort_by_key(|&(id, n)| (def(id).severity, Reverse(n), id));
-        let more = failing.len().saturating_sub(MAX_FAILING_CHECKS);
-        failing.truncate(MAX_FAILING_CHECKS);
-        let ids: Vec<CheckId> = failing.iter().map(|&(id, _)| id).collect();
-        let mut examples =
-            explorer::example_urls(&self.state.pool, crawl.id, &ids, EXAMPLES_PER_CHECK).await?;
-        let failing_checks = failing
-            .into_iter()
-            .map(|(check, count)| {
-                let d = def(check);
-                FailingCheck {
-                    check,
-                    title: d.title.to_owned(),
-                    severity: d.severity,
-                    count,
-                    example_urls: examples
-                        .remove(&check)
-                        .unwrap_or_default()
-                        .iter()
-                        .filter_map(|u| Url::parse(u).ok())
-                        .collect(),
-                }
-            })
-            .collect();
-        Ok(CrawlHealth {
-            crawl_id: crawl.id,
-            number: crawl.number,
-            finished_at: crawl.finished_at,
-            health_score: crawl.health_score.and_then(|n| u8::try_from(n).ok()),
-            checks_passed: crawl.checks_passed.and_then(|n| u16::try_from(n).ok()),
-            checks_total: crawl.checks_total.and_then(|n| u16::try_from(n).ok()),
-            pages_crawled: summary.as_ref().map_or(0, |s| s.report_summary.pages),
-            stop_reason: summary.as_ref().map_or_else(
-                || "unknown".to_owned(),
-                |s| stop_reason_words(&s.stop_reason),
-            ),
-            failing_checks,
-            more_failing_checks: u16::try_from(more).unwrap_or(u16::MAX),
-        })
-    }
-
     async fn issue_urls_work(
         &self,
         caller: &ApiCaller,
@@ -324,47 +281,26 @@ impl<'a> AgentService<'a> {
     ) -> Result<IssueUrlsPage, AgentError> {
         let pool = &self.state.pool;
         let site = self.site(caller, site).await?;
-        let check = CheckId::from_slug(check.trim()).ok_or_else(|| {
-            AgentError::BadRequest(format!(
-                "Unknown check \"{check}\". Use a check slug such as title_missing; \
-                 get_site_health lists the failing ones."
-            ))
-        })?;
-        let limit = clamp_limit(limit);
-        let offset = offset.unwrap_or(0);
+        let check = parse_check(check)?;
         let mut page = IssueUrlsPage {
             site_id: site.id,
             check,
             title: def(check).title.to_owned(),
             crawl_number: None,
             total: 0,
-            limit,
-            offset,
+            limit: clamp_limit(limit),
+            offset: offset.unwrap_or(0),
             urls: Vec::new(),
             next_offset: None,
         };
         let Some(crawl) = crawls::latest_done(pool, site.id).await? else {
             return Ok(page);
         };
-        let filter = PageFilter::Check(check);
-        let (matching, _) = explorer::match_count(pool, crawl.id, filter, "").await?;
-        let rows =
-            explorer::rows_at(pool, crawl.id, filter, i64::from(offset), i64::from(limit)).await?;
+        let rows = issue_page(pool, crawl.id, check, limit, offset).await?;
         page.crawl_number = Some(crawl.number);
-        page.total = clamp_u32(matching);
-        let shown = u32::try_from(rows.len()).unwrap_or(u32::MAX);
-        page.urls = rows
-            .into_iter()
-            .filter_map(|r| {
-                Some(UrlRow {
-                    url: Url::parse(&r.url).ok()?,
-                    status: r.status,
-                    title: r.title,
-                    indexability: r.indexability,
-                })
-            })
-            .collect();
-        page.next_offset = offset.checked_add(shown).filter(|next| *next < page.total);
+        page.total = rows.total;
+        page.urls = rows.urls;
+        page.next_offset = rows.next_offset;
         Ok(page)
     }
 
@@ -406,7 +342,11 @@ impl<'a> AgentService<'a> {
             crawl_number: crawl.number,
             url: page.url,
             status: page.status,
-            redirect_chain: page.redirect_chain,
+            redirect_chain: page
+                .redirect_chain
+                .into_iter()
+                .map(|(status, url)| RedirectHop { status, url })
+                .collect(),
             redirect_target: page.redirect_target,
             response_ms: page.response_ms,
             size_bytes: page.size_bytes,
@@ -435,6 +375,7 @@ impl<'a> AgentService<'a> {
         site: &str,
         severity: Option<&str>,
         limit: Option<u32>,
+        offset: Option<u32>,
     ) -> Result<ChangesPage, AgentError> {
         let pool = &self.state.pool;
         let site = self.site(caller, site).await?;
@@ -443,33 +384,44 @@ impl<'a> AgentService<'a> {
             .filter(|s| !s.is_empty())
             .map(parse_severity)
             .transpose()?;
+        let (limit, offset) = (clamp_limit(limit), offset.unwrap_or(0));
         let mut out = ChangesPage {
             site_id: site.id,
             crawl_number: None,
             crawl_finished_at: None,
             total: 0,
+            limit,
+            offset,
             changes: Vec::new(),
+            next_offset: None,
         };
         let Some(crawl) = crawls::latest_done(pool, site.id).await? else {
             return Ok(out);
         };
         let counts = reports::change_kind_counts(pool, crawl.id).await?;
-        let rows =
-            reports::changes_for_crawl(pool, crawl.id, severity, i64::from(clamp_limit(limit)))
-                .await?;
+        let rows = reports::changes_for_crawl_at(
+            pool,
+            crawl.id,
+            severity,
+            i64::from(offset),
+            i64::from(limit),
+        )
+        .await?;
         out.crawl_number = Some(crawl.number);
         out.crawl_finished_at = crawl.finished_at;
         out.total = clamp_u32(severity.map_or_else(|| counts.total(), |s| counts.severity(s)));
+        let shown = u32::try_from(rows.len()).unwrap_or(u32::MAX);
         out.changes = rows
             .into_iter()
             .map(|c| ChangeInfo {
                 kind: c.kind,
                 severity: c.severity,
                 url: c.url,
-                before: c.before,
-                after: c.after,
+                before: clip_change_text(&c.before),
+                after: clip_change_text(&c.after),
             })
             .collect();
+        out.next_offset = next_offset(offset, shown, out.total);
         Ok(out)
     }
 
@@ -488,7 +440,12 @@ impl<'a> AgentService<'a> {
             manual_priority(plan),
             ManualWindow::for_allowance(allowance),
         )
-        .await?;
+        .await
+        // The site was deleted between the lookup and the insert.
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => AgentError::site_not_found(),
+            e => e.into(),
+        })?;
         match outcome {
             ManualOutcome::Queued { id, number } => Ok(CrawlQueued {
                 site_id: site.id,
@@ -515,47 +472,143 @@ impl<'a> AgentService<'a> {
     }
 }
 
-fn seconds_until_reset() -> u64 {
-    let now = OffsetDateTime::now_utc();
-    u64::try_from((next_reset(now) - now).whole_seconds().max(1)).unwrap_or(1)
+/// How many rows a list call returns: `limit` if given, at most [`MAX_LIMIT`], at least 1.
+pub fn clamp_limit(limit: Option<u32>) -> u32 {
+    limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
 }
 
-fn clamp_limit(limit: Option<u32>) -> u32 {
-    limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
+/// The offset of the next page, when rows remain after `offset + shown`.
+fn next_offset(offset: u32, shown: u32, total: u32) -> Option<u32> {
+    offset.checked_add(shown).filter(|next| *next < total)
+}
+
+/// A check by slug.
+pub fn parse_check(slug: &str) -> Result<CheckId, AgentError> {
+    CheckId::from_slug(slug.trim()).ok_or_else(|| {
+        AgentError::BadRequest(format!(
+            "Unknown check \"{slug}\". Use a check slug such as title_missing; \
+             get_site_health lists the failing ones."
+        ))
+    })
 }
 
 fn clamp_u32(n: i64) -> u32 {
     u32::try_from(n.max(0)).unwrap_or(u32::MAX)
 }
 
-fn parse_severity(s: &str) -> Result<Severity, AgentError> {
-    match s.to_ascii_lowercase().as_str() {
-        "critical" => Ok(Severity::Critical),
-        "warning" => Ok(Severity::Warning),
-        "notice" => Ok(Severity::Notice),
-        _ => Err(AgentError::BadRequest(format!(
+/// `critical`, `warning` or `notice` (lowercase, as the web app's filters write them).
+pub fn parse_severity(s: &str) -> Result<Severity, AgentError> {
+    Severity::from_slug(s.trim()).ok_or_else(|| {
+        AgentError::BadRequest(format!(
             "Unknown severity \"{s}\". Use critical, warning or notice."
-        ))),
-    }
+        ))
+    })
+}
+
+/// A finished crawl's score, counts and failing checks (most severe first, with example URLs
+/// fetched in one query). It reads the crawl only, so it serves any crawl id the caller is
+/// already allowed to see, a site's or a quick audit's.
+pub async fn crawl_health(pool: &PgPool, crawl: &Crawl) -> Result<CrawlHealth, AgentError> {
+    let summary = crawl.summary();
+    let mut failing = rank_failing(
+        summary
+            .iter()
+            .flat_map(|s| s.counts.iter())
+            .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n))),
+    );
+    let more = failing.len().saturating_sub(MAX_FAILING_CHECKS);
+    failing.truncate(MAX_FAILING_CHECKS);
+    let ids: Vec<CheckId> = failing.iter().map(|&(id, _)| id).collect();
+    let mut examples = explorer::example_urls(pool, crawl.id, &ids, EXAMPLES_PER_CHECK).await?;
+    let failing_checks = failing
+        .into_iter()
+        .map(|(check, count)| {
+            let d = def(check);
+            FailingCheck {
+                check,
+                title: d.title.to_owned(),
+                severity: d.severity,
+                count,
+                example_urls: examples
+                    .remove(&check)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|u| Url::parse(u).ok())
+                    .collect(),
+            }
+        })
+        .collect();
+    Ok(CrawlHealth {
+        crawl_id: crawl.id,
+        number: crawl.number,
+        finished_at: crawl.finished_at,
+        health_score: crawl.health_score.and_then(|n| u8::try_from(n).ok()),
+        checks_passed: crawl.checks_passed.and_then(|n| u16::try_from(n).ok()),
+        checks_total: crawl.checks_total.and_then(|n| u16::try_from(n).ok()),
+        pages_crawled: summary.as_ref().map_or(0, |s| s.report_summary.pages),
+        stop_reason: summary.as_ref().map_or_else(
+            || "unknown".to_owned(),
+            |s| stop_reason_words(&s.stop_reason),
+        ),
+        stop_code: summary
+            .as_ref()
+            .map_or("unknown", |s| stop_reason_code(&s.stop_reason))
+            .to_owned(),
+        failing_checks,
+        more_failing_checks: u16::try_from(more).unwrap_or(u16::MAX),
+    })
+}
+
+/// One page of the pages of a crawl that fail `check`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IssueRows {
+    /// Pages failing the check in the crawl.
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
+    pub urls: Vec<UrlRow>,
+    /// Pass as `offset` for the next page; none on the last page.
+    pub next_offset: Option<u32>,
+}
+
+/// The pages of `crawl_id` that fail `check`, `limit` (clamped) from `offset`, in crawl order.
+pub async fn issue_page(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    check: CheckId,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<IssueRows, AgentError> {
+    let (limit, offset) = (clamp_limit(limit), offset.unwrap_or(0));
+    let filter = PageFilter::Check(check);
+    let (matching, _) = explorer::match_count(pool, crawl_id, filter, "").await?;
+    let rows =
+        explorer::rows_at(pool, crawl_id, filter, i64::from(offset), i64::from(limit)).await?;
+    let total = clamp_u32(matching);
+    let shown = u32::try_from(rows.len()).unwrap_or(u32::MAX);
+    let urls = rows
+        .into_iter()
+        .filter_map(|r| {
+            Some(UrlRow {
+                url: Url::parse(&r.url).ok()?,
+                status: r.status,
+                title: r.title,
+                indexability: r.indexability,
+            })
+        })
+        .collect();
+    Ok(IssueRows {
+        total,
+        limit,
+        offset,
+        urls,
+        next_offset: next_offset(offset, shown, total),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_count_starts_again_at_the_next_midnight_utc() {
-        let now = time::macros::datetime!(2026-10-05 23:59:30 UTC);
-        assert_eq!(
-            next_reset(now),
-            time::macros::datetime!(2026-10-06 0:00 UTC)
-        );
-        let now = time::macros::datetime!(2026-12-31 0:00 UTC);
-        assert_eq!(
-            next_reset(now),
-            time::macros::datetime!(2027-01-01 0:00 UTC)
-        );
-    }
 
     #[test]
     fn limits_are_clamped() {
@@ -565,8 +618,18 @@ mod tests {
     }
 
     #[test]
-    fn severities_parse_in_any_case() {
-        assert_eq!(parse_severity("Critical").unwrap(), Severity::Critical);
+    fn severities_are_lowercase_slugs() {
+        assert_eq!(parse_severity("critical").unwrap(), Severity::Critical);
+        assert_eq!(parse_severity(" notice ").unwrap(), Severity::Notice);
+        assert!(parse_severity("Critical").is_err());
         assert!(parse_severity("severe").is_err());
+    }
+
+    #[test]
+    fn the_next_page_starts_where_this_one_ends_until_the_total_is_reached() {
+        assert_eq!(next_offset(0, 50, 120), Some(50));
+        assert_eq!(next_offset(100, 20, 120), None);
+        assert_eq!(next_offset(0, 0, 0), None);
+        assert_eq!(next_offset(u32::MAX, 5, u32::MAX), None);
     }
 }

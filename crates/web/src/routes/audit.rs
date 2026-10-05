@@ -475,12 +475,11 @@ fn severity_label(s: Severity) -> (&'static str, &'static str, &'static str) {
 
 /// Failing checks, critical first, then by affected pages.
 fn issue_rows(base: &str, s: &StoredSummary) -> Vec<IssueRow> {
-    let mut failing: Vec<(CheckId, u32)> = s
-        .counts
-        .iter()
-        .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n)))
-        .collect();
-    failing.sort_by_key(|&(id, n)| (def(id).severity, std::cmp::Reverse(n), id));
+    let failing = codoseo_mcp::types::rank_failing(
+        s.counts
+            .iter()
+            .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n))),
+    );
     let max = failing
         .iter()
         .filter(|(id, _)| def(*id).scope != Scope::SiteWide)

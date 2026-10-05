@@ -386,3 +386,34 @@ async fn retention_deletes_keys_revoked_over_90_days_ago() {
     assert!(left.contains(&live.id), "a live key stays");
     assert!(left.contains(&ids[0].1), "89 days stays");
 }
+
+#[tokio::test]
+async fn the_day_ends_at_the_next_midnight_utc_by_postgres_clock() {
+    use time::macros::datetime;
+    let db = TestDb::new().await;
+    // Exactly at midnight a whole new day has just begun.
+    let end = api_keys::day_end(&db.pool, Some(datetime!(2026-10-05 0:00 UTC)))
+        .await
+        .unwrap();
+    assert_eq!(end.resets_at, datetime!(2026-10-06 0:00 UTC));
+    assert_eq!(end.seconds_left, 86_400);
+    // A moment before midnight, and half a second before it (rounded up, never 0).
+    let end = api_keys::day_end(&db.pool, Some(datetime!(2026-10-05 23:59:59 UTC)))
+        .await
+        .unwrap();
+    assert_eq!(end.seconds_left, 1);
+    let end = api_keys::day_end(&db.pool, Some(datetime!(2026-12-31 23:59:59.5 UTC)))
+        .await
+        .unwrap();
+    assert_eq!(end.resets_at, datetime!(2027-01-01 0:00 UTC));
+    assert_eq!(end.seconds_left, 1);
+    // A non-UTC instant counts by its UTC day: 01:30 at +02:00 is 23:30 UTC the day before.
+    let end = api_keys::day_end(&db.pool, Some(datetime!(2026-10-06 1:30 +2)))
+        .await
+        .unwrap();
+    assert_eq!(end.resets_at, datetime!(2026-10-06 0:00 UTC));
+    assert_eq!(end.seconds_left, 1800);
+    // Now: between 1 second and a day.
+    let now = api_keys::day_end(&db.pool, None).await.unwrap();
+    assert!((1..=86_400).contains(&now.seconds_left));
+}

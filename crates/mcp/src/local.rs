@@ -25,7 +25,7 @@ use crate::backend::{Backend, BackendError};
 use crate::cache::{AuditCache, CacheError};
 use crate::types::{
     AuditHandle, AuditId, AuditState, AuditStatus, AuditSummary, FailingCheck, MAX_FAILING_CHECKS,
-    RedirectReport, RobotsReport, UrlRow,
+    RedirectReport, RobotsReport, UrlRow, rank_failing,
 };
 
 pub struct LocalBackend {
@@ -268,6 +268,18 @@ fn now_secs() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// A stop reason as a stable machine name, for callers that branch on it.
+pub fn stop_reason_code(stop: &StopReason) -> &'static str {
+    match stop {
+        StopReason::Completed => "completed",
+        StopReason::PageLimit => "page_limit",
+        StopReason::TimeLimit => "time_limit",
+        StopReason::Unreachable(_) => "unreachable",
+        StopReason::Blocked(_) => "blocked",
+        StopReason::RobotsBlocked => "robots_blocked",
+    }
+}
+
 /// A stop reason in the words summaries use.
 pub fn stop_reason_words(stop: &StopReason) -> String {
     match stop {
@@ -283,27 +295,26 @@ pub fn stop_reason_words(stop: &StopReason) -> String {
 /// Built from a saved [`Audit`], so a freshly finished crawl and one reloaded from the
 /// cache (after a restart) produce the same summary shape.
 fn build_summary(id: &AuditId, audit: &Audit) -> AuditSummary {
-    let mut ranked: Vec<&(CheckId, u32)> = audit.report.counts.iter().collect();
-    ranked.sort_by_key(|(check, count)| (def(*check).severity, std::cmp::Reverse(*count)));
+    let ranked = rank_failing(audit.report.counts.iter().copied());
     let total = ranked.len();
     let failing_checks = ranked
         .iter()
         .take(MAX_FAILING_CHECKS)
-        .map(|(check, count)| {
-            let d = def(*check);
+        .map(|&(check, count)| {
+            let d = def(check);
             let example_urls = audit
                 .snapshot
                 .pages
                 .iter()
-                .filter(|p| p.issues.has_check(*check))
+                .filter(|p| p.issues.has_check(check))
                 .take(3)
                 .map(|p| p.url.clone())
                 .collect();
             FailingCheck {
-                check: *check,
+                check,
                 title: d.title.to_owned(),
                 severity: d.severity,
-                count: *count,
+                count,
                 example_urls,
             }
         })
