@@ -14,6 +14,7 @@ pub mod quick;
 pub mod rankorg;
 pub mod search;
 pub mod seo;
+pub mod settings_alerts;
 pub mod sites;
 
 use axum::Router;
@@ -39,6 +40,7 @@ pub fn router() -> Router<AppState> {
         .merge(search::routes())
         .merge(quick::routes())
         .merge(monitoring::routes())
+        .merge(settings_alerts::routes())
         .merge(admin::routes())
         .merge(rankorg::routes())
         .route("/bot", get(bot::page))

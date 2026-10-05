@@ -6,8 +6,11 @@ use std::time::Duration;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
+use codoseo_core::crawl::AddressPolicy;
+use codoseo_notify::{ChannelKey, GuardedHttp};
+
 use crate::auth::mailer::Mailer;
-use crate::config::Config;
+use crate::config::{Config, Mode};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -16,12 +19,24 @@ pub struct AppState {
     pub mailer: Mailer,
     /// For outgoing calls (GitHub OAuth).
     pub http: reqwest::Client,
+    /// Encrypts and decrypts alert channel targets (derived from `SECRET_KEY`).
+    pub channel_key: ChannelKey,
+    /// For "Send test" and for checking a webhook address when it is saved: the same guarded
+    /// client the job runner delivers with (the cloud refuses private and internal addresses,
+    /// self-hosted allows them).
+    pub notify_http: GuardedHttp,
 }
 
 impl AppState {
     pub fn new(pool: PgPool, config: Config, mailer: Mailer) -> AppState {
+        let policy = match config.mode {
+            Mode::Cloud => AddressPolicy::Public,
+            Mode::SelfHost => AddressPolicy::AllowPrivate,
+        };
         AppState {
             pool,
+            channel_key: ChannelKey::derive(&config.secret_key),
+            notify_http: GuardedHttp::new(policy).expect("http client builds"),
             config: Arc::new(config),
             mailer,
             http: reqwest::Client::builder()

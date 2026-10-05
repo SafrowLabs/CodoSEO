@@ -25,6 +25,7 @@ pub enum Screen {
     Crawls,
     Sites,
     Account,
+    Alerts,
     Admin,
 }
 
@@ -37,6 +38,7 @@ impl Screen {
             Screen::Crawls => "Crawls",
             Screen::Sites => "Sites",
             Screen::Account => "Account",
+            Screen::Alerts => "Alerts",
             Screen::Admin => "Admin",
         }
     }
@@ -188,10 +190,13 @@ impl Shell {
                 "ACCOUNT"
             },
             items: vec![
-                NavItem {
-                    soon: true,
-                    ..workspace_item("Alert rules", "#", false, "", "i-bell")
-                },
+                workspace_item(
+                    "Alerts",
+                    "/settings/alerts",
+                    screen == Screen::Alerts,
+                    "",
+                    "i-bell",
+                ),
                 NavItem {
                     soon: true,
                     ..workspace_item("Schedule", "#", false, "", "i-calendar")

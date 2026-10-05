@@ -174,8 +174,10 @@ pub struct AlertCrawl {
     pub starred: Vec<u64>,
 }
 
+type CrawlRow = (Uuid, String, Option<Uuid>, bool, Option<String>, Vec<i64>);
+
 pub async fn alert_crawl(pool: &PgPool, crawl_id: Uuid) -> Result<Option<AlertCrawl>, sqlx::Error> {
-    let row: Option<(Uuid, String, Option<Uuid>, bool, Option<String>, Vec<i64>)> = sqlx::query_as(
+    let row: Option<CrawlRow> = sqlx::query_as(
         "SELECT s.id, s.domain, s.account_id, c.trigger = 'quick', c.failure_reason, s.key_pages \
          FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
     )

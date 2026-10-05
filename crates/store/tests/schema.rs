@@ -86,7 +86,7 @@ async fn migrations_apply_and_every_table_accepts_a_row() {
     .expect("insert alert_channel")
     .get(0);
 
-    sqlx::query("INSERT INTO alert_rules (site_id, channel_id, mode) VALUES ($1, $2, 'instant')")
+    sqlx::query("INSERT INTO alert_rules (site_id, change_kind, channel_id, mode) VALUES ($1, 'error_spike', $2, 'instant')")
         .bind(site_id)
         .bind(channel_id)
         .execute(pool)

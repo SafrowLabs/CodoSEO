@@ -214,6 +214,7 @@ async fn create(
     .await?;
     match outcome {
         CreateOutcome::Created(site) => {
+            super::settings_alerts::default_rules_for_site(&state, user.id(), site.id).await;
             Ok(Redirect::to(&format!("/s/{}/audit", site.id)).into_response())
         }
         CreateOutcome::LimitReached => over_limit(limit_reached()),

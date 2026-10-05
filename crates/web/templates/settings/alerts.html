@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page page-alerts">
+  <div class="page-head"><h1>Alerts</h1><span class="chip">everything not instant goes in your Monday digest</span></div>
+
+  {% if let Some(s) = secret %}
+  <div class="card callout" role="status">
+    <div class="card-head"><span class="card-title">Signing secret for {{ s.channel }}</span><span class="card-aside">shown once</span></div>
+    <div class="card-pad" style="display:grid;gap:8px">
+      <code class="secret">{{ s.secret }}</code>
+      <p class="hint">Copy it now, it isn't shown again. Every delivery carries <span class="mono">X-CodoSEO-Signature: sha256=&lt;HMAC-SHA256 of "timestamp.body"&gt;</span> and <span class="mono">X-CodoSEO-Timestamp</span>; check the signature with this secret.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-head"><span class="card-title">Channels</span><span class="card-aside">{{ channels.len() }}</span></div>
+    <div class="channels">
+      {% for c in channels %}
+      <div class="channel">
+        <div class="channel-main">
+          <div class="channel-title"><b>{{ c.name }}</b><span class="badge {% if c.status == "active" %}t-ok{% else if c.status == "muted" %}t-muted{% else %}t-err{% endif %}">{{ c.status_label }}</span>{% if c.is_default %}<span class="tag">your email</span>{% endif %}</div>
+          <div class="faint mono trunc">{{ c.kind }} · {{ c.target }}</div>
+          {% if let Some(err) = c.error %}<div class="error-text channel-error"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</div>{% endif %}
+        </div>
+        <div class="channel-actions">
+          <span class="test-result" id="test-{{ c.id }}" aria-live="polite"></span>
+          <button class="btn btn-sm" type="button" hx-post="/settings/alerts/channels/{{ c.id }}/test" hx-target="#test-{{ c.id }}" hx-swap="innerHTML" hx-disabled-elt="this">Send test</button>
+          {% if !c.enabled %}<form method="post" action="/settings/alerts/channels/{{ c.id }}/enable"><button class="btn btn-sm btn-primary" type="submit">Turn on</button></form>{% endif %}
+          <form method="post" action="/settings/alerts/channels/{{ c.id }}/mute"><input type="hidden" name="muted" value="{% if c.muted %}false{% else %}true{% endif %}"><button class="btn btn-sm" type="submit">{% if c.muted %}Unmute{% else %}Mute{% endif %}</button></form>
+          {% if !c.is_default %}<form method="post" action="/settings/alerts/channels/{{ c.id }}/delete" hx-confirm="Delete this channel and its rules?"><button class="btn btn-sm btn-ghost" type="submit" aria-label="Delete {{ c.name }}">Delete</button></form>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="card-pad channels-add">
+      <div class="card-title" style="margin-bottom:10px">Add a channel</div>
+      {{ form|safe }}
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><span class="card-title">What is sent at once</span><span class="card-aside">unchecked changes go in the Monday digest</span></div>
+    {% if sites.is_empty() %}
+    <div class="empty-sm">Add a site and its alert rules will show up here.</div>
+    {% endif %}
+    {% for site in sites %}
+    <div class="rules-site">
+      <div class="rules-site-name"><b>{{ site.domain }}</b></div>
+      <div class="rules-scroll">
+        <table class="rules" aria-label="Instant alerts for {{ site.domain }}">
+          <thead><tr><th scope="col">Change</th>{% for col in columns %}<th scope="col" class="{% if col.off %}is-off{% endif %}">{{ col.label }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for row in site.rows %}
+            <tr>
+              <th scope="row">{{ row.label }}{% if !row.note.is_empty() %}<span class="hint"> {{ row.note }}</span>{% endif %}</th>
+              {% for cell in row.cells %}
+              <td><input class="check" type="checkbox" name="instant" value="1"{% if cell.checked %} checked{% endif %} hx-post="/settings/alerts/rules" hx-trigger="change" hx-swap="none" hx-vals='{"site":"{{ site.id }}","kind":"{{ row.slug }}","channel":"{{ cell.channel }}"}' aria-label="{{ cell.label }}"></td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -612,6 +612,11 @@ pub async fn attach_after_login(
         ClaimOutcome::LimitReached(s) => ("limit", s),
         ClaimOutcome::NotFound => ("expired", None),
     };
+    if matches!(how, "attached" | "created")
+        && let Some(s) = &site
+    {
+        super::settings_alerts::default_rules_for_site(state, account.id, s.id).await;
+    }
     events::record(
         &state.pool,
         EventKind::LinkClicked,

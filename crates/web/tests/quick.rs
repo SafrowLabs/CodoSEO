@@ -509,6 +509,15 @@ async fn unlocking_emails_a_link_that_attaches_the_audit_and_queues_the_first_cr
         "the audited site now belongs to the account"
     );
     assert_eq!(res.location(), Some(format!("/s/{site}/audit").as_str()));
+    assert_eq!(
+        count(
+            &app,
+            &format!("SELECT count(*) FROM alert_rules WHERE site_id = '{site}'")
+        )
+        .await,
+        5,
+        "the default instant rules are on for the attached site"
+    );
 
     let (priority, status): (i16, String) = sqlx::query_as(
         "SELECT priority, status::text FROM crawls WHERE site_id = $1 AND trigger = 'first'",
