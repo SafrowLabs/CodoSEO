@@ -316,13 +316,17 @@ pub async fn example_urls(
     per_check: i64,
 ) -> Result<std::collections::HashMap<CheckId, Vec<String>>, sqlx::Error> {
     let bits: Vec<i32> = checks.iter().map(|c| i32::from(*c as u8)).collect();
+    // The crawl's flagged rows are read once; each check then picks its first rows from that
+    // set. Asking `pages` once per check walks the table's primary key across other crawls
+    // for a check few pages fail.
     let rows: Vec<(i32, String)> = sqlx::query_as(
-        "SELECT b.bit, e.url FROM unnest($2::int[]) AS b(bit) \
+        "WITH c AS MATERIALIZED ( \
+             SELECT id, url, issues FROM pages WHERE crawl_id = $1 AND issues <> 0) \
+         SELECT b.bit, e.url FROM unnest($2::int[]) AS b(bit) \
          CROSS JOIN LATERAL ( \
-             SELECT p.url FROM pages p \
-             WHERE p.crawl_id = $1 AND (p.issues & (1::bigint << b.bit)) <> 0 \
-             ORDER BY p.id LIMIT $3) e \
-         ORDER BY b.bit",
+             SELECT c.id, c.url FROM c WHERE (c.issues & (1::bigint << b.bit)) <> 0 \
+             ORDER BY c.id LIMIT $3) e \
+         ORDER BY b.bit, e.id",
     )
     .bind(crawl_id)
     .bind(&bits)

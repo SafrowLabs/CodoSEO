@@ -21,3 +21,9 @@ CREATE TABLE api_usage (
   calls INT NOT NULL,
   PRIMARY KEY (account_id, day)
 );
+
+-- The pages of one crawl in id order: the explorer and the API page through a crawl's pages
+-- `ORDER BY id`, and with only `(crawl_id)` indexed the planner walks the primary key across
+-- every crawl and filters, which is slow for a check few pages fail in a big table.
+DROP INDEX pages_crawl_id_idx;
+CREATE INDEX pages_crawl_id_id_idx ON pages (crawl_id, id);

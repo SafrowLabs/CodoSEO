@@ -99,7 +99,7 @@ pub async fn latest_done_for_account(
         "SELECT DISTINCT ON (c.site_id) c.site_id, c.health_score, c.finished_at \
          FROM crawls c JOIN sites s ON s.id = c.site_id \
          WHERE s.account_id = $1 AND c.status = 'done' \
-         ORDER BY c.site_id, c.finished_at DESC",
+         ORDER BY c.site_id, c.finished_at DESC, c.created_at DESC, c.id DESC",
     )
     .bind(account_id)
     .fetch_all(pool)
