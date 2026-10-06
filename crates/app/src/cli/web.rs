@@ -21,15 +21,15 @@ pub struct WebArgs {
 /// Every role that stores or reads channel secrets prints it at startup.
 pub fn secret_key_warning(secret_key_set: bool) -> Option<&'static str> {
     (!secret_key_set).then_some(
-        "warning: SECRET_KEY is not set; using the built-in development key. Set it so \
-         stored channel secrets are protected.",
+        "SECRET_KEY is not set; using the built-in development key. Set it so stored \
+         channel secrets are protected.",
     )
 }
 
-/// Prints [`secret_key_warning`] for this process's environment.
+/// Logs [`secret_key_warning`] for this process's environment.
 pub fn warn_if_dev_secret_key() {
     if let Some(warning) = secret_key_warning(std::env::var("SECRET_KEY").is_ok()) {
-        eprintln!("{warning}");
+        tracing::warn!("{warning}");
     }
 }
 
@@ -67,14 +67,34 @@ pub async fn serve(state: AppState, shutdown: CancellationToken) -> Outcome {
         Mode::SelfHost => "self-hosted",
         Mode::Cloud => "cloud",
     };
-    println!(
-        "CodoSEO web ({mode}) listening on {} → {}",
-        state.config.bind, state.config.base_url
+    tracing::info!(
+        bind = %state.config.bind,
+        base_url = %state.config.base_url,
+        "CodoSEO web ({mode}) listening"
     );
     codoseo_web::serve(state, listener, async move { shutdown.cancelled().await })
         .await
         .map_err(|e| CliError::msg(format!("web server failed: {e}")))?;
     Ok(EXIT_OK)
+}
+
+/// Starts what the metrics need in a server role: the internal `/metrics` listener (when
+/// `CODOSEO_METRICS_BIND` is set) and the pool gauges. A worker also publishes its memory budget.
+pub async fn start_metrics(
+    pool: &sqlx::PgPool,
+    shutdown: &CancellationToken,
+    worker_budget: Option<u64>,
+) -> Result<(), CliError> {
+    let listening = crate::telemetry::serve_metrics(shutdown)
+        .await
+        .map_err(CliError::msg)?;
+    if listening.is_some() {
+        crate::telemetry::sample_pool(pool.clone(), shutdown.clone());
+        if let Some(budget) = worker_budget {
+            codoseo_web::metrics::worker_memory_budget(budget);
+        }
+    }
+    Ok(())
 }
 
 /// Cancels `token` on SIGTERM or Ctrl-C.
@@ -104,6 +124,7 @@ pub async fn run(args: WebArgs) -> Outcome {
     let state = prepare(args.bind)?;
     let shutdown = CancellationToken::new();
     cancel_on_signal(shutdown.clone());
+    start_metrics(&state.pool, &shutdown, None).await?;
     // The scheduler runs in the web role; `CODOSEO_SCHEDULER=off` leaves it to another container.
     let scheduler = crate::scheduler::spawn(&state.pool, &state.config, &shutdown);
     let outcome = serve(state, shutdown.clone()).await;

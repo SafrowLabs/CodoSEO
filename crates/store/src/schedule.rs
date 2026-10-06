@@ -369,7 +369,8 @@ pub async fn record_active_after_4_weeks(
     pool: &PgPool,
     now: OffsetDateTime,
 ) -> Result<u64, sqlx::Error> {
-    let mut tx = pool.begin().await?;
+    // The web role's short statement_timeout would cut the scan of `events`; see `begin_long`.
+    let mut tx = crate::pool::begin_long(pool).await?;
     // Without a unique key on the event, this keeps two schedulers from both writing it.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.scheduler.active_after_4_weeks'))")
         .execute(&mut *tx)

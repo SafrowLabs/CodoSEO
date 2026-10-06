@@ -9,6 +9,7 @@ use codoseo_notify::{ChannelKey, Email, GuardedHttp, Mailer};
 use codoseo_store::jobs::{ClaimedJob, JobKind, JobQueue};
 use codoseo_web::Config;
 use codoseo_web::Mode;
+use codoseo_web::metrics;
 use serde::Deserialize;
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
@@ -96,6 +97,7 @@ async fn settle(ctx: &JobContext, queue: &JobQueue, worker_id: &str, job: Claime
     let recorded = match outcome {
         Ok(()) => queue.complete(id, worker_id).await,
         Err(error) => {
+            metrics::job_failed(kind.slug());
             tracing::warn!(job = %id, kind = kind.slug(), %error, "job failed");
             queue.retry(id, worker_id, &error).await
         }

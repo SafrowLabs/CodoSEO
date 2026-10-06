@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -12,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -34,3 +37,44 @@ jobs:
       - run: cargo test --workspace
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+  # Licenses, advisories, banned crates and sources, per deny.toml. Nightly runs it again.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  # Builds the image natively on each architecture (no QEMU), checks its size and runs the
+  # self-host compose file against it. Publishing the image is the release workflow's job.
+  docker:
+    name: docker (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: codoseo:ci
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.arch }}
+      - name: Image is under 40 MB
+        run: |
+          size="$(docker image inspect -f '{{.Size}}' codoseo:ci)"
+          echo "image size: $size bytes"
+          test "$size" -lt 40000000
+      - name: Compose up, healthcheck and crawl a test site
+        run: IMAGE=codoseo:ci PROJECT=codoseo-ci PORT=18080 deploy/test-container.sh

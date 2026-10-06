@@ -10,7 +10,7 @@ use crate::worker::{
     DEFAULT_MEMORY_BUDGET, address_policy_from_env, requeue_stale_sweep, worker_loop,
 };
 
-use super::web::{mailer_for, warn_if_dev_secret_key};
+use super::web::{mailer_for, start_metrics, warn_if_dev_secret_key};
 use super::{CliError, EXIT_OK, Outcome};
 
 #[derive(Debug, Args)]
@@ -48,7 +48,15 @@ pub async fn run(_args: WorkerArgs) -> Outcome {
         });
     }
 
-    println!("worker {worker_id} started");
+    start_metrics(
+        &pool,
+        &shutdown,
+        Some(crate::worker::budget::memory_budget_bytes(
+            DEFAULT_MEMORY_BUDGET,
+        )),
+    )
+    .await?;
+    tracing::info!(%worker_id, "worker started");
     let sweep = tokio::spawn(requeue_stale_sweep(crawl_queue.clone(), shutdown.clone()));
     let job_runner = tokio::spawn(job_loop(
         jobs,

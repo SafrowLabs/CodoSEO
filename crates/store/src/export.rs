@@ -123,12 +123,15 @@ pub async fn batch(
          ORDER BY p.id LIMIT $4",
         filter.predicate()
     );
+    // The web role's short statement_timeout would cut a slow batch short; see `begin_long`.
+    let mut tx = crate::pool::begin_long(pool).await?;
     let rows: Vec<Row> = sqlx::query_as(&sql)
         .bind(crawl_id)
         .bind(after)
         .bind(q.map(contains_pattern))
         .bind(limit)
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await?;
+    tx.commit().await?;
     rows.into_iter().map(ExportRow::try_from).collect()
 }

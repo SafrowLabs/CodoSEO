@@ -21,6 +21,7 @@ use serde::Serialize;
 use crate::agent::auth::ApiCaller;
 use crate::agent::error::AgentError;
 use crate::agent::service::{AgentService, Reply};
+use crate::metrics::{self, Surface, Tier};
 use crate::state::AppState;
 
 /// Where the API lives; the `Origin` check exempts everything under it.
@@ -86,6 +87,14 @@ async fn counted<Q, T: Serialize, F: Future<Output = Reply<T>>>(
 
 /// The reply as a response: the body, or the JSON error, with the rate-limit headers.
 fn respond<T: Serialize>(status: StatusCode, reply: Reply<T>) -> Response {
+    metrics::api_request(
+        Surface::Rest,
+        Tier::Key,
+        reply
+            .outcome
+            .as_ref()
+            .map_or_else(AgentError::code, |_| "ok"),
+    );
     let mut res = match reply.outcome {
         Ok(value) => (status, Json(value)).into_response(),
         Err(e) => e.into_response(),

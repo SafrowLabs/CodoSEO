@@ -17,6 +17,7 @@ use codoseo_notify::{AlertItem, AlertMessage, ChannelKind, DeliveryError, delive
 use codoseo_store::alert_rules::{self, AlertCrawl, Route, StoredChange};
 use codoseo_store::jobs::{ClaimedJob, JobKind, JobQueue};
 use codoseo_store::{accounts, channels};
+use codoseo_web::metrics;
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -304,6 +305,7 @@ pub async fn deliver_alert(
             return Err(format!("cannot read the channel target: {e}"));
         }
     };
+    metrics::alert_delivery(state.kind.as_str(), outcome.is_ok());
     match outcome {
         Ok(()) => {
             channels::record_success(pool, delivery.channel_id)

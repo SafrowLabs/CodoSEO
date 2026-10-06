@@ -1,28 +1,42 @@
-# CodoSEO — Open-Source SEO Crawler & Site Audit CLI
+# CodoSEO
+
+**Know the moment your SEO breaks.**
 
 [![crates.io](https://img.shields.io/crates/v/codoseo)](https://crates.io/crates/codoseo)
 [![Downloads](https://img.shields.io/crates/d/codoseo)](https://crates.io/crates/codoseo)
 [![License: AGPL-3.0](https://img.shields.io/crates/l/codoseo)](https://www.gnu.org/licenses/agpl-3.0.html)
-[![CI](https://github.com/SafrowLabs/codoSEO/actions/workflows/ci.yml/badge.svg)](https://github.com/SafrowLabs/codoSEO/actions/workflows/ci.yml)
+[![CI](https://github.com/SafrowLabs/CodoSEO/actions/workflows/ci.yml/badge.svg)](https://github.com/SafrowLabs/CodoSEO/actions/workflows/ci.yml)
 
-**CodoSEO** is a fast, polite, open-source SEO crawler and technical site-audit tool written in Rust. It crawls a site, runs **44 SEO checks** across response health, indexability, on-page factors, content, links, schema and more, scores the result 0–100, and can diff two audits to catch regressions in CI.
+CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in Rust. It crawls a site, runs **44 SEO checks** across response health, indexability, on-page factors, content, links, schema and more, scores the result 0-100, and compares each crawl with the one before so a regression shows up the day it ships. It comes in four forms:
 
-- Crawls up to 500 pages by default; configurable to any limit
-- Respects `robots.txt`, `Crawl-delay`, and backs off on `429`/`503`
-- Outputs table, JSON, Markdown or CSV — pipe-friendly and CI-ready
-- Ships a local [MCP](https://modelcontextprotocol.io) server (`codoseo mcp`) for AI agents like Claude Code
-- Single static binary; no runtime dependencies
-- AGPL-3.0 — free to self-host, source-available
+- **A CLI** for one-off audits and CI gates (`codoseo crawl`, `codoseo diff`).
+- **A local MCP server** (`codoseo mcp`) so an AI agent such as Claude Code can audit sites from your machine.
+- **A web app** with scheduled crawls, a URL explorer, change tracking and email, Slack, Discord and webhook alerts. Self-host it with Docker, or use the hosted version at [codoseo.com](https://codoseo.com).
+- **A REST API and a hosted MCP server** at codoseo.com for your monitored sites.
+
+It respects `robots.txt` and `Crawl-delay`, backs off on `429` and `503`, and ships as one static binary. AGPL-3.0.
+
+CodoSEO is built by SafrowLabs, the team behind RankOrg.
 
 ---
 
 ## Install
 
 ```sh
+# Homebrew (macOS, Linux)
+brew install safrowlabs/tap/codoseo
+
+# npm: downloads the release binary for your platform
+npx codoseo --help
+
+# Cargo (needs Rust 1.88 or newer)
 cargo install codoseo
+
+# Docker: the image's default command runs the web app; any CLI command works too
+docker run --rm ghcr.io/safrowlabs/codoseo crawl https://example.com
 ```
 
-Requires **Rust 1.88** or newer. Binaries for Linux, macOS and Windows are on the [releases page](https://github.com/SafrowLabs/codoSEO/releases).
+Prebuilt binaries for Linux (static musl, x86_64 and aarch64), macOS (Intel and Apple Silicon) and Windows are on the [releases page](https://github.com/SafrowLabs/CodoSEO/releases), each with a `.sha256` file. Release assets are named `codoseo-vX.Y.Z-<target>.tar.gz`.
 
 ---
 
@@ -84,11 +98,12 @@ codoseo diff baseline.json audit.json
 | `codoseo robots <URL>` | Show the site's `robots.txt` and test whether CodoSEObot may fetch a path |
 | `codoseo redirects <URL>` | Follow a URL's redirect chain hop by hop |
 | `codoseo diff <BEFORE> <AFTER>` | Compare two saved JSON audits; surface new issues and regressions |
-| `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [Local MCP](#local-mcp)) |
+| `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [MCP for AI agents](#mcp-for-ai-agents)) |
 | `codoseo web` | Serve the web app (see [Web app and self-hosting](#web-app-and-self-hosting)) |
 | `codoseo worker` | Claim and run crawls from the Postgres queue |
-| `codoseo all` | Self-hosting in one process: apply migrations, then run the web app and a worker |
+| `codoseo all` | Self-hosting in one process: apply migrations, then run the web app, a worker and the scheduler |
 | `codoseo migrate` | Apply pending Postgres migrations |
+| `codoseo healthcheck` | Probe `/readyz` and exit 0 if healthy (used by the container health check) |
 
 ### Flags
 
@@ -284,59 +299,72 @@ CodoSEO identifies itself as `CodoSEObot/0.1 (+https://codoseo.com/bot)`. It:
 
 ---
 
-## Local MCP
+## MCP for AI agents
 
-`codoseo mcp` runs a local [MCP](https://modelcontextprotocol.io) server over stdio, so an AI agent can crawl and audit sites directly from your machine — no account, no cloud calls, and (unlike the hosted version) private and internal addresses are allowed.
+### Local server
 
-Add it to Claude Code:
+`codoseo mcp` runs an [MCP](https://modelcontextprotocol.io) server over stdio, so an agent can crawl and audit sites from your machine. No account and no cloud calls; unlike the hosted version, private and internal addresses are allowed.
 
 ```sh
+# Claude Code
 claude mcp add codoseo -- codoseo mcp
+
+# Without installing the binary
+claude mcp add codoseo -- npx -y codoseo mcp
 ```
 
-Or in any MCP-compatible client, point it at `codoseo mcp` as a stdio server.
+Any other client that takes a stdio command (Cursor, Claude Desktop, ...) needs the same two pieces, for example in `mcp.json`:
 
-**Tools:**
+```json
+{ "mcpServers": { "codoseo": { "command": "codoseo", "args": ["mcp"] } } }
+```
 
-| Tool | Description |
-|---|---|
-| `audit_site` | Crawl a site and run the checks; returns the summary if it finishes quickly, otherwise a running `audit_id` to poll |
-| `get_audit` | Check an audit's progress or summary by id |
-| `get_issue_urls` | List the URLs affected by one failing check, paginated |
-| `get_page` | Get one page's full record from a finished audit |
-| `check_page` | Fetch and check one page right now, without a full crawl |
-| `check_robots` | Show a site's `robots.txt` and whether CodoSEObot may fetch a path |
-| `check_redirects` | Follow a URL's redirects hop by hop |
-| `compare_audits` | Compare two finished audits and list what changed |
+Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_redirects`, `compare_audits`. Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
 
-Audits are cached as JSON under your user cache directory (`~/Library/Caches/codoseo/audits/` on macOS, `~/.cache/codoseo/audits/` on Linux) so `get_audit`, `get_issue_urls`, `get_page` and `compare_audits` can be called after `audit_site` returns.
+### Hosted server (codoseo.com)
+
+Add the connector `https://codoseo.com/mcp` in claude.ai (Settings, Connectors), or in Claude Code:
+
+```sh
+claude mcp add --transport http codoseo https://codoseo.com/mcp
+```
+
+With no key it gives agents free audits of public sites (`quick_audit`, `get_audit`, `get_issue_urls`, `start_monitoring`). With an API key from **Settings, API keys** it gives them your monitored sites:
+
+```sh
+claude mcp add --transport http codoseo https://codoseo.com/mcp --header "Authorization: Bearer cdo_..."
+```
+
+Details, JSON config and the tool list are in [docs/mcp.md](docs/mcp.md); the same data is available over REST ([docs/api.md](docs/api.md)).
 
 ---
 
 ## Web app and self-hosting
 
-The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview with pixel-width meters; inlinks; reconstructed headers), a site audit with your health score and issues, and a changes view that compares each crawl with the one before. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
+The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview; inlinks; reconstructed headers), a site audit with your health score and issues, and a changes view that compares each crawl with the one before. It can crawl on a schedule and alert you by email, Slack, Discord or webhook. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
 
-Run everything in one process:
+Self-host with Docker Compose in three commands:
 
 ```sh
-createdb codoseo
-DATABASE_URL=postgres://localhost/codoseo codoseo all
-# open http://localhost:8080 — the first account to sign in becomes the owner
+curl -fsSL https://raw.githubusercontent.com/SafrowLabs/CodoSEO/main/deploy/compose.selfhost.yml -o compose.yml
+printf 'SECRET_KEY=%s\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 24)" > .env
+docker compose up -d
 ```
 
-Sign-in uses magic links. Without an email server the link is printed to the server log; set `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` to add "Continue with GitHub". The owner can close signups from **Account**.
+Then open <http://localhost:8080>. The first account to sign in becomes the owner. Sign-in uses magic links; without an email server (`SMTP_URL`) the link is printed in the container log (`docker compose logs codoseo`).
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `DATABASE_URL` | — | Postgres connection string (required) |
-| `CODOSEO_MODE` | `selfhost` | `selfhost` or `cloud` (cloud turns on plan limits) |
-| `BASE_URL` | `http://localhost:<port>` | Public address, used for links, cookies and the `Origin` check on every form post |
-| `CODOSEO_BIND` | `0.0.0.0:8080` | Listen address (`--bind` overrides it) |
-| `SECRET_KEY` | dev key | Required in cloud mode |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | — | Optional GitHub sign-in (callback: `<BASE_URL>/auth/github/callback`) |
+Without Docker, run everything in one process against any Postgres:
 
-For larger setups run `codoseo web` and one or more `codoseo worker` processes against the same database, after `codoseo migrate`. Health checks: `/healthz` (process up) and `/readyz` (database reachable).
+```sh
+DATABASE_URL=postgres://localhost/codoseo codoseo all
+```
+
+- [docs/self-hosting.md](docs/self-hosting.md): install, email, GitHub sign-in, reverse proxy, upgrades, backups
+- [docs/configuration.md](docs/configuration.md): every environment variable
+- [docs/deploy-coolify.md](docs/deploy-coolify.md): Coolify template and the two-container layout
+- [docs/operations.md](docs/operations.md): logs, metrics, health checks, upgrades
+- [docs/mcp.md](docs/mcp.md) and [docs/api.md](docs/api.md): agent access
+- [RELEASING.md](RELEASING.md): how releases are cut
 
 Keyboard: <kbd>⌘K</kbd> command palette and URL search, <kbd>G</kbd> then <kbd>E</kbd>/<kbd>A</kbd>/<kbd>C</kbd>/<kbd>H</kbd> to switch screens, <kbd>J</kbd>/<kbd>K</kbd> to move through rows, <kbd>/</kbd> to filter, <kbd>[</kbd> to collapse the sidebar, <kbd>?</kbd> for the full list.
 
@@ -352,14 +380,14 @@ crates/
   crawler/    — fetcher, robots.txt, sitemaps, politeness, crawl loop
   checks/     — the 44 check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
-  mcp/        — local MCP server: the 8 tools above, over rmcp
+  mcp/        — MCP server: the 8 local tools and the hosted tools, over rmcp
   store/      — Postgres: migrations, crawl and jobs queues, queries for the web app
   web/        — the web app: axum routes, askama templates, htmx, bundled assets
   app/        — CLI (the `codoseo` binary)
   testkit/    — shared test helpers (not published to crates.io)
 ```
 
-Each crate is published to [crates.io](https://crates.io/crates/codoseo) independently so you can embed the crawler or checks in your own Rust project.
+Each library crate is published to [crates.io](https://crates.io/crates/codoseo) independently so you can embed the crawler or checks in your own Rust project.
 
 ---
 
@@ -375,4 +403,4 @@ cargo test
 
 ## License
 
-[AGPL-3.0-only](https://www.gnu.org/licenses/agpl-3.0.html). The MCP server and web app are coming later — see [codoseo.com](https://codoseo.com).
+[AGPL-3.0-only](https://www.gnu.org/licenses/agpl-3.0.html). Hosted version: [codoseo.com](https://codoseo.com).

@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use super::error::AgentError;
 use super::keys;
+use crate::metrics::{self, Surface, Tier};
 use crate::state::AppState;
 
 /// A caller holding a live API key: the key's account (as loaded for this request) and the key.
@@ -70,6 +71,11 @@ impl FromRequestParts<AppState> for ApiCaller {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<ApiCaller, AgentError> {
-        authenticate(state, &parts.headers).await
+        let caller = authenticate(state, &parts.headers).await;
+        // A refused key never reaches a handler, so this is where REST counts it.
+        if let Err(e) = &caller {
+            metrics::api_request(Surface::Rest, Tier::Key, e.code());
+        }
+        caller
     }
 }

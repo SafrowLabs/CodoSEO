@@ -17,7 +17,7 @@
   "homepage": "https://codoseo.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SafrowLabs/codoSEO.git",
+    "url": "git+https://github.com/SafrowLabs/CodoSEO.git",
     "directory": "npm"
   },
   "license": "AGPL-3.0-only",

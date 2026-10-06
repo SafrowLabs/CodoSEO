@@ -16,6 +16,7 @@ use super::anon::{AnonCaller, AnonService};
 use super::auth::ApiCaller;
 use super::error::AgentError;
 use super::service::{AgentService, Reply};
+use crate::metrics::{self, Surface, Tier};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -43,7 +44,20 @@ fn tool_error(e: AgentError) -> String {
 }
 
 fn outcome<T>(reply: Reply<T>) -> Result<T, String> {
-    reply.into_result().map_err(tool_error)
+    let result = reply.into_result();
+    metrics::api_request(
+        Surface::Mcp,
+        Tier::Key,
+        result.as_ref().map_or_else(AgentError::code, |_| "ok"),
+    );
+    result.map_err(tool_error)
+}
+
+/// A no-key tool call's outcome, counted. Those errors are plain messages without a code.
+fn anon<T>(result: Result<T, String>) -> Result<T, String> {
+    let label = if result.is_ok() { "ok" } else { "error" };
+    metrics::api_request(Surface::Mcp, Tier::Anon, label);
+    result
 }
 
 impl CloudBackend for AgentBackend {
@@ -97,21 +111,21 @@ impl CloudBackend for AgentBackend {
     }
 
     async fn reject(&self, who: &ApiCaller, message: String) -> Result<Infallible, String> {
-        self.service()
+        let refused = self
+            .service()
             .refuse::<Infallible>(who, AgentError::BadRequest(message))
-            .await
-            .into_result()
-            .map_err(tool_error)
+            .await;
+        outcome(refused)
     }
 }
 
 impl AnonBackend for AgentBackend {
     async fn quick_audit(&self, who: &AnonCaller, url: &str) -> Result<QuickAuditState, String> {
-        AnonService::new(&self.state).quick_audit(who, url).await
+        anon(AnonService::new(&self.state).quick_audit(who, url).await)
     }
 
     async fn get_audit(&self, who: &AnonCaller, audit_id: &str) -> Result<QuickAuditState, String> {
-        AnonService::new(&self.state).get_audit(who, audit_id).await
+        anon(AnonService::new(&self.state).get_audit(who, audit_id).await)
     }
 
     /// `quick_audit` looks at its audit every second or so while it waits; those looks are part
@@ -128,9 +142,11 @@ impl AnonBackend for AgentBackend {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<AuditIssueUrls, String> {
-        AnonService::new(&self.state)
-            .audit_issue_urls(who, audit_id, check, limit, offset)
-            .await
+        anon(
+            AnonService::new(&self.state)
+                .audit_issue_urls(who, audit_id, check, limit, offset)
+                .await,
+        )
     }
 
     async fn start_monitoring(
@@ -139,8 +155,10 @@ impl AnonBackend for AgentBackend {
         url: &str,
         email: &str,
     ) -> Result<MonitoringRequested, String> {
-        AnonService::new(&self.state)
-            .start_monitoring(who, url, email)
-            .await
+        anon(
+            AnonService::new(&self.state)
+                .start_monitoring(who, url, email)
+                .await,
+        )
     }
 }

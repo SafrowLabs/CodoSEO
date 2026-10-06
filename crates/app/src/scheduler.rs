@@ -10,6 +10,7 @@ use codoseo_store::jobs::JobQueue;
 use codoseo_store::plans;
 use codoseo_store::schedule::{self, DueSite};
 use codoseo_web::auth::session;
+use codoseo_web::metrics;
 use codoseo_web::{Config, Mode};
 use jiff::civil::{Time, Weekday};
 use jiff::tz::TimeZone;
@@ -264,6 +265,7 @@ pub async fn tick(ctx: &SchedulerContext, now: Timestamp) -> TickReport {
         Ok(()) => ping_heartbeat(ctx).await,
         Err(e) => report.fail("heartbeat", e),
     }
+    metrics::scheduler_tick(unix_now());
     report
 }
 
@@ -272,6 +274,11 @@ impl TickReport {
         tracing::warn!(step, %error, "scheduler step failed");
         self.failures.push((step, error.to_string()));
     }
+}
+
+/// Now as Unix seconds, for the last-tick gauge.
+fn unix_now() -> f64 {
+    Timestamp::now().as_millisecond() as f64 / 1000.0
 }
 
 fn to_odt(ts: Timestamp) -> OffsetDateTime {
@@ -394,13 +401,34 @@ async fn ping_heartbeat(ctx: &SchedulerContext) {
         Ok(res) => {
             tracing::warn!(status = %res.status(), "scheduler heartbeat URL answered with an error")
         }
-        Err(e) => tracing::warn!(error = %e, "could not reach the scheduler heartbeat URL"),
+        Err(e) => {
+            tracing::warn!(error = %heartbeat_error(e), "could not reach the scheduler heartbeat URL")
+        }
     }
+}
+
+/// A failed ping as text without the URL: monitoring services put their secret in the path
+/// (`/ping/<uuid>`), and reqwest's message would otherwise repeat it into the logs.
+fn heartbeat_error(e: reqwest::Error) -> String {
+    e.without_url().to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_failed_heartbeat_ping_is_logged_without_its_url() {
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1/ping/secret-token-123")
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("secret-token-123"), "premise");
+        let logged = heartbeat_error(err);
+        assert!(!logged.contains("secret-token-123"), "{logged}");
+        assert!(!logged.contains("127.0.0.1"), "{logged}");
+    }
 
     #[test]
     fn only_off_disables_the_scheduler() {

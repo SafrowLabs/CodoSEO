@@ -6,9 +6,11 @@ const { createHash } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { spawnSync } = require("node:child_process");
 
+// The release workflow builds exactly these targets. Linux binaries are static musl builds, so they
+// run on glibc and Alpine alike.
 const targets = {
-  "linux-x64": "x86_64-unknown-linux-gnu",
-  "linux-arm64": "aarch64-unknown-linux-gnu",
+  "linux-x64": "x86_64-unknown-linux-musl",
+  "linux-arm64": "aarch64-unknown-linux-musl",
   "darwin-x64": "x86_64-apple-darwin",
   "darwin-arm64": "aarch64-apple-darwin",
   "win32-x64": "x86_64-pc-windows-msvc"
@@ -58,7 +60,7 @@ async function main() {
   if (!rustTarget) throw new Error(`CodoSEO does not have a published binary for ${npmTarget}.`);
   const packageVersion = require("./package.json").version;
   const archiveName = `codoseo-v${packageVersion}-${rustTarget}.tar.gz`;
-  const archiveUrl = `https://github.com/SafrowLabs/codoSEO/releases/download/v${packageVersion}/${archiveName}`;
+  const archiveUrl = `https://github.com/SafrowLabs/CodoSEO/releases/download/v${packageVersion}/${archiveName}`;
   const vendorDir = path.join(__dirname, "vendor", npmTarget);
   const binaryName = process.platform === "win32" ? "codoseo.exe" : "codoseo";
   const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codoseo-"));
@@ -91,4 +93,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { download, verifyChecksum };
+module.exports = { download, verifyChecksum, targets };

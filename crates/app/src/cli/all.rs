@@ -8,7 +8,7 @@ use codoseo_store::crawl_queue::CrawlQueue;
 use codoseo_store::jobs::JobQueue;
 use tokio_util::sync::CancellationToken;
 
-use super::web::{cancel_on_signal, prepare, serve};
+use super::web::{cancel_on_signal, prepare, serve, start_metrics};
 use super::{CliError, Outcome};
 use crate::jobs::{JobContext, job_loop};
 use crate::worker::{
@@ -30,6 +30,14 @@ pub async fn run(args: AllArgs) -> Outcome {
 
     let shutdown = CancellationToken::new();
     cancel_on_signal(shutdown.clone());
+    start_metrics(
+        &state.pool,
+        &shutdown,
+        Some(crate::worker::budget::memory_budget_bytes(
+            DEFAULT_MEMORY_BUDGET,
+        )),
+    )
+    .await?;
 
     let pool = state.pool.clone();
     let crawl_queue = CrawlQueue::new(pool.clone());

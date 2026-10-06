@@ -326,3 +326,41 @@ async fn top_pages_are_the_indexable_pages_with_the_most_inlinks() {
             .is_empty()
     );
 }
+
+/// The admin funnel scans `events` for a whole month; production's web role gives every
+/// statement 5 s. On a pool whose sessions have a 1 s limit and a table that is locked for 2 s,
+/// both funnel queries must still answer: they lift the limit for their own transaction.
+#[tokio::test]
+async fn the_funnels_outlast_a_short_statement_timeout() {
+    use std::time::Duration;
+
+    use sqlx::postgres::PgPoolOptions;
+
+    let db = TestDb::new().await;
+    events::record(&db.pool, EventKind::AuditStarted, None, None, None)
+        .await
+        .unwrap();
+    let options = (*db.pool.connect_options())
+        .clone()
+        .options([("statement_timeout", "1000")]);
+    let limited = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await
+        .unwrap();
+
+    let mut lock = db.pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE events IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        lock.commit().await.unwrap();
+    });
+    let web = events::funnel_counts(&limited, 30).await.unwrap();
+    let agents = events::agent_funnel_counts(&limited, 30).await.unwrap();
+    release.await.unwrap();
+    assert_eq!(web[0].events, 1);
+    assert_eq!(agents[0].events, 0);
+}

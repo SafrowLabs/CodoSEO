@@ -7,7 +7,7 @@ version = "0.0.1"
 edition = "2024"
 rust-version = "1.88"
 license = "AGPL-3.0-only"
-repository = "https://github.com/SafrowLabs/codoSEO"
+repository = "https://github.com/SafrowLabs/CodoSEO"
 homepage = "https://codoseo.com"
 
 [workspace.dependencies]
@@ -29,6 +29,9 @@ proptest = "1.11.0"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
 tokio-util = "0.7.19"
 tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+metrics = "0.24.6"
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "gzip", "brotli", "stream"] }
 bytes = "1.12.1"
 http = "1.5.0"
@@ -71,3 +74,12 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
+
+# The profile the container image and release binaries are built with. Thin LTO plus one codegen
+# unit shrinks and speeds up the binary; symbols are stripped. Day-to-day `cargo build --release`
+# is unaffected.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = true

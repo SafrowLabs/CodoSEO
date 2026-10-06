@@ -25,9 +25,14 @@ fn read_cgroup_v1() -> Option<u64> {
     text.trim().parse().ok()
 }
 
+/// The memory a crawl capped at `max_pages` reserves, at ~1.5 KB/page.
+pub fn reserved_bytes(max_pages: u32) -> u64 {
+    u64::from(max_pages) * RESERVATION_PER_PAGE
+}
+
 /// Whether a crawl capped at `max_pages` fits within `budget`, at ~1.5 KB/page.
 pub fn fits(max_pages: u32, budget: u64) -> bool {
-    (max_pages as u64) * RESERVATION_PER_PAGE <= budget
+    reserved_bytes(max_pages) <= budget
 }
 
 #[cfg(test)]
