@@ -1,6 +1,6 @@
 {
   "name": "codoseo",
-  "version": "0.0.1",
+  "version": "0.1.0-rc.1",
   "description": "CodoSEO SEO crawler and site auditor CLI",
   "bin": {
     "codoseo": "bin/codoseo.js"

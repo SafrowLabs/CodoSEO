@@ -619,7 +619,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
 name = "codoseo"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "assert_cmd",
  "axum",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-checks"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "codoseo-core",
  "proptest",
@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-core"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "proptest",
  "serde",
@@ -682,7 +682,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-crawler"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "axum",
  "bytes",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-diff"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "codoseo-core",
  "url",
@@ -717,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-mcp"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "codoseo-checks",
  "codoseo-core",
@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-notify"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "aes-gcm",
  "askama",
@@ -768,7 +768,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-store"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "codoseo-core",
  "codoseo-notify",
@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-testkit"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "axum",
  "codoseo-core",
@@ -797,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "codoseo-web"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "askama",
  "askama_web",
