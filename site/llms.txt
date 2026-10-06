@@ -44,6 +44,7 @@ Table (default), JSON, Markdown, CSV. Use `--format json -o audit.json` to save 
 ## Links
 
 - Homepage: https://codoseo.com
+- Web app: https://app.codoseo.com
 - GitHub: https://github.com/SafrowLabs/CodoSEO
 - crates.io: https://crates.io/crates/codoseo
 - Docs (README): https://github.com/SafrowLabs/CodoSEO#readme
