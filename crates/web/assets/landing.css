@@ -6,7 +6,47 @@
 .l-nav { display: flex; align-items: center; gap: 18px; font-size: 13.5px; color: var(--muted); }
 .l-nav a:not(.btn):hover { color: var(--ink); }
 
-.l-hero { padding-top: clamp(40px, 9vw, 96px); padding-bottom: 48px; }
+.l-hero {
+  padding-top: clamp(40px, 9vw, 96px); padding-bottom: 48px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 32px 56px;
+}
+.l-hero-copy > * { animation: rise 0.6s var(--ease) both; }
+.l-hero-copy > :nth-child(2) { animation-delay: 0.06s; }
+.l-hero-copy > :nth-child(3) { animation-delay: 0.12s; }
+.l-hero-copy > :nth-child(n + 4) { animation-delay: 0.18s; }
+
+/* The hero mascot watches the cursor (app.js) and shows off its moods underneath. */
+.l-hero-art { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.l-watch { animation: mascot-in 0.8s var(--spring) 0.15s both; }
+.l-watch .mascot-tile { width: clamp(150px, 22vw, 232px); border-radius: 26%; box-shadow: inset 0 0 0 1px rgb(251 251 249 / 0.07), var(--shadow-pop); }
+.l-watch .mascot { --eye-stroke: 4.6; }
+.l-watch .m-gaze { transition-duration: 0.18s; }
+.l-moods { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, auto); gap: 8px 18px; font: 11.5px var(--mono); color: var(--muted-2); }
+.l-moods li { display: flex; align-items: center; gap: 8px; animation: rise 0.5s var(--ease) both; }
+.l-moods li:nth-child(1) { animation-delay: 0.45s; }
+.l-moods li:nth-child(2) { animation-delay: 0.5s; }
+.l-moods li:nth-child(3) { animation-delay: 0.55s; }
+.l-moods li:nth-child(4) { animation-delay: 0.6s; }
+.l-moods .mascot { color: var(--ink-3); }
+@media (max-width: 780px) {
+  .l-hero { grid-template-columns: minmax(0, 1fr); }
+  .l-hero-art { order: -1; flex-direction: row; justify-content: flex-start; }
+  .l-watch .mascot-tile { width: 92px; }
+  .l-moods { display: none; }
+}
+@keyframes mascot-in { from { opacity: 0; transform: translateY(10px) scale(0.92); } to { opacity: 1; transform: none; } }
+
+/* Sections rise in as they scroll into view. app.js sets .reveal-on only when it can reveal
+   them again and motion is welcome, so without it everything simply shows. */
+.reveal-on [data-reveal] { opacity: 0; transform: translateY(16px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.reveal-on [data-reveal].is-in { opacity: 1; transform: none; }
+.reveal-on [data-reveal] li { opacity: 0; transform: translateY(8px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.reveal-on [data-reveal].is-in li { opacity: 1; transform: none; }
+.reveal-on [data-reveal] li:nth-child(2) { transition-delay: 0.06s; }
+.reveal-on [data-reveal] li:nth-child(3) { transition-delay: 0.12s; }
+.reveal-on [data-reveal] li:nth-child(4) { transition-delay: 0.18s; }
+.reveal-on [data-reveal] li:nth-child(5) { transition-delay: 0.24s; }
+.reveal-on [data-reveal] li:nth-child(6) { transition-delay: 0.3s; }
 .l-eyebrow { font: 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 14px; }
 .l-hero h1 { font-size: clamp(34px, 6.4vw, 60px); line-height: 1.04; font-weight: 600; letter-spacing: -0.04em; max-width: 14em; text-wrap: balance; }
 .l-hero mark { background: linear-gradient(transparent 60%, color-mix(in oklab, var(--accent) 70%, transparent) 60%); color: inherit; padding: 0 2px; }
@@ -37,7 +77,7 @@
 
 .q-page { padding-top: 32px; padding-bottom: 64px; max-width: 760px; }
 .q-title { font: 600 clamp(26px, 5vw, 38px)/1.1 var(--font); letter-spacing: -0.03em; margin-bottom: 24px; overflow-wrap: anywhere; }
-.q-wait { display: flex; align-items: center; gap: 14px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.q-wait { display: flex; align-items: center; gap: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
 .q-wait b { font-size: 18px; letter-spacing: -0.02em; }
 .q-wait p { margin-top: 4px; }
 .q-count { font-family: var(--mono); font-weight: 600; color: var(--ink); }
@@ -86,7 +126,10 @@
 .prose a { text-decoration: underline; text-underline-offset: 2px; }
 .prose code, .prose pre { font: 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; overflow-wrap: anywhere; }
 .prose pre { padding: 12px 14px; overflow-x: auto; }
-@media (prefers-reduced-motion: reduce) { .l-wrap * { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .l-wrap * { animation: none !important; }
+  .reveal-on [data-reveal], .reveal-on [data-reveal] li { opacity: 1; transform: none; transition: none; }
+}
 
 .q-rankorg { margin-top: 18px; font-size: 13.5px; }
 .q-rankorg a { text-decoration: underline; text-underline-offset: 2px; }

@@ -1,23 +1,55 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CodoSEO — Open-Source SEO Crawler & Site Monitor</title>
-  <meta name="description" content="Know the moment your SEO breaks. Open-source SEO crawler and monitor built in Rust. Runs 44 checks, scores your site 0–100, diffs audits and integrates with CI. Free to install and self-host.">
+  <title>CodoSEO — Open-Source SEO Crawler &amp; Site Monitor</title>
+  <meta name="description" content="Know the moment your SEO breaks. Open-source SEO crawler and monitor in Rust: 44 checks, a 0–100 health score, audit diffs and CI gates. Free to self-host.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
   <link rel="canonical" href="https://codoseo.com/">
+
+  <!-- Icons and app manifest -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#F4F4F0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0A1411" media="(prefers-color-scheme: dark)">
+
+  <!-- Theme: light by default; dark or system only when the visitor picks it. Runs before paint. -->
+  <script>
+  (function () {
+    var d = document.documentElement, p = 'light';
+    try { p = localStorage.getItem('codoseo-theme') || 'light'; } catch (e) {}
+    if (p !== 'dark' && p !== 'system') p = 'light';
+    var t = p === 'system' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : (p === 'dark' ? 'dark' : 'light');
+    d.setAttribute('data-theme', t);
+    d.setAttribute('data-theme-pref', p);
+    d.className += ' js';
+    var m = document.querySelectorAll('meta[name="theme-color"]');
+    for (var i = 0; i < m.length; i++) m[i].setAttribute('content', t === 'dark' ? '#0A1411' : '#F4F4F0');
+  })();
+  </script>
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://codoseo.com/">
-  <meta property="og:title" content="CodoSEO — Open-Source SEO Crawler & Site Monitor">
+  <meta property="og:title" content="CodoSEO — Open-Source SEO Crawler &amp; Site Monitor">
   <meta property="og:description" content="Know the moment your SEO breaks. 44 SEO checks, health scoring, audit diffs and CI integration. Built in Rust by SafrowLabs.">
   <meta property="og:site_name" content="CodoSEO">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:image" content="https://codoseo.com/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The CodoSEO mascot, two watchful eyes, next to the CodoSEO wordmark and the line: Know the moment your SEO breaks.">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="CodoSEO — Open-Source SEO Crawler & Site Monitor">
+  <meta name="twitter:title" content="CodoSEO — Open-Source SEO Crawler &amp; Site Monitor">
   <meta name="twitter:description" content="Know the moment your SEO breaks. 44 checks, health scoring, audit diffs and CI. Built in Rust.">
+  <meta name="twitter:image" content="https://codoseo.com/og.png">
+  <meta name="twitter:image:alt" content="The CodoSEO mascot, two watchful eyes, next to the CodoSEO wordmark and the line: Know the moment your SEO breaks.">
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -36,7 +68,17 @@
         "@id": "https://codoseo.com/#organization",
         "name": "SafrowLabs",
         "url": "https://codoseo.com",
+        "logo": { "@type": "ImageObject", "url": "https://codoseo.com/icon-512.png", "width": 512, "height": 512 },
+        "image": "https://codoseo.com/og.png",
         "sameAs": ["https://github.com/SafrowLabs"]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://codoseo.com/#website",
+        "name": "CodoSEO",
+        "url": "https://codoseo.com/",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://codoseo.com/#organization" }
       },
       {
         "@type": "SoftwareApplication",
@@ -47,11 +89,16 @@
         "operatingSystem": "Linux, macOS, Windows",
         "description": "Open-source SEO crawler and monitor built in Rust. Crawls a site, runs 44 SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema. Scores the site 0–100 and diffs two audits to catch regressions in CI.",
         "url": "https://codoseo.com",
+        "image": "https://codoseo.com/og.png",
+        "logo": "https://codoseo.com/icon-512.png",
+        "screenshot": "https://codoseo.com/og.png",
         "downloadUrl": "https://crates.io/crates/codoseo",
-        "softwareVersion": "0.0.1",
+        "installUrl": "https://github.com/SafrowLabs/CodoSEO/releases",
+        "softwareVersion": "0.1.0-rc.1",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
         "isAccessibleForFree": true,
         "author": { "@id": "https://codoseo.com/#organization" },
+        "publisher": { "@id": "https://codoseo.com/#organization" },
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "keywords": "SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker"
       },
@@ -61,12 +108,12 @@
           {
             "@type": "Question",
             "name": "How do I install CodoSEO?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Run: cargo install codoseo. Requires Rust 1.88 or newer." }
+            "acceptedAnswer": { "@type": "Answer", "text": "Run: cargo install codoseo. Requires Rust 1.88 or newer. Prebuilt binaries for Linux, macOS and Windows are on the GitHub releases page." }
           },
           {
             "@type": "Question",
             "name": "Is CodoSEO free?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Yes. The CLI is free and open-source under AGPL-3.0. The upcoming hosted web app will have a free tier." }
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. CodoSEO is free and open-source under AGPL-3.0, including the CLI and the self-hosted web app. The hosted web app at app.codoseo.com lets you start with a free audit." }
           },
           {
             "@type": "Question",
@@ -81,103 +128,211 @@
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ---------- tokens: light (default) ---------- */
     :root {
-      --bg: #FBFBF9; --ink: #111613; --ink-2: #4C544F; --ink-3: #6A726D; --ink-4: #8C948F;
-      --line: #E2E4DE; --line-2: #ECEDE8; --line-3: #F4F5F1; --panel: #FFFFFF; --tint: #F6F7F4;
-      --dark: #0E1A17; --yellow: oklch(0.84 0.16 88); --yellow-h: oklch(0.8 0.16 86);
-      --yellow-ink: oklch(0.5 0.11 78); --yellow-bg: #FBF7E4; --yellow-line: #F1E9C6;
-      --link: #1A0DAB; --red: #C5221F; --amber: #E37400; --grey: #9AA19C; --green: #137333;
-      --mono: 'Geist Mono', ui-monospace, monospace;
+      color-scheme: light;
+      --bg: #F4F4F0; --bg-2: #EFEFEA; --surface: #FFFFFF; --surface-2: #F7F7F4; --surface-3: #F1F2EE;
+      --line: #E2E4DE; --line-2: #EEEFEA; --line-strong: #D6DAD2;
+      --ink: #111613; --ink-strong: #0E1A17; --ink-2: #4C544F; --ink-3: #5B635E; --ink-4: #646C67;
+      --yellow: #F0C42C; --yellow-h: #E5B51A; --on-yellow: #0E1A17; --yellow-ink: #7A5E00;
+      --yellow-bg: #FBF6DF; --yellow-line: #EFE2AE; --mark: rgba(240,196,44,.55); --mark-ink: inherit;
+      --link: #1A0DAB; --red: #C5221F; --amber: #9A5B00; --green: #137333; --grey: #8C948F;
+      --st-crawl: #5B9BF8; --st-warn: #E0AE14; --st-err: #E5533D; --st-ok: #2FA36B; --st-idle: #5E6B66; --st-brand: #F0C42C;
+      --s2-fg: #137333; --s2-bg: #E6F4EA; --s3-fg: #9A5B00; --s3-bg: #FEF3E0; --s4-fg: #C5221F; --s4-bg: #FCE8E6; --s5-fg: #8430CE; --s5-bg: #F3E8FD;
+      --fresh: #E7F3EA; --dots: #DADDD5; --glow: transparent;
+      --header-bg: rgba(244,244,240,.86);
+      --band: #EAEDE5; --band-line: #DCE2D8;
+      --hl-head-bg: #0E1A17; --hl-head-ink: #F4F5F1; --hl-head-sub: #9DAAA4;
+      --solid-bg: #111613; --solid-ink: #FFFFFF; --solid-h: #2A302C;
+      --ic-y-fg: #1F6B3E; --ic-y-bg: #DDF0E3; --ic-p-fg: #8F4A12; --ic-p-bg: #FBEBDC; --ic-n-fg: #646C67; --ic-n-bg: #ECEFE9; --ic-s-fg: #6B5300; --ic-s-bg: #FBF0C6;
+      --tag-ship-fg: #1F6B3E; --tag-ship-bg: #DDF0E3; --tag-plan-fg: #5B635E; --tag-plan-bg: #E8EBE4;
+      --shadow-1: 0 1px 2px rgba(17,22,19,.05), 0 12px 32px -18px rgba(17,22,19,.20);
+      --shadow-2: 0 1px 2px rgba(17,22,19,.05), 0 40px 80px -40px rgba(17,22,19,.28);
+      --shadow-h: 0 2px 4px rgba(17,22,19,.06), 0 18px 40px -20px rgba(17,22,19,.28);
+      --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     }
+    /* ---------- tokens: dark (only when chosen) ---------- */
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0A1411; --bg-2: #0E1A17; --surface: #13221E; --surface-2: #182B26; --surface-3: #1E342E;
+      --line: #2C443C; --line-2: #213530; --line-strong: #3A574C;
+      --ink: #F2F5F0; --ink-strong: #FBFBF9; --ink-2: #C3CCC6; --ink-3: #A9B3AD; --ink-4: #8E9A94;
+      --yellow: #F0C42C; --yellow-h: #F7D24E; --on-yellow: #0E1A17; --yellow-ink: #F0C42C;
+      --yellow-bg: rgba(240,196,44,.07); --yellow-line: rgba(240,196,44,.26); --mark: rgba(240,196,44,.13); --mark-ink: #F0C42C;
+      --link: #8AB8FF; --red: #F2735E; --amber: #F0A33C; --green: #3DBE7E; --grey: #7A8882;
+      --st-crawl: #5B9BF8; --st-warn: #F0C42C; --st-err: #E5533D; --st-ok: #3DBE7E; --st-idle: #7A8882; --st-brand: #F0C42C;
+      --s2-fg: #4FD08F; --s2-bg: rgba(61,190,126,.15); --s3-fg: #F5B451; --s3-bg: rgba(240,163,60,.15); --s4-fg: #FF826E; --s4-bg: rgba(229,83,61,.17); --s5-fg: #C89BFF; --s5-bg: rgba(168,110,255,.17);
+      --fresh: rgba(61,190,126,.16); --dots: #1C2E29; --glow: rgba(240,196,44,.09);
+      --header-bg: rgba(10,20,17,.84);
+      --band: #0E1A17; --band-line: #24392F;
+      --hl-head-bg: #F0C42C; --hl-head-ink: #0E1A17; --hl-head-sub: #5A4706;
+      --solid-bg: #F2F5F0; --solid-ink: #0E1A17; --solid-h: #FFFFFF;
+      --ic-y-fg: #4FD08F; --ic-y-bg: rgba(61,190,126,.16); --ic-p-fg: #F5B451; --ic-p-bg: rgba(240,163,60,.16); --ic-n-fg: #8E9A94; --ic-n-bg: #1E342E; --ic-s-fg: #F0C42C; --ic-s-bg: rgba(240,196,44,.14);
+      --tag-ship-fg: #4FD08F; --tag-ship-bg: rgba(61,190,126,.15); --tag-plan-fg: #A9B3AD; --tag-plan-bg: #1E342E;
+      --shadow-1: 0 1px 0 rgba(255,255,255,.03) inset, 0 16px 40px -20px rgba(0,0,0,.7);
+      --shadow-2: 0 1px 0 rgba(255,255,255,.03) inset, 0 40px 90px -40px rgba(0,0,0,.85);
+      --shadow-h: 0 1px 0 rgba(255,255,255,.04) inset, 0 22px 50px -22px rgba(0,0,0,.85);
+    }
+
     html { scroll-behavior: smooth; }
-    body { background: var(--bg); color: var(--ink); font-family: 'Geist', system-ui, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    body { background: var(--bg); color: var(--ink); font-family: 'Geist', system-ui, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
     a { color: inherit; text-decoration: none; }
+    button { font: inherit; color: inherit; }
     .wrap { max-width: 1240px; margin: 0 auto; padding: 0 28px; }
     .mono { font-family: var(--mono); }
     :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-    /* header */
-    header { position: sticky; top: 0; z-index: 30; background: rgba(251,251,249,.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line-2); }
-    .bar { display: flex; align-items: center; gap: 36px; padding: 13px 0; }
-    .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 17px; letter-spacing: -.02em; }
-    .owl { width: 26px; height: 26px; flex: none; border-radius: 7px 7px 10px 10px; background: var(--dark); display: flex; align-items: center; justify-content: center; gap: 1px; padding-bottom: 3px; }
-    .owl i { width: 10px; height: 10px; border-radius: 50%; background: var(--yellow); display: grid; place-items: center; }
-    .owl i::after { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--dark); }
-    .owl.sm { width: 22px; height: 22px; border-radius: 6px 6px 9px 9px; padding-bottom: 2px; }
-    .owl.sm i { width: 8px; height: 8px; } .owl.sm i::after { width: 3px; height: 3px; }
-    .owl.xs i { width: 9px; height: 9px; } .owl.xs i::after { width: 3px; height: 3px; }
+    /* ---------- wordmark: C◉d◉SEO ---------- */
+    .wm { display: inline-flex; align-items: baseline; font-weight: 600; letter-spacing: -.04em; color: var(--ink); line-height: 1; white-space: nowrap; }
+    .wm .o { width: .68em; height: .68em; margin: .15em .025em 0; flex: none; overflow: visible; align-self: baseline; transform: translateY(.02em); }
+    .wo-p { transform: translate(var(--gx, 0px), var(--gy, 0px)); transition: transform .35s cubic-bezier(.3,1.4,.5,1); }
+    .wo-b { transform-box: fill-box; transform-origin: center; transform: scaleY(var(--bl, 1)); transition: transform .09s ease-in; }
+    .wm:hover, .wm:focus-visible { --gx: -2.4px; --gy: -1.6px; }
+    .wm.blink { --bl: .12; }
+
+    /* ---------- mascot (one template, see mascot() in the script) ---------- */
+    .mascot { display: block; overflow: visible; color: var(--ink); --sx: 0px; --sy: 0px; --pr: 5; --pc: var(--st-brand); --rc: currentColor; }
+    .mascot .rg { fill: none; stroke: var(--rc); stroke-width: 5; transition: stroke .5s ease; }
+    .mascot.sm .rg { stroke-width: 7; }
+    .mascot .pp { transform: translate(var(--sx), var(--sy)); transition: transform .7s cubic-bezier(.34,1.3,.5,1); }
+    .mascot .lk { transform: translate(var(--lx, 0px), var(--ly, 0px)); transition: transform .55s cubic-bezier(.3,1.2,.5,1); }
+    .mascot.follow .lk { transition-duration: .14s; transition-timing-function: ease-out; }
+    .mascot .pu { fill: var(--pc); transform: scale(var(--pr)); transition: transform .6s cubic-bezier(.34,1.4,.5,1), fill .5s ease; }
+    .mascot .bl { transform-box: fill-box; transform-origin: center; }
+    .mascot.blink .bl { animation: blink .17s ease-in-out; }
+    @keyframes blink { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.08); } }
+    .mascot[data-state="rest"]  { --sx: 2px; --sy: 1px; --pr: 4.5; }
+    .mascot[data-state="crawl"] { --pr: 4.5; --pc: var(--st-crawl); }
+    .mascot[data-state="crawl"] .sw { animation: sweep 2.4s ease-in-out infinite; }
+    .mascot[data-state="warn"]  { --sx: 2px; --sy: 1px; --pr: 4.75; --pc: var(--st-warn); }
+    .mascot[data-state="error"] { --pr: 6.5; --pc: var(--st-err); }
+    .mascot[data-state="error"] .bl { animation: jolt .5s ease-out; }
+    .mascot[data-state="ok"]    { --sy: -2px; --pr: 5; --pc: var(--st-ok); }
+    .mascot[data-state="idle"]  { --sy: 7px; --pr: 3.5; --pc: var(--st-idle); --rc: var(--st-idle); }
+    .mascot[data-state="idle"] .bl { animation: doze 4.2s ease-in-out infinite; }
+    @keyframes sweep { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(5.5px); } 75% { transform: translateX(-5.5px); } }
+    @keyframes jolt { 0% { transform: scale(1); } 35% { transform: scale(1.06); } 100% { transform: scale(1); } }
+    @keyframes doze { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.9) translateY(.6px); } }
+
+    /* ---------- header ---------- */
+    .top { position: sticky; top: 0; z-index: 30; background: var(--header-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line-2); }
+    .bar { display: flex; align-items: center; gap: 36px; padding: 12px 0; }
+    .brand { font-size: 21px; padding: 2px 0; }
     nav { display: flex; gap: 24px; font-size: 14px; flex: 1; min-width: 0; }
-    nav a { color: #5B635E; } nav a:hover { color: var(--ink); }
+    nav a { color: var(--ink-3); transition: color .15s; } nav a:hover { color: var(--ink); }
     .bar-r { margin-left: auto; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-    .ghost { font-size: 13.5px; padding: 7px 11px; border-radius: 8px; display: flex; align-items: center; gap: 8px; }
-    .ghost:hover { background: #F1F2EE; }
-    .solid { font-size: 13.5px; color: #fff; background: var(--ink); border-radius: 8px; padding: 8px 14px; font-weight: 500; }
-    .solid:hover { background: #2A302C; }
+    .ghost { font-size: 13.5px; padding: 7px 11px; border-radius: 8px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); transition: background .15s, color .15s; }
+    .ghost:hover { background: var(--surface-3); color: var(--ink); }
+    .solid { font-size: 13.5px; color: var(--solid-ink); background: var(--solid-bg); border-radius: 8px; padding: 8px 14px; font-weight: 500; transition: background .15s, transform .15s; }
+    .solid:hover { background: var(--solid-h); transform: translateY(-1px); }
+    .theme { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); display: grid; place-items: center; cursor: pointer; color: var(--ink-2); transition: border-color .15s, color .15s, background .15s; }
+    .theme:hover { border-color: var(--line-strong); color: var(--ink); }
+    .theme svg { width: 17px; height: 17px; grid-area: 1 / 1; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transform: rotate(-40deg) scale(.6); transition: opacity .25s, transform .35s; }
+    [data-theme-pref="light"] .theme .i-light, [data-theme-pref="dark"] .theme .i-dark, [data-theme-pref="system"] .theme .i-system { opacity: 1; transform: none; }
 
-    /* hero */
-    .hero { background-image: radial-gradient(#E3E5DF 1px, transparent 1px); background-size: 22px 22px; background-position: -11px -11px; border-bottom: 1px solid var(--line-2); }
-    .hero .wrap { padding-top: 88px; padding-bottom: 96px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 56px; align-items: center; }
-    .pills { display: flex; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; color: #5B635E; }
-    .pills span { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
-    .pills .hot { background: var(--yellow); border-color: var(--yellow); color: var(--dark); }
-    h1 { font-size: clamp(44px, 6.2vw, 80px); line-height: .98; letter-spacing: -.045em; font-weight: 600; margin-top: 26px; text-wrap: balance; }
-    mark { background: linear-gradient(transparent 64%, oklch(0.9 0.13 92) 64%); color: inherit; padding: 0 .05em; }
+    /* ---------- hero ---------- */
+    .hero { background-color: var(--bg-2); background-image: radial-gradient(700px 360px at 78% 8%, var(--glow), transparent 70%), radial-gradient(var(--dots) 1px, transparent 1px); background-size: auto, 22px 22px; background-position: 0 0, -11px -11px; border-bottom: 1px solid var(--line-2); }
+    .hero .wrap { padding-top: 84px; padding-bottom: 96px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 56px; align-items: center; }
+    .pills { display: flex; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+    .pills span { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+    .pills .hot { background: var(--yellow); border-color: var(--yellow); color: var(--on-yellow); }
+    h1 { font-size: clamp(44px, 6.2vw, 80px); line-height: .98; letter-spacing: -.045em; font-weight: 600; margin-top: 26px; text-wrap: balance; color: var(--ink-strong); }
+    mark { background: linear-gradient(transparent 64%, var(--mark) 64%); color: var(--mark-ink); padding: 0 .05em; }
     .lede { font-size: 19px; line-height: 1.55; color: var(--ink-2); margin-top: 24px; max-width: 46ch; text-wrap: pretty; }
-    .install { display: flex; gap: 6px; margin-top: 34px; max-width: 520px; background: #fff; border: 1px solid #D9DCD5; border-radius: 12px; padding: 5px; box-shadow: 0 1px 2px rgba(17,22,19,.04), 0 12px 32px -18px rgba(17,22,19,.18); }
+    .hero-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+    .install { display: flex; gap: 6px; margin-top: 18px; max-width: 520px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px; padding: 5px; box-shadow: var(--shadow-1); }
     .install code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 14.5px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
     .install code b { color: var(--ink-4); font-weight: 400; }
-    .btn { border: 0; font: inherit; font-weight: 600; font-size: 14.5px; border-radius: 8px; padding: 10px 18px; cursor: pointer; white-space: nowrap; background: var(--yellow); color: var(--dark); display: inline-flex; align-items: center; justify-content: center; }
-    .btn:hover { background: var(--yellow-h); }
-    .btn.out { background: #fff; color: var(--ink); border: 1px solid #D9DCD5; font-weight: 500; }
-    .btn.out:hover { background: var(--tint); }
+    .btn { border: 0; font: inherit; font-weight: 600; font-size: 14.5px; border-radius: 8px; padding: 10px 18px; cursor: pointer; white-space: nowrap; background: var(--yellow); color: var(--on-yellow); display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: background .15s, transform .18s, box-shadow .18s, border-color .15s; }
+    .btn:hover { background: var(--yellow-h); transform: translateY(-1px); box-shadow: 0 8px 20px -10px rgba(224,174,20,.7); }
+    .btn:active { transform: translateY(0); box-shadow: none; }
+    .btn .ar { transition: transform .2s; } .btn:hover .ar { transform: translateX(3px); }
+    .btn.out { background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); font-weight: 500; }
+    .btn.out:hover { background: var(--surface-2); border-color: var(--ink-4); box-shadow: var(--shadow-1); }
     .notes { display: flex; gap: 10px 20px; flex-wrap: wrap; margin-top: 14px; font-size: 13.5px; color: var(--ink-3); }
-    .notes code { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+    .notes a { color: var(--link); } .notes a:hover { text-decoration: underline; }
 
-    /* panel */
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0; }
-    .shot { box-shadow: 0 1px 2px rgba(17,22,19,.04), 0 40px 80px -40px rgba(17,22,19,.25); }
-    .ptop { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid #EEEFEA; }
-    .url { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; background: var(--tint); border-radius: 7px; padding: 6px 10px; font-family: var(--mono); font-size: 12.5px; overflow: hidden; white-space: nowrap; }
-    .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--yellow); }
-    .state { font-family: var(--mono); font-size: 12px; color: #5B635E; white-space: nowrap; }
-    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #EEEFEA; }
-    .stats div { padding: 12px 14px; border-right: 1px solid var(--line-3); }
+    /* the hero mascot peeks over the sample-crawl panel */
+    .stage { position: relative; padding-top: 92px; min-width: 0; }
+    .peek { position: absolute; top: 0; right: 36px; width: 200px; z-index: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    .peek .mascot { width: 100%; height: auto; }
+    .stage .panel { position: relative; z-index: 1; }
+
+    /* ---------- panel ---------- */
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0; }
+    .shot { box-shadow: var(--shadow-2); }
+    .ptop { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line-2); }
+    .url { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; background: var(--surface-2); border-radius: 7px; padding: 6px 10px; font-family: var(--mono); font-size: 12.5px; overflow: hidden; white-space: nowrap; }
+    .url .mascot { width: 22px; height: auto; flex: none; }
+    .state { font-family: var(--mono); font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line-2); }
+    .stats div { padding: 12px 14px; border-right: 1px solid var(--line-2); }
+    .stats div:last-child { border-right: 0; }
     .stats small { display: block; font-size: 11.5px; color: var(--ink-4); }
     .stats b { display: block; font-family: var(--mono); font-size: 17px; font-weight: 500; margin-top: 3px; letter-spacing: -.02em; }
-    .prog { height: 3px; background: #F1F2EE; } .prog i { display: block; height: 3px; background: var(--yellow); width: 0; transition: width .3s; }
-    .row { display: grid; grid-template-columns: minmax(0, 1.5fr) 52px 104px 56px; gap: 12px; align-items: center; padding: 0 14px; height: 42px; border-bottom: 1px solid var(--line-3); font-size: 13px; }
-    .row.head { height: auto; padding: 9px 14px; font-size: 11px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #F1F2EE; }
+    .prog { height: 3px; background: var(--surface-3); } .prog i { display: block; height: 3px; background: var(--st-crawl); width: 0; transition: width .3s, background .4s; }
+    .prog.done i { background: var(--st-ok); }
+    .row { display: grid; grid-template-columns: minmax(0, 1.5fr) 52px 104px 56px; gap: 12px; align-items: center; padding: 0 14px; height: 42px; border-bottom: 1px solid var(--line-2); font-size: 13px; }
+    .row.head { height: auto; padding: 9px 14px; font-size: 11px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .05em; }
     .row .p { font-family: var(--mono); font-size: 12.5px; color: var(--link); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row .s { font-family: var(--mono); font-size: 11.5px; font-weight: 500; border-radius: 4px; padding: 2px 6px; justify-self: start; }
     .row .i { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row .t { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+    .ix-ok { color: var(--ink-2); } .ix-bad { color: var(--red); } .ix-warn { color: var(--amber); }
     .feed { height: 378px; overflow: hidden; }
     .feed .row:first-child.fresh { animation: rowin .9s ease-out; }
-    @keyframes rowin { from { background: #EEF6F0; } to { background: transparent; } }
-    .s2 { color: #137333; background: #E6F4EA; } .s3 { color: #9A5B00; background: #FEF3E0; } .s4 { color: #C5221F; background: #FCE8E6; } .s5 { color: #8430CE; background: #F3E8FD; }
+    @keyframes rowin { from { background: var(--fresh); } to { background: transparent; } }
+    .s2 { color: var(--s2-fg); background: var(--s2-bg); } .s3 { color: var(--s3-fg); background: var(--s3-bg); } .s4 { color: var(--s4-fg); background: var(--s4-bg); } .s5 { color: var(--s5-fg); background: var(--s5-bg); }
 
-    /* sections */
+    /* ---------- sections ---------- */
     section.blk { padding-top: 120px; }
     .shead { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 24px 56px; align-items: end; }
     .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; color: var(--yellow-ink); text-transform: uppercase; margin-bottom: 14px; }
-    h2 { font-size: clamp(34px, 4vw, 52px); line-height: 1.02; letter-spacing: -.04em; font-weight: 600; text-wrap: balance; }
+    h2 { font-size: clamp(34px, 4vw, 52px); line-height: 1.02; letter-spacing: -.04em; font-weight: 600; text-wrap: balance; color: var(--ink-strong); }
     .shead p { font-size: 17px; line-height: 1.6; color: var(--ink-2); max-width: 52ch; }
     .mt { margin-top: 44px; }
     code.k { font-family: var(--mono); font-size: .88em; }
 
-    /* terminal */
+    /* ---------- status showcase ---------- */
+    .status { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+    .st-stage { position: relative; padding: 44px 40px 36px; display: flex; flex-direction: column; justify-content: space-between; gap: 28px; border-right: 1px solid var(--line-2); background-image: radial-gradient(var(--dots) 1px, transparent 1px); background-size: 18px 18px; min-height: 340px; }
+    .st-stage .mascot { width: min(100%, 300px); height: auto; margin: 8px auto 0; }
+    .st-now { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .st-now b { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }
+    .st-now .chip { font-family: var(--mono); font-size: 11.5px; padding: 3px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-3); background: var(--surface); }
+    .st-now p { flex-basis: 100%; color: var(--ink-2); font-size: 15px; line-height: 1.55; max-width: 44ch; min-height: 3.1em; }
+    .st-list { list-style: none; display: flex; flex-direction: column; }
+    .st-list li { border-bottom: 1px solid var(--line-2); } .st-list li:last-child { border-bottom: 0; }
+    .st-btn { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 16px 24px; position: relative; transition: background .2s; }
+    .st-btn:hover { background: var(--surface-2); }
+    .st-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+    .st-btn .mascot { width: 56px; height: auto; }
+    .st-btn b { display: block; font-weight: 600; font-size: 15.5px; }
+    .st-btn span span { display: block; font-size: 13.5px; color: var(--ink-3); margin-top: 2px; }
+    .st-btn code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-4); }
+    .st-btn::after { content: ''; position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--c, var(--yellow)); }
+    .st-btn[aria-pressed="true"] { background: var(--surface-2); }
+    .st-btn[aria-pressed="true"]::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c, var(--yellow)); }
+    .st-btn[aria-pressed="true"].run::after { animation: fill var(--dur, 3s) linear forwards; }
+    @keyframes fill { to { width: 100%; } }
+    .c-crawl { --c: var(--st-crawl); } .c-warn { --c: var(--st-warn); } .c-error { --c: var(--st-err); } .c-ok { --c: var(--st-ok); } .c-idle { --c: var(--st-idle); }
+
+    /* ---------- terminal ---------- */
     .term { font-family: var(--mono); font-size: 13px; line-height: 1.75; }
-    .term .tabs { display: flex; gap: 18px; padding: 10px 16px; border-bottom: 1px solid #EEEFEA; font-size: 12px; color: var(--ink-4); }
+    .term .tabs { display: flex; gap: 18px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); font-size: 12px; color: var(--ink-4); }
     .term .tabs span:first-child { color: var(--ink); }
     .term pre { padding: 18px 20px; overflow-x: auto; font: inherit; color: var(--ink); }
-    .c-dim { color: var(--ink-4); } .c-y { color: var(--yellow-ink); } .c-r { color: var(--red); } .c-a { color: #9A5B00; } .c-g { color: var(--green); } .c-l { color: var(--link); }
+    .c-dim { color: var(--ink-4); } .c-y { color: var(--yellow-ink); } .c-r { color: var(--red); } .c-a { color: var(--amber); } .c-g { color: var(--green); } .c-l { color: var(--link); }
     .cmds { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-    .cmds code { font-family: var(--mono); font-size: 12.5px; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; color: var(--ink-2); }
+    .cmds code { font-family: var(--mono); font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; color: var(--ink-2); transition: border-color .15s, transform .15s; }
+    .cmds code:hover { border-color: var(--line-strong); transform: translateY(-1px); }
 
-    /* checks */
+    /* ---------- checks ---------- */
     .cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); border-top: 1px solid var(--line); }
     .cat { padding: 24px 24px 28px 0; border-bottom: 1px solid var(--line); }
-    .cat header { position: static; background: none; border: 0; backdrop-filter: none; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .cat .ch { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
     .cat h3 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
     .cat .n { font-family: var(--mono); font-size: 12px; color: var(--ink-4); }
     .cat ul { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
@@ -187,14 +342,14 @@
     .legend span { display: flex; align-items: center; gap: 7px; }
     .legend span::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
     .legend a { margin-left: auto; color: var(--link); } .legend a:hover { text-decoration: underline; }
-    .r { --c: var(--red); } .a { --c: var(--amber); } .n0 { --c: var(--grey); }
+    .r { --c: var(--st-err); } .a { --c: var(--st-warn); } .n0 { --c: var(--grey); }
 
-    /* diff */
-    .band { background: #F3F6F1; border: 1px solid #E1E7DE; border-radius: 20px; padding: clamp(24px, 4.5vw, 56px); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 48px; align-items: center; }
+    /* ---------- diff ---------- */
+    .band { background: var(--band); border: 1px solid var(--band-line); border-radius: 20px; padding: clamp(24px, 4.5vw, 56px); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 48px; align-items: center; }
     .band h2 { font-size: clamp(32px, 3.6vw, 46px); line-height: 1.04; }
     .band p { font-size: 17px; line-height: 1.6; color: var(--ink-2); margin-top: 20px; max-width: 46ch; }
-    .dhead { display: flex; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #EEEFEA; font-family: var(--mono); font-size: 12px; color: #5B635E; }
-    .diff { padding: 14px 16px; border-bottom: 1px solid var(--line-3); }
+    .dhead { display: flex; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line-2); font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+    .diff { padding: 14px 16px; border-bottom: 1px solid var(--line-2); }
     .diff:last-child { border-bottom: 0; }
     .diff .t { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-weight: 500; font-size: 14.5px; }
     .diff .t::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
@@ -202,73 +357,103 @@
     .diff .l { margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.7; overflow-x: auto; white-space: nowrap; }
     .diff .l div:first-child { color: var(--ink-4); }
 
-    /* facts */
+    /* ---------- facts ---------- */
     .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 56px; align-items: center; }
     .split h2 { margin-bottom: 22px; }
     .split > div > p { font-size: 17px; line-height: 1.6; color: var(--ink-2); max-width: 48ch; }
     .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 32px; margin-top: 40px; }
     .facts div { border-top: 1px solid var(--ink); padding-top: 14px; }
     .facts b { display: block; font-weight: 600; font-size: 15.5px; }
-    .facts span { display: block; font-size: 14.5px; line-height: 1.5; color: #5B635E; margin-top: 6px; }
+    .facts span { display: block; font-size: 14.5px; line-height: 1.5; color: var(--ink-3); margin-top: 6px; }
 
-    /* roadmap */
-    .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; }
-    .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; }
+    /* ---------- roadmap ---------- */
+    .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; transition: transform .25s cubic-bezier(.3,1.2,.5,1), box-shadow .25s, border-color .2s; }
+    .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-h); border-color: var(--line-strong); }
     .card .tag { align-self: flex-start; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; padding: 3px 7px; border-radius: 4px; text-transform: uppercase; }
-    .tag.dev { background: oklch(0.95 0.07 92); color: oklch(0.45 0.1 80); } .tag.plan { background: #ECEFE9; color: #5B635E; }
+    .tag.ship { background: var(--tag-ship-bg); color: var(--tag-ship-fg); } .tag.plan { background: var(--tag-plan-bg); color: var(--tag-plan-fg); }
     .card h3 { font-size: 22px; letter-spacing: -.02em; font-weight: 600; margin-top: 14px; }
     .card p { font-size: 15px; line-height: 1.55; color: var(--ink-2); margin-top: 8px; }
     .card ul { list-style: none; margin-top: 16px; }
-    .card li { font-size: 14px; color: var(--ink-2); padding: 9px 0; border-top: 1px solid #F1F2EE; }
+    .card li { font-size: 14px; color: var(--ink-2); padding: 9px 0; border-top: 1px solid var(--line-2); }
 
-    /* compare */
-    .scroll { overflow-x: auto; }
+    /* ---------- compare ---------- */
+    .scroll { overflow-x: auto; position: relative; }
     .cmp { min-width: 720px; }
-    .cmp .g { display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); border-bottom: 1px solid #F1F2EE; font-size: 14px; }
+    .cmp .g { display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--line-2); font-size: 14px; }
+    .cmp .g:last-child { border-bottom: 0; }
     .cmp .g > * { padding: 13px 22px; display: flex; align-items: center; gap: 10px; }
-    .cmp .g > :nth-child(3), .cmp .g > :nth-child(4) { color: #5B635E; }
+    .cmp .g > :nth-child(3), .cmp .g > :nth-child(4) { color: var(--ink-3); }
     .cmp .g > :nth-child(2) { background: var(--yellow-bg); box-shadow: inset 1px 0 0 var(--yellow-line), inset -1px 0 0 var(--yellow-line); }
     .cmp .g.h { border-bottom: 1px solid var(--line); }
-    .cmp .g.h > * { flex-direction: column; align-items: flex-start; gap: 4px; padding: 18px 22px; font-weight: 600; font-size: 15px; }
-    .cmp .g.h > :nth-child(2) { background: var(--dark); color: #F4F5F1; box-shadow: none; }
+    .cmp .g.h > * { flex-direction: column; align-items: flex-start; gap: 4px; padding: 18px 22px; font-weight: 600; font-size: 15px; color: var(--ink); }
+    .cmp .g.h > :nth-child(2) { background: var(--hl-head-bg); color: var(--hl-head-ink); box-shadow: none; }
+    .cmp .g.h > :nth-child(2) .mascot { color: var(--hl-head-ink); width: 30px; height: auto; }
     .cmp .g.h small { font-family: var(--mono); font-weight: 400; font-size: 11px; color: var(--ink-4); }
-    .cmp .g.h > :nth-child(2) small { color: #8E9C96; }
-    .cmp .g > :first-child { font-weight: 500; }
+    .cmp .g.h > :nth-child(2) small { color: var(--hl-head-sub); }
+    .cmp .g > :first-child { font-weight: 500; color: var(--ink); }
     .ic { flex: none; min-width: 18px; height: 18px; padding: 0 var(--px, 0); border-radius: 9px; display: grid; place-items: center; font-size: 10px; font-weight: 600; font-family: var(--mono); }
-    .ic.y { color: oklch(0.42 0.12 152); background: oklch(0.94 0.05 152); } .ic.p { color: oklch(0.5 0.14 50); background: oklch(0.95 0.045 60); }
-    .ic.n { color: var(--ink-4); background: #ECEFE9; } .ic.s { --px: 6px; font-size: 9.5px; color: oklch(0.45 0.1 80); background: oklch(0.95 0.07 92); }
+    .ic.y { color: var(--ic-y-fg); background: var(--ic-y-bg); } .ic.p { color: var(--ic-p-fg); background: var(--ic-p-bg); }
+    .ic.n { color: var(--ic-n-fg); background: var(--ic-n-bg); } .ic.s { --px: 6px; font-size: 9.5px; color: var(--ic-s-fg); background: var(--ic-s-bg); }
     .fine { font-size: 12.5px; color: var(--ink-4); margin-top: 14px; }
 
-    /* crates + cta */
+    /* ---------- crates + cta ---------- */
     .crates { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; }
-    .crates a { font-family: var(--mono); font-size: 13px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
-    .crates a:hover { border-color: var(--ink); }
-    .cta { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; justify-content: space-between; border-top: 1px solid var(--ink); padding-top: 40px; margin-top: 140px; }
+    .crates a { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; transition: border-color .15s, transform .15s; }
+    .crates a:hover { border-color: var(--ink); transform: translateY(-1px); }
+    .cta { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; justify-content: space-between; border-top: 1px solid var(--ink); padding-top: 40px; margin-top: 140px; position: relative; }
     .cta h2 { font-size: clamp(36px, 4.6vw, 60px); line-height: 1; letter-spacing: -.045em; max-width: 16ch; }
     .cta .acts { display: flex; gap: 8px; flex-wrap: wrap; }
     .cta .btn { padding: 12px 20px; font-size: 15px; border-radius: 9px; }
     .cta .btn.out { font-family: var(--mono); }
+    .cta-eyes { position: absolute; top: -49px; left: 0; width: 92px; background: var(--bg); padding: 0 10px 0 0; }
+    .cta-eyes .mascot { width: 100%; height: auto; }
     footer { padding: 96px 0 44px; }
-    footer .in { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; font-size: 13.5px; color: var(--ink-3); }
-    footer .in > span { display: flex; align-items: center; gap: 10px; }
+    footer .in { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: center; font-size: 13.5px; color: var(--ink-3); }
+    footer .in > span { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    footer .wm { font-size: 17px; }
     footer .links { display: flex; gap: 20px; flex-wrap: wrap; }
     footer a:hover { color: var(--ink); text-decoration: underline; }
 
+    /* ---------- scroll reveal (JS adds .js on <html>) ---------- */
+    .js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .8s cubic-bezier(.2,.8,.2,1); transition-delay: var(--d, 0s); }
+    .js .reveal.in { opacity: 1; transform: none; }
+
     @media (max-width: 860px) {
-      nav { display: none; } .bar { gap: 12px; } .hero .wrap { padding-top: 56px; padding-bottom: 64px; }
+      nav { display: none; } .bar { gap: 12px; } .hero .wrap { padding-top: 48px; padding-bottom: 64px; gap: 40px; }
       section.blk { padding-top: 88px; } .wrap { padding: 0 16px; } .stats b { font-size: 15px; }
       .row { grid-template-columns: minmax(0, 1fr) 52px 56px; } .row .i { display: none; }
       .legend a { margin-left: 0; } .facts { grid-template-columns: 1fr; }
+      .status { grid-template-columns: 1fr; } .st-stage { border-right: 0; border-bottom: 1px solid var(--line-2); padding: 28px 20px 24px; min-height: 0; }
+      .st-stage .mascot { width: min(70%, 240px); }
+      .st-btn { padding: 14px 16px; gap: 14px; grid-template-columns: 44px minmax(0, 1fr) auto; } .st-btn .mascot { width: 44px; }
+      .stage { padding-top: 72px; } .peek { width: 150px; right: 20px; }
+      .cta { margin-top: 120px; }
     }
-    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .prog i { transition: none; } .feed .row.fresh { animation: none !important; } }
+    @media (max-width: 480px) {
+      .gh { display: none; } .brand { font-size: 19px; }
+      .st-btn code { display: none; } .st-btn { grid-template-columns: 44px minmax(0, 1fr); }
+      .install code { font-size: 13.5px; padding: 10px 8px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      .js .reveal { opacity: 1; transform: none; }
+    }
   </style>
 </head>
 <body>
 
-<header>
+<!-- Wordmark eye, defined once and reused by every wordmark on the page -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="wm-o" viewBox="0 0 24 24"><g class="wo-b"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="4.2"/><circle class="wo-p" cx="13.5" cy="12.5" r="3.4" fill="#F0C42C"/></g></symbol>
+</svg>
+
+<header class="top">
   <div class="wrap bar">
-    <a href="/" class="brand" aria-label="CodoSEO home"><span class="owl"><i></i><i></i></span>CodoSEO</a>
+    <a href="/" class="wm brand" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
     <nav aria-label="Primary">
+      <a href="#status">Status</a>
       <a href="#checks">Checks</a>
       <a href="#diff">Diff</a>
       <a href="#ci">CI</a>
@@ -276,7 +461,12 @@
       <a href="#compare">Compare</a>
     </nav>
     <div class="bar-r">
-      <a class="ghost" href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
+      <button class="theme" id="theme" type="button" aria-label="Theme: light. Switch to dark" title="Theme: light">
+        <svg class="i-light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+        <svg class="i-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <svg class="i-system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/></svg>
+      </button>
+      <a class="ghost gh" href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
       <a class="solid" href="https://app.codoseo.com/">Start free audit</a>
     </div>
   </div>
@@ -286,39 +476,56 @@
 <section class="hero">
   <div class="wrap">
     <div>
-      <div class="pills"><span class="hot">Open source</span><span>Written in Rust</span><span>AGPL-3.0</span><span>v0.0.1 on crates.io</span></div>
+      <div class="pills"><span class="hot">Open source</span><span>Written in Rust</span><span>AGPL-3.0</span><span>v0.1.0-rc.1</span></div>
       <h1>Know the moment your <mark>SEO breaks.</mark></h1>
       <p class="lede">An open-source SEO crawler and monitor in a single Rust binary. It runs 44 checks, scores your site from 0 to 100, diffs two audits and fails your CI build before rankings drop.</p>
-      <div class="acts" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:30px">
-        <a class="btn" href="https://app.codoseo.com/">Start free audit</a>
+      <div class="hero-acts">
+        <a class="btn" href="https://app.codoseo.com/">Start free audit <span class="ar" aria-hidden="true">→</span></a>
         <a class="btn out" href="#install">Self-host or install the CLI</a>
       </div>
-      <div class="install" id="install" style="margin-top:18px">
+      <div class="install" id="install">
         <code><b>$</b><span id="cmd">cargo install codoseo</span></code>
         <button class="btn" id="copy" type="button" aria-label="Copy install command">Copy</button>
       </div>
-      <div class="notes"><span>CLI needs no account or API key</span><span>Requires Rust 1.88+</span><span>Binaries on <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener" style="color:var(--link)">GitHub releases</a></span></div>
+      <div class="notes"><span>CLI needs no account or API key</span><span>Requires Rust 1.88+</span><span>Binaries on <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">GitHub releases</a></span></div>
     </div>
 
-    <div class="panel shot" aria-label="Sample crawl in progress">
-      <div class="ptop">
-        <span class="url"><i class="dot" id="dot"></i>https://northwind-outdoor.com</span>
-        <span class="state" id="state">Crawling…</span>
+    <div class="stage">
+      <div class="peek" id="peek" data-mascot="look" data-follow aria-hidden="true"></div>
+      <div class="panel shot" role="img" aria-label="Sample crawl in progress">
+        <div class="ptop">
+          <span class="url"><span data-mascot="crawl" data-small id="dot"></span>https://northwind-outdoor.com</span>
+          <span class="state" id="state">Crawling…</span>
+        </div>
+        <div class="stats">
+          <div><small>Crawled</small><b id="s-crawled">0</b></div>
+          <div><small>Queue</small><b id="s-queue">0</b></div>
+          <div><small>URL/s</small><b id="s-rate">0</b></div>
+          <div><small>Issues</small><b id="s-issues">0</b></div>
+        </div>
+        <div class="prog" id="progw"><i id="prog"></i></div>
+        <div class="row head"><span>Address</span><span>Status</span><span class="i">Indexability</span><span style="text-align:right">Time</span></div>
+        <div class="feed" id="feed"></div>
       </div>
-      <div class="stats">
-        <div><small>Crawled</small><b id="s-crawled">0</b></div>
-        <div><small>Queue</small><b id="s-queue">0</b></div>
-        <div><small>URL/s</small><b id="s-rate">0</b></div>
-        <div><small>Issues</small><b id="s-issues">0</b></div>
-      </div>
-      <div class="prog"><i id="prog"></i></div>
-      <div class="row head"><span>Address</span><span>Status</span><span class="i">Indexability</span><span style="text-align:right">Time</span></div>
-      <div class="feed" id="feed"></div>
     </div>
   </div>
 </section>
 
-<section class="blk wrap" id="run">
+<section class="blk wrap reveal" id="status">
+  <div class="shead">
+    <div><div class="eyebrow">The eyes are the status</div><h2>One glance tells you how the crawl is going.</h2></div>
+    <p>CodoSEO's mark is a pair of eyes, and the pupils carry the state: where they look, how wide they open and what colour they turn. The same mark is the logo, the favicon and the status light.</p>
+  </div>
+  <div class="panel status mt">
+    <div class="st-stage">
+      <div data-mascot="crawl" id="st-big" aria-hidden="true"></div>
+      <div class="st-now" aria-live="off"><b id="st-name">Crawling</b><span class="chip" id="st-chip">pupils sweep</span><p id="st-desc">A crawl is running. The eyes scan side to side, page by page.</p></div>
+    </div>
+    <ul class="st-list" id="st-list" aria-label="Status states"></ul>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="run">
   <div class="shead">
     <div><div class="eyebrow">The CLI</div><h2>Point it at a URL. Read what's broken.</h2></div>
     <p>One command crawls the site, runs every check and prints a report. Output is a table, JSON, Markdown or CSV, so you can read it, pipe it into <code class="k">jq</code> or save it as a file.</p>
@@ -351,7 +558,7 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   </div>
 </section>
 
-<section class="blk wrap" id="checks">
+<section class="blk wrap reveal" id="checks">
   <div class="shead">
     <h2>44 checks after every crawl.</h2>
     <p>Each check passes or fails and names the pages behind it. Results roll up into a health score from 0 to 100, weighted by severity and by how many pages are affected.</p>
@@ -360,7 +567,7 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   <div class="legend"><span class="r">Critical</span><span class="a">Warning</span><span class="n0">Notice</span><a href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener">Full check reference →</a></div>
 </section>
 
-<section class="blk wrap" id="diff">
+<section class="blk wrap reveal" id="diff">
   <div class="band">
     <div>
       <h2>Crawl again tomorrow and see the diff.</h2>
@@ -376,7 +583,7 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   </div>
 </section>
 
-<section class="blk wrap" id="ci">
+<section class="blk wrap reveal" id="ci">
   <div class="split">
     <div>
       <h2>Fail the build before rankings drop.</h2>
@@ -404,25 +611,25 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   </div>
 </section>
 
-<section class="blk wrap" id="roadmap">
+<section class="blk wrap reveal" id="roadmap">
   <div class="shead">
-    <div><div class="eyebrow">Roadmap</div><h2>The CLI is the first piece.</h2></div>
-    <p>The crawler, checks and diff engine are shipped. The hosted and assistant-facing parts are not, and the dates are not fixed. Watch the repo for releases.</p>
+    <div><div class="eyebrow">Roadmap</div><h2>The CLI was the first piece.</h2></div>
+    <p>The crawler, checks and diff engine shipped first. The web app and the MCP server are part of the 0.1 release. GEO checks come next, and the dates are not fixed. Watch the repo for releases.</p>
   </div>
   <div class="road mt">
-    <div class="card">
-      <span class="tag dev">In development</span>
+    <div class="card reveal">
+      <span class="tag ship">In 0.1</span>
       <h3>Web app</h3>
       <p>A dashboard for continuous monitoring. Add a URL and get your first report without touching a terminal.</p>
       <ul><li>Scheduled crawls with change detection between runs</li><li>Alerts to Slack, Discord, email and webhooks</li><li>Health score trend and issue history</li><li>Self-host with <code class="k">docker compose up</code>, or use a hosted plan</li></ul>
     </div>
-    <div class="card">
-      <span class="tag plan">Planned</span>
+    <div class="card reveal" style="--d:.08s">
+      <span class="tag ship">In 0.1</span>
       <h3>MCP server</h3>
       <p>Ask Claude, Cursor or any MCP client to audit a page, check a canonical or diff two crawls from your editor.</p>
-      <ul><li>Crawl and audit a site from a chat prompt</li><li>Natural-language questions about issues</li><li>Suggested fixes for failing checks</li><li>Shares the engine with the CLI and web app</li></ul>
+      <ul><li>Crawl and audit a site from a chat prompt</li><li>Natural-language questions about issues</li><li>Runs locally over stdio with <code class="k">codoseo mcp</code></li><li>Shares the engine with the CLI and web app</li></ul>
     </div>
-    <div class="card">
+    <div class="card reveal" style="--d:.16s">
       <span class="tag plan">Planned</span>
       <h3>GEO checks</h3>
       <p>Visibility for AI answer engines, next to the classic SEO checks.</p>
@@ -431,16 +638,16 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   </div>
 </section>
 
-<section class="blk wrap" id="compare">
+<section class="blk wrap reveal" id="compare">
   <div class="shead">
     <h2>Open source, scriptable, free to run.</h2>
-    <p>How the CLI compares today. Web app and GEO rows are marked as soon because they are not shipped yet.</p>
+    <p>How CodoSEO compares today. The GEO row is marked as soon because those checks are not shipped yet.</p>
   </div>
   <div class="panel scroll mt"><div class="cmp" id="cmp"></div></div>
   <p class="fine">Competitor details are from their public product pages and may be out of date. Corrections welcome on GitHub.</p>
 </section>
 
-<section class="blk wrap">
+<section class="blk wrap reveal">
   <div class="shead">
     <div><div class="eyebrow">Free and open source</div><h2>Use it. Self-host it. Contribute to it.</h2></div>
     <p>Licensed under AGPL-3.0. The source is on GitHub and every crate is published to crates.io, so you can embed the crawler or the checks in your own project.</p>
@@ -453,9 +660,10 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   </div>
 
   <div class="cta">
+    <div class="cta-eyes" data-mascot="look" data-follow aria-hidden="true"></div>
     <h2>Run your first audit in a minute.</h2>
     <div class="acts">
-      <a class="btn" href="https://app.codoseo.com/">Start free audit</a>
+      <a class="btn" href="https://app.codoseo.com/">Start free audit <span class="ar" aria-hidden="true">→</span></a>
       <a class="btn out" href="#install">Install the CLI</a>
       <a class="btn out" href="https://github.com/SafrowLabs/CodoSEO#readme" target="_blank" rel="noopener">Read the docs</a>
     </div>
@@ -465,7 +673,7 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
 
 <footer>
   <div class="wrap in">
-    <span><span class="owl sm"><i></i><i></i></span>CodoSEO by <a href="https://github.com/SafrowLabs" target="_blank" rel="noopener" style="text-decoration:underline">SafrowLabs</a> · AGPL-3.0</span>
+    <span><a href="/" class="wm" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a><span>by <a href="https://github.com/SafrowLabs" target="_blank" rel="noopener" style="text-decoration:underline">SafrowLabs</a> · AGPL-3.0</span></span>
     <span class="links">
       <a href="https://app.codoseo.com/">App</a>
       <a href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
@@ -479,15 +687,204 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
+  var doc = document.documentElement;
+  var still = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var rnd = function (a, b) { return a + Math.random() * (b - a); };
 
-  // copy install command
+  /* ---------- theme toggle: light → dark → system ---------- */
+  var NEXT = { light: 'dark', dark: 'system', system: 'light' };
+  var sysDark = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  function applyTheme(pref) {
+    var t = pref === 'dark' || (pref === 'system' && sysDark && sysDark.matches) ? 'dark' : 'light';
+    doc.setAttribute('data-theme', t);
+    doc.setAttribute('data-theme-pref', pref);
+    var metas = document.querySelectorAll('meta[name="theme-color"]');
+    for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', t === 'dark' ? '#0A1411' : '#F4F4F0');
+    var b = $('theme'), label = pref === 'system' ? 'system (' + t + ')' : pref;
+    b.setAttribute('aria-label', 'Theme: ' + label + '. Switch to ' + NEXT[pref]);
+    b.title = 'Theme: ' + label;
+  }
+  applyTheme(doc.getAttribute('data-theme-pref') || 'light');
+  $('theme').addEventListener('click', function () {
+    var pref = NEXT[doc.getAttribute('data-theme-pref')] || 'dark';
+    try { localStorage.setItem('codoseo-theme', pref); } catch (e) {}
+    applyTheme(pref);
+  });
+  if (sysDark) {
+    var onSys = function () { if (doc.getAttribute('data-theme-pref') === 'system') applyTheme('system'); };
+    if (sysDark.addEventListener) sysDark.addEventListener('change', onSys); else if (sysDark.addListener) sysDark.addListener(onSys);
+  }
+
+  /* ---------- mascot: the one template every pair of eyes comes from ---------- */
+  // Geometry from the brand mark (viewBox 0 0 64 64, cropped to the eyes): rings at x 20.5 / 43.5, y 32, r 11.5.
+  // Pupils are unit circles moved and scaled by CSS custom properties, so states animate with transitions.
+  function mascot(state, small) {
+    // Pupils are drawn first so the rings sit on top: a pupil that glances far sideways tucks under its ring.
+    var pupil = function (cx) {
+      return '<g transform="translate(' + cx + ' 32)"><g class="lk"><g class="pp"><g class="sw"><circle class="pu" r="1"/></g></g></g></g>';
+    };
+    var ring = function (cx) { return '<circle class="rg" cx="' + cx + '" cy="32" r="11.5"/>'; };
+    return '<svg class="mascot' + (small ? ' sm' : '') + '" viewBox="5 17 54 30" data-state="' + state + '" aria-hidden="true" focusable="false">' +
+      '<g class="bl">' + pupil(20.5) + pupil(43.5) + ring(20.5) + ring(43.5) + '</g></svg>';
+  }
+  var all = document.querySelectorAll('[data-mascot]');
+  for (var i = 0; i < all.length; i++) {
+    all[i].innerHTML = mascot(all[i].getAttribute('data-mascot'), all[i].hasAttribute('data-small'));
+  }
+  var svgOf = function (el) { return el.querySelector('svg.mascot') || el; };
+  var setState = function (el, s) { svgOf(el).setAttribute('data-state', s); };
+
+  /* blinking: random intervals, sometimes a double blink */
+  function blink(svg) {
+    if (still) return;
+    svg.classList.remove('blink'); void svg.getBoundingClientRect(); svg.classList.add('blink');
+    setTimeout(function () { svg.classList.remove('blink'); }, 200);
+  }
+  function blinker(svg, min, max) {
+    if (still) return;
+    (function loop() {
+      setTimeout(function () {
+        if (!document.hidden && svg.getAttribute('data-state') !== 'idle') {
+          blink(svg); if (Math.random() < .22) setTimeout(function () { blink(svg); }, 260);
+        }
+        loop();
+      }, rnd(min, max));
+    })();
+  }
+
+  /* eyes that look at the cursor (mouse) or look around on their own (touch / idle) */
+  var followers = [];
+  var fl = document.querySelectorAll('[data-follow]');
+  for (i = 0; i < fl.length; i++) {
+    var sv = svgOf(fl[i]);
+    sv.classList.add('follow');
+    followers.push({ svg: sv, eyes: sv.querySelectorAll('.lk') });
+    blinker(sv, 2400, 6200);
+  }
+  function lookAt(f, x, y) {
+    var r = f.svg.getBoundingClientRect();
+    if (!r.width) return;
+    var k = r.width / 54; // px per viewBox unit
+    for (var j = 0; j < f.eyes.length; j++) {
+      var cx = r.left + ((j ? 43.5 : 20.5) - 5) * k, cy = r.top + (32 - 17) * k;
+      var dx = x - cx, dy = y - cy, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      var m = Math.min(4.6, d / (k * 9)); // travel in viewBox units, eased by distance
+      f.eyes[j].style.setProperty('--lx', (dx / d * m).toFixed(2) + 'px');
+      f.eyes[j].style.setProperty('--ly', (dy / d * m).toFixed(2) + 'px');
+    }
+  }
+  function lookDir(f, ux, uy) {
+    for (var j = 0; j < f.eyes.length; j++) {
+      f.eyes[j].style.setProperty('--lx', ux.toFixed(2) + 'px');
+      f.eyes[j].style.setProperty('--ly', uy.toFixed(2) + 'px');
+    }
+  }
+  if (!still && followers.length) {
+    var mx = 0, my = 0, queued = false, lastMove = 0;
+    // only a real mouse drives the eyes; touch and pen fall through to the look-around loop below
+    window.addEventListener('pointermove', function (e) {
+      if (e.pointerType !== 'mouse') return;
+      mx = e.clientX; my = e.clientY; lastMove = Date.now();
+      if (!queued) { queued = true; requestAnimationFrame(function () { queued = false; followers.forEach(function (f) { f.svg.classList.add('follow'); lookAt(f, mx, my); }); }); }
+    }, { passive: true });
+    // idle look-around loop: runs on touch screens, and on desktop when the mouse has been still a while
+    var SPOTS = [[0, 0], [4, 0], [-4, 0], [3, -3], [-3, -2.5], [0, 3.5], [3.5, 2.5], [-4, 1.5], [0, -3.5]];
+    (function wander() {
+      setTimeout(function () {
+        if (!document.hidden && Date.now() - lastMove > 4000) {
+          var s = SPOTS[(Math.random() * SPOTS.length) | 0];
+          followers.forEach(function (f) { f.svg.classList.remove('follow'); lookDir(f, s[0], s[1]); });
+          if (Math.random() < .3) followers.forEach(function (f) { blink(f.svg); });
+        } else {
+          followers.forEach(function (f) { f.svg.classList.add('follow'); });
+        }
+        wander();
+      }, rnd(1300, 2800));
+    })();
+  }
+  // tapping or clicking the hero mascot makes it blink and look surprised for a beat
+  $('peek').addEventListener('click', function () {
+    var s = svgOf(this); blink(s);
+    s.style.setProperty('--pr', '6.5');
+    setTimeout(function () { s.style.removeProperty('--pr'); }, 700);
+  });
+
+  /* wordmark: glance on hover (CSS) plus a blink */
+  var wms = document.querySelectorAll('.wm');
+  for (i = 0; i < wms.length; i++) {
+    wms[i].addEventListener('mouseenter', function () {
+      if (still) return; var w = this; w.classList.add('blink');
+      setTimeout(function () { w.classList.remove('blink'); }, 110);
+    });
+  }
+
+  /* ---------- status showcase ---------- */
+  var STATES = [
+    ['crawl', 'Crawling', 'pupils sweep', 'A crawl is running. The eyes scan side to side, page by page.', 3600],
+    ['warn', 'Warning', 'resting gaze', 'Warnings to look at, nothing broken. The eyes rest in the brand yellow.', 2800],
+    ['error', 'Error', 'pupils widen', 'A critical check failed: a page went 404 or a noindex slipped in. The pupils go wide and red.', 3000],
+    ['ok', 'All clear', 'eyes lifted', 'Every critical check passes. The eyes lift, centred and green.', 2800],
+    ['idle', 'Idle', 'drooping', 'Nothing running until the next scheduled crawl. Grey, sleepy and drooping.', 2800]
+  ];
+  var list = $('st-list'), big = $('st-big'), cur = 0, timer = null, paused = 0;
+  list.innerHTML = STATES.map(function (s, n) {
+    return '<li><button class="st-btn c-' + s[0] + '" type="button" data-i="' + n + '" aria-pressed="false">' + mascot(s[0], true) +
+      '<span><b>' + s[1] + '</b><span>' + s[3].split('. ')[0] + '.</span></span><code>' + s[2] + '</code></button></li>';
+  }).join('');
+  var btns = list.querySelectorAll('.st-btn');
+  var bigSvg = svgOf(big);
+  blinker(bigSvg, 2200, 5200);
+  function show(n, auto) {
+    cur = n; var s = STATES[n];
+    setState(big, s[0]);
+    $('st-name').textContent = s[1]; $('st-chip').textContent = s[2]; $('st-desc').textContent = s[3];
+    for (var j = 0; j < btns.length; j++) {
+      btns[j].setAttribute('aria-pressed', j === n ? 'true' : 'false');
+      btns[j].classList.remove('run');
+    }
+    if (auto && !still) {
+      void btns[n].offsetWidth; btns[n].style.setProperty('--dur', s[4] + 'ms'); btns[n].classList.add('run');
+    }
+  }
+  function cycle() {
+    clearTimeout(timer);
+    if (still) return;
+    timer = setTimeout(function () {
+      if (!document.hidden && statusVisible && Date.now() > paused) show((cur + 1) % STATES.length, true);
+      cycle();
+    }, Date.now() > paused ? STATES[cur][4] : 1000);
+  }
+  for (i = 0; i < btns.length; i++) {
+    btns[i].addEventListener('click', function () {
+      paused = Date.now() + 9000; show(+this.getAttribute('data-i'), false); cycle();
+    });
+  }
+  var statusVisible = true;
+  if ('IntersectionObserver' in window) {
+    statusVisible = false;
+    new IntersectionObserver(function (es) { statusVisible = es[0].isIntersecting; }).observe($('status'));
+  }
+  show(0, true); cycle();
+
+  /* ---------- scroll reveal ---------- */
+  var rev = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window && !still) {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+    for (i = 0; i < rev.length; i++) io.observe(rev[i]);
+  } else {
+    for (i = 0; i < rev.length; i++) rev[i].classList.add('in');
+  }
+
+  /* ---------- copy install command ---------- */
   $('copy').addEventListener('click', function () {
     var b = this;
     var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1800); };
     if (navigator.clipboard) navigator.clipboard.writeText($('cmd').textContent).then(done, function () {});
   });
 
-  // sample crawl feed
+  /* ---------- sample crawl feed ---------- */
   var POOL = [
     ['/', 200, 'Indexable', 112], ['/tents', 200, 'Indexable', 98], ['/tents/ridgeline-2p', 200, 'Indexable', 141],
     ['/sale', 301, 'Redirect → /deals', 34], ['/blog/winter-camping-checklist', 200, 'Indexable', 176],
@@ -498,9 +895,9 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
     ['/packs/trail-35l', 200, 'Indexable', 117], ['/cart', 200, 'Blocked by robots.txt', 0],
     ['/returns', 200, 'Indexable', 72], ['/journal/gear-list-2019', 410, 'Gone', 58], ['/contact', 200, 'Indexable', 69]
   ];
-  var TOTAL = 1284, tick = 0;
+  var TOTAL = 1284, tick = 0, dot = $('dot');
   var cls = function (s) { return s >= 500 ? 's5' : s >= 400 ? 's4' : s >= 300 ? 's3' : 's2'; };
-  var col = function (r) { return r[2] === 'Indexable' ? '#4C544F' : r[1] >= 400 ? '#C5221F' : '#9A5B00'; };
+  var col = function (r) { return r[2] === 'Indexable' ? 'ix-ok' : r[1] >= 400 ? 'ix-bad' : 'ix-warn'; };
   var esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
 
   function render(t, animate) {
@@ -508,7 +905,7 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
     for (var i = 0; i < 9; i++) {
       var r = POOL[(((t - i) % POOL.length) + POOL.length) % POOL.length];
       html += '<div class="row' + (i === 0 && !done && animate ? ' fresh' : '') + '"><span class="p">' + esc(r[0]) +
-        '</span><span class="s ' + cls(r[1]) + '">' + r[1] + '</span><span class="i" style="color:' + col(r) + '">' + esc(r[2]) +
+        '</span><span class="s ' + cls(r[1]) + '">' + r[1] + '</span><span class="i ' + col(r) + '">' + esc(r[2]) +
         '</span><span class="t">' + (r[3] ? r[3] + ' ms' : '—') + '</span></div>';
     }
     $('feed').innerHTML = html;
@@ -517,14 +914,14 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
     $('s-rate').textContent = done ? '—' : 12 + (tick * 7) % 6;
     $('s-issues').textContent = Math.round(crawled / TOTAL * 96);
     $('prog').style.width = (crawled / TOTAL * 100).toFixed(1) + '%';
-    $('dot').style.background = done ? '#137333' : '';
+    $('progw').classList.toggle('done', done);
+    setState(dot, done ? 'ok' : 'crawl');
     $('state').textContent = done ? 'Sample · complete in 1m 42s' : 'Sample crawl…';
   }
-  var still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (still) { render(109, false); }
-  else { render(0, false); setInterval(function () { tick++; render(tick % 110, true); }, 420); }
+  else { render(0, false); setInterval(function () { if (!document.hidden) { tick++; render(tick % 110, true); } }, 420); }
 
-  // checks grid: [name, count, [[label, severity]]]
+  /* ---------- checks grid: [name, count, [[label, severity]]] ---------- */
   var CATS = [
     ['Response', 6, [['4xx and 5xx errors', 0], ['Fetch failures', 0], ['Redirect loops', 0], ['Redirect chains', 1]]],
     ['Indexability', 6, [['Noindex on key pages', 0], ['Blocked by robots.txt', 0], ['Canonical to non-200', 1], ['Canonical issues', 2]]],
@@ -538,11 +935,11 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   ];
   var SEV = ['r', 'a', 'n0'];
   $('cats').innerHTML = CATS.map(function (c) {
-    return '<div class="cat"><header><h3>' + c[0] + '</h3><span class="n">' + c[1] + ' checks</span></header><ul>' +
+    return '<div class="cat"><div class="ch"><h3>' + c[0] + '</h3><span class="n">' + c[1] + ' checks</span></div><ul>' +
       c[2].map(function (i) { return '<li class="' + SEV[i[1]] + '">' + i[0] + '</li>'; }).join('') + '</ul></div>';
   }).join('');
 
-  // comparison table: [label, [state, text] x3]
+  /* ---------- comparison table: [label, [state, text] x3] ---------- */
   var G = [
     ['License', ['y', 'AGPL-3.0, open source'], ['n', 'Proprietary'], ['n', 'Proprietary']],
     ['Runs on your own machine or CI', ['y', 'Single static binary'], ['p', 'Desktop app or CLI'], ['n', 'Cloud only']],
@@ -550,13 +947,14 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
     ['Exit codes for CI', ['y', '--fail-on critical'], ['p', 'Via CLI, licensed'], ['n', '']],
     ['Diff between two audits', ['y', 'JSON audit files'], ['p', 'Crawl comparison'], ['p', 'Crawl comparison']],
     ['JavaScript rendering', ['s', ''], ['y', ''], ['y', '']],
-    ['Scheduled monitoring and alerts', ['s', 'Web app'], ['p', 'Machine must be on'], ['y', '']],
+    ['Scheduled monitoring and alerts', ['y', 'Web app'], ['p', 'Machine must be on'], ['y', '']],
     ['llms.txt and AI crawler checks', ['s', 'GEO checks'], ['n', ''], ['n', '']]
   ];
   var IC = { y: '✓', p: '◐', n: '–', s: 'SOON' };
-  var cell = function (c) { return '<span><i class="ic ' + c[0] + '">' + IC[c[0]] + '</i>' + (c[1] ? '<span>' + esc(c[1]) + '</span>' : '') + '</span>'; };
+  var SR = { y: 'Yes', p: 'Partly', n: 'No', s: 'Coming soon' };
+  var cell = function (c) { return '<span><i class="ic ' + c[0] + '" aria-hidden="true">' + IC[c[0]] + '</i><span class="sr">' + SR[c[0]] + (c[1] ? ': ' : '') + '</span>' + (c[1] ? '<span>' + esc(c[1]) + '</span>' : '') + '</span>'; };
   $('cmp').innerHTML =
-    '<div class="g h"><span></span><span><span style="display:flex;gap:8px;align-items:center"><span class="owl xs" style="width:20px;height:20px;border-radius:6px 6px 8px 8px"><i></i><i></i></span>CodoSEO</span><small>open-source CLI</small></span><span>Screaming Frog<small>desktop SEO Spider</small></span><span>Ahrefs Site Audit<small>cloud SaaS</small></span></div>' +
+    '<div class="g h"><span></span><span><span style="display:flex;gap:8px;align-items:center">' + mascot('rest', true) + 'CodoSEO</span><small>open source</small></span><span>Screaming Frog<small>desktop SEO Spider</small></span><span>Ahrefs Site Audit<small>cloud SaaS</small></span></div>' +
     G.map(function (r) { return '<div class="g"><span>' + r[0] + '</span>' + cell(r[1]) + cell(r[2]) + cell(r[3]) + '</div>'; }).join('');
 })();
 </script>

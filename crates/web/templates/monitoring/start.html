@@ -1,10 +1,10 @@
 {% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
 {% block title %}{% match view %}{% when StartView::Confirm { domain, .. } %}Monitor {{ domain }}{% when StartView::Expired { .. } %}Link expired{% when StartView::Done(d) %}{% match d.site %}{% when SiteNote::PlanFull { .. } %}Your plan is full{% else %}Monitoring started{% endmatch %}{% endmatch %} — CodoSEO{% endblock %}
-{% block head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 {% block body %}
 <div class="solo-page">
   <div class="solo-card solo-card-wide">
-    <div style="display:flex;justify-content:center;margin-bottom:18px"><span class="owl" style="width:44px;height:44px;border-radius:12px 12px 16px 16px;gap:3px;padding-bottom:6px"><i style="width:16px;height:16px"></i><i style="width:16px;height:16px"></i></span></div>
+    <div class="solo-mascot">{% call m::tile() %}{% endcall %}</div>
     {% match view %}
     {% when StartView::Confirm { domain, email } %}
     <h1>Monitor {{ domain }}?</h1>

@@ -163,7 +163,7 @@ pub struct AuditLive {
     pub banner: bool,
     /// A crawl is queued or running.
     pub active: bool,
-    /// `queued` or `running`, for the status dot.
+    /// `queued` or `running`, for the mascot.
     pub state: &'static str,
     pub line: String,
     pub sub: String,

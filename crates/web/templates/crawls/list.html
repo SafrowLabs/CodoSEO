@@ -1,8 +1,9 @@
+{%- import "partials/mascot.html" as m -%}
 <div id="crawl-list" class="card">
   <i hidden hx-get="{{ base }}/crawls" hx-trigger="crawlQueued from:body, crawlFinished from:body{% if live %}, every 3s{% endif %}" hx-target="#crawl-list" hx-swap="outerHTML" data-quiet></i>
   {% if rows.is_empty() %}
   <div class="empty">
-    <div class="art"><svg class="icon"><use href="#i-crawls"/></svg></div>
+    {% call m::eyes("idle", "mascot-empty") %}{% endcall %}
     <h2>No crawls yet</h2>
     <p>Run a crawl to audit {{ domain }}. Each crawl is compared with the one before, so you'll see what changed.</p>
     <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>

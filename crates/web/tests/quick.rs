@@ -95,6 +95,25 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
             .contains(r#"rel="canonical" href="https://codoseo.com/""#)
     );
     assert!(res.body.contains("application/ld+json"));
+    for needle in [
+        r#"<meta name="robots" content="index, follow, max-image-preview:large">"#,
+        r#"<meta property="og:image" content="https://codoseo.com/og.png">"#,
+        r#"<meta property="og:image:width" content="1200">"#,
+        r#"<meta property="og:image:height" content="630">"#,
+        r#"<meta property="og:locale" content="en_US">"#,
+        r#"<meta name="twitter:card" content="summary_large_image">"#,
+        r#"<meta name="twitter:image" content="https://codoseo.com/og.png">"#,
+        r#""@type":"SoftwareApplication""#,
+        r#""logo":"https://codoseo.com/assets/icon-512."#,
+        // The hero mascot that watches the cursor.
+        "data-watch",
+    ] {
+        assert!(res.body.contains(needle), "{needle}: {}", res.body);
+    }
+    assert!(
+        !res.body.contains(r#"content="noindex"#),
+        "the landing page is for search engines"
+    );
     assert!(
         !res.body.contains("challenges.cloudflare.com"),
         "no Turnstile script without keys"
@@ -700,6 +719,10 @@ async fn the_bot_page_robots_and_llms_txt_are_served_in_the_cloud() {
         "203.0.113.7",
         "5 requests per second",
         "User-agent: CodoSEObot",
+        r#"<link rel="canonical" href="https://codoseo.com/bot">"#,
+        r#"<meta name="robots" content="index, follow, max-image-preview:large">"#,
+        r#"<meta property="og:url" content="https://codoseo.com/bot">"#,
+        r#"<meta name="twitter:card" content="summary_large_image">"#,
     ] {
         assert!(res.body.contains(needle), "{needle}: {}", res.body);
     }

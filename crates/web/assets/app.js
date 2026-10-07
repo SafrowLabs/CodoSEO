@@ -1,5 +1,6 @@
 // CodoSEO web app behaviour on top of htmx: navigation that keeps the chrome still, the ⌘K
-// palette, keyboard shortcuts, toasts, a progress bar, count-up numbers, theme and sidebar.
+// palette, keyboard shortcuts, toasts, a progress bar, count-up numbers, theme and sidebar,
+// and the mascot (blinks, glances, and on the landing page, follows the cursor).
 (() => {
   "use strict";
   const root = document.documentElement;
@@ -34,19 +35,33 @@
   document.body.addEventListener("toast", (e) => toast(e.detail.message, e.detail.kind));
 
   // ── Theme and sidebar ────────────────────────────────
+  // Light is the default, whatever the OS prefers. "dark" and "system" are stored and set as
+  // data-theme (the head script does it before first paint); only "system" follows the OS.
+  const darkOS = window.matchMedia("(prefers-color-scheme: dark)");
+  const THEME_COLOR = { light: "#efefea", dark: "#0a1411" };
   function setTheme(t) {
-    if (t === "light" || t === "dark") { root.dataset.theme = t; store.set("codoseo-theme", t); }
+    if (t === "dark" || t === "system") { root.dataset.theme = t; store.set("codoseo-theme", t); }
     else { delete root.dataset.theme; store.set("codoseo-theme", null); }
-    $$("[data-theme-label]").forEach((el) => (el.textContent = themeLabel()));
+    syncTheme();
   }
   function themeLabel() {
     const t = root.dataset.theme;
-    return t === "dark" ? "Dark" : t === "light" ? "Light" : "System";
+    return t === "dark" ? "Dark" : t === "system" ? "System" : "Light";
+  }
+  // The theme-color metas come one per OS scheme; unless "system" is chosen, both take the
+  // colour of the theme in use.
+  function syncTheme() {
+    const t = root.dataset.theme;
+    $$('meta[name="theme-color"]').forEach((m) => {
+      const own = (m.media || "").includes("dark") ? "dark" : "light";
+      m.content = THEME_COLOR[t === "system" ? own : t === "dark" ? "dark" : "light"];
+    });
+    $$("[data-theme-label]").forEach((el) => (el.textContent = themeLabel()));
   }
   function cycleTheme() {
     const t = root.dataset.theme;
-    setTheme(t === "light" ? "dark" : t === "dark" ? "system" : "light");
-    toast(`Theme: ${themeLabel()}`, "info");
+    setTheme(t === "dark" ? "system" : t === "system" ? "light" : "dark");
+    toast(`Theme: ${themeLabel()}${root.dataset.theme === "system" ? (darkOS.matches ? " (dark)" : " (light)") : ""}`, "info");
   }
   function toggleRail() {
     const on = root.classList.toggle("rail");
@@ -85,7 +100,9 @@
       const cur = document.getElementById(id);
       const next = doc.getElementById(id);
       if (cur && next && cur.outerHTML !== next.outerHTML) {
+        const settle = settleMascots(cur, next);
         cur.replaceWith(next);
+        settle();
         if (window.htmx) htmx.process(next);
       }
     });
@@ -102,6 +119,19 @@
     d.swapOverride = reduced() ? "outerHTML" : "outerHTML transition:true";
     drawer(false);
   });
+
+  // A mascot that comes back in a new mood (same id) starts in its old one and moves over, the
+  // way htmx settles classes on its own swaps.
+  function settleMascots(cur, next) {
+    const moves = $$(".mascot[id]", next).map((el) => {
+      const old = cur.querySelector(`#${CSS.escape(el.id)}`);
+      if (!old || old.getAttribute("class") === el.getAttribute("class")) return null;
+      const to = el.getAttribute("class");
+      el.setAttribute("class", old.getAttribute("class"));
+      return () => el.setAttribute("class", to);
+    }).filter(Boolean);
+    return () => moves.length && requestAnimationFrame(() => requestAnimationFrame(() => moves.forEach((m) => m())));
+  }
 
   // Reloads the current page's #main and chrome in place (after a crawl finishes).
   async function refresh() {
@@ -367,8 +397,77 @@
     setTimeout(() => $$("button[type=submit]", form).forEach((b) => (b.disabled = true)), 0);
   });
 
+  // ── Mascot ───────────────────────────────────────────
+  // Every pair of eyes on the page blinks now and then, a little out of step.
+  function blink() {
+    if (!reduced() && !document.hidden) {
+      $$(".mascot").forEach((el) => setTimeout(() => {
+        el.classList.add("is-blinking");
+        setTimeout(() => el.classList.remove("is-blinking"), 220);
+      }, Math.random() * 500));
+    }
+    setTimeout(blink, 5000 + Math.random() * 3000);
+  }
+
+  // The landing page's big mascot follows the cursor; on touch screens it looks around.
+  function watch() {
+    const box = $("[data-watch]");
+    if (!box || reduced()) return;
+    const eyes = $(".mascot", box);
+    const gaze = $(".m-gaze", box);
+    eyes.classList.replace("m-rest", "m-look");
+    const look = (x, y) => (gaze.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`);
+    const REACH = 4.2; // how far a pupil can move inside its ring, in SVG units
+    if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      let frame = 0;
+      window.addEventListener("pointermove", (e) => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+          const r = eyes.getBoundingClientRect();
+          const dx = e.clientX - (r.left + r.width / 2);
+          const dy = e.clientY - (r.top + r.height / 2);
+          const pull = Math.min(1, Math.hypot(dx, dy) / 260);
+          const a = Math.atan2(dy, dx);
+          look(Math.cos(a) * REACH * pull, Math.sin(a) * REACH * pull);
+        });
+      }, { passive: true });
+      document.documentElement.addEventListener("pointerleave", () => look(0, 0));
+    } else {
+      const wander = () => {
+        const a = Math.random() * Math.PI * 2;
+        const d = Math.random() < 0.3 ? 0 : REACH * (0.5 + Math.random() * 0.5);
+        look(Math.cos(a) * d, Math.sin(a) * d);
+        setTimeout(wander, 1600 + Math.random() * 2400);
+      };
+      gaze.style.transitionDuration = "0.6s";
+      wander();
+    }
+  }
+
+  // Sections marked data-reveal rise in as they scroll into view.
+  function reveal() {
+    const els = $$("[data-reveal]");
+    if (!els.length || reduced() || !("IntersectionObserver" in window)) return;
+    const io = new IntersectionObserver((entries) => entries.forEach((en) => {
+      if (!en.isIntersecting) return;
+      en.target.classList.add("is-in");
+      io.unobserve(en.target);
+    }), { rootMargin: "0px 0px -8% 0px" });
+    // What's already on screen stays put; only what's below the fold waits to rise.
+    els.forEach((el) => {
+      if (el.getBoundingClientRect().top < window.innerHeight * 0.92) el.classList.add("is-in");
+      else io.observe(el);
+    });
+    root.classList.add("reveal-on");
+  }
+
+  darkOS.addEventListener("change", syncTheme);
+
   document.addEventListener("DOMContentLoaded", () => {
     countUp(document);
-    $$("[data-theme-label]").forEach((el) => (el.textContent = themeLabel()));
+    syncTheme();
+    watch();
+    reveal();
+    setTimeout(blink, 2500 + Math.random() * 3000);
   });
 })();

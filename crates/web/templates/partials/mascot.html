@@ -1,0 +1,20 @@
+{#- The Binocular mascot and the wordmark, the one place their geometry lives. Import with
+    {% import "partials/mascot.html" as m %}.
+
+    eyes: two rings and two pupils. The rings take currentColor; the mood class sets the
+    pupils' colour, place and size (app.css, "Mascot"), with a spring between moods. Moods:
+    rest (the brand's resting gaze), crawling, error, warning, ok, idle. Give it a stable `id`
+    where htmx swaps it, so the old mood settles into the new one instead of jumping. -#}
+{% macro eyes(mood = "rest", class = "", id = "") -%}
+<svg{% if !id.is_empty() %} id="{{ id }}"{% endif %} class="mascot m-{{ mood }}{% if !class.is_empty() %} {{ class }}{% endif %}" viewBox="4 16 56 32" aria-hidden="true" focusable="false"><g class="m-blink"><circle class="m-ring" cx="20.5" cy="32" r="11.5"/><circle class="m-ring" cx="43.5" cy="32" r="11.5"/><g class="m-gaze"><circle class="m-pupil" cx="20.5" cy="32" r="5"/><circle class="m-pupil" cx="43.5" cy="32" r="5"/></g></g></svg>
+{%- endmacro %}
+
+{#- "C◉d◉SEO": each o is an eye. Screen readers get the plain name. -#}
+{% macro wordmark() -%}
+<span class="wordmark" role="img" aria-label="CodoSEO">C<svg class="wm-o" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><circle class="wm-p" cx="13.5" cy="12.5" r="3.4"/></svg>d<svg class="wm-o" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><circle class="wm-p" cx="13.5" cy="12.5" r="3.4"/></svg>SEO</span>
+{%- endmacro %}
+
+{#- The app icon, alive: the eyes on an ink tile. -#}
+{% macro tile(mood = "rest", class = "") -%}
+<span class="mascot-tile{% if !class.is_empty() %} {{ class }}{% endif %}">{% call eyes(mood) %}{% endcall %}</span>
+{%- endmacro %}

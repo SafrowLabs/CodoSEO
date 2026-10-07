@@ -1,3 +1,4 @@
+{%- import "partials/mascot.html" as m -%}
 <div id="audit-body" class="page"{% if reloads_on_queue() %} hx-get="{{ base }}/audit" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
 {% if let Some(d) = done %}
   <div class="page-head">
@@ -95,7 +96,7 @@
   <div class="page-head"><h1>Site audit</h1></div>
   <div class="card">
     <div class="empty">
-      <div class="art"><svg class="icon"><use href="#i-alert"/></svg></div>
+      {% call m::eyes("error", "mascot-empty") %}{% endcall %}
       <h2>The crawl failed</h2>
       <p>{{ reason }}</p>
       <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Try again</button>
@@ -105,7 +106,7 @@
   <div class="page-head"><h1>Site audit</h1></div>
   <div class="card">
     <div class="empty">
-      <div class="art"><svg class="icon"><use href="#i-audit"/></svg></div>
+      {% call m::eyes("idle", "mascot-empty") %}{% endcall %}
       <h2>No crawls yet</h2>
       <p>Run a crawl of {{ domain }} to get a health score and every issue, with the exact URLs behind it.</p>
       <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>

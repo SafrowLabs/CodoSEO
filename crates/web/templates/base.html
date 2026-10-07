@@ -1,3 +1,4 @@
+{%- import "partials/mascot.html" as m -%}
 <!doctype html>
 <html lang="en">
 <head>
@@ -5,10 +6,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ shell.title() }}</title>
 <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}],"scrollIntoViewOnBoost":false,"historyCacheSize":20,"defaultFocusScroll":false}'>
-<link rel="icon" href="{{ crate::assets::url("favicon.svg") }}" type="image/svg+xml">
+<meta name="robots" content="noindex, nofollow">
+{% include "partials/icons_head.html" %}
 <link rel="preload" href="{{ crate::assets::url("Geist-Variable.woff2") }}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="{{ crate::assets::url("app.css") }}">
-<script>(function(){try{var t=localStorage.getItem("codoseo-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;if(localStorage.getItem("codoseo-rail")==="1")document.documentElement.classList.add("rail")}catch(e){}})()</script>
+<script>(function(){try{var t=localStorage.getItem("codoseo-theme");if(t==="dark"||t==="system")document.documentElement.dataset.theme=t;if(localStorage.getItem("codoseo-rail")==="1")document.documentElement.classList.add("rail")}catch(e){}})()</script>
 <script src="{{ crate::assets::url("htmx.min.js") }}" defer></script>
 <script src="{{ crate::assets::url("app.js") }}" defer></script>
 </head>
@@ -18,7 +20,7 @@
 <div class="shell">
   <header class="topbar">
     <button class="icon-btn menu-btn" data-action="drawer" aria-label="Open menu"><svg class="icon"><use href="#i-menu"/></svg></button>
-    <a class="brand" href="/" aria-label="CodoSEO home"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+    <a class="brand" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
     <div class="crumbs" id="crumbs">
       {% if let Some(site) = shell.site %}
         <a class="site" href="{{ site.base }}/audit">{{ site.domain }}</a><span class="sep">/</span>
@@ -84,7 +86,7 @@
       </summary>
       <div class="menu" role="menu">
         <a href="/account" role="menuitem"><svg class="icon"><use href="#i-settings"/></svg>Account</a>
-        <button type="button" data-action="theme" role="menuitem"><svg class="icon"><use href="#i-moon"/></svg>Theme<span class="grow"></span><span class="faint" data-theme-label>System</span></button>
+        <button type="button" data-action="theme" role="menuitem"><svg class="icon"><use href="#i-moon"/></svg>Theme<span class="grow"></span><span class="faint" data-theme-label>Light</span></button>
         <button type="button" data-action="rail" role="menuitem"><svg class="icon"><use href="#i-sidebar"/></svg>Collapse sidebar<span class="grow"></span><kbd>[</kbd></button>
         <button type="button" data-action="shortcuts" role="menuitem"><svg class="icon"><use href="#i-keyboard"/></svg>Shortcuts<span class="grow"></span><kbd>?</kbd></button>
         <hr>

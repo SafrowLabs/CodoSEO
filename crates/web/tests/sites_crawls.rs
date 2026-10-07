@@ -596,6 +596,13 @@ async fn status_poll_shows_the_active_crawl() {
     assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("id=\"crawler\""), "{}", res.body);
     assert!(res.body.contains("QUEUED #1"));
+    // The mascot waits with its resting gaze, under a stable id so htmx settles its mood.
+    assert!(
+        res.body
+            .contains(r#"id="crawler-eyes" class="mascot m-rest"#),
+        "{}",
+        res.body
+    );
     assert!(res.body.contains("every 2s"), "keeps polling");
     assert!(res.header("hx-trigger").is_none());
 }
@@ -618,6 +625,17 @@ async fn status_poll_announces_a_finished_crawl() {
         .await;
     assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("CRAWLER IDLE"), "{}", res.body);
+    let mood = match health {
+        80.. => "ok",
+        50..80 => "warning",
+        _ => "error",
+    };
+    assert!(
+        res.body
+            .contains(&format!(r#"id="crawler-eyes" class="mascot m-{mood}"#)),
+        "{}",
+        res.body
+    );
     assert!(!res.body.contains("every 2s"), "stops polling");
     let t = trigger_json(&res);
     assert!(t.get("crawlFinished").is_some(), "{t}");

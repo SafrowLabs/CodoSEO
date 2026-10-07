@@ -1,13 +1,19 @@
 {% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/seo.html" as seo -%}
 {% block title %}CodoSEObot — CodoSEO{% endblock %}
+{% block robots %}<meta name="robots" content="index, follow, max-image-preview:large">{% endblock %}
 {% block head %}
 <meta name="description" content="CodoSEObot is the crawler behind CodoSEO audits. How it identifies itself, how politely it crawls, and how to allow or block it.">
-<link rel="canonical" href="{{ base }}/bot">
+{% call seo::social(base, "/bot", "CodoSEObot — the crawler behind CodoSEO", "How CodoSEObot identifies itself, how politely it crawls, and how to allow or block it.") %}{% endcall %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","@id":"{{ base }}/bot","url":"{{ base }}/bot","name":"CodoSEObot","inLanguage":"en","isPartOf":{"@id":"{{ base }}/#website"},"about":{"@id":"{{ base }}/#app"}}
+</script>
 <link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
 {% endblock %}
 {% block body %}
 <header class="l-top l-wrap">
-  <a class="brand" href="/" style="width:auto;padding:0;height:auto"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
   <nav class="l-nav"><a class="btn btn-sm" href="/">Audit your site</a></nav>
 </header>
 <main class="l-wrap q-page prose">
