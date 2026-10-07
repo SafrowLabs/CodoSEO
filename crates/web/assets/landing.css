@@ -1,77 +1,14 @@
-/* The cloud landing page, the public audit report and the bot page. Built on app.css's tokens,
-   so light and dark come for free. */
+/* The public audit report and the bot page (the landing page has its own home.css). Built on
+   app.css's tokens, so light and dark come for free. */
 
 .l-wrap { width: min(1040px, 100%); margin: 0 auto; padding-left: 24px; padding-right: 24px; }
 .l-top { display: flex; align-items: center; justify-content: space-between; height: 64px; }
 .l-nav { display: flex; align-items: center; gap: 18px; font-size: 13.5px; color: var(--muted); }
 .l-nav a:not(.btn):hover { color: var(--ink); }
 
-.l-hero {
-  padding-top: clamp(40px, 9vw, 96px); padding-bottom: 48px;
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 32px 56px;
-}
-.l-hero-copy > * { animation: rise 0.6s var(--ease) both; }
-.l-hero-copy > :nth-child(2) { animation-delay: 0.06s; }
-.l-hero-copy > :nth-child(3) { animation-delay: 0.12s; }
-.l-hero-copy > :nth-child(n + 4) { animation-delay: 0.18s; }
-
-/* The hero mascot watches the cursor (app.js) and shows off its moods underneath. */
-.l-hero-art { display: flex; flex-direction: column; align-items: center; gap: 22px; }
-.l-watch { animation: mascot-in 0.8s var(--spring) 0.15s both; }
-.l-watch .mascot-tile { width: clamp(150px, 22vw, 232px); border-radius: 26%; box-shadow: inset 0 0 0 1px rgb(251 251 249 / 0.07), var(--shadow-pop); }
-.l-watch .mascot { --eye-stroke: 4.6; }
-.l-watch .m-gaze { transition-duration: 0.18s; }
-.l-moods { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, auto); gap: 8px 18px; font: 11.5px var(--mono); color: var(--muted-2); }
-.l-moods li { display: flex; align-items: center; gap: 8px; animation: rise 0.5s var(--ease) both; }
-.l-moods li:nth-child(1) { animation-delay: 0.45s; }
-.l-moods li:nth-child(2) { animation-delay: 0.5s; }
-.l-moods li:nth-child(3) { animation-delay: 0.55s; }
-.l-moods li:nth-child(4) { animation-delay: 0.6s; }
-.l-moods .mascot { color: var(--ink-3); }
-@media (max-width: 780px) {
-  .l-hero { grid-template-columns: minmax(0, 1fr); }
-  .l-hero-art { order: -1; flex-direction: row; justify-content: flex-start; }
-  .l-watch .mascot-tile { width: 92px; }
-  .l-moods { display: none; }
-}
-@keyframes mascot-in { from { opacity: 0; transform: translateY(10px) scale(0.92); } to { opacity: 1; transform: none; } }
-
-/* Sections rise in as they scroll into view. app.js sets .reveal-on only when it can reveal
-   them again and motion is welcome, so without it everything simply shows. */
-.reveal-on [data-reveal] { opacity: 0; transform: translateY(16px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
-.reveal-on [data-reveal].is-in { opacity: 1; transform: none; }
-.reveal-on [data-reveal] li { opacity: 0; transform: translateY(8px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
-.reveal-on [data-reveal].is-in li { opacity: 1; transform: none; }
-.reveal-on [data-reveal] li:nth-child(2) { transition-delay: 0.06s; }
-.reveal-on [data-reveal] li:nth-child(3) { transition-delay: 0.12s; }
-.reveal-on [data-reveal] li:nth-child(4) { transition-delay: 0.18s; }
-.reveal-on [data-reveal] li:nth-child(5) { transition-delay: 0.24s; }
-.reveal-on [data-reveal] li:nth-child(6) { transition-delay: 0.3s; }
 .l-eyebrow { font: 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 14px; }
-.l-hero h1 { font-size: clamp(34px, 6.4vw, 60px); line-height: 1.04; font-weight: 600; letter-spacing: -0.04em; max-width: 14em; text-wrap: balance; }
-.l-hero mark { background: linear-gradient(transparent 60%, color-mix(in oklab, var(--accent) 70%, transparent) 60%); color: inherit; padding: 0 2px; }
-.l-lead { margin-top: 18px; max-width: 38em; font-size: 17px; line-height: 1.55; color: var(--muted); }
-.l-form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; max-width: 560px; }
-.l-ts { flex-basis: 100%; min-height: 65px; }
-.l-form .input { flex: 1; min-width: 0; }
 .l-hint { margin-top: 12px; font-size: 12.5px; color: var(--faint-2); }
-@media (max-width: 560px) { .l-form { flex-direction: column; } .l-form .input { flex: none; } }
-
 .l-wrap h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 18px; }
-.l-steps, .l-cats, .l-oss, .l-foot {
-  padding-top: 40px; padding-bottom: 40px;
-  /* A divider as wide as the content, not the padded box. */
-  background: linear-gradient(var(--line), var(--line)) center top / calc(100% - 48px) 1px no-repeat;
-}
-.l-steps ol, .l-cats ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.l-steps li, .l-cats li { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-sm); }
-.l-steps li b, .l-cats li b { font-weight: 600; letter-spacing: -0.01em; }
-.l-steps li span, .l-cats li span { color: var(--muted-2); font-size: 14px; line-height: 1.5; }
-.l-oss p { max-width: 40em; color: var(--muted); line-height: 1.6; margin-bottom: 12px; }
-.l-oss code { font: 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
-.l-foot { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; padding-top: 24px; padding-bottom: 36px; font-size: 12.5px; color: var(--faint-2); }
-.l-foot a { text-decoration: underline; text-underline-offset: 2px; }
-@media (max-width: 780px) { .l-steps ol, .l-cats ul { grid-template-columns: 1fr; } }
 
 /* ── The public audit report ───────────────────────── */
 
@@ -128,7 +65,6 @@
 .prose pre { padding: 12px 14px; overflow-x: auto; }
 @media (prefers-reduced-motion: reduce) {
   .l-wrap * { animation: none !important; }
-  .reveal-on [data-reveal], .reveal-on [data-reveal] li { opacity: 1; transform: none; transition: none; }
 }
 
 .q-rankorg { margin-top: 18px; font-size: 13.5px; }

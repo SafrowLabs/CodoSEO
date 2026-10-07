@@ -52,6 +52,16 @@ impl std::fmt::Debug for TurnstileConfig {
     }
 }
 
+/// Umami analytics on the public pages (cloud only): the tracker script and the website it
+/// reports to. Neither is a secret; both show up in the page source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UmamiConfig {
+    /// `UMAMI_SCRIPT_URL`, for example `https://analytics.example.com/script.js`.
+    pub script_url: Url,
+    /// `UMAMI_WEBSITE_ID`: the website's id in Umami.
+    pub website_id: String,
+}
+
 /// Dodo Payments billing (cloud only). All four keys are needed; with any missing, billing is
 /// off: the billing pages say so and checkout is disabled.
 #[derive(Clone)]
@@ -120,6 +130,8 @@ pub struct Config {
     pub bot_ip: Option<String>,
     /// Turnstile on the audit form: `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`. Cloud only.
     pub turnstile: Option<TurnstileConfig>,
+    /// Umami on the public pages: `UMAMI_SCRIPT_URL` and `UMAMI_WEBSITE_ID`. Cloud only.
+    pub umami: Option<UmamiConfig>,
     /// The request header carrying the visitor's address behind the cloud's proxy
     /// (`CLIENT_IP_HEADER`, default `CF-Connecting-IP`). Read in cloud mode only.
     pub client_ip_header: String,
@@ -174,6 +186,7 @@ impl std::fmt::Debug for Config {
             .field("github", &self.github)
             .field("bot_ip", &self.bot_ip)
             .field("turnstile", &self.turnstile)
+            .field("umami", &self.umami)
             .field("client_ip_header", &self.client_ip_header)
             .field("admin_emails", &self.admin_emails)
             .field("rankorg_url", &self.rankorg_url.as_str())
@@ -288,6 +301,8 @@ impl Config {
             _ => None,
         };
 
+        let umami = umami_from(&get, mode)?;
+
         let admin_emails = get("ADMIN_EMAILS")
             .unwrap_or_default()
             .split(',')
@@ -324,6 +339,7 @@ impl Config {
             github,
             bot_ip: get("CODOSEO_BOT_IP"),
             turnstile,
+            umami,
             client_ip_header: get("CLIENT_IP_HEADER")
                 .unwrap_or_else(|| "CF-Connecting-IP".to_owned()),
             admin_emails,
@@ -366,6 +382,46 @@ fn count_from(
             name,
             reason: format!("expected a whole number of 0 or more, got {raw:?}"),
         })
+}
+
+/// Umami needs both values. With only one set the tracker would load without reporting
+/// anywhere (or not load at all), so it stays off and startup says why.
+fn umami_from(
+    get: &impl Fn(&str) -> Option<String>,
+    mode: Mode,
+) -> Result<Option<UmamiConfig>, ConfigError> {
+    if mode != Mode::Cloud {
+        return Ok(None);
+    }
+    let get = |k: &str| get(k).map(|v| v.trim().to_owned());
+    match (get("UMAMI_SCRIPT_URL"), get("UMAMI_WEBSITE_ID")) {
+        (Some(script), Some(website_id)) => {
+            let script_url = Url::parse(&script).map_err(|e| ConfigError::Invalid {
+                name: "UMAMI_SCRIPT_URL",
+                reason: e.to_string(),
+            })?;
+            if !matches!(script_url.scheme(), "https" | "http") {
+                return Err(ConfigError::Invalid {
+                    name: "UMAMI_SCRIPT_URL",
+                    reason: format!("expected an http(s) URL, got {script:?}"),
+                });
+            }
+            Ok(Some(UmamiConfig {
+                script_url,
+                website_id,
+            }))
+        }
+        (None, None) => Ok(None),
+        (script, _) => {
+            let missing = if script.is_none() {
+                "UMAMI_SCRIPT_URL"
+            } else {
+                "UMAMI_WEBSITE_ID"
+            };
+            tracing::warn!(missing, "Umami analytics is off: set both UMAMI_* values");
+            Ok(None)
+        }
+    }
 }
 
 const DODO_KEYS: [&str; 4] = [
@@ -601,6 +657,27 @@ mod tests {
     #[test]
     fn unknown_mode_is_rejected() {
         assert!(cfg(&[("CODOSEO_MODE", "nope")]).is_err());
+    }
+
+    #[test]
+    fn umami_needs_both_values_and_the_cloud() {
+        let keys = [
+            ("UMAMI_SCRIPT_URL", " https://stats.example.com/script.js "),
+            ("UMAMI_WEBSITE_ID", "b9cc7518-902b-4283-adf6-e621a5a3bdf7"),
+        ];
+        let both: Vec<_> = CLOUD.iter().chain(keys.iter()).copied().collect();
+        let u = cfg(&both).unwrap().umami.expect("configured");
+        assert_eq!(u.script_url.as_str(), "https://stats.example.com/script.js");
+        assert_eq!(u.website_id, "b9cc7518-902b-4283-adf6-e621a5a3bdf7");
+        let one: Vec<_> = CLOUD.iter().chain(keys[1..].iter()).copied().collect();
+        assert!(cfg(&one).unwrap().umami.is_none());
+        // Self-hosted makes no outside requests, so it never loads the tracker.
+        assert!(cfg(&keys).unwrap().umami.is_none());
+        for bad in ["not a url", "javascript:alert(1)"] {
+            let bad = [("UMAMI_SCRIPT_URL", bad), keys[1]];
+            let env: Vec<_> = CLOUD.iter().chain(bad.iter()).copied().collect();
+            assert!(cfg(&env).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

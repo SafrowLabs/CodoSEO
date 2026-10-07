@@ -43,7 +43,8 @@ Coolify's [GitHub Actions guide](https://coolify.io/docs/applications/ci-cd/gith
 describes: `.github/workflows/deploy.yml` builds one `linux/amd64` image, pushes it to ghcr.io as
 `:main` and `:sha-<short>`, then calls the resource's deploy webhook. Coolify pulls `:main` (the
 services have `pull_policy: always`), runs `migrate` and restarts `web` and `worker`. Changes that
-touch only docs, `site/` or other workflows don't deploy.
+touch only docs or other workflows don't deploy. The marketing page at `/` is part of the app
+(`crates/web/templates/landing/`), so changing it deploys like any other app change.
 
 One-time setup:
 

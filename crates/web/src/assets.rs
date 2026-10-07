@@ -87,6 +87,17 @@ const SOURCES: &[Source] = &[
         content_type: "text/css; charset=utf-8",
         bytes: include_bytes!("../assets/landing.css"),
     },
+    // The cloud landing page at `/`, which carries its own styles and script.
+    Source {
+        name: "home.css",
+        content_type: "text/css; charset=utf-8",
+        bytes: include_bytes!("../assets/home.css"),
+    },
+    Source {
+        name: "home.js",
+        content_type: "text/javascript; charset=utf-8",
+        bytes: include_bytes!("../assets/home.js"),
+    },
     // Last, so its font URLs can be rewritten to the fonts' hashed names.
     Source {
         name: "app.css",
@@ -309,9 +320,11 @@ mod tests {
 
     #[test]
     fn css_points_at_hashed_fonts() {
-        let css = ASSETS.by_name("app.css").unwrap();
-        let text = std::str::from_utf8(&css.bytes).unwrap();
-        assert!(text.contains(url("Geist-Variable.woff2")));
-        assert!(!text.contains("/assets/Geist-Variable.woff2"));
+        for name in ["app.css", "home.css"] {
+            let css = ASSETS.by_name(name).unwrap();
+            let text = std::str::from_utf8(&css.bytes).unwrap();
+            assert!(text.contains(url("Geist-Variable.woff2")), "{name}");
+            assert!(!text.contains("/assets/Geist-Variable.woff2"), "{name}");
+        }
     }
 }

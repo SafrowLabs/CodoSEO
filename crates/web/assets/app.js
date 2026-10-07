@@ -409,65 +409,11 @@
     setTimeout(blink, 5000 + Math.random() * 3000);
   }
 
-  // The landing page's big mascot follows the cursor; on touch screens it looks around.
-  function watch() {
-    const box = $("[data-watch]");
-    if (!box || reduced()) return;
-    const eyes = $(".mascot", box);
-    const gaze = $(".m-gaze", box);
-    eyes.classList.replace("m-rest", "m-look");
-    const look = (x, y) => (gaze.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`);
-    const REACH = 4.2; // how far a pupil can move inside its ring, in SVG units
-    if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
-      let frame = 0;
-      window.addEventListener("pointermove", (e) => {
-        cancelAnimationFrame(frame);
-        frame = requestAnimationFrame(() => {
-          const r = eyes.getBoundingClientRect();
-          const dx = e.clientX - (r.left + r.width / 2);
-          const dy = e.clientY - (r.top + r.height / 2);
-          const pull = Math.min(1, Math.hypot(dx, dy) / 260);
-          const a = Math.atan2(dy, dx);
-          look(Math.cos(a) * REACH * pull, Math.sin(a) * REACH * pull);
-        });
-      }, { passive: true });
-      document.documentElement.addEventListener("pointerleave", () => look(0, 0));
-    } else {
-      const wander = () => {
-        const a = Math.random() * Math.PI * 2;
-        const d = Math.random() < 0.3 ? 0 : REACH * (0.5 + Math.random() * 0.5);
-        look(Math.cos(a) * d, Math.sin(a) * d);
-        setTimeout(wander, 1600 + Math.random() * 2400);
-      };
-      gaze.style.transitionDuration = "0.6s";
-      wander();
-    }
-  }
-
-  // Sections marked data-reveal rise in as they scroll into view.
-  function reveal() {
-    const els = $$("[data-reveal]");
-    if (!els.length || reduced() || !("IntersectionObserver" in window)) return;
-    const io = new IntersectionObserver((entries) => entries.forEach((en) => {
-      if (!en.isIntersecting) return;
-      en.target.classList.add("is-in");
-      io.unobserve(en.target);
-    }), { rootMargin: "0px 0px -8% 0px" });
-    // What's already on screen stays put; only what's below the fold waits to rise.
-    els.forEach((el) => {
-      if (el.getBoundingClientRect().top < window.innerHeight * 0.92) el.classList.add("is-in");
-      else io.observe(el);
-    });
-    root.classList.add("reveal-on");
-  }
-
   darkOS.addEventListener("change", syncTheme);
 
   document.addEventListener("DOMContentLoaded", () => {
     countUp(document);
     syncTheme();
-    watch();
-    reveal();
     setTimeout(blink, 2500 + Math.random() * 3000);
   });
 })();

@@ -7,6 +7,7 @@ use axum::response::{IntoResponse, Response};
 use codoseo_core::crawl::USER_AGENT;
 
 use super::quick::require_cloud;
+use crate::config::UmamiConfig;
 use crate::error::AppError;
 use crate::render::html;
 use crate::state::AppState;
@@ -17,6 +18,7 @@ pub struct BotPage {
     pub user_agent: &'static str,
     pub ip: Option<String>,
     pub base: String,
+    pub umami: Option<UmamiConfig>,
 }
 
 pub async fn page(State(state): State<AppState>) -> Result<Response, AppError> {
@@ -25,6 +27,7 @@ pub async fn page(State(state): State<AppState>) -> Result<Response, AppError> {
         user_agent: USER_AGENT,
         ip: state.config.bot_ip.clone(),
         base: state.config.origin(),
+        umami: state.config.umami.clone(),
     })?
     .into_response())
 }
