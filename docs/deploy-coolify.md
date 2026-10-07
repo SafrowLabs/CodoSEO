@@ -36,6 +36,24 @@ Both `web` and `worker` depend on `migrate` completing successfully, so one depl
 4. Attach your domain to the `web` service on port 8080. The compose file declares `expose` for 8080 and 9090 and publishes no host ports; Coolify's proxy reaches the container over the Docker network.
 5. Deploy. `docker compose up -d` and a Coolify redeploy both run `migrate` first.
 
+### Auto-deploy from main
+
+To have every merge to `main` go live with no GitHub Actions involved, let Coolify build the repo
+itself. `compose.coolify.yml` at the repo root is the two-container layout above, but builds the
+image from the `Dockerfile` instead of pulling it from ghcr.io.
+
+1. In Coolify, connect the repository through a **GitHub App** source (Sources, add GitHub App,
+   install it on `SafrowLabs/CodoSEO`). The app is what tells Coolify about pushes.
+2. Create a new resource from that source: branch `main`, build pack **Docker Compose**, base
+   directory `/`, compose file `/compose.coolify.yml`.
+3. Set the same environment variables and domain as in the steps above (domain on `web`, port 8080).
+4. In the resource's settings, turn on **Auto Deploy**. From then on, a push to `main` (a merged
+   pull request) builds and deploys; pushes to other branches do nothing.
+
+The Rust build happens on the Coolify server: several minutes, and about 2–3 GB of memory during
+the link step. Later builds reuse BuildKit's cache. Migrations still run first on every deploy. If
+the server is too small to build, keep `deploy/compose.cloud.yml` and deploy a released image instead.
+
 ### Behaviour worth knowing
 
 - **Worker memory.** The worker budgets crawl memory as 70% of its cgroup limit (it falls back to 1 GB when no limit is readable), so keep `mem_limit` accurate. A crawl whose page cap does not fit the budget is failed rather than risking an out-of-memory kill.

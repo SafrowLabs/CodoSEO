@@ -3,10 +3,12 @@ name: nightly
 # Checks too slow or too time-dependent for every push: the 50,000-page crawl memory test and the
 # dependency audit (a new advisory can land against an unchanged lockfile).
 
+# Paused: runs only by hand (Actions, "Run workflow") while features land. Restore the
+# triggers below the `on:` key to run it automatically again.
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
+  # schedule:
+  #   - cron: "17 3 * * *"
 
 permissions:
   contents: read

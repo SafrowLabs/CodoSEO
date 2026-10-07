@@ -1,8 +1,13 @@
 # Releasing
 
-One workflow, `.github/workflows/release.yml`, does everything. It runs on a `v*` tag push, by hand
-(`workflow_dispatch`), and on pull requests that touch the release machinery (workflow, `packaging/`,
-`npm/`, `Dockerfile`, Cargo manifests).
+One workflow, `.github/workflows/release.yml`, does everything.
+
+> **Paused: everything runs by hand.** While features land, every workflow (`ci`, `nightly`, `npm`,
+> `release`) only runs from Actions, "Run workflow". Pushing a tag or opening a pull request starts
+> nothing. To release, push the tag, then run "release" **on the tag ref** with `dry_run` unticked.
+> The original triggers are commented out under each workflow's `on:` key; uncomment them to go
+> back to automatic runs. Deploys to the hosted app don't go through Actions at all: Coolify
+> builds `main` itself ([docs/deploy-coolify.md](docs/deploy-coolify.md#auto-deploy-from-main)).
 
 ## What a release produces
 
@@ -36,14 +41,15 @@ A publish job whose secret is missing is skipped with a notice; the rest of the 
 2. `python3 packaging/check-version.py vX.Y.Z` must print the version. The release workflow runs the
    same script and fails before building anything if the tag, the workspace version or the npm
    version disagree.
-3. Merge to `main` with CI green (`ci.yml`: fmt, clippy, tests, cargo-deny, container build).
+3. Merge to `main` with CI green. CI is manual while paused: run "ci" (fmt, clippy, tests) and
+   "nightly" (cargo-deny, memory test) by hand on `main` first.
 
 ## Dry run
 
 Actions, "release", "Run workflow", on the branch you want to check, leave `dry_run` ticked. It builds
 all five binaries and both image architectures (nothing is pushed), then runs
 `cargo publish --workspace --dry-run`, `npm test` + `npm pack --dry-run` and renders the Homebrew
-formula. Nothing is published. Opening a pull request that touches the release files does the same.
+formula. Nothing is published.
 
 ## Release candidate
 
@@ -62,6 +68,9 @@ Use it to check the install paths: `npx codoseo@next`, `docker run ghcr.io/safro
 ```sh
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
+
+Then Actions, "release", "Run workflow", pick the tag `vX.Y.Z` as the ref and untick `dry_run`
+(while triggers are paused, the tag push alone does nothing). Release candidates go the same way.
 
 Order: version gate, binaries and image digests in parallel, GitHub release, then the image tags,
 crates.io, npm and the

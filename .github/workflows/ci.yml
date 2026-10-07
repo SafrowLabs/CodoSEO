@@ -1,8 +1,12 @@
 name: ci
 
+# Paused: runs only by hand (Actions, "Run workflow") while features land. Restore the
+# triggers below the `on:` key to run it automatically again.
+
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
+  # push:
+  # pull_request:
 
 permissions:
   contents: read

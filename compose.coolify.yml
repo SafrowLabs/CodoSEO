@@ -1,0 +1,114 @@
+# CodoSEO for Coolify auto-deploy: the same three roles as deploy/compose.cloud.yml, but the image is
+# built from this repository's Dockerfile instead of pulled from ghcr.io. Point a Coolify
+# "Docker Compose" resource at this file on the `main` branch with Auto Deploy on, and every
+# merge to main is built and deployed by Coolify itself; no GitHub Actions run.
+# See docs/deploy-coolify.md, "Auto-deploy from main".
+#
+#   migrate   one-shot: applies pending migrations, then exits
+#   web       the web app and API, behind Coolify's proxy (port 8080, no host binding)
+#   worker    claims crawls from the Postgres queue and runs them
+#
+# Keep the environment, limits and health checks in step with deploy/compose.cloud.yml; only the image
+# source differs. The Rust build runs on the Coolify server (several minutes, ~2-3 GB of RAM at
+# the link step); BuildKit's cache mounts keep later builds incremental.
+
+name: codoseo-cloud
+
+# Built from the repo root (this file sits there so the context resolves the same whatever
+# project directory Coolify passes). All three services name the same build; BuildKit's cache
+# makes the second and third free.
+x-build: &build
+  context: .
+  dockerfile: Dockerfile
+
+# Settings every long-running role reads. Empty values are treated as unset by the app.
+x-app-env: &app-env
+  CODOSEO_MODE: cloud
+  BASE_URL: ${BASE_URL:?set BASE_URL (the public https URL)}
+  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (openssl rand -hex 32)}
+  SMTP_URL: ${SMTP_URL:?set SMTP_URL}
+  MAIL_FROM: ${MAIL_FROM:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+  TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+  ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+  RANKORG_URL: ${RANKORG_URL:-}
+  CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+  CODOSEO_BOT_IP: ${CODOSEO_BOT_IP:-}
+  MCP_SHARED_CLIENTS: ${MCP_SHARED_CLIENTS:-}
+  MCP_ANON_DAILY_AUDITS: ${MCP_ANON_DAILY_AUDITS:-}
+  MCP_ANON_DAILY_EMAILS: ${MCP_ANON_DAILY_EMAILS:-}
+  DODO_ENV: ${DODO_ENV:-}
+  DODO_API_KEY: ${DODO_API_KEY:-}
+  DODO_API_URL: ${DODO_API_URL:-}
+  DODO_WEBHOOK_SECRET: ${DODO_WEBHOOK_SECRET:-}
+  DODO_PRODUCT_PRO: ${DODO_PRODUCT_PRO:-}
+  DODO_PRODUCT_AGENCY: ${DODO_PRODUCT_AGENCY:-}
+  SCHEDULER_HEARTBEAT_URL: ${SCHEDULER_HEARTBEAT_URL:-}
+  CODOSEO_SCHEDULER: ${CODOSEO_SCHEDULER:-}
+  # Logs are JSON lines on stderr in the cloud. Prometheus metrics are served on an internal
+  # port only (never on 8080): scrape web:9090 and worker:9090 from inside the Docker network.
+  CODOSEO_METRICS_BIND: ${CODOSEO_METRICS_BIND:-0.0.0.0:9090}
+  CODOSEO_LOG_FORMAT: ${CODOSEO_LOG_FORMAT:-}
+  RUST_LOG: ${RUST_LOG:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+
+services:
+  migrate:
+    image: codoseo:main
+    build: *build
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      # Migrations create objects, so they run as the owning role (codoseo).
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (postgres://codoseo:...@host:5432/codoseo)}
+    healthcheck:
+      disable: true
+
+  web:
+    image: codoseo:main
+    build: *build
+    command: ["web"]
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+    # No `ports:`; the reverse proxy (Coolify's Traefik) reaches the container on 8080.
+    expose:
+      - "8080"
+      - "9090"
+    environment:
+      <<: *app-env
+      # The web role may use a separate, tighter login role (codoseo_web, statement_timeout 5s).
+      DATABASE_URL: ${DATABASE_URL_WEB:-${DATABASE_URL}}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/codoseo", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  worker:
+    image: codoseo:main
+    build: *build
+    command: ["worker"]
+    restart: unless-stopped
+    # The worker budgets crawl memory as 70% of this limit, so keep it honest.
+    mem_limit: 1536m
+    cpus: 1.5
+    # Lets a running crawl finish its current batch on `docker stop` (the worker drains for 60 s).
+    stop_grace_period: 75s
+    expose:
+      - "9090"
+    environment:
+      <<: *app-env
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
