@@ -24,7 +24,7 @@ CodoSEO is built by SafrowLabs, the team behind RankOrg.
 
 ```sh
 # Homebrew (macOS, Linux)
-brew install safrowlabs/tap/codoseo
+brew install safrowlabs/codoseo/codoseo
 
 # npm: downloads the release binary for your platform
 npx codoseo --help

@@ -335,7 +335,7 @@ jobs:
             assets/SHA256SUMS
 
   # The publish jobs wait for the GitHub release: the npm installer and the Homebrew formula
-  # download from it. Each skips (with a notice) when its secret is missing.
+  # download from it. crates.io and Homebrew skip (with a notice) when their secret is missing.
   crates:
     name: crates.io
     if: needs.meta.outputs.publish == 'true' && needs.meta.outputs.prerelease == 'false'
@@ -365,24 +365,23 @@ jobs:
     if: needs.meta.outputs.publish == 'true'
     needs: [meta, release]
     runs-on: ubuntu-24.04
+    # Publishes through npm trusted publishing: the id-token is exchanged for a short-lived publish
+    # credential, so no long-lived token is needed. NPM_TOKEN is only a fallback for when the
+    # trusted publisher is not set up on npmjs.com. Unlike the other publish jobs this one never
+    # skips: with neither in place, the publish fails instead of passing without publishing.
     permissions:
       contents: read
       id-token: write
-    env:
-      HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
-      - name: Skip notice
-        if: env.HAS_TOKEN != 'true'
-        run: echo "::notice::NPM_TOKEN is not set, skipping npm"
       - uses: actions/checkout@v4
-        if: env.HAS_TOKEN == 'true'
       - uses: actions/setup-node@v4
-        if: env.HAS_TOKEN == 'true'
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - name: Update npm
+        run: npm install -g npm@11
       - name: npm publish
-        if: env.HAS_TOKEN == 'true'
         working-directory: npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -415,7 +414,7 @@ jobs:
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true'
         with:
-          repository: SafrowLabs/homebrew-tap
+          repository: SafrowLabs/homebrew-codoseo
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
       - name: Render and push the formula

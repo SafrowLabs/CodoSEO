@@ -18,7 +18,7 @@ One workflow, `.github/workflows/release.yml`, does everything.
 | `ghcr.io/safrowlabs/codoseo:X.Y.Z`, `:X.Y`, `:latest` (amd64 + arm64, one manifest) | ghcr.io |
 | `codoseo` and its library crates | crates.io |
 | `codoseo` npm package (downloads the release binary) | npm |
-| `Formula/codoseo.rb` (installs the release binary) | `SafrowLabs/homebrew-tap` |
+| `Formula/codoseo.rb` (installs the release binary) | `SafrowLabs/homebrew-codoseo` |
 
 Binaries and the image are built from the same pinned toolchain (`rust:1.99.0-alpine`, `--profile dist`).
 
@@ -29,10 +29,17 @@ Set these as repository secrets. `GITHUB_TOKEN` covers the GitHub release and gh
 | Secret | Used for |
 | --- | --- |
 | `CARGO_REGISTRY_TOKEN` | `cargo publish`. A crates.io token with publish-new and publish-update scopes. |
-| `NPM_TOKEN` | `npm publish --provenance`. An automation or granular token with publish rights on `codoseo`. |
-| `HOMEBREW_TAP_TOKEN` | Push to `SafrowLabs/homebrew-tap` (fine-grained token, contents: write on that repo only). |
+| `NPM_TOKEN` | Optional fallback for `npm publish`. A granular token with publish rights on `codoseo`; not needed once trusted publishing is set up (below). |
+| `HOMEBREW_TAP_TOKEN` | Push to `SafrowLabs/homebrew-codoseo` (fine-grained token, contents: write on that repo only). |
 
-A publish job whose secret is missing is skipped with a notice; the rest of the release carries on.
+The crates.io and Homebrew jobs skip with a notice when their secret is missing; the rest of the
+release carries on. The npm job never skips: it fails if it can neither use trusted publishing nor
+`NPM_TOKEN`.
+
+**npm trusted publishing.** On npmjs.com, `codoseo` → Settings → Trusted Publisher → GitHub
+Actions: organization `SafrowLabs`, repository `CodoSEO`, workflow `release.yml`, no environment.
+The release job then publishes through GitHub's OIDC token and `NPM_TOKEN` can be deleted. npm is
+restricting tokens that bypass 2FA for direct publishing, so the token fallback may stop working.
 
 ## Before tagging
 
@@ -76,7 +83,7 @@ Then Actions, "release", "Run workflow", pick the tag `vX.Y.Z` as the ref and un
 Order: version gate, binaries and image digests in parallel, GitHub release, then the image tags,
 crates.io, npm and the
 Homebrew tap (they need the release because the npm installer and the formula download from it).
-Check afterwards: `brew install safrowlabs/tap/codoseo && codoseo --version`, `npx codoseo --version`,
+Check afterwards: `brew install safrowlabs/codoseo/codoseo && codoseo --version`, `npx codoseo --version`,
 `cargo install codoseo`.
 
 Re-running a failed release: use "Re-run failed jobs" on the same run. `cargo publish` refuses crates

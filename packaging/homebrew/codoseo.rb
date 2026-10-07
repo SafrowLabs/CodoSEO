@@ -1,5 +1,5 @@
 # Formula template. The release workflow fills in the @...@ placeholders (packaging/render-formula.py)
-# and pushes the result to SafrowLabs/homebrew-tap as Formula/codoseo.rb. It installs the prebuilt
+# and pushes the result to SafrowLabs/homebrew-codoseo as Formula/codoseo.rb. It installs the prebuilt
 # release binaries, so nothing is compiled on the user's machine.
 class Codoseo < Formula
   desc "Fast, polite SEO crawler and site auditor"
