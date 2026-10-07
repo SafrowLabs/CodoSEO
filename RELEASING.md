@@ -6,8 +6,9 @@ One workflow, `.github/workflows/release.yml`, does everything.
 > `release`) only runs from Actions, "Run workflow". Pushing a tag or opening a pull request starts
 > nothing. To release, push the tag, then run "release" **on the tag ref** with `dry_run` unticked.
 > The original triggers are commented out under each workflow's `on:` key; uncomment them to go
-> back to automatic runs. Deploys to the hosted app don't go through Actions at all: Coolify
-> builds `main` itself ([docs/deploy-coolify.md](docs/deploy-coolify.md#auto-deploy-from-main)).
+> back to automatic runs. The one exception is `deploy.yml`: a push to `main` that touches the app
+> builds a single `linux/amd64` image and has Coolify deploy it
+> ([docs/deploy-coolify.md](docs/deploy-coolify.md#auto-deploy-from-main)).
 
 ## What a release produces
 
