@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CodoSEO — Open-Source SEO Crawler &amp; Site Monitor</title>
-  <meta name="description" content="Know the moment your SEO breaks. Open-source SEO crawler and monitor in Rust: 44 checks, a 0–100 health score, audit diffs and CI gates. Free to self-host.">
+  <meta name="description" content="Know the moment your SEO breaks. Open-source SEO crawler and site monitor: 44 checks, a 0–100 health score, change alerts and CI gates. Free plan available.">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <link rel="canonical" href="https://codoseo.com/">
 
@@ -35,7 +35,7 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://codoseo.com/">
   <meta property="og:title" content="CodoSEO — Open-Source SEO Crawler &amp; Site Monitor">
-  <meta property="og:description" content="Know the moment your SEO breaks. 44 SEO checks, health scoring, audit diffs and CI integration. Built in Rust by SafrowLabs.">
+  <meta property="og:description" content="Know the moment your SEO breaks. 44 SEO checks, health scoring, change alerts and CI gates. Start free. Built in Rust by SafrowLabs.">
   <meta property="og:site_name" content="CodoSEO">
   <meta property="og:locale" content="en_US">
   <meta property="og:image" content="https://codoseo.com/og.png">
@@ -47,7 +47,7 @@
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="CodoSEO — Open-Source SEO Crawler &amp; Site Monitor">
-  <meta name="twitter:description" content="Know the moment your SEO breaks. 44 checks, health scoring, audit diffs and CI. Built in Rust.">
+  <meta name="twitter:description" content="Know the moment your SEO breaks. 44 checks, health scoring, change alerts and CI gates. Start free.">
   <meta name="twitter:image" content="https://codoseo.com/og.png">
   <meta name="twitter:image:alt" content="The CodoSEO mascot, two watchful eyes, next to the CodoSEO wordmark and the line: Know the moment your SEO breaks.">
 
@@ -58,7 +58,7 @@
 
   <!-- Analytics -->
   <script defer src="https://analytics.host.safrow.com/script.js" data-website-id="b9cc7518-902b-4283-adf6-e621a5a3bdf7"></script>
-  <!-- JSON-LD structured data -->
+  <!-- JSON-LD structured data. Keep the FAQPage answers in step with the visible FAQ section. -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -67,7 +67,7 @@
         "@type": "Organization",
         "@id": "https://codoseo.com/#organization",
         "name": "SafrowLabs",
-        "url": "https://codoseo.com",
+        "url": "https://safrow.com",
         "logo": { "@type": "ImageObject", "url": "https://codoseo.com/icon-512.png", "width": 512, "height": 512 },
         "image": "https://codoseo.com/og.png",
         "sameAs": ["https://github.com/SafrowLabs"]
@@ -87,7 +87,7 @@
         "alternateName": ["codoseo", "CodoSEO CLI"],
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Linux, macOS, Windows",
-        "description": "Open-source SEO crawler and monitor built in Rust. Crawls a site, runs 44 SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema. Scores the site 0–100 and diffs two audits to catch regressions in CI.",
+        "description": "Open-source SEO crawler and site monitor built in Rust. Crawls a site, runs 44 SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema, scores the site 0–100, tracks changes between crawls and alerts on regressions. Ships as a CLI, a web app, an MCP server and a REST API.",
         "url": "https://codoseo.com",
         "image": "https://codoseo.com/og.png",
         "logo": "https://codoseo.com/icon-512.png",
@@ -99,26 +99,46 @@
         "isAccessibleForFree": true,
         "author": { "@id": "https://codoseo.com/#organization" },
         "publisher": { "@id": "https://codoseo.com/#organization" },
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-        "keywords": "SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker"
+        "offers": { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" },
+        "keywords": "SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker, MCP server"
       },
       {
         "@type": "FAQPage",
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "How do I install CodoSEO?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Run: cargo install codoseo. Requires Rust 1.88 or newer. Prebuilt binaries for Linux, macOS and Windows are on the GitHub releases page." }
-          },
-          {
-            "@type": "Question",
             "name": "Is CodoSEO free?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Yes. CodoSEO is free and open-source under AGPL-3.0, including the CLI and the self-hosted web app. The hosted web app at app.codoseo.com lets you start with a free audit." }
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app at app.codoseo.com has a free plan for one site. Paid plans for more sites and bigger crawls are coming soon." }
           },
           {
             "@type": "Question",
-            "name": "What SEO checks does CodoSEO run?",
-            "acceptedAnswer": { "@type": "Answer", "text": "CodoSEO runs 44 checks across 9 categories: response errors (4xx, 5xx, redirect loops), indexability (noindex, canonical, robots.txt), on-page (title, meta description, H1), content (thin pages, duplicates, missing alt text), links (broken links, orphan pages, redirect chains), technical (HTTPS, mixed content, slow responses), sitemap (pages missing from or conflicting with sitemap), social (Open Graph) and schema (JSON-LD, hreflang)." }
+            "name": "Do I need an account?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Not for the CLI or the local MCP server, and not for a one-off audit of up to 100 pages in the hosted app. A free account lets you monitor a site on a schedule and get alerts." }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I install the CLI?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Run brew install safrowlabs/codoseo/codoseo, npx codoseo, or cargo install codoseo (Rust 1.88 or newer). Prebuilt binaries for Linux, macOS and Windows are on the GitHub releases page, and a Docker image is at ghcr.io/safrowlabs/codoseo." }
+          },
+          {
+            "@type": "Question",
+            "name": "What does CodoSEO check?",
+            "acceptedAnswer": { "@type": "Answer", "text": "44 checks across 9 categories: response codes and redirects, indexability (noindex, canonicals, robots.txt), on-page (titles, meta descriptions, H1s), content (thin and duplicate pages, image alt text), links (broken links, orphan pages, click depth), technical (HTTPS, mixed content, slow responses), sitemaps, Open Graph and structured data (JSON-LD, hreflang)." }
+          },
+          {
+            "@type": "Question",
+            "name": "Will crawling slow down my site?",
+            "acceptedAnswer": { "@type": "Answer", "text": "CodoSEO is built to be polite. It obeys robots.txt and Crawl-delay, slows down on its own when a server answers 429 or 503, and identifies itself as CodoSEObot so you can spot it in your logs." }
+          },
+          {
+            "@type": "Question",
+            "name": "Does it work with AI assistants?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. CodoSEO includes an MCP server. Run codoseo mcp on your machine, or connect the hosted server at https://codoseo.com/mcp, and Claude, Cursor or any MCP client can run audits and read the results." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I self-host the web app?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Docker Compose brings it up in three commands and it needs nothing but Postgres. The self-hosting guide covers email, sign-in, reverse proxies, upgrades and backups." }
           }
         ]
       }
@@ -143,9 +163,8 @@
       --fresh: #E7F3EA; --dots: #DADDD5; --glow: transparent;
       --header-bg: rgba(244,244,240,.86);
       --band: #EAEDE5; --band-line: #DCE2D8;
-      --hl-head-bg: #0E1A17; --hl-head-ink: #F4F5F1; --hl-head-sub: #9DAAA4;
       --solid-bg: #111613; --solid-ink: #FFFFFF; --solid-h: #2A302C;
-      --ic-y-fg: #1F6B3E; --ic-y-bg: #DDF0E3; --ic-p-fg: #8F4A12; --ic-p-bg: #FBEBDC; --ic-n-fg: #646C67; --ic-n-bg: #ECEFE9; --ic-s-fg: #6B5300; --ic-s-bg: #FBF0C6;
+      --ic-y-fg: #1F6B3E; --ic-y-bg: #DDF0E3; --ic-n-fg: #646C67; --ic-n-bg: #ECEFE9;
       --tag-ship-fg: #1F6B3E; --tag-ship-bg: #DDF0E3; --tag-plan-fg: #5B635E; --tag-plan-bg: #E8EBE4;
       --shadow-1: 0 1px 2px rgba(17,22,19,.05), 0 12px 32px -18px rgba(17,22,19,.20);
       --shadow-2: 0 1px 2px rgba(17,22,19,.05), 0 40px 80px -40px rgba(17,22,19,.28);
@@ -166,16 +185,15 @@
       --fresh: rgba(61,190,126,.16); --dots: #1C2E29; --glow: rgba(240,196,44,.09);
       --header-bg: rgba(10,20,17,.84);
       --band: #0E1A17; --band-line: #24392F;
-      --hl-head-bg: #F0C42C; --hl-head-ink: #0E1A17; --hl-head-sub: #5A4706;
       --solid-bg: #F2F5F0; --solid-ink: #0E1A17; --solid-h: #FFFFFF;
-      --ic-y-fg: #4FD08F; --ic-y-bg: rgba(61,190,126,.16); --ic-p-fg: #F5B451; --ic-p-bg: rgba(240,163,60,.16); --ic-n-fg: #8E9A94; --ic-n-bg: #1E342E; --ic-s-fg: #F0C42C; --ic-s-bg: rgba(240,196,44,.14);
+      --ic-y-fg: #4FD08F; --ic-y-bg: rgba(61,190,126,.16); --ic-n-fg: #8E9A94; --ic-n-bg: #1E342E;
       --tag-ship-fg: #4FD08F; --tag-ship-bg: rgba(61,190,126,.15); --tag-plan-fg: #A9B3AD; --tag-plan-bg: #1E342E;
       --shadow-1: 0 1px 0 rgba(255,255,255,.03) inset, 0 16px 40px -20px rgba(0,0,0,.7);
       --shadow-2: 0 1px 0 rgba(255,255,255,.03) inset, 0 40px 90px -40px rgba(0,0,0,.85);
       --shadow-h: 0 1px 0 rgba(255,255,255,.04) inset, 0 22px 50px -22px rgba(0,0,0,.85);
     }
 
-    html { scroll-behavior: smooth; }
+    html { scroll-behavior: smooth; scroll-padding-top: 72px; }
     body { background: var(--bg); color: var(--ink); font-family: 'Geist', system-ui, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
     a { color: inherit; text-decoration: none; }
     button { font: inherit; color: inherit; }
@@ -203,18 +221,10 @@
     .mascot .bl { transform-box: fill-box; transform-origin: center; }
     .mascot.blink .bl { animation: blink .17s ease-in-out; }
     @keyframes blink { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.08); } }
-    .mascot[data-state="rest"]  { --sx: 2px; --sy: 1px; --pr: 4.5; }
     .mascot[data-state="crawl"] { --pr: 4.5; --pc: var(--st-crawl); }
     .mascot[data-state="crawl"] .sw { animation: sweep 2.4s ease-in-out infinite; }
-    .mascot[data-state="warn"]  { --sx: 2px; --sy: 1px; --pr: 4.75; --pc: var(--st-warn); }
-    .mascot[data-state="error"] { --pr: 6.5; --pc: var(--st-err); }
-    .mascot[data-state="error"] .bl { animation: jolt .5s ease-out; }
     .mascot[data-state="ok"]    { --sy: -2px; --pr: 5; --pc: var(--st-ok); }
-    .mascot[data-state="idle"]  { --sy: 7px; --pr: 3.5; --pc: var(--st-idle); --rc: var(--st-idle); }
-    .mascot[data-state="idle"] .bl { animation: doze 4.2s ease-in-out infinite; }
     @keyframes sweep { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(5.5px); } 75% { transform: translateX(-5.5px); } }
-    @keyframes jolt { 0% { transform: scale(1); } 35% { transform: scale(1.06); } 100% { transform: scale(1); } }
-    @keyframes doze { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.9) translateY(.6px); } }
 
     /* ---------- header ---------- */
     .top { position: sticky; top: 0; z-index: 30; background: var(--header-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line-2); }
@@ -251,6 +261,7 @@
     .btn .ar { transition: transform .2s; } .btn:hover .ar { transform: translateX(3px); }
     .btn.out { background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); font-weight: 500; }
     .btn.out:hover { background: var(--surface-2); border-color: var(--ink-4); box-shadow: var(--shadow-1); }
+    .btn.dis, .btn.dis:hover { cursor: default; background: transparent; color: var(--ink-3); border: 1px dashed var(--line-strong); box-shadow: none; transform: none; }
     .notes { display: flex; gap: 10px 20px; flex-wrap: wrap; margin-top: 14px; font-size: 13.5px; color: var(--ink-3); }
     .notes a { color: var(--link); } .notes a:hover { text-decoration: underline; }
 
@@ -292,32 +303,26 @@
     .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; color: var(--yellow-ink); text-transform: uppercase; margin-bottom: 14px; }
     h2 { font-size: clamp(34px, 4vw, 52px); line-height: 1.02; letter-spacing: -.04em; font-weight: 600; text-wrap: balance; color: var(--ink-strong); }
     .shead p { font-size: 17px; line-height: 1.6; color: var(--ink-2); max-width: 52ch; }
+    .shead p a { color: var(--link); } .shead p a:hover { text-decoration: underline; }
     .mt { margin-top: 44px; }
     code.k { font-family: var(--mono); font-size: .88em; }
 
-    /* ---------- status showcase ---------- */
-    .status { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
-    .st-stage { position: relative; padding: 44px 40px 36px; display: flex; flex-direction: column; justify-content: space-between; gap: 28px; border-right: 1px solid var(--line-2); background-image: radial-gradient(var(--dots) 1px, transparent 1px); background-size: 18px 18px; min-height: 340px; }
-    .st-stage .mascot { width: min(100%, 300px); height: auto; margin: 8px auto 0; }
-    .st-now { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-    .st-now b { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }
-    .st-now .chip { font-family: var(--mono); font-size: 11.5px; padding: 3px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-3); background: var(--surface); }
-    .st-now p { flex-basis: 100%; color: var(--ink-2); font-size: 15px; line-height: 1.55; max-width: 44ch; min-height: 3.1em; }
-    .st-list { list-style: none; display: flex; flex-direction: column; }
-    .st-list li { border-bottom: 1px solid var(--line-2); } .st-list li:last-child { border-bottom: 0; }
-    .st-btn { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 16px 24px; position: relative; transition: background .2s; }
-    .st-btn:hover { background: var(--surface-2); }
-    .st-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
-    .st-btn .mascot { width: 56px; height: auto; }
-    .st-btn b { display: block; font-weight: 600; font-size: 15.5px; }
-    .st-btn span span { display: block; font-size: 13.5px; color: var(--ink-3); margin-top: 2px; }
-    .st-btn code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-4); }
-    .st-btn::after { content: ''; position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--c, var(--yellow)); }
-    .st-btn[aria-pressed="true"] { background: var(--surface-2); }
-    .st-btn[aria-pressed="true"]::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c, var(--yellow)); }
-    .st-btn[aria-pressed="true"].run::after { animation: fill var(--dur, 3s) linear forwards; }
-    @keyframes fill { to { width: 100%; } }
-    .c-crawl { --c: var(--st-crawl); } .c-warn { --c: var(--st-warn); } .c-error { --c: var(--st-err); } .c-ok { --c: var(--st-ok); } .c-idle { --c: var(--st-idle); }
+    /* ---------- products: four ways in ---------- */
+    .ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+    .way { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; display: flex; flex-direction: column; transition: transform .25s cubic-bezier(.3,1.2,.5,1), box-shadow .25s, border-color .2s; }
+    .way:hover { transform: translateY(-3px); box-shadow: var(--shadow-h); border-color: var(--line-strong); }
+    .way-k { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--yellow-ink); }
+    .way h3 { font-size: 19px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; margin-top: 12px; }
+    .way p { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); margin-top: 8px; flex: 1; }
+    .way code { align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 18px; font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 8px; color: var(--ink-2); }
+
+    /* ---------- features ---------- */
+    .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 0 40px; border-top: 1px solid var(--line); }
+    .feat { padding: 28px 0 30px; border-bottom: 1px solid var(--line); }
+    .fi { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--yellow-bg); border: 1px solid var(--yellow-line); color: var(--ink); }
+    .fi svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .feat h3 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin-top: 16px; }
+    .feat p { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); margin-top: 6px; max-width: 42ch; }
 
     /* ---------- terminal ---------- */
     .term { font-family: var(--mono); font-size: 13px; line-height: 1.75; }
@@ -357,7 +362,7 @@
     .diff .l { margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.7; overflow-x: auto; white-space: nowrap; }
     .diff .l div:first-child { color: var(--ink-4); }
 
-    /* ---------- facts ---------- */
+    /* ---------- split sections (CI, AI agents) ---------- */
     .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 56px; align-items: center; }
     .split h2 { margin-bottom: 22px; }
     .split > div > p { font-size: 17px; line-height: 1.6; color: var(--ink-2); max-width: 48ch; }
@@ -366,73 +371,92 @@
     .facts b { display: block; font-weight: 600; font-size: 15.5px; }
     .facts span { display: block; font-size: 14.5px; line-height: 1.5; color: var(--ink-3); margin-top: 6px; }
 
-    /* ---------- roadmap ---------- */
-    .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
-    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; transition: transform .25s cubic-bezier(.3,1.2,.5,1), box-shadow .25s, border-color .2s; }
-    .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-h); border-color: var(--line-strong); }
-    .card .tag { align-self: flex-start; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; padding: 3px 7px; border-radius: 4px; text-transform: uppercase; }
+    /* ---------- pricing ---------- */
+    .prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+    .price { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 26px; display: flex; flex-direction: column; }
+    .price.hl { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow), var(--shadow-1); }
+    .price.soon { background: var(--surface-2); border-style: dashed; border-color: var(--line-strong); }
+    .ph { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .ph h3 { font-size: 19px; font-weight: 600; letter-spacing: -.02em; }
+    .tag { flex: none; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; padding: 3px 7px; border-radius: 4px; text-transform: uppercase; }
     .tag.ship { background: var(--tag-ship-bg); color: var(--tag-ship-fg); } .tag.plan { background: var(--tag-plan-bg); color: var(--tag-plan-fg); }
-    .card h3 { font-size: 22px; letter-spacing: -.02em; font-weight: 600; margin-top: 14px; }
-    .card p { font-size: 15px; line-height: 1.55; color: var(--ink-2); margin-top: 8px; }
-    .card ul { list-style: none; margin-top: 16px; }
-    .card li { font-size: 14px; color: var(--ink-2); padding: 9px 0; border-top: 1px solid var(--line-2); }
+    .amt { display: flex; align-items: baseline; gap: 8px; margin-top: 20px; min-height: 46px; }
+    .amt b { font-size: 46px; font-weight: 600; letter-spacing: -.04em; line-height: 1; color: var(--ink-strong); }
+    .amt b.tbd { font-size: 30px; color: var(--ink-3); }
+    .amt span { font-size: 14px; color: var(--ink-3); }
+    .price > p { font-size: 15px; line-height: 1.5; color: var(--ink-2); margin-top: 10px; }
+    .price ul { list-style: none; display: flex; flex-direction: column; gap: 10px; margin: 22px 0 26px; padding-top: 20px; border-top: 1px solid var(--line-2); flex: 1; }
+    .price li { display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; line-height: 1.45; color: var(--ink-2); }
+    .price li::before { content: '✓'; flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 9px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: var(--ic-y-fg); background: var(--ic-y-bg); }
+    .price.soon li::before { color: var(--ic-n-fg); background: var(--ic-n-bg); }
+    .price .btn { width: 100%; }
+    .fine { font-size: 13.5px; color: var(--ink-3); margin-top: 18px; }
+    .fine a { color: var(--link); } .fine a:hover { text-decoration: underline; }
 
-    /* ---------- compare ---------- */
-    .scroll { overflow-x: auto; position: relative; }
-    .cmp { min-width: 720px; }
-    .cmp .g { display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--line-2); font-size: 14px; }
-    .cmp .g:last-child { border-bottom: 0; }
-    .cmp .g > * { padding: 13px 22px; display: flex; align-items: center; gap: 10px; }
-    .cmp .g > :nth-child(3), .cmp .g > :nth-child(4) { color: var(--ink-3); }
-    .cmp .g > :nth-child(2) { background: var(--yellow-bg); box-shadow: inset 1px 0 0 var(--yellow-line), inset -1px 0 0 var(--yellow-line); }
-    .cmp .g.h { border-bottom: 1px solid var(--line); }
-    .cmp .g.h > * { flex-direction: column; align-items: flex-start; gap: 4px; padding: 18px 22px; font-weight: 600; font-size: 15px; color: var(--ink); }
-    .cmp .g.h > :nth-child(2) { background: var(--hl-head-bg); color: var(--hl-head-ink); box-shadow: none; }
-    .cmp .g.h > :nth-child(2) .mascot { color: var(--hl-head-ink); width: 30px; height: auto; }
-    .cmp .g.h small { font-family: var(--mono); font-weight: 400; font-size: 11px; color: var(--ink-4); }
-    .cmp .g.h > :nth-child(2) small { color: var(--hl-head-sub); }
-    .cmp .g > :first-child { font-weight: 500; color: var(--ink); }
-    .ic { flex: none; min-width: 18px; height: 18px; padding: 0 var(--px, 0); border-radius: 9px; display: grid; place-items: center; font-size: 10px; font-weight: 600; font-family: var(--mono); }
-    .ic.y { color: var(--ic-y-fg); background: var(--ic-y-bg); } .ic.p { color: var(--ic-p-fg); background: var(--ic-p-bg); }
-    .ic.n { color: var(--ic-n-fg); background: var(--ic-n-bg); } .ic.s { --px: 6px; font-size: 9.5px; color: var(--ic-s-fg); background: var(--ic-s-bg); }
-    .fine { font-size: 12.5px; color: var(--ink-4); margin-top: 14px; }
-
-    /* ---------- crates + cta ---------- */
-    .crates { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; }
+    /* ---------- docs ---------- */
+    .docs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+    .doc { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; transition: border-color .15s, transform .15s, box-shadow .2s; }
+    .doc:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow-1); }
+    .doc b { font-size: 15.5px; font-weight: 600; padding-right: 24px; }
+    .doc span { font-size: 13.5px; line-height: 1.5; color: var(--ink-3); }
+    .doc::after { content: '↗'; position: absolute; top: 16px; right: 18px; font-size: 14px; color: var(--ink-4); transition: transform .15s, color .15s; }
+    .doc:hover::after { color: var(--ink); transform: translate(2px, -2px); }
+    .get { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px 40px; align-items: center; margin-top: 16px; }
+    .get h3 { font-size: 19px; font-weight: 600; letter-spacing: -.02em; }
+    .get p { font-size: 15px; line-height: 1.55; color: var(--ink-2); margin-top: 8px; max-width: 44ch; }
+    .crates { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
     .crates a { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; transition: border-color .15s, transform .15s; }
     .crates a:hover { border-color: var(--ink); transform: translateY(-1px); }
+
+    /* ---------- faq ---------- */
+    .faq { border-top: 1px solid var(--line); max-width: 900px; }
+    .faq details { border-bottom: 1px solid var(--line); }
+    .faq summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 20px 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: '+'; flex: none; font-family: var(--mono); font-size: 20px; font-weight: 400; line-height: 1; color: var(--ink-3); transition: transform .2s; }
+    .faq details[open] summary::after { transform: rotate(45deg); }
+    .faq summary:hover { color: var(--ink-strong); }
+    .faq details p { font-size: 15.5px; line-height: 1.65; color: var(--ink-2); padding: 0 40px 22px 0; max-width: 72ch; }
+    .faq details a { color: var(--link); } .faq details a:hover { text-decoration: underline; }
+
+    /* ---------- cta ---------- */
     .cta { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; justify-content: space-between; border-top: 1px solid var(--ink); padding-top: 40px; margin-top: 140px; position: relative; }
     .cta h2 { font-size: clamp(36px, 4.6vw, 60px); line-height: 1; letter-spacing: -.045em; max-width: 16ch; }
     .cta .acts { display: flex; gap: 8px; flex-wrap: wrap; }
     .cta .btn { padding: 12px 20px; font-size: 15px; border-radius: 9px; }
-    .cta .btn.out { font-family: var(--mono); }
     .cta-eyes { position: absolute; top: -49px; left: 0; width: 92px; background: var(--bg); padding: 0 10px 0 0; }
     .cta-eyes .mascot { width: 100%; height: auto; }
-    footer { padding: 96px 0 44px; }
-    footer .in { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: center; font-size: 13.5px; color: var(--ink-3); }
-    footer .in > span { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-    footer .wm { font-size: 17px; }
-    footer .links { display: flex; gap: 20px; flex-wrap: wrap; }
-    footer a:hover { color: var(--ink); text-decoration: underline; }
+
+    /* ---------- footer ---------- */
+    footer { padding: 112px 0 40px; }
+    .fgrid { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr)); gap: 36px 32px; padding-top: 44px; border-top: 1px solid var(--line); }
+    .fbrand .wm { font-size: 20px; }
+    .fbrand p { font-size: 14px; line-height: 1.55; color: var(--ink-3); margin-top: 14px; max-width: 34ch; }
+    .fh { font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 12px; }
+    .fcol a { display: block; font-size: 14px; color: var(--ink-2); padding: 4px 0; }
+    footer a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+    .fbot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; margin-top: 48px; padding-top: 22px; border-top: 1px solid var(--line-2); font-size: 13px; color: var(--ink-3); }
+    .fbot a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
 
     /* ---------- scroll reveal (JS adds .js on <html>) ---------- */
     .js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .8s cubic-bezier(.2,.8,.2,1); transition-delay: var(--d, 0s); }
     .js .reveal.in { opacity: 1; transform: none; }
 
+    @media (max-width: 1020px) {
+      .fgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .fbrand { grid-column: 1 / -1; }
+    }
     @media (max-width: 860px) {
       nav { display: none; } .bar { gap: 12px; } .hero .wrap { padding-top: 48px; padding-bottom: 64px; gap: 40px; }
       section.blk { padding-top: 88px; } .wrap { padding: 0 16px; } .stats b { font-size: 15px; }
       .row { grid-template-columns: minmax(0, 1fr) 52px 56px; } .row .i { display: none; }
       .legend a { margin-left: 0; } .facts { grid-template-columns: 1fr; }
-      .status { grid-template-columns: 1fr; } .st-stage { border-right: 0; border-bottom: 1px solid var(--line-2); padding: 28px 20px 24px; min-height: 0; }
-      .st-stage .mascot { width: min(70%, 240px); }
-      .st-btn { padding: 14px 16px; gap: 14px; grid-template-columns: 44px minmax(0, 1fr) auto; } .st-btn .mascot { width: 44px; }
       .stage { padding-top: 72px; } .peek { width: 150px; right: 20px; }
       .cta { margin-top: 120px; }
+      .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .faq details p { padding-right: 0; }
     }
     @media (max-width: 480px) {
       .gh { display: none; } .brand { font-size: 19px; }
-      .st-btn code { display: none; } .st-btn { grid-template-columns: 44px minmax(0, 1fr); }
       .install code { font-size: 13.5px; padding: 10px 8px; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -453,12 +477,12 @@
   <div class="wrap bar">
     <a href="/" class="wm brand" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
     <nav aria-label="Primary">
-      <a href="#status">Status</a>
+      <a href="#features">Features</a>
       <a href="#checks">Checks</a>
-      <a href="#diff">Diff</a>
-      <a href="#ci">CI</a>
-      <a href="#roadmap">Roadmap</a>
-      <a href="#compare">Compare</a>
+      <a href="#ai">AI agents</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#docs">Docs</a>
+      <a href="#faq">FAQ</a>
     </nav>
     <div class="bar-r">
       <button class="theme" id="theme" type="button" aria-label="Theme: light. Switch to dark" title="Theme: light">
@@ -476,18 +500,18 @@
 <section class="hero">
   <div class="wrap">
     <div>
-      <div class="pills"><span class="hot">Open source</span><span>Written in Rust</span><span>AGPL-3.0</span><span>v0.1.0-rc.1</span></div>
+      <div class="pills"><span class="hot">Open source</span><span>Free plan</span><span>Written in Rust</span><span>AGPL-3.0</span></div>
       <h1>Know the moment your <mark>SEO breaks.</mark></h1>
-      <p class="lede">An open-source SEO crawler and monitor in a single Rust binary. It runs 44 checks, scores your site from 0 to 100, diffs two audits and fails your CI build before rankings drop.</p>
+      <p class="lede">CodoSEO crawls your site, runs 44 SEO checks, scores it from 0 to 100 and shows exactly what changed since the last crawl. You hear about a broken page the day it ships, not when rankings drop.</p>
       <div class="hero-acts">
         <a class="btn" href="https://app.codoseo.com/">Start free audit <span class="ar" aria-hidden="true">→</span></a>
-        <a class="btn out" href="#install">Self-host or install the CLI</a>
+        <a class="btn out" href="#pricing">See pricing</a>
       </div>
       <div class="install" id="install">
         <code><b>$</b><span id="cmd">cargo install codoseo</span></code>
         <button class="btn" id="copy" type="button" aria-label="Copy install command">Copy</button>
       </div>
-      <div class="notes"><span>CLI needs no account or API key</span><span>Requires Rust 1.88+</span><span>Binaries on <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">GitHub releases</a></span></div>
+      <div class="notes"><span>No signup for a 100-page audit</span><span>CLI needs no account</span><span>Also on <a href="#install-options">Homebrew, npm and Docker</a></span></div>
     </div>
 
     <div class="stage">
@@ -511,21 +535,103 @@
   </div>
 </section>
 
-<section class="blk wrap reveal" id="status">
+<section class="blk wrap reveal" id="product">
   <div class="shead">
-    <div><div class="eyebrow">The eyes are the status</div><h2>One glance tells you how the crawl is going.</h2></div>
-    <p>CodoSEO's mark is a pair of eyes, and the pupils carry the state: where they look, how wide they open and what colour they turn. The same mark is the logo, the favicon and the status light.</p>
+    <div><div class="eyebrow">One engine, four ways in</div><h2>Audit from a browser, a terminal or a chat.</h2></div>
+    <p>The same crawler and the same 44 checks power the web app, the CLI, the MCP server and the REST API. A finding means the same thing wherever you see it.</p>
   </div>
-  <div class="panel status mt">
-    <div class="st-stage">
-      <div data-mascot="crawl" id="st-big" aria-hidden="true"></div>
-      <div class="st-now" aria-live="off"><b id="st-name">Crawling</b><span class="chip" id="st-chip">pupils sweep</span><p id="st-desc">A crawl is running. The eyes scan side to side, page by page.</p></div>
-    </div>
-    <ul class="st-list" id="st-list" aria-label="Status states"></ul>
+  <div class="ways mt">
+    <a class="way" href="https://app.codoseo.com/">
+      <span class="way-k">Web app</span>
+      <h3>Monitor the sites you care about</h3>
+      <p>Scheduled crawls, a URL explorer, change tracking and alerts. Use the hosted app or run it on your own servers.</p>
+      <code>app.codoseo.com</code>
+    </a>
+    <a class="way" href="#cli">
+      <span class="way-k">CLI</span>
+      <h3>One binary for audits and CI</h3>
+      <p>Crawl a site, inspect a page, follow a redirect chain or compare two audits. No account and no API key.</p>
+      <code>codoseo crawl &lt;URL&gt;</code>
+    </a>
+    <a class="way" href="#ai">
+      <span class="way-k">MCP server</span>
+      <h3>Give your AI agent an SEO crawler</h3>
+      <p>Claude, Cursor and other MCP clients can audit a site, list the pages behind an issue and compare crawls.</p>
+      <code>codoseo mcp</code>
+    </a>
+    <a class="way" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener">
+      <span class="way-k">REST API</span>
+      <h3>Your audits as JSON</h3>
+      <p>Read health scores, failing pages and changes for your monitored sites, or queue a crawl, with one API key.</p>
+      <code>GET /api/v1/sites</code>
+    </a>
   </div>
 </section>
 
-<section class="blk wrap reveal" id="run">
+<section class="blk wrap reveal" id="features">
+  <div class="shead">
+    <div><div class="eyebrow">Features</div><h2>Everything you need to keep a site healthy.</h2></div>
+    <p>Crawl, score, compare and alert. CodoSEO finds what broke, names the pages behind it and tells you when it happened.</p>
+  </div>
+  <div class="feats mt">
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h6"/><path d="m15 17.5 2.2 2.2 4.3-4.4"/></svg></span>
+      <h3>44 SEO checks</h3>
+      <p>Status codes, indexability, titles and descriptions, content, links, HTTPS, sitemaps, Open Graph and structured data.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 17 4.2-5"/></svg></span>
+      <h3>Health score from 0 to 100</h3>
+      <p>Each check is weighted by severity and by how many pages it affects, so one number tells you where a site stands.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v13M3.5 13.5 7 17l3.5-3.5"/><path d="M17 20V7M13.5 10.5 17 7l3.5 3.5"/></svg></span>
+      <h3>Change tracking</h3>
+      <p>Every crawl is compared with the one before: new and fixed issues, status codes, titles and redirect chains that changed.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
+      <h3>Scheduled crawls</h3>
+      <p>Crawl every week or every day. The hosted app runs them for you, so nothing has to stay switched on.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></span>
+      <h3>Alerts where you work</h3>
+      <p>Get told about regressions by email, Slack, Discord or webhook, the same day the broken change goes live.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span>
+      <h3>URL explorer</h3>
+      <p>Filter every crawled URL by status, indexability, content type or check. See a SERP preview, inlinks and headers.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7 10 3 2.5L7 15M12.5 15H17"/></svg></span>
+      <h3>CI gates</h3>
+      <p><code class="k">--fail-on critical</code> fails the build when a deploy breaks SEO. Works in GitHub Actions, GitLab CI or any shell.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 5 6.2v5.3c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6.2z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg></span>
+      <h3>Polite by default</h3>
+      <p>Obeys robots.txt and Crawl-delay, backs off on 429 and 503, and identifies itself as CodoSEObot.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></svg></span>
+      <h3>Self-host in three commands</h3>
+      <p>The web app needs only Postgres: no Redis and no outside requests. Your crawl data stays on your servers.</p>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="checks">
+  <div class="shead">
+    <div><div class="eyebrow">Site audit</div><h2>44 checks after every crawl.</h2></div>
+    <p>Each check passes or fails and names the pages behind it. Results roll up into a health score from 0 to 100, weighted by severity and by how many pages are affected.</p>
+  </div>
+  <div class="cats mt" id="cats"></div>
+  <div class="legend"><span class="r">Critical</span><span class="a">Warning</span><span class="n0">Notice</span><a href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener">Full check reference →</a></div>
+</section>
+
+<section class="blk wrap reveal" id="cli">
   <div class="shead">
     <div><div class="eyebrow">The CLI</div><h2>Point it at a URL. Read what's broken.</h2></div>
     <p>One command crawls the site, runs every check and prints a report. Output is a table, JSON, Markdown or CSV, so you can read it, pipe it into <code class="k">jq</code> or save it as a file.</p>
@@ -558,20 +664,11 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   </div>
 </section>
 
-<section class="blk wrap reveal" id="checks">
-  <div class="shead">
-    <h2>44 checks after every crawl.</h2>
-    <p>Each check passes or fails and names the pages behind it. Results roll up into a health score from 0 to 100, weighted by severity and by how many pages are affected.</p>
-  </div>
-  <div class="cats mt" id="cats"></div>
-  <div class="legend"><span class="r">Critical</span><span class="a">Warning</span><span class="n0">Notice</span><a href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener">Full check reference →</a></div>
-</section>
-
 <section class="blk wrap reveal" id="diff">
   <div class="band">
     <div>
       <h2>Crawl again tomorrow and see the diff.</h2>
-      <p>Save each audit as JSON and compare any two. <code class="k">codoseo diff</code> lists new issues, resolved issues, score changes, status changes, title changes and redirect regressions.</p>
+      <p>Every crawl is compared with the last one. In the web app it happens on its own; on the command line, <code class="k">codoseo diff</code> compares any two saved audits. New issues, resolved issues, score changes, status changes, title changes and redirect regressions.</p>
     </div>
     <div class="panel">
       <div class="dhead"><span>before.json → after.json</span><span>Score 84 → 79</span></div>
@@ -586,10 +683,11 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
 <section class="blk wrap reveal" id="ci">
   <div class="split">
     <div>
+      <div class="eyebrow">CI/CD</div>
       <h2>Fail the build before rankings drop.</h2>
       <p>CodoSEO is one static binary with no browser and no config file, so it drops into any pipeline. <code class="k">--fail-on critical</code> exits with code 1 when the threshold is reached.</p>
       <div class="facts">
-        <div><b>Async and polite</b><span>Built on Tokio. Respects robots.txt and Crawl-delay, and backs off on 429 and 503.</span></div>
+        <div><b>Fast and polite</b><span>Async crawling in Rust that still respects robots.txt and Crawl-delay, and backs off on 429 and 503.</span></div>
         <div><b>Exit codes for CI</b><span>Gate a deploy on <code class="k">critical</code> or <code class="k">warning</code> findings, for crawls and for diffs.</span></div>
         <div><b>Plain output</b><span>Table, JSON, Markdown and CSV. Audit files are portable and diffable.</span></div>
         <div><b>Embed the crates</b><span>Core, crawler, checks and diff are published separately for your own Rust projects.</span></div>
@@ -611,76 +709,218 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
   </div>
 </section>
 
-<section class="blk wrap reveal" id="roadmap">
-  <div class="shead">
-    <div><div class="eyebrow">Roadmap</div><h2>The CLI was the first piece.</h2></div>
-    <p>The crawler, checks and diff engine shipped first. The web app and the MCP server are part of the 0.1 release. GEO checks come next, and the dates are not fixed. Watch the repo for releases.</p>
-  </div>
-  <div class="road mt">
-    <div class="card reveal">
-      <span class="tag ship">In 0.1</span>
-      <h3>Web app</h3>
-      <p>A dashboard for continuous monitoring. Add a URL and get your first report without touching a terminal.</p>
-      <ul><li>Scheduled crawls with change detection between runs</li><li>Alerts to Slack, Discord, email and webhooks</li><li>Health score trend and issue history</li><li>Self-host with <code class="k">docker compose up</code>, or use a hosted plan</li></ul>
+<section class="blk wrap reveal" id="ai">
+  <div class="split">
+    <div class="panel term">
+      <div class="tabs"><span>Claude Code</span></div>
+<pre><span class="c-dim"># run it on your machine, no account</span>
+claude mcp add codoseo -- npx -y codoseo mcp
+
+<span class="c-dim"># or connect the hosted server</span>
+claude mcp add --transport http codoseo \
+  https://codoseo.com/mcp
+
+<span class="c-y">&gt;</span> Audit example.com and list the pages
+  with broken links.</pre>
     </div>
-    <div class="card reveal" style="--d:.08s">
-      <span class="tag ship">In 0.1</span>
-      <h3>MCP server</h3>
-      <p>Ask Claude, Cursor or any MCP client to audit a page, check a canonical or diff two crawls from your editor.</p>
-      <ul><li>Crawl and audit a site from a chat prompt</li><li>Natural-language questions about issues</li><li>Runs locally over stdio with <code class="k">codoseo mcp</code></li><li>Shares the engine with the CLI and web app</li></ul>
-    </div>
-    <div class="card reveal" style="--d:.16s">
-      <span class="tag plan">Planned</span>
-      <h3>GEO checks</h3>
-      <p>Visibility for AI answer engines, next to the classic SEO checks.</p>
-      <ul><li>AI crawler rules in robots.txt, per user agent</li><li>llms.txt and llms-full.txt validation</li><li>Key content present in the raw HTML</li><li>Alert when a deploy blocks an AI bot</li></ul>
+    <div>
+      <div class="eyebrow">For AI agents</div>
+      <h2>Ask your agent to audit the site.</h2>
+      <p>CodoSEO ships an MCP server, so Claude, Cursor or any MCP client can crawl a site, pull the pages behind an issue, check a redirect chain and compare two audits from a single prompt.</p>
+      <div class="facts">
+        <div><b>Local, no account</b><span><code class="k">codoseo mcp</code> runs over stdio on your machine and can reach staging and internal hosts.</span></div>
+        <div><b>Hosted for your sites</b><span>Connect <code class="k">codoseo.com/mcp</code> with an API key to ask about the sites you monitor.</span></div>
+      </div>
     </div>
   </div>
 </section>
 
-<section class="blk wrap reveal" id="compare">
+<section class="blk wrap reveal" id="pricing">
   <div class="shead">
-    <h2>Open source, scriptable, free to run.</h2>
-    <p>How CodoSEO compares today. The GEO row is marked as soon because those checks are not shipped yet.</p>
+    <div><div class="eyebrow">Pricing</div><h2>Start free. Stay free if you like.</h2></div>
+    <p>The hosted free plan monitors one site. The CLI, the MCP server and the self-hosted web app are free and open source. Paid plans for more sites and bigger crawls are coming soon.</p>
   </div>
-  <div class="panel scroll mt"><div class="cmp" id="cmp"></div></div>
-  <p class="fine">Competitor details are from their public product pages and may be out of date. Corrections welcome on GitHub.</p>
+  <div class="prices mt">
+    <div class="price hl">
+      <div class="ph"><h3>Free</h3><span class="tag ship">Available now</span></div>
+      <div class="amt"><b>$0</b><span>forever</span></div>
+      <p>Hosted monitoring for one site.</p>
+      <ul>
+        <li>1 monitored site</li>
+        <li>Up to 500 pages per crawl</li>
+        <li>A scheduled crawl every week</li>
+        <li>1 manual crawl a week</li>
+        <li>30 days of history</li>
+        <li>Email alerts</li>
+        <li>100 API calls a day</li>
+      </ul>
+      <a class="btn" href="https://app.codoseo.com/">Start free <span class="ar" aria-hidden="true">→</span></a>
+    </div>
+    <div class="price soon">
+      <div class="ph"><h3>Pro and Agency</h3><span class="tag plan">Coming soon</span></div>
+      <div class="amt"><b class="tbd">Coming soon</b></div>
+      <p>For agencies and growing teams.</p>
+      <ul>
+        <li>More monitored sites</li>
+        <li>Larger and longer crawls</li>
+        <li>Daily scheduled crawls</li>
+        <li>Slack, Discord and webhook alerts</li>
+        <li>A year of history</li>
+        <li>Higher API limits</li>
+      </ul>
+      <span class="btn dis" aria-disabled="true">Pricing coming soon</span>
+    </div>
+    <div class="price">
+      <div class="ph"><h3>Self-hosted</h3><span class="tag ship">Open source</span></div>
+      <div class="amt"><b>$0</b><span>AGPL-3.0</span></div>
+      <p>The full web app on your own servers.</p>
+      <ul>
+        <li>Unlimited sites</li>
+        <li>100,000 pages per crawl by default, configurable</li>
+        <li>Daily scheduled crawls</li>
+        <li>Email, Slack, Discord and webhook alerts</li>
+        <li>REST API and MCP server, no call limit</li>
+        <li>Your data stays on your servers</li>
+      </ul>
+      <a class="btn out" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Read the self-hosting guide</a>
+    </div>
+  </div>
+  <p class="fine">Want to try it first? Run a one-off audit of up to 100 pages at <a href="https://app.codoseo.com/">app.codoseo.com</a>, no signup needed. The CLI is free and has no page cap of its own.</p>
 </section>
 
-<section class="blk wrap reveal">
+<section class="blk wrap reveal" id="docs">
   <div class="shead">
-    <div><div class="eyebrow">Free and open source</div><h2>Use it. Self-host it. Contribute to it.</h2></div>
-    <p>Licensed under AGPL-3.0. The source is on GitHub and every crate is published to crates.io, so you can embed the crawler or the checks in your own project.</p>
+    <div><div class="eyebrow">Documentation</div><h2>Up and running in minutes.</h2></div>
+    <p>Guides for every way to run CodoSEO, from a first crawl to a self-hosted install. The docs live with the code on GitHub.</p>
   </div>
-  <div class="crates">
-    <a href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">github.com/SafrowLabs/CodoSEO</a>
-    <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">codoseo</a>
-    <a href="https://crates.io/crates/codoseo-core" target="_blank" rel="noopener">codoseo-core</a>
-    <a href="https://crates.io/crates/codoseo-crawler" target="_blank" rel="noopener">codoseo-crawler</a>
+  <div class="docs mt">
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#quick-start" target="_blank" rel="noopener"><b>Quick start</b><span>Your first crawl, a saved audit and a diff.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#commands" target="_blank" rel="noopener"><b>CLI reference</b><span>Every command and flag, with defaults.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener"><b>Check reference</b><span>All 44 checks with severity and slug.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#ci-integration" target="_blank" rel="noopener"><b>CI integration</b><span>Exit codes, baselines and a GitHub Actions example.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md" target="_blank" rel="noopener"><b>MCP server</b><span>Connect Claude, Cursor and other MCP clients.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener"><b>REST API</b><span>Sites, issues, pages and changes as JSON.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener"><b>Self-hosting</b><span>Docker Compose, email, sign-in, upgrades and backups.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/configuration.md" target="_blank" rel="noopener"><b>Configuration</b><span>Every environment variable for the web app.</span></a>
   </div>
+  <div class="get mt" id="install-options">
+    <div>
+      <h3>Install the CLI your way</h3>
+      <p>Prebuilt binaries for Linux, macOS and Windows are on the releases page, each with a checksum. Every crate is on crates.io, so you can embed the crawler or the checks in your own project.</p>
+      <div class="crates">
+        <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">codoseo</a>
+        <a href="https://crates.io/crates/codoseo-core" target="_blank" rel="noopener">codoseo-core</a>
+        <a href="https://crates.io/crates/codoseo-crawler" target="_blank" rel="noopener">codoseo-crawler</a>
+      </div>
+    </div>
+    <div class="panel term">
+      <div class="tabs"><span>Install</span></div>
+<pre><span class="c-dim"># Homebrew (macOS, Linux)</span>
+brew install safrowlabs/codoseo/codoseo
 
+<span class="c-dim"># npm</span>
+npx codoseo --help
+
+<span class="c-dim"># Cargo (Rust 1.88+)</span>
+cargo install codoseo
+
+<span class="c-dim"># Docker</span>
+docker run --rm ghcr.io/safrowlabs/codoseo crawl https://example.com</pre>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="faq">
+  <div class="shead">
+    <div><div class="eyebrow">FAQ</div><h2>Questions, answered.</h2></div>
+    <p>Something else on your mind? <a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Open an issue on GitHub</a> and we'll get back to you.</p>
+  </div>
+  <div class="faq mt">
+    <details open>
+      <summary>Is CodoSEO free?</summary>
+      <p>Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app at app.codoseo.com has a free plan for one site. Paid plans for more sites and bigger crawls are coming soon.</p>
+    </details>
+    <details>
+      <summary>Do I need an account?</summary>
+      <p>Not for the CLI or the local MCP server, and not for a one-off audit of up to 100 pages in the hosted app. A free account lets you monitor a site on a schedule and get alerts.</p>
+    </details>
+    <details>
+      <summary>How do I install the CLI?</summary>
+      <p>Run <code class="k">brew install safrowlabs/codoseo/codoseo</code>, <code class="k">npx codoseo</code>, or <code class="k">cargo install codoseo</code> (Rust 1.88 or newer). Prebuilt binaries for Linux, macOS and Windows are on the <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">GitHub releases page</a>, and a Docker image is at <code class="k">ghcr.io/safrowlabs/codoseo</code>.</p>
+    </details>
+    <details>
+      <summary>What does CodoSEO check?</summary>
+      <p>44 checks across 9 categories: response codes and redirects, indexability (noindex, canonicals, robots.txt), on-page (titles, meta descriptions, H1s), content (thin and duplicate pages, image alt text), links (broken links, orphan pages, click depth), technical (HTTPS, mixed content, slow responses), sitemaps, Open Graph and structured data (JSON-LD, hreflang).</p>
+    </details>
+    <details>
+      <summary>Will crawling slow down my site?</summary>
+      <p>CodoSEO is built to be polite. It obeys robots.txt and Crawl-delay, slows down on its own when a server answers 429 or 503, and identifies itself as CodoSEObot so you can spot it in your logs.</p>
+    </details>
+    <details>
+      <summary>Does it work with AI assistants?</summary>
+      <p>Yes. CodoSEO includes an MCP server. Run <code class="k">codoseo mcp</code> on your machine, or connect the hosted server at <code class="k">https://codoseo.com/mcp</code>, and Claude, Cursor or any MCP client can run audits and read the results.</p>
+    </details>
+    <details>
+      <summary>Can I self-host the web app?</summary>
+      <p>Yes. Docker Compose brings it up in three commands and it needs nothing but Postgres. The <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">self-hosting guide</a> covers email, sign-in, reverse proxies, upgrades and backups.</p>
+    </details>
+  </div>
+</section>
+
+<section class="wrap reveal">
   <div class="cta">
     <div class="cta-eyes" data-mascot="look" data-follow aria-hidden="true"></div>
     <h2>Run your first audit in a minute.</h2>
     <div class="acts">
       <a class="btn" href="https://app.codoseo.com/">Start free audit <span class="ar" aria-hidden="true">→</span></a>
-      <a class="btn out" href="#install">Install the CLI</a>
-      <a class="btn out" href="https://github.com/SafrowLabs/CodoSEO#readme" target="_blank" rel="noopener">Read the docs</a>
+      <a class="btn out" href="#install-options">Install the CLI</a>
+      <a class="btn out" href="#docs">Read the docs</a>
     </div>
   </div>
 </section>
 </main>
 
 <footer>
-  <div class="wrap in">
-    <span><a href="/" class="wm" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a><span>by <a href="https://github.com/SafrowLabs" target="_blank" rel="noopener" style="text-decoration:underline">SafrowLabs</a> · AGPL-3.0</span></span>
-    <span class="links">
-      <a href="https://app.codoseo.com/">App</a>
-      <a href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">crates.io</a>
-      <a href="https://github.com/SafrowLabs/CodoSEO#readme" target="_blank" rel="noopener">Docs</a>
-      <a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Issues</a>
-    </span>
+  <div class="wrap">
+    <div class="fgrid">
+      <div class="fbrand">
+        <a href="/" class="wm" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
+        <p>Know the moment your SEO breaks. An open-source SEO crawler and site monitor, written in Rust.</p>
+      </div>
+      <div class="fcol">
+        <p class="fh">Product</p>
+        <a href="#features">Features</a>
+        <a href="#checks">SEO checks</a>
+        <a href="#ai">AI agents</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://app.codoseo.com/">Web app</a>
+      </div>
+      <div class="fcol">
+        <p class="fh">Docs</p>
+        <a href="https://github.com/SafrowLabs/CodoSEO#quick-start" target="_blank" rel="noopener">Quick start</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO#commands" target="_blank" rel="noopener">CLI reference</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md" target="_blank" rel="noopener">MCP server</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener">REST API</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Self-hosting</a>
+      </div>
+      <div class="fcol">
+        <p class="fh">Open source</p>
+        <a href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">crates.io</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Issues</a>
+      </div>
+      <div class="fcol">
+        <p class="fh">From the makers</p>
+        <a href="https://safrow.com/" target="_blank" rel="noopener">SafrowLabs</a>
+        <a href="https://rankorg.com/" target="_blank" rel="noopener">RankOrg</a>
+      </div>
+    </div>
+    <div class="fbot">
+      <span>© 2026 SafrowLabs. CodoSEO is open source under AGPL-3.0.</span>
+      <span>Built by <a href="https://safrow.com/" target="_blank" rel="noopener">SafrowLabs</a>, the team behind <a href="https://rankorg.com/" target="_blank" rel="noopener">RankOrg</a>.</span>
+    </div>
   </div>
 </footer>
 
@@ -744,7 +984,7 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
     if (still) return;
     (function loop() {
       setTimeout(function () {
-        if (!document.hidden && svg.getAttribute('data-state') !== 'idle') {
+        if (!document.hidden) {
           blink(svg); if (Math.random() < .22) setTimeout(function () { blink(svg); }, 260);
         }
         loop();
@@ -818,54 +1058,6 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
     });
   }
 
-  /* ---------- status showcase ---------- */
-  var STATES = [
-    ['crawl', 'Crawling', 'pupils sweep', 'A crawl is running. The eyes scan side to side, page by page.', 3600],
-    ['warn', 'Warning', 'resting gaze', 'Warnings to look at, nothing broken. The eyes rest in the brand yellow.', 2800],
-    ['error', 'Error', 'pupils widen', 'A critical check failed: a page went 404 or a noindex slipped in. The pupils go wide and red.', 3000],
-    ['ok', 'All clear', 'eyes lifted', 'Every critical check passes. The eyes lift, centred and green.', 2800],
-    ['idle', 'Idle', 'drooping', 'Nothing running until the next scheduled crawl. Grey, sleepy and drooping.', 2800]
-  ];
-  var list = $('st-list'), big = $('st-big'), cur = 0, timer = null, paused = 0;
-  list.innerHTML = STATES.map(function (s, n) {
-    return '<li><button class="st-btn c-' + s[0] + '" type="button" data-i="' + n + '" aria-pressed="false">' + mascot(s[0], true) +
-      '<span><b>' + s[1] + '</b><span>' + s[3].split('. ')[0] + '.</span></span><code>' + s[2] + '</code></button></li>';
-  }).join('');
-  var btns = list.querySelectorAll('.st-btn');
-  var bigSvg = svgOf(big);
-  blinker(bigSvg, 2200, 5200);
-  function show(n, auto) {
-    cur = n; var s = STATES[n];
-    setState(big, s[0]);
-    $('st-name').textContent = s[1]; $('st-chip').textContent = s[2]; $('st-desc').textContent = s[3];
-    for (var j = 0; j < btns.length; j++) {
-      btns[j].setAttribute('aria-pressed', j === n ? 'true' : 'false');
-      btns[j].classList.remove('run');
-    }
-    if (auto && !still) {
-      void btns[n].offsetWidth; btns[n].style.setProperty('--dur', s[4] + 'ms'); btns[n].classList.add('run');
-    }
-  }
-  function cycle() {
-    clearTimeout(timer);
-    if (still) return;
-    timer = setTimeout(function () {
-      if (!document.hidden && statusVisible && Date.now() > paused) show((cur + 1) % STATES.length, true);
-      cycle();
-    }, Date.now() > paused ? STATES[cur][4] : 1000);
-  }
-  for (i = 0; i < btns.length; i++) {
-    btns[i].addEventListener('click', function () {
-      paused = Date.now() + 9000; show(+this.getAttribute('data-i'), false); cycle();
-    });
-  }
-  var statusVisible = true;
-  if ('IntersectionObserver' in window) {
-    statusVisible = false;
-    new IntersectionObserver(function (es) { statusVisible = es[0].isIntersecting; }).observe($('status'));
-  }
-  show(0, true); cycle();
-
   /* ---------- scroll reveal ---------- */
   var rev = document.querySelectorAll('.reveal');
   if ('IntersectionObserver' in window && !still) {
@@ -938,24 +1130,6 @@ Crawling  ━━━━━━━━━━━━━━━━━━━━  142 page
     return '<div class="cat"><div class="ch"><h3>' + c[0] + '</h3><span class="n">' + c[1] + ' checks</span></div><ul>' +
       c[2].map(function (i) { return '<li class="' + SEV[i[1]] + '">' + i[0] + '</li>'; }).join('') + '</ul></div>';
   }).join('');
-
-  /* ---------- comparison table: [label, [state, text] x3] ---------- */
-  var G = [
-    ['License', ['y', 'AGPL-3.0, open source'], ['n', 'Proprietary'], ['n', 'Proprietary']],
-    ['Runs on your own machine or CI', ['y', 'Single static binary'], ['p', 'Desktop app or CLI'], ['n', 'Cloud only']],
-    ['Price to start', ['y', 'Free, no URL limit'], ['p', 'Free up to 500 URLs'], ['p', 'Paid plans']],
-    ['Exit codes for CI', ['y', '--fail-on critical'], ['p', 'Via CLI, licensed'], ['n', '']],
-    ['Diff between two audits', ['y', 'JSON audit files'], ['p', 'Crawl comparison'], ['p', 'Crawl comparison']],
-    ['JavaScript rendering', ['s', ''], ['y', ''], ['y', '']],
-    ['Scheduled monitoring and alerts', ['y', 'Web app'], ['p', 'Machine must be on'], ['y', '']],
-    ['llms.txt and AI crawler checks', ['s', 'GEO checks'], ['n', ''], ['n', '']]
-  ];
-  var IC = { y: '✓', p: '◐', n: '–', s: 'SOON' };
-  var SR = { y: 'Yes', p: 'Partly', n: 'No', s: 'Coming soon' };
-  var cell = function (c) { return '<span><i class="ic ' + c[0] + '" aria-hidden="true">' + IC[c[0]] + '</i><span class="sr">' + SR[c[0]] + (c[1] ? ': ' : '') + '</span>' + (c[1] ? '<span>' + esc(c[1]) + '</span>' : '') + '</span>'; };
-  $('cmp').innerHTML =
-    '<div class="g h"><span></span><span><span style="display:flex;gap:8px;align-items:center">' + mascot('rest', true) + 'CodoSEO</span><small>open source</small></span><span>Screaming Frog<small>desktop SEO Spider</small></span><span>Ahrefs Site Audit<small>cloud SaaS</small></span></div>' +
-    G.map(function (r) { return '<div class="g"><span>' + r[0] + '</span>' + cell(r[1]) + cell(r[2]) + cell(r[3]) + '</div>'; }).join('');
 })();
 </script>
 </body>
