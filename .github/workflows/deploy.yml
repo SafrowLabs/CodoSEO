@@ -1,14 +1,15 @@
 name: deploy
 
 # Every push to main that touches the app builds one linux/amd64 image, pushes it to ghcr.io as
-# `:main` and `:sha-<short>`, then has Coolify pull that exact tag and redeploy. Coolify builds
-# nothing; the resource runs deploy/compose.cloud.yml with CODOSEO_VERSION pinned per deploy, so a
-# rollback is setting CODOSEO_VERSION back to an older `sha-…` tag in Coolify and redeploying.
+# `:main` and `:sha-<short>`, then calls the Coolify resource's deploy webhook. Coolify builds
+# nothing: it runs deploy/compose.cloud.yml with CODOSEO_VERSION=main, and `pull_policy: always`
+# there makes every deploy fetch the new `:main`. Rollback: set CODOSEO_VERSION to an older
+# `sha-…` tag in Coolify and deploy.
 #
 # No release artefacts here (other architectures, binaries, crates, npm, Homebrew): that is
-# release.yml, run by hand. Secrets: COOLIFY_URL (https://host.safrow.com), COOLIFY_TOKEN (API token
-# with deploy and write access), COOLIFY_APP_UUID. Without them the image is still pushed and the
-# deploy step is skipped. See docs/deploy-coolify.md, "Auto-deploy from main".
+# release.yml, run by hand. Secrets: COOLIFY_WEBHOOK (the resource's deploy webhook URL) and
+# COOLIFY_TOKEN (an API token with the Deploy permission only). Without them the image is still
+# pushed and the deploy step is skipped. See docs/deploy-coolify.md, "Auto-deploy from main".
 
 on:
   push:
@@ -66,36 +67,15 @@ jobs:
           cache-from: type=gha,scope=deploy-amd64
           cache-to: type=gha,mode=max,scope=deploy-amd64
 
+      # Last, after the image is in the registry, as Coolify's GitHub Actions guide prescribes.
       - name: Deploy on Coolify
         env:
-          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          APP: ${{ secrets.COOLIFY_APP_UUID }}
-          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          if [ -z "$COOLIFY_URL" ] || [ -z "$COOLIFY_TOKEN" ] || [ -z "$APP" ]; then
-            echo "::notice::Coolify secrets not set; pushed $IMAGE:$TAG but did not deploy."
+          if [ -z "$COOLIFY_WEBHOOK" ] || [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::notice::Coolify secrets not set; pushed $IMAGE:main but did not deploy."
             exit 0
           fi
-          api() { curl -fsS -H "Authorization: Bearer $COOLIFY_TOKEN" -H "Content-Type: application/json" "$@"; }
-          base="${COOLIFY_URL%/}/api/v1"
-
-          # Pin the tag the compose file pulls (${CODOSEO_VERSION:-latest}); a new tag always pulls.
-          body="$(jq -nc --arg v "$TAG" '{key: "CODOSEO_VERSION", value: $v}')"
-          api -X PATCH "$base/applications/$APP/envs" -d "$body" >/dev/null \
-            || api -X POST "$base/applications/$APP/envs" -d "$body" >/dev/null
-
-          dep="$(api "$base/deploy?uuid=$APP&force=false" | jq -r '.deployments[0].deployment_uuid')"
-          echo "Coolify deployment $dep for $TAG"
-
-          # Wait for Coolify to finish (pull, migrate, restart), up to 15 minutes.
-          for _ in $(seq 90); do
-            status="$(api "$base/deployments/$dep" | jq -r '.status')"
-            case "$status" in
-              finished) echo "Deployed $TAG"; exit 0 ;;
-              failed|cancelled*) echo "::error::Coolify deployment $dep ended: $status"; exit 1 ;;
-            esac
-            sleep 10
-          done
-          echo "::error::Coolify deployment $dep still '$status' after 15 minutes"
-          exit 1
+          curl --fail-with-body -sS -X POST "$COOLIFY_WEBHOOK" \
+            -H "Authorization: Bearer $COOLIFY_TOKEN"

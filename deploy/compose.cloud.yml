@@ -12,6 +12,8 @@
 
 name: codoseo-cloud
 
+# `pull_policy: always` on each service: a deploy fetches the tag even when it is mutable (`:main`,
+# `:latest`), so a redeploy never restarts a stale local copy.
 x-image: &image ${CODOSEO_IMAGE:-ghcr.io/safrowlabs/codoseo}:${CODOSEO_VERSION:-latest}
 
 # Settings every long-running role reads. Empty values are treated as unset by the app.
@@ -51,6 +53,7 @@ x-app-env: &app-env
 services:
   migrate:
     image: *image
+    pull_policy: always
     command: ["migrate"]
     restart: "no"
     environment:
@@ -61,6 +64,7 @@ services:
 
   web:
     image: *image
+    pull_policy: always
     command: ["web"]
     restart: unless-stopped
     mem_limit: 384m
@@ -85,6 +89,7 @@ services:
 
   worker:
     image: *image
+    pull_policy: always
     command: ["worker"]
     restart: unless-stopped
     # The worker budgets crawl memory as 70% of this limit, so keep it honest.

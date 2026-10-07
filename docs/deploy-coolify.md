@@ -38,27 +38,28 @@ Both `web` and `worker` depend on `migrate` completing successfully, so one depl
 
 ### Auto-deploy from main
 
-Every merge to `main` that touches the app goes live without Coolify building anything:
-`.github/workflows/deploy.yml` builds one `linux/amd64` image, pushes it to ghcr.io as `:main` and
-`:sha-<short>`, sets `CODOSEO_VERSION` on the Coolify resource to that `sha-…` tag through the
-Coolify API, and starts a deploy, which pulls the image, runs `migrate` and restarts `web` and
-`worker`. The workflow waits for Coolify and fails if the deploy fails. Changes that touch only
-docs, `site/` or other workflows don't deploy.
+Every merge to `main` that touches the app goes live without Coolify building anything, the way
+Coolify's [GitHub Actions guide](https://coolify.io/docs/applications/ci-cd/github/actions)
+describes: `.github/workflows/deploy.yml` builds one `linux/amd64` image, pushes it to ghcr.io as
+`:main` and `:sha-<short>`, then calls the resource's deploy webhook. Coolify pulls `:main` (the
+services have `pull_policy: always`), runs `migrate` and restarts `web` and `worker`. Changes that
+touch only docs, `site/` or other workflows don't deploy.
 
 One-time setup:
 
-1. Keep the resource on `deploy/compose.cloud.yml` (the two-container layout above).
+1. Keep the resource on `deploy/compose.cloud.yml` and set `CODOSEO_VERSION=main` on it.
 2. Turn **Auto Deploy off** on the resource; GitHub Actions decides when to deploy, after the image
    exists.
-3. In Coolify, enable the API (Settings, Configuration) and create an API token (Keys & Tokens)
-   that can deploy and write.
-4. Add three repository secrets (Settings, Secrets and variables, Actions): `COOLIFY_URL` (the
-   Coolify address, e.g. `https://host.safrow.com`), `COOLIFY_TOKEN`, and `COOLIFY_APP_UUID` (the
-   id in the resource's URL in Coolify).
+3. Enable API access (Settings, Advanced) and create an API token with only the **Deploy**
+   permission (Keys & Tokens, API Tokens). Deploy can trigger, restart and stop deployments; it can't
+   read secrets or change configuration. Leave the API IP allowlist empty: GitHub's runners have no
+   fixed addresses.
+4. Add two repository secrets (Settings, Secrets and variables, Actions): `COOLIFY_WEBHOOK`, the
+   Deploy webhook URL from the resource's Webhooks tab, and `COOLIFY_TOKEN`.
 
-Rollback: set `CODOSEO_VERSION` on the resource to an earlier `sha-…` tag and redeploy. The ghcr.io
-package must stay public, or the Coolify server must be logged in to ghcr.io. Releases (all
-architectures, binaries, crates, npm, Homebrew) stay with `release.yml`, run by hand.
+Rollback: set `CODOSEO_VERSION` on the resource to an earlier `sha-…` tag and deploy. The ghcr.io
+package is public; if it ever goes private, log the Coolify server's Docker in to ghcr.io. Releases
+(all architectures, binaries, crates, npm, Homebrew) stay with `release.yml`, run by hand.
 
 ### Behaviour worth knowing
 
