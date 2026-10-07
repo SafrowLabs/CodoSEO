@@ -1,26 +1,25 @@
 {% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/seo.html" as seo -%}
 {% block title %}CodoSEO — Open-source SEO crawler and site monitor{% endblock %}
+{% block robots %}<meta name="robots" content="index, follow, max-image-preview:large">{% endblock %}
 {% block head %}
 <meta name="description" content="Know the moment your SEO breaks. Paste your URL for a free 100-page audit with a health score and your top issues, then monitor the site and get alerts when something important changes. Open source, built in Rust.">
-<link rel="canonical" href="{{ base }}/">
-<meta property="og:type" content="website">
-<meta property="og:url" content="{{ base }}/">
-<meta property="og:title" content="CodoSEO — Open-source SEO crawler and site monitor">
-<meta property="og:description" content="Free 100-page SEO audit in about a minute. {{ checks }} checks, a 0–100 health score, and alerts when your SEO breaks.">
-<meta property="og:site_name" content="CodoSEO">
-<meta name="twitter:card" content="summary">
+{% call seo::social(base, "/", "CodoSEO — Open-source SEO crawler and site monitor", "Free 100-page SEO audit in about a minute. {} checks, a 0–100 health score, and alerts when your SEO breaks."|format(checks)) %}{% endcall %}
 <link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
 {% if turnstile_site_key.is_some() %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
-{"@type":"Organization","@id":"{{ base }}/#organization","name":"SafrowLabs","url":"{{ base }}","sameAs":["https://github.com/SafrowLabs"]},
-{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","url":"{{ base }}","license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@id":"{{ base }}/#organization"}}
+{"@type":"Organization","@id":"{{ base }}/#organization","name":"SafrowLabs","url":"{{ base }}","sameAs":["https://github.com/SafrowLabs"],"brand":{"@id":"{{ base }}/#brand"}},
+{"@type":"Brand","@id":"{{ base }}/#brand","name":"CodoSEO","logo":"{{ base }}{{ crate::assets::url("icon-512.png") }}"},
+{"@type":"WebSite","@id":"{{ base }}/#website","name":"CodoSEO","url":"{{ base }}/","inLanguage":"en","publisher":{"@id":"{{ base }}/#organization"}},
+{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","url":"{{ base }}","image":"{{ base }}/og.png","brand":{"@id":"{{ base }}/#brand"},"license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@id":"{{ base }}/#organization"}}
 ]}
 </script>
 {% endblock %}
 {% block body %}
 <header class="l-top l-wrap">
-  <a class="brand" href="/" style="width:auto;padding:0;height:auto"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
   <nav class="l-nav">
     <a href="https://github.com/SafrowLabs/CodoSEO">GitHub</a>
     <a href="/bot">Bot</a>
@@ -30,19 +29,32 @@
 
 <main>
   <section class="l-hero l-wrap">
-    <p class="l-eyebrow">Open-source SEO crawler and monitor</p>
-    <h1>Know the moment your <mark>SEO breaks.</mark></h1>
-    <p class="l-lead">Paste your site's address. In about a minute you get a health score and your top issues, with no sign-up. Then let CodoSEO watch the site and tell you when something important changes.</p>
-    <form class="l-form" method="post" action="/audit" hx-boost="false">
-      <input class="input input-lg" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="l-hint" required autofocus>
-      {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile l-ts" data-sitekey="{{ key }}" data-theme="auto"></div>{% endif %}
-      <button class="btn btn-primary btn-lg" type="submit">Audit my site</button>
-    </form>
-    {% if let Some(err) = error %}<p class="error-text" role="alert" style="margin-top:10px"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}
-    <p class="l-hint" id="l-hint">Free · first 100 pages · no account needed</p>
+    <div class="l-hero-copy">
+      <p class="l-eyebrow">Open-source SEO crawler and monitor</p>
+      <h1>Know the moment your <mark>SEO breaks.</mark></h1>
+      <p class="l-lead">Paste your site's address. In about a minute you get a health score and your top issues, with no sign-up. Then let CodoSEO watch the site and tell you when something important changes.</p>
+      <form class="l-form" method="post" action="/audit" hx-boost="false">
+        <input class="input input-lg" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="l-hint" required autofocus>
+        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile l-ts" data-sitekey="{{ key }}" data-theme="light"></div><script>(function(){var t=document.documentElement.dataset.theme;if(t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches))document.currentScript.previousElementSibling.dataset.theme="dark"})()</script>
+        {#- The widget follows the theme in use: light unless dark (or "system" on a dark OS) is chosen. #}
+        <script>(function(){var t=document.documentElement.dataset.theme;if(t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches))document.currentScript.previousElementSibling.dataset.theme="dark"})()</script>{% endif %}
+        <button class="btn btn-primary btn-lg" type="submit">Audit my site</button>
+      </form>
+      {% if let Some(err) = error %}<p class="error-text" role="alert" style="margin-top:10px"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}
+      <p class="l-hint" id="l-hint">Free · first 100 pages · no account needed</p>
+    </div>
+    <div class="l-hero-art" aria-hidden="true">
+      <div class="l-watch" data-watch>{% call m::tile("rest") %}{% endcall %}</div>
+      <ul class="l-moods">
+        <li>{% call m::eyes("crawling", "mascot-sm") %}{% endcall %}Crawling</li>
+        <li>{% call m::eyes("ok", "mascot-sm") %}{% endcall %}All clear</li>
+        <li>{% call m::eyes("warning", "mascot-sm") %}{% endcall %}Warnings</li>
+        <li>{% call m::eyes("error", "mascot-sm") %}{% endcall %}Broken</li>
+      </ul>
+    </div>
   </section>
 
-  <section class="l-wrap l-steps" aria-labelledby="how">
+  <section class="l-wrap l-steps" data-reveal aria-labelledby="how">
     <h2 id="how">How it works</h2>
     <ol>
       <li><b>1 · Paste your URL.</b><span>We crawl up to 100 pages politely, at 5 requests per second, as CodoSEObot.</span></li>
@@ -51,7 +63,7 @@
     </ol>
   </section>
 
-  <section class="l-wrap l-cats" aria-labelledby="checks">
+  <section class="l-wrap l-cats" data-reveal aria-labelledby="checks">
     <h2 id="checks">{{ checks }} checks after every crawl</h2>
     <ul>
       <li><b>Indexability</b><span>noindex, canonicals, robots.txt blocks</span></li>
@@ -63,7 +75,7 @@
     </ul>
   </section>
 
-  <section class="l-wrap l-oss">
+  <section class="l-wrap l-oss" data-reveal>
     <h2>Open source. Run it yourself.</h2>
     <p>CodoSEO is one Rust binary under AGPL-3.0: a CLI, an MCP server for your coding agent, and a self-hostable web app. The cloud runs the same code.</p>
     <p><code>cargo install codoseo</code></p>

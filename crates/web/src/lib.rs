@@ -42,6 +42,11 @@ pub fn app(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/assets/{file}", get(assets::serve))
+        // Icons and the manifest, on the cloud and self-hosted alike.
+        .route("/favicon.ico", get(assets::favicon_ico))
+        .route("/apple-touch-icon.png", get(assets::apple_touch_icon))
+        .route("/site.webmanifest", get(assets::manifest))
+        .route("/og.png", get(assets::og_image))
         .fallback(error::not_found)
         .layer(middleware::from_fn_with_state(
             state.clone(),

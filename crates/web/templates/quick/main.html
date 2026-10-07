@@ -1,7 +1,8 @@
+{%- import "partials/mascot.html" as m -%}
 <section id="audit-main" class="q-main"{% if main.polling %} hx-get="/audit/{{ main.id }}/live" hx-trigger="every 2s" hx-swap="outerHTML" data-quiet{% endif %} aria-live="polite">
 {% if main.polling %}
   <div class="q-wait" role="status">
-    <i class="dot running"></i>
+    {% if main.running %}{% call m::eyes("crawling", "", "quick-eyes") %}{% endcall %}{% else %}{% call m::eyes("rest", "", "quick-eyes") %}{% endcall %}{% endif %}
     {% if main.running %}
       <div><b class="shimmer">Crawling {{ main.domain }}</b><p class="muted"><span class="q-count">{{ main.pages_done }}</span> pages checked so far. This takes about a minute.</p></div>
     {% else %}

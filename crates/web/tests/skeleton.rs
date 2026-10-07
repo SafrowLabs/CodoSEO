@@ -114,6 +114,54 @@ async fn hashed_assets_are_cached_for_a_year() {
 }
 
 #[tokio::test]
+async fn icons_and_the_manifest_are_served_at_the_root() {
+    // Self-hosted and cloud alike: browsers ask for these by name.
+    for app in [
+        TestApp::new().await,
+        TestApp::with_config(support::cloud_config()).await,
+    ] {
+        for (path, ty) in [
+            ("/favicon.ico", "image/x-icon"),
+            ("/apple-touch-icon.png", "image/png"),
+            ("/og.png", "image/png"),
+            ("/site.webmanifest", "application/manifest+json"),
+        ] {
+            let res = app.get(path, None).await;
+            assert_eq!(res.status, StatusCode::OK, "{path}");
+            assert_eq!(res.header("content-type"), Some(ty), "{path}");
+            assert_eq!(
+                res.header("cache-control"),
+                Some("public, max-age=86400"),
+                "{path}"
+            );
+        }
+        // Binary icons are never gzipped, whatever the client accepts.
+        let ico = app
+            .send(
+                Request::get("/favicon.ico")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(ico.header("content-encoding"), None);
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(&app.get("/site.webmanifest", None).await.body).unwrap();
+        assert_eq!(manifest["name"], "CodoSEO");
+        let icons = manifest["icons"].as_array().unwrap();
+        assert!(
+            icons.iter().any(|i| i["purpose"] == "maskable"),
+            "{manifest}"
+        );
+        for icon in icons {
+            let src = icon["src"].as_str().unwrap();
+            assert_eq!(app.get(src, None).await.status, StatusCode::OK, "{src}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn base_layout_renders_the_shell() {
     let app = TestApp::new().await;
     let (_, cookie) = app.login("ana@example.com").await;
@@ -128,6 +176,18 @@ async fn base_layout_renders_the_shell() {
         "⌘K",
         r#"id="palette""#,
         "codoseo-theme",
+        // Light by default: the head script only ever sets dark or system.
+        r#"if(t==="dark"||t==="system")"#,
+        r#"data-theme-label>Light<"#,
+        // The mascot and the C◉d◉SEO wordmark, named for screen readers.
+        r#"class="mascot m-rest""#,
+        r#"aria-label="CodoSEO""#,
+        r#"<meta name="robots" content="noindex, nofollow">"#,
+        r#"<link rel="manifest" href="/site.webmanifest">"#,
+        r#"<link rel="icon" href="/favicon.ico" sizes="any">"#,
+        r#"<link rel="apple-touch-icon" href="/apple-touch-icon.png">"#,
+        r#"<meta name="theme-color""#,
+        codoseo_web::assets::url("favicon.svg"),
         codoseo_web::assets::url("app.css"),
         codoseo_web::assets::url("htmx.min.js"),
         "ana@example.com",

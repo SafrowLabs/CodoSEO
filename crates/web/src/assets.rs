@@ -2,7 +2,11 @@
 //!
 //! Each asset is served under a content-hashed name (`/assets/app.3f2a1b9c.css`) with a
 //! one-year immutable cache, so a deploy never serves a stale stylesheet. CSS, JS and SVG are
-//! gzip-compressed once, the first time any asset is asked for.
+//! gzip-compressed once, the first time any asset is asked for; PNG and ICO are already
+//! compressed and go out as they are.
+//!
+//! A few icons are also served at the fixed root paths browsers and link previews ask for by
+//! name (`/favicon.ico`, `/apple-touch-icon.png`, `/og.png`), next to the web app manifest.
 
 use std::borrow::Cow;
 use std::io::Write;
@@ -46,6 +50,37 @@ const SOURCES: &[Source] = &[
         name: "favicon.svg",
         content_type: "image/svg+xml",
         bytes: include_bytes!("../assets/favicon.svg"),
+    },
+    Source {
+        name: "favicon.ico",
+        content_type: "image/x-icon",
+        bytes: include_bytes!("../assets/favicon.ico"),
+    },
+    Source {
+        name: "apple-touch-icon.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/apple-touch-icon.png"),
+    },
+    Source {
+        name: "icon-192.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/icon-192.png"),
+    },
+    Source {
+        name: "icon-512.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/icon-512.png"),
+    },
+    Source {
+        name: "icon-maskable-512.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/icon-maskable-512.png"),
+    },
+    // The 1200×630 share card for Open Graph and Twitter.
+    Source {
+        name: "og.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/og.png"),
     },
     Source {
         name: "landing.css",
@@ -140,6 +175,74 @@ pub async fn serve(Path(file): Path<String>, headers: HeaderMap) -> Response {
         )
             .into_response();
     };
+    respond(
+        asset,
+        &headers,
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
+    )
+}
+
+/// An asset at a fixed root path. Its bytes can change with a deploy, so it is cached for a
+/// day rather than for good.
+fn fixed(name: &str, headers: &HeaderMap) -> Response {
+    let asset = ASSETS
+        .by_name(name)
+        .unwrap_or_else(|| panic!("unknown asset {name:?}"));
+    respond(
+        asset,
+        headers,
+        HeaderValue::from_static("public, max-age=86400"),
+    )
+}
+
+/// `GET /favicon.ico`, for browsers and tools that ask for it without reading the page.
+pub async fn favicon_ico(headers: HeaderMap) -> Response {
+    fixed("favicon.ico", &headers)
+}
+
+/// `GET /apple-touch-icon.png`, which iOS asks for by name.
+pub async fn apple_touch_icon(headers: HeaderMap) -> Response {
+    fixed("apple-touch-icon.png", &headers)
+}
+
+/// `GET /og.png`: the share card. Its URL stays put, so a link shared before a deploy keeps
+/// its picture.
+pub async fn og_image(headers: HeaderMap) -> Response {
+    fixed("og.png", &headers)
+}
+
+/// `GET /site.webmanifest`: name, colours and icons for "add to home screen".
+pub async fn manifest() -> Response {
+    let body = serde_json::json!({
+        "name": "CodoSEO",
+        "short_name": "CodoSEO",
+        "description": "Open-source SEO crawler and site monitor.",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#efefea",
+        "theme_color": "#efefea",
+        "icons": [
+            { "src": url("icon-192.png"), "sizes": "192x192", "type": "image/png" },
+            { "src": url("icon-512.png"), "sizes": "512x512", "type": "image/png" },
+            {
+                "src": url("icon-maskable-512.png"),
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "maskable",
+            },
+        ],
+    });
+    (
+        [
+            (header::CONTENT_TYPE, "application/manifest+json"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+fn respond(asset: &Asset, headers: &HeaderMap, cache: HeaderValue) -> Response {
     let accepts_gzip = headers
         .get(header::ACCEPT_ENCODING)
         .and_then(|v| v.to_str().ok())
@@ -159,10 +262,7 @@ pub async fn serve(Path(file): Path<String>, headers: HeaderMap) -> Response {
         header::CONTENT_TYPE,
         HeaderValue::from_static(asset.content_type),
     );
-    h.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=31536000, immutable"),
-    );
+    h.insert(header::CACHE_CONTROL, cache);
     if asset.gzip.is_some() {
         h.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
     }
@@ -180,6 +280,31 @@ mod tests {
             assert!(u.starts_with("/assets/"), "{u}");
             assert_ne!(u, format!("/assets/{}", src.name));
         }
+    }
+
+    #[test]
+    fn only_text_and_svg_are_gzipped() {
+        for name in ["app.css", "app.js", "favicon.svg"] {
+            assert!(ASSETS.by_name(name).unwrap().gzip.is_some(), "{name}");
+        }
+        for name in [
+            "favicon.ico",
+            "apple-touch-icon.png",
+            "og.png",
+            "Geist-Variable.woff2",
+        ] {
+            assert!(ASSETS.by_name(name).unwrap().gzip.is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn binary_assets_are_served_byte_for_byte() {
+        let png = ASSETS.by_name("icon-512.png").unwrap();
+        assert!(png.bytes.starts_with(b"\x89PNG"));
+        assert_eq!(
+            png.bytes.len(),
+            include_bytes!("../assets/icon-512.png").len()
+        );
     }
 
     #[test]

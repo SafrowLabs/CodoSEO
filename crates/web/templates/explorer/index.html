@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{%- import "partials/mascot.html" as m -%}
 {% block panel_class %} fill{% endblock %}
 {% block main %}
 {% if let Some(ex) = view %}
@@ -36,7 +37,7 @@
 </div>
 {% else %}
 <div class="empty" style="flex:1;justify-content:center">
-  <div class="art"><svg class="icon"><use href="#i-explorer"/></svg></div>
+  {% if crawl_active %}{% call m::eyes("crawling", "mascot-empty") %}{% endcall %}{% else %}{% call m::eyes("idle", "mascot-empty") %}{% endcall %}{% endif %}
   {% if crawl_active %}
   <h2>Your first crawl is on its way</h2>
   <p>Every URL CodoSEO finds will be listed here with its status, indexability, title and more. This page fills in as soon as the crawl finishes.</p>

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{%- import "partials/mascot.html" as m -%}
 {% block main %}
 {% if cards.is_empty() %}
 <div class="onboard">
-  <div style="display:flex;justify-content:center;margin-bottom:22px"><span class="owl" style="width:48px;height:48px;border-radius:13px 13px 17px 17px;gap:3px;padding-bottom:7px"><i style="width:17px;height:17px"></i><i style="width:17px;height:17px"></i></span></div>
+  <div class="solo-mascot">{% call m::tile() %}{% endcall %}</div>
   <h1>Add your first site</h1>
   <p class="lead">Paste your homepage. We'll crawl it politely, run 44 SEO checks and show you what to fix first.</p>
   {{ form|safe }}

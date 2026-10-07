@@ -99,6 +99,10 @@ pub struct NavGroup {
 pub struct CrawlerView {
     /// `idle`, `queued`, `running`, `failed`
     pub state: &'static str,
+    /// The mascot's mood (`partials/mascot.html`): `crawling` while a crawl runs, `rest` while
+    /// one waits, then the latest crawl's health as `ok`, `warning` or `error`, and `idle`
+    /// before the first crawl.
+    pub mood: &'static str,
     pub label: String,
     pub rows: Vec<(String, String)>,
     /// Progress through the page budget while running, 0–100.
@@ -523,6 +527,7 @@ fn crawler_view(
             let pct = ((u64::from(done) * 100) / u64::from(budget)).min(99) as u8;
             return CrawlerView {
                 state: "running",
+                mood: "crawling",
                 label: format!("CRAWLING #{}", a.number),
                 rows: vec![
                     ("pages".to_owned(), fmt::thousands(done)),
@@ -538,6 +543,7 @@ fn crawler_view(
         }
         return CrawlerView {
             state: "queued",
+            mood: "rest",
             label: format!("QUEUED #{}", a.number),
             rows: vec![("queued".to_owned(), fmt::ago(a.queued_at))],
             pct: None,
@@ -547,6 +553,7 @@ fn crawler_view(
     match latest {
         Some(c) => CrawlerView {
             state: "idle",
+            mood: health_mood(c.health_score),
             label: "CRAWLER IDLE".to_owned(),
             rows: vec![
                 (
@@ -565,10 +572,36 @@ fn crawler_view(
         },
         None => CrawlerView {
             state: "idle",
+            mood: "idle",
             label: "NO CRAWLS YET".to_owned(),
             rows: vec![("next".to_owned(), "run your first crawl".to_owned())],
             pct: None,
             poll_url: None,
         },
+    }
+}
+
+/// The mascot's mood for a finished crawl, banded like the audit's health swatch.
+fn health_mood(score: Option<i16>) -> &'static str {
+    match score {
+        Some(80..) => "ok",
+        Some(50..80) => "warning",
+        Some(_) => "error",
+        None => "idle",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mascot_reads_the_latest_health_score() {
+        assert_eq!(health_mood(Some(100)), "ok");
+        assert_eq!(health_mood(Some(80)), "ok");
+        assert_eq!(health_mood(Some(79)), "warning");
+        assert_eq!(health_mood(Some(50)), "warning");
+        assert_eq!(health_mood(Some(49)), "error");
+        assert_eq!(health_mood(None), "idle");
     }
 }

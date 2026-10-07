@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}CodoSEO{% endblock %}</title>
 <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>
-<link rel="icon" href="{{ crate::assets::url("favicon.svg") }}" type="image/svg+xml">
+{% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% include "partials/icons_head.html" %}
 <link rel="stylesheet" href="{{ crate::assets::url("app.css") }}">
-<script>(function(){try{var t=localStorage.getItem("codoseo-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}})()</script>
+<script>(function(){try{var t=localStorage.getItem("codoseo-theme");if(t==="dark"||t==="system")document.documentElement.dataset.theme=t}catch(e){}})()</script>
 <script src="{{ crate::assets::url("htmx.min.js") }}" defer></script>
 <script src="{{ crate::assets::url("app.js") }}" defer></script>
 {% block head %}{% endblock %}

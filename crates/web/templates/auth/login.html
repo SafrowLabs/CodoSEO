@@ -1,9 +1,10 @@
 {% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
 {% block title %}Sign in — CodoSEO{% endblock %}
 {% block body %}
 <div class="auth">
   <div class="auth-side">
-    <a class="brand" href="/" style="width:auto;padding:0;height:auto"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+    <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
     <div class="auth-form">{% include "auth/_card.html" %}</div>
     <div class="auth-foot">Open source under AGPL-3.0 · <a href="https://codoseo.com" style="text-decoration:underline">codoseo.com</a></div>
   </div>

@@ -1,17 +1,19 @@
 name: npm wrapper
 
+# Paused: runs only by hand (Actions, "Run workflow") while features land. Restore the
+# triggers below the `on:` key to run it automatically again.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "**"
-    paths:
-      - "npm/**"
-      - ".github/workflows/npm.yml"
-  pull_request:
-    paths:
-      - "npm/**"
-      - ".github/workflows/npm.yml"
+  # push:
+  #   branches:
+  #     - "**"
+  #   paths:
+  #     - "npm/**"
+  #     - ".github/workflows/npm.yml"
+  # pull_request:
+  #   paths:
+  #     - "npm/**"
+  #     - ".github/workflows/npm.yml"
 
 permissions:
   contents: read

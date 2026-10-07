@@ -1,12 +1,12 @@
 {% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
 {% block title %}Audit of {{ main.domain }} — CodoSEO{% endblock %}
 {% block head %}
-<meta name="robots" content="noindex, nofollow">
 <link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
 {% endblock %}
 {% block body %}
 <header class="l-top l-wrap">
-  <a class="brand" href="/" style="width:auto;padding:0;height:auto"><span class="owl"><i></i><i></i></span><span>CodoSEO</span></a>
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
   <nav class="l-nav"><a class="btn btn-sm" href="/">Audit another site</a></nav>
 </header>
 <main class="l-wrap q-page">

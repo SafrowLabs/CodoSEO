@@ -1,9 +1,10 @@
 {% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
 {% block title %}{% match view %}{% when ResumeView::Confirm %}Keep monitoring?{% when ResumeView::Resumed %}Monitoring is back on{% when ResumeView::Expired %}Link expired{% endmatch %} — CodoSEO{% endblock %}
 {% block body %}
 <div class="solo-page">
   <div class="solo-card">
-    <div style="display:flex;justify-content:center;margin-bottom:18px"><span class="owl" style="width:44px;height:44px;border-radius:12px 12px 16px 16px;gap:3px;padding-bottom:6px"><i style="width:16px;height:16px"></i><i style="width:16px;height:16px"></i></span></div>
+    <div class="solo-mascot">{% call m::tile() %}{% endcall %}</div>
     {% match view %}
     {% when ResumeView::Confirm %}
     <h1>Keep monitoring your sites?</h1>

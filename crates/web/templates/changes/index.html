@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{%- import "partials/mascot.html" as m -%}
 {% block main %}
 <div class="page">
 {% if let Some(e) = empty %}
   <div class="page-head"><h1>Crawl comparison</h1></div>
   <div class="card">
     <div class="empty">
-      <div class="art"><svg class="icon"><use href="#i-changes"/></svg></div>
+      {% call m::eyes("idle", "mascot-empty") %}{% endcall %}
       <h2>{{ e.title }}</h2>
       <p>{{ e.text }}</p>
       {% if e.can_run %}<button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>{% endif %}
@@ -30,7 +31,7 @@
       </div>
       {% if let Some(msg) = c.nothing %}
       <div class="empty">
-        <div class="art"><svg class="icon"><use href="#i-check"/></svg></div>
+        {% call m::eyes("ok", "mascot-empty") %}{% endcall %}
         <h2>No changes</h2>
         <p>{{ msg }}</p>
       </div>

@@ -1,28 +1,29 @@
 name: release
 
-# Tag `vX.Y.Z` (or `vX.Y.Z-rc.N`) builds the binaries, the container image and publishes everything.
-# Manual runs (workflow_dispatch) and pull requests that touch the release machinery build and
-# check everything but publish nothing; see RELEASING.md.
+# Builds the binaries and the container image and publishes everything; see RELEASING.md.
+# Paused to manual-only: pushing a `v*` tag no longer starts it. Run it by hand on the tag ref with
+# `dry_run` unticked to publish; on a branch, or with `dry_run` ticked, it checks and publishes
+# nothing. Restore the commented triggers to release on tag push again.
 
 on:
-  push:
-    tags:
-      - "v*"
+  # push:
+  #   tags:
+  #     - "v*"
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Build and check everything, publish nothing. Untick on a tag ref to (re)publish."
         type: boolean
         default: true
-  pull_request:
-    paths:
-      - ".github/workflows/release.yml"
-      - "packaging/**"
-      - "npm/**"
-      - "Dockerfile"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/*/Cargo.toml"
+  # pull_request:
+  #   paths:
+  #     - ".github/workflows/release.yml"
+  #     - "packaging/**"
+  #     - "npm/**"
+  #     - "Dockerfile"
+  #     - "Cargo.toml"
+  #     - "Cargo.lock"
+  #     - "crates/*/Cargo.toml"
 
 permissions:
   contents: read
