@@ -1,0 +1,81 @@
+name: deploy
+
+# Every push to main that touches the app builds one linux/amd64 image, pushes it to ghcr.io as
+# `:main` and `:sha-<short>`, then calls the Coolify resource's deploy webhook. Coolify builds
+# nothing: it runs deploy/compose.cloud.yml with CODOSEO_VERSION=main, and `pull_policy: always`
+# there makes every deploy fetch the new `:main`. Rollback: set CODOSEO_VERSION to an older
+# `sha-…` tag in Coolify and deploy.
+#
+# No release artefacts here (other architectures, binaries, crates, npm, Homebrew): that is
+# release.yml, run by hand. Secrets: COOLIFY_WEBHOOK (the resource's deploy webhook URL) and
+# COOLIFY_TOKEN (an API token with the Deploy permission only). Without them the image is still
+# pushed and the deploy step is skipped. See docs/deploy-coolify.md, "Auto-deploy from main".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# A newer push supersedes a build still running; the deploy itself is quick.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/safrowlabs/codoseo
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag
+        id: tag
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:main
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=main-${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=deploy-amd64
+          cache-to: type=gha,mode=max,scope=deploy-amd64
+
+      # Last, after the image is in the registry, as Coolify's GitHub Actions guide prescribes.
+      - name: Deploy on Coolify
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_WEBHOOK" ] || [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::notice::Coolify secrets not set; pushed $IMAGE:main but did not deploy."
+            exit 0
+          fi
+          curl --fail-with-body -sS -X POST "$COOLIFY_WEBHOOK" \
+            -H "Authorization: Bearer $COOLIFY_TOKEN"

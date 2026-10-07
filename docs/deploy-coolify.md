@@ -38,21 +38,28 @@ Both `web` and `worker` depend on `migrate` completing successfully, so one depl
 
 ### Auto-deploy from main
 
-To have every merge to `main` go live with no GitHub Actions involved, let Coolify build the repo
-itself. `compose.coolify.yml` at the repo root is the two-container layout above, but builds the
-image from the `Dockerfile` instead of pulling it from ghcr.io.
+Every merge to `main` that touches the app goes live without Coolify building anything, the way
+Coolify's [GitHub Actions guide](https://coolify.io/docs/applications/ci-cd/github/actions)
+describes: `.github/workflows/deploy.yml` builds one `linux/amd64` image, pushes it to ghcr.io as
+`:main` and `:sha-<short>`, then calls the resource's deploy webhook. Coolify pulls `:main` (the
+services have `pull_policy: always`), runs `migrate` and restarts `web` and `worker`. Changes that
+touch only docs, `site/` or other workflows don't deploy.
 
-1. In Coolify, connect the repository through a **GitHub App** source (Sources, add GitHub App,
-   install it on `SafrowLabs/CodoSEO`). The app is what tells Coolify about pushes.
-2. Create a new resource from that source: branch `main`, build pack **Docker Compose**, base
-   directory `/`, compose file `/compose.coolify.yml`.
-3. Set the same environment variables and domain as in the steps above (domain on `web`, port 8080).
-4. In the resource's settings, turn on **Auto Deploy**. From then on, a push to `main` (a merged
-   pull request) builds and deploys; pushes to other branches do nothing.
+One-time setup:
 
-The Rust build happens on the Coolify server: several minutes, and about 2–3 GB of memory during
-the link step. Later builds reuse BuildKit's cache. Migrations still run first on every deploy. If
-the server is too small to build, keep `deploy/compose.cloud.yml` and deploy a released image instead.
+1. Keep the resource on `deploy/compose.cloud.yml` and set `CODOSEO_VERSION=main` on it.
+2. Turn **Auto Deploy off** on the resource; GitHub Actions decides when to deploy, after the image
+   exists.
+3. Enable API access (Settings, Advanced) and create an API token with only the **Deploy**
+   permission (Keys & Tokens, API Tokens). Deploy can trigger, restart and stop deployments; it can't
+   read secrets or change configuration. Leave the API IP allowlist empty: GitHub's runners have no
+   fixed addresses.
+4. Add two repository secrets (Settings, Secrets and variables, Actions): `COOLIFY_WEBHOOK`, the
+   Deploy webhook URL from the resource's Webhooks tab, and `COOLIFY_TOKEN`.
+
+Rollback: set `CODOSEO_VERSION` on the resource to an earlier `sha-…` tag and deploy. The ghcr.io
+package is public; if it ever goes private, log the Coolify server's Docker in to ghcr.io. Releases
+(all architectures, binaries, crates, npm, Homebrew) stay with `release.yml`, run by hand.
 
 ### Behaviour worth knowing
 
