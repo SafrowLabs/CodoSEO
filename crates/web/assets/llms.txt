@@ -2,15 +2,17 @@
 
 > Open-source SEO crawler and site monitor built in Rust. Know the moment your SEO breaks.
 
-CodoSEO is a command-line tool and upcoming web platform for technical SEO auditing and monitoring. It crawls a website, runs 44 SEO checks across 9 categories, scores the site 0–100, and can diff two audits to catch regressions in CI. Built by SafrowLabs (the team behind RankOrg) and licensed AGPL-3.0.
+CodoSEO is a command-line tool, web app and MCP server for technical SEO auditing and monitoring. Current release: 0.1.0-rc.1. It crawls a website, runs 44 SEO checks across 9 categories, scores the site 0–100, and can diff two audits to catch regressions in CI. Built by SafrowLabs (the team behind RankOrg) and licensed AGPL-3.0.
 
 ## Install
 
 ```
-cargo install codoseo
+brew install safrowlabs/codoseo/codoseo   # Homebrew (macOS, Linux)
+npx codoseo --help                        # npm
+cargo install codoseo                     # Cargo, Rust 1.88+
 ```
 
-Requires Rust 1.88+.
+Prebuilt binaries: https://github.com/SafrowLabs/CodoSEO/releases
 
 ## Commands
 
@@ -36,16 +38,31 @@ Table (default), JSON, Markdown, CSV. Use `--format json -o audit.json` to save 
 
 `--fail-on critical` exits 1 when a critical check fails. `diff --fail-on critical` exits 1 when a regression is detected. Use in GitHub Actions, GitLab CI, or any shell pipeline.
 
-## Coming soon
+## Web app and MCP server
 
-- **Web App**: hosted dashboard, scheduled crawls (weekly free / daily paid), change alerts via Slack, Discord, email and webhook, health score trends
-- **MCP Server**: connect CodoSEO to Claude, Cursor or any MCP-compatible AI assistant
+- **Web app**: hosted at https://codoseo.com or self-hosted with Docker Compose. Scheduled crawls, change detection between runs, alerts via Slack, Discord, email and webhook, health score trends
+- **MCP server**: `codoseo mcp` runs a local MCP server over stdio, so Claude, Cursor or any MCP-compatible AI assistant can crawl and audit sites. The hosted server is at https://codoseo.com/mcp
+- **REST API**: https://codoseo.com/api/v1, with an API key, for your monitored sites
+
+## Pricing
+
+- **Free** (hosted, available now): 1 monitored site, up to 500 pages per crawl, a scheduled crawl every week, 1 manual crawl a week, 30 days of history, email alerts, 100 API calls a day
+- **Pro and Agency** (hosted): coming soon, for more sites and bigger crawls
+- **Self-hosted**: free and open source (AGPL-3.0), unlimited sites
+- **No-signup audit**: a one-off audit of up to 100 pages at https://codoseo.com
+- The CLI and the local MCP server are free and need no account
 
 ## Links
 
 - Homepage: https://codoseo.com
+- Sign in: https://codoseo.com/login
+- About CodoSEObot: https://codoseo.com/bot
 - GitHub: https://github.com/SafrowLabs/CodoSEO
 - crates.io: https://crates.io/crates/codoseo
 - Docs (README): https://github.com/SafrowLabs/CodoSEO#readme
+- MCP docs: https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md
+- REST API docs: https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md
+- Self-hosting guide: https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md
 - License: AGPL-3.0
-- Built by: SafrowLabs — https://github.com/SafrowLabs
+- Built by: SafrowLabs — https://safrow.com (GitHub: https://github.com/SafrowLabs)
+- Sister product: RankOrg — https://rankorg.com

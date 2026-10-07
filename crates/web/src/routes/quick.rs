@@ -30,7 +30,7 @@ use super::sites::{FIRST_CRAWL_PRIORITY, check_public_target, parse_start_url, s
 use crate::abuse::{self, ClientIp};
 use crate::auth::magic::{self, AuditLink, LinkOutcome};
 use crate::auth::{email, session};
-use crate::config::Mode;
+use crate::config::{Mode, UmamiConfig};
 use crate::error::AppError;
 use crate::fmt;
 use crate::render::{Hx, html, hx_redirect};
@@ -298,6 +298,7 @@ impl UnlockCard {
 pub struct ReportPage {
     pub main: MainView,
     pub unlock: UnlockCard,
+    pub umami: Option<UmamiConfig>,
 }
 
 #[derive(Template)]
@@ -512,6 +513,7 @@ async fn report(
     let page = ReportPage {
         main: main_view(&state, &audit).await?,
         unlock: UnlockCard::new(audit.crawl.id),
+        umami: state.config.umami.clone(),
     };
     Ok((report_headers(), html(&page)?).into_response())
 }
@@ -601,6 +603,7 @@ async fn unlock(
     let page = ReportPage {
         main: main_view(&state, &audit).await?,
         unlock: card,
+        umami: state.config.umami.clone(),
     };
     Ok((status, report_headers(), html(&page)?).into_response())
 }

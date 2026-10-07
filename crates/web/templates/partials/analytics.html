@@ -1,0 +1,3 @@
+{#- Umami on the public pages, when UMAMI_SCRIPT_URL and UMAMI_WEBSITE_ID are set (cloud only).
+    The including page needs an `umami: Option<UmamiConfig>` field. -#}
+{% if let Some(u) = umami %}<script defer src="{{ u.script_url }}" data-website-id="{{ u.website_id }}"></script>{% endif %}

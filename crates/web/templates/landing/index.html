@@ -1,89 +1,497 @@
-{% extends "solo_base.html" %}
-{%- import "partials/mascot.html" as m -%}
+{#- The cloud landing page at `/` for signed-out visitors. It stands alone rather than extending
+    solo_base.html: it has its own design tokens (home.css) and needs none of the app's CSS,
+    htmx or app.js. Keep the FAQPage JSON-LD in step with the visible FAQ section. -#}
 {%- import "partials/seo.html" as seo -%}
-{% block title %}CodoSEO — Open-source SEO crawler and site monitor{% endblock %}
-{% block robots %}<meta name="robots" content="index, follow, max-image-preview:large">{% endblock %}
-{% block head %}
-<meta name="description" content="Know the moment your SEO breaks. Paste your URL for a free 100-page audit with a health score and your top issues, then monitor the site and get alerts when something important changes. Open source, built in Rust.">
-{% call seo::social(base, "/", "CodoSEO — Open-source SEO crawler and site monitor", "Free 100-page SEO audit in about a minute. {} checks, a 0–100 health score, and alerts when your SEO breaks."|format(checks)) %}{% endcall %}
-<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodoSEO — Open-Source SEO Crawler &amp; Site Monitor</title>
+<meta name="description" content="Know the moment your SEO breaks. Open-source SEO crawler and site monitor: {{ checks }} checks, a 0–100 health score, change alerts and CI gates. Free plan available.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+{% call seo::social(base, "/", "CodoSEO — Open-Source SEO Crawler & Site Monitor", "Know the moment your SEO breaks. {} SEO checks, health scoring, change alerts and CI gates. Start free."|format(checks)) %}{% endcall %}
+{% include "partials/icons_head.html" %}
+{#- Theme before paint: light unless the visitor picked dark or system (same key as app.js). #}
+<script>(function(){var d=document.documentElement,p="light";try{p=localStorage.getItem("codoseo-theme")||"light"}catch(e){}if(p!=="dark"&&p!=="system")p="light";var t=p==="dark"||(p==="system"&&window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";d.setAttribute("data-theme",t);d.setAttribute("data-theme-pref",p);d.className+=" js";var m=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<m.length;i++)m[i].setAttribute("content",t==="dark"?"#0A1411":"#F4F4F0")})()</script>
+<link rel="stylesheet" href="{{ crate::assets::url("home.css") }}">
+<script src="{{ crate::assets::url("home.js") }}" defer></script>
 {% if turnstile_site_key.is_some() %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}
+{% include "partials/analytics.html" %}
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
-{"@type":"Organization","@id":"{{ base }}/#organization","name":"SafrowLabs","url":"{{ base }}","sameAs":["https://github.com/SafrowLabs"],"brand":{"@id":"{{ base }}/#brand"}},
+{"@type":"Organization","@id":"{{ base }}/#organization","name":"SafrowLabs","url":"https://safrow.com","logo":{"@type":"ImageObject","url":"{{ base }}{{ crate::assets::url("icon-512.png") }}","width":512,"height":512},"image":"{{ base }}/og.png","sameAs":["https://github.com/SafrowLabs"],"brand":{"@id":"{{ base }}/#brand"}},
 {"@type":"Brand","@id":"{{ base }}/#brand","name":"CodoSEO","logo":"{{ base }}{{ crate::assets::url("icon-512.png") }}"},
 {"@type":"WebSite","@id":"{{ base }}/#website","name":"CodoSEO","url":"{{ base }}/","inLanguage":"en","publisher":{"@id":"{{ base }}/#organization"}},
-{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","url":"{{ base }}","image":"{{ base }}/og.png","brand":{"@id":"{{ base }}/#brand"},"license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@id":"{{ base }}/#organization"}}
+{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","alternateName":["codoseo","CodoSEO CLI"],"applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","description":"Open-source SEO crawler and site monitor built in Rust. Crawls a site, runs {{ checks }} SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema, scores the site 0–100, tracks changes between crawls and alerts on regressions. Ships as a CLI, a web app, an MCP server and a REST API.","url":"{{ base }}/","image":"{{ base }}/og.png","screenshot":"{{ base }}/og.png","downloadUrl":"https://crates.io/crates/codoseo","installUrl":"https://github.com/SafrowLabs/CodoSEO/releases","license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"brand":{"@id":"{{ base }}/#brand"},"author":{"@id":"{{ base }}/#organization"},"publisher":{"@id":"{{ base }}/#organization"},"offers":{"@type":"Offer","name":"Free","price":"0","priceCurrency":"USD"},"keywords":"SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker, MCP server"},
+{"@type":"FAQPage","mainEntity":[
+{"@type":"Question","name":"Is CodoSEO free?","acceptedAnswer":{"@type":"Answer","text":"Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site. Paid plans for more sites and bigger crawls are coming soon."}},
+{"@type":"Question","name":"Do I need an account?","acceptedAnswer":{"@type":"Answer","text":"Not for the CLI or the local MCP server, and not for a one-off audit of up to {{ quick_pages }} pages in the hosted app. A free account lets you monitor a site on a schedule and get alerts."}},
+{"@type":"Question","name":"How do I install the CLI?","acceptedAnswer":{"@type":"Answer","text":"Run brew install safrowlabs/codoseo/codoseo, npx codoseo, or cargo install codoseo (Rust 1.88 or newer). Prebuilt binaries for Linux, macOS and Windows are on the GitHub releases page, and a Docker image is at ghcr.io/safrowlabs/codoseo."}},
+{"@type":"Question","name":"What does CodoSEO check?","acceptedAnswer":{"@type":"Answer","text":"{{ checks }} checks across {{ categories.len() }} categories: response codes and redirects, indexability (noindex, canonicals, robots.txt), on-page (titles, meta descriptions, H1s), content (thin and duplicate pages, image alt text), links (broken links, orphan pages, click depth), technical (HTTPS, mixed content, slow responses), sitemaps, Open Graph and structured data (JSON-LD, hreflang)."}},
+{"@type":"Question","name":"Will crawling slow down my site?","acceptedAnswer":{"@type":"Answer","text":"CodoSEO is built to be polite. It obeys robots.txt and Crawl-delay, slows down on its own when a server answers 429 or 503, and identifies itself as CodoSEObot so you can spot it in your logs."}},
+{"@type":"Question","name":"Does it work with AI assistants?","acceptedAnswer":{"@type":"Answer","text":"Yes. CodoSEO includes an MCP server. Run codoseo mcp on your machine, or connect the hosted server at {{ base }}/mcp, and Claude, Cursor or any MCP client can run audits and read the results."}},
+{"@type":"Question","name":"Can I self-host the web app?","acceptedAnswer":{"@type":"Answer","text":"Yes. Docker Compose brings it up in three commands and it needs nothing but Postgres. The self-hosting guide covers email, sign-in, reverse proxies, upgrades and backups."}}
+]}
 ]}
 </script>
-{% endblock %}
-{% block body %}
-<header class="l-top l-wrap">
-  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
-  <nav class="l-nav">
-    <a href="https://github.com/SafrowLabs/CodoSEO">GitHub</a>
-    <a href="/bot">Bot</a>
-    <a class="btn btn-sm" href="/login">Sign in</a>
-  </nav>
+</head>
+<body>
+
+<!-- Wordmark eye, defined once and reused by every wordmark on the page -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="wm-o" viewBox="0 0 24 24"><g class="wo-b"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="4.2"/><circle class="wo-p" cx="13.5" cy="12.5" r="3.4" fill="#F0C42C"/></g></symbol>
+</svg>
+
+<header class="top">
+  <div class="wrap bar">
+    <a href="/" class="wm brand" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
+    <nav aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#checks">Checks</a>
+      <a href="#ai">AI agents</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#docs">Docs</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="bar-r">
+      <button class="theme" id="theme" type="button" aria-label="Theme: light. Switch to dark" title="Theme: light">
+        <svg class="i-light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+        <svg class="i-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <svg class="i-system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/></svg>
+      </button>
+      <a class="ghost gh" href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
+      <a class="ghost" href="/login">Sign in</a>
+      <a class="solid" href="#audit">Start free audit</a>
+    </div>
+  </div>
 </header>
 
 <main>
-  <section class="l-hero l-wrap">
-    <div class="l-hero-copy">
-      <p class="l-eyebrow">Open-source SEO crawler and monitor</p>
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <div class="pills"><span class="hot">Open source</span><span>Free plan</span><span>Written in Rust</span><span>AGPL-3.0</span></div>
       <h1>Know the moment your <mark>SEO breaks.</mark></h1>
-      <p class="l-lead">Paste your site's address. In about a minute you get a health score and your top issues, with no sign-up. Then let CodoSEO watch the site and tell you when something important changes.</p>
-      <form class="l-form" method="post" action="/audit" hx-boost="false">
-        <input class="input input-lg" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="l-hint" required autofocus>
-        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile l-ts" data-sitekey="{{ key }}" data-theme="light"></div><script>(function(){var t=document.documentElement.dataset.theme;if(t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches))document.currentScript.previousElementSibling.dataset.theme="dark"})()</script>
-        {#- The widget follows the theme in use: light unless dark (or "system" on a dark OS) is chosen. #}
-        <script>(function(){var t=document.documentElement.dataset.theme;if(t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches))document.currentScript.previousElementSibling.dataset.theme="dark"})()</script>{% endif %}
-        <button class="btn btn-primary btn-lg" type="submit">Audit my site</button>
+      <p class="lede">CodoSEO crawls your site, runs {{ checks }} SEO checks, scores it from 0 to 100 and shows exactly what changed since the last crawl. You hear about a broken page the day it ships, not when rankings drop.</p>
+      <form class="audit-form" method="post" action="/audit">
+        <div class="audit">
+          <input id="audit" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="audit-hint"{% if error.is_some() %} aria-invalid="true" autofocus{% endif %} required>
+          <button class="btn" type="submit" data-umami-event="audit-start">Audit my site <span class="ar" aria-hidden="true">→</span></button>
+        </div>
+        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
       </form>
-      {% if let Some(err) = error %}<p class="error-text" role="alert" style="margin-top:10px"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}
-      <p class="l-hint" id="l-hint">Free · first 100 pages · no account needed</p>
+      {% if let Some(err) = error %}<p class="err" role="alert">{{ err }}</p>{% endif %}
+      <div class="notes" id="audit-hint"><span>Free · first {{ quick_pages }} pages · no signup</span><span>Prefer the terminal? <a href="#install-options">Install the CLI</a></span></div>
     </div>
-    <div class="l-hero-art" aria-hidden="true">
-      <div class="l-watch" data-watch>{% call m::tile("rest") %}{% endcall %}</div>
-      <ul class="l-moods">
-        <li>{% call m::eyes("crawling", "mascot-sm") %}{% endcall %}Crawling</li>
-        <li>{% call m::eyes("ok", "mascot-sm") %}{% endcall %}All clear</li>
-        <li>{% call m::eyes("warning", "mascot-sm") %}{% endcall %}Warnings</li>
-        <li>{% call m::eyes("error", "mascot-sm") %}{% endcall %}Broken</li>
+
+    <div class="stage">
+      <div class="peek" id="peek" data-mascot="look" data-follow aria-hidden="true"></div>
+      <div class="panel shot" role="img" aria-label="Sample crawl in progress">
+        <div class="ptop">
+          <span class="url"><span data-mascot="crawl" data-small id="dot"></span>https://northwind-outdoor.com</span>
+          <span class="state" id="state">Crawling…</span>
+        </div>
+        <div class="stats">
+          <div><small>Crawled</small><b id="s-crawled">0</b></div>
+          <div><small>Queue</small><b id="s-queue">0</b></div>
+          <div><small>URL/s</small><b id="s-rate">0</b></div>
+          <div><small>Issues</small><b id="s-issues">0</b></div>
+        </div>
+        <div class="prog" id="progw"><i id="prog"></i></div>
+        <div class="row head"><span>Address</span><span>Status</span><span class="i">Indexability</span><span style="text-align:right">Time</span></div>
+        <div class="feed" id="feed"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="product">
+  <div class="shead">
+    <div><div class="eyebrow">One engine, four ways in</div><h2>Audit from a browser, a terminal or a chat.</h2></div>
+    <p>The same crawler and the same {{ checks }} checks power the web app, the CLI, the MCP server and the REST API. A finding means the same thing wherever you see it.</p>
+  </div>
+  <div class="ways mt">
+    <a class="way" href="/login">
+      <span class="way-k">Web app</span>
+      <h3>Monitor the sites you care about</h3>
+      <p>Scheduled crawls, a URL explorer, change tracking and alerts. Use the hosted app or run it on your own servers.</p>
+      <code>{{ host }}</code>
+    </a>
+    <a class="way" href="#cli">
+      <span class="way-k">CLI</span>
+      <h3>One binary for audits and CI</h3>
+      <p>Crawl a site, inspect a page, follow a redirect chain or compare two audits. No account and no API key.</p>
+      <code>codoseo crawl &lt;URL&gt;</code>
+    </a>
+    <a class="way" href="#ai">
+      <span class="way-k">MCP server</span>
+      <h3>Give your AI agent an SEO crawler</h3>
+      <p>Claude, Cursor and other MCP clients can audit a site, list the pages behind an issue and compare crawls.</p>
+      <code>codoseo mcp</code>
+    </a>
+    <a class="way" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener">
+      <span class="way-k">REST API</span>
+      <h3>Your audits as JSON</h3>
+      <p>Read health scores, failing pages and changes for your monitored sites, or queue a crawl, with one API key.</p>
+      <code>GET /api/v1/sites</code>
+    </a>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="features">
+  <div class="shead">
+    <div><div class="eyebrow">Features</div><h2>Everything you need to keep a site healthy.</h2></div>
+    <p>Crawl, score, compare and alert. CodoSEO finds what broke, names the pages behind it and tells you when it happened.</p>
+  </div>
+  <div class="feats mt">
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h6"/><path d="m15 17.5 2.2 2.2 4.3-4.4"/></svg></span>
+      <h3>{{ checks }} SEO checks</h3>
+      <p>Status codes, indexability, titles and descriptions, content, links, HTTPS, sitemaps, Open Graph and structured data.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 17 4.2-5"/></svg></span>
+      <h3>Health score from 0 to 100</h3>
+      <p>Each check is weighted by severity and by how many pages it affects, so one number tells you where a site stands.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v13M3.5 13.5 7 17l3.5-3.5"/><path d="M17 20V7M13.5 10.5 17 7l3.5 3.5"/></svg></span>
+      <h3>Change tracking</h3>
+      <p>Every crawl is compared with the one before: new and fixed issues, status codes, titles and redirect chains that changed.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
+      <h3>Scheduled crawls</h3>
+      <p>Crawl every week or every day. The hosted app runs them for you, so nothing has to stay switched on.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></span>
+      <h3>Alerts where you work</h3>
+      <p>Get told about regressions by email, Slack, Discord or webhook, the same day the broken change goes live.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span>
+      <h3>URL explorer</h3>
+      <p>Filter every crawled URL by status, indexability, content type or check. See a SERP preview, inlinks and headers.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7 10 3 2.5L7 15M12.5 15H17"/></svg></span>
+      <h3>CI gates</h3>
+      <p><code class="k">--fail-on critical</code> fails the build when a deploy breaks SEO. Works in GitHub Actions, GitLab CI or any shell.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 5 6.2v5.3c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6.2z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg></span>
+      <h3>Polite by default</h3>
+      <p>Obeys robots.txt and Crawl-delay, backs off on 429 and 503, and identifies itself as <a href="/bot">CodoSEObot</a>.</p>
+    </div>
+    <div class="feat">
+      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></svg></span>
+      <h3>Self-host in three commands</h3>
+      <p>The web app needs only Postgres: no Redis and no outside requests. Your crawl data stays on your servers.</p>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="checks">
+  <div class="shead">
+    <div><div class="eyebrow">Site audit</div><h2>{{ checks }} checks after every crawl.</h2></div>
+    <p>Each check passes or fails and names the pages behind it. Results roll up into a health score from 0 to 100, weighted by severity and by how many pages are affected.</p>
+  </div>
+  <div class="cats mt">
+    {%- for c in categories %}
+    <div class="cat"><div class="ch"><h3>{{ c.name }}</h3><span class="n">{{ c.count }} check{% if c.count != 1 %}s{% endif %}</span></div><ul>{% for h in c.highlights %}<li class="{{ h.severity }}">{{ h.label }}</li>{% endfor %}</ul></div>
+    {%- endfor %}
+  </div>
+  <div class="legend"><span class="r">Critical</span><span class="a">Warning</span><span class="n0">Notice</span><a href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener">Full check reference →</a></div>
+</section>
+
+<section class="blk wrap reveal" id="cli">
+  <div class="shead">
+    <div><div class="eyebrow">The CLI</div><h2>Point it at a URL. Read what's broken.</h2></div>
+    <p>One command crawls the site, runs every check and prints a report. Output is a table, JSON, Markdown or CSV, so you can read it, pipe it into <code class="k">jq</code> or save it as a file.</p>
+  </div>
+  <div class="panel term mt">
+    <div class="tabs"><span>codoseo crawl https://example.com --format md</span></div>
+<pre><span class="c-dim">Preflight … ok
+Crawling  ━━━━━━━━━━━━━━━━━━━━  142 pages  28s</span>
+
+<b># CodoSEO report for https://example.com/</b>
+
+- <b>Health score:</b> <span class="c-g"><b>84 / 100</b></span>
+- <b>Checks:</b> {{ checks - 7 }} of {{ checks }} checks passed
+
+<span class="c-r"><b>## Critical (1)</b></span>
+<span class="c-dim">| Check                      | Slug                 | Affected | Examples                   |</span>
+| <span class="c-r">Page returns a 4xx error</span>   | <span class="c-l">http_4xx</span>             | 1 page   | /old-page                  |
+
+<span class="c-a"><b>## Warning (2)</b></span>
+| <span class="c-a">Page links to a broken URL</span> | <span class="c-l">links_to_broken</span>      | 1 page   | /contact                   |
+| <span class="c-a">Meta description is missing</span> | <span class="c-l">description_missing</span>  | 6 pages  | /blog/…                    |
+
+<b>## Summary</b>
+- Pages: <span class="c-g"><b>142</b></span> <span class="c-dim">(138 indexable)</span>
+- Status: <span class="c-g">2xx 138</span> <span class="c-dim">· 3xx 3 ·</span> <span class="c-r">4xx 1</span> <span class="c-dim">· 5xx 0</span>
+- Avg response: <span class="c-g">210 ms</span></pre>
+  </div>
+  <div class="cmds">
+    <code>codoseo check &lt;URL&gt;</code><code>codoseo robots &lt;URL&gt;</code><code>codoseo redirects &lt;URL&gt;</code><code>codoseo diff before.json after.json</code>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="diff">
+  <div class="band">
+    <div>
+      <h2>Crawl again tomorrow and see the diff.</h2>
+      <p>Every crawl is compared with the last one. In the web app it happens on its own; on the command line, <code class="k">codoseo diff</code> compares any two saved audits. New issues, resolved issues, score changes, status changes, title changes and redirect regressions.</p>
+    </div>
+    <div class="panel">
+      <div class="dhead"><span>before.json → after.json</span><span>Score 84 → 79</span></div>
+      <div class="diff r"><div class="t">Became noindex <em>/pricing</em></div><div class="l"><div>− meta robots: index, follow</div><div class="c-r">+ meta robots: noindex</div></div></div>
+      <div class="diff r"><div class="t">Status changed <em>/journal/old-trail-guide</em></div><div class="l"><div>− 200 OK</div><div class="c-r">+ 404 Not Found</div></div></div>
+      <div class="diff a"><div class="t">Title changed <em>/tents</em></div><div class="l"><div>− Tents &amp; Shelters | Northwind Outdoor</div><div class="c-a">+ Tents</div></div></div>
+      <div class="diff a"><div class="t">Redirect chain grew <em>/sale</em></div><div class="l"><div>− /sale → /deals</div><div class="c-a">+ /sale → /deals → /offers → /</div></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="ci">
+  <div class="split">
+    <div>
+      <div class="eyebrow">CI/CD</div>
+      <h2>Fail the build before rankings drop.</h2>
+      <p>CodoSEO is one static binary with no browser and no config file, so it drops into any pipeline. <code class="k">--fail-on critical</code> exits with code 1 when the threshold is reached.</p>
+      <div class="facts">
+        <div><b>Fast and polite</b><span>Async crawling in Rust that still respects robots.txt and Crawl-delay, and backs off on 429 and 503.</span></div>
+        <div><b>Exit codes for CI</b><span>Gate a deploy on <code class="k">critical</code> or <code class="k">warning</code> findings, for crawls and for diffs.</span></div>
+        <div><b>Plain output</b><span>Table, JSON, Markdown and CSV. Audit files are portable and diffable.</span></div>
+        <div><b>Embed the crates</b><span>Core, crawler, checks and diff are published separately for your own Rust projects.</span></div>
+      </div>
+    </div>
+    <div class="panel term">
+      <div class="tabs"><span>.github/workflows/seo.yml</span></div>
+<pre><span class="c-y">- name:</span> SEO audit
+  <span class="c-y">run:</span> |
+    cargo install codoseo
+    codoseo crawl {% raw %}${{ env.SITE_URL }}{% endraw %} \
+      --format json -o audit.json \
+      --fail-on critical
+
+<span class="c-dim"># later: compare against the last release</span>
+<span class="c-y">- name:</span> SEO diff
+  <span class="c-y">run:</span> codoseo diff before.json audit.json --fail-on critical</pre>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="ai">
+  <div class="split">
+    <div class="panel term">
+      <div class="tabs"><span>Claude Code</span></div>
+<pre><span class="c-dim"># run it on your machine, no account</span>
+claude mcp add codoseo -- npx -y codoseo mcp
+
+<span class="c-dim"># or connect the hosted server</span>
+claude mcp add --transport http codoseo \
+  {{ base }}/mcp
+
+<span class="c-y">&gt;</span> Audit example.com and list the pages
+  with broken links.</pre>
+    </div>
+    <div>
+      <div class="eyebrow">For AI agents</div>
+      <h2>Ask your agent to audit the site.</h2>
+      <p>CodoSEO ships an MCP server, so Claude, Cursor or any MCP client can crawl a site, pull the pages behind an issue, check a redirect chain and compare two audits from a single prompt.</p>
+      <div class="facts">
+        <div><b>Local, no account</b><span><code class="k">codoseo mcp</code> runs over stdio on your machine and can reach staging and internal hosts.</span></div>
+        <div><b>Hosted for your sites</b><span>Connect <code class="k">{{ host }}/mcp</code> with an API key to ask about the sites you monitor.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="pricing">
+  <div class="shead">
+    <div><div class="eyebrow">Pricing</div><h2>Start free. Stay free if you like.</h2></div>
+    <p>The hosted free plan monitors one site. The CLI, the MCP server and the self-hosted web app are free and open source. Paid plans for more sites and bigger crawls are coming soon.</p>
+  </div>
+  <div class="prices mt">
+    <div class="price hl">
+      <div class="ph"><h3>Free</h3><span class="tag ship">Available now</span></div>
+      <div class="amt"><b>$0</b><span>forever</span></div>
+      <p>Hosted monitoring for one site.</p>
+      <ul>
+        {%- for f in free %}
+        <li>{{ f }}</li>
+        {%- endfor %}
       </ul>
+      <a class="btn" href="/login" data-umami-event="signup-free">Create a free account <span class="ar" aria-hidden="true">→</span></a>
     </div>
-  </section>
+    <div class="price soon">
+      <div class="ph"><h3>Pro and Agency</h3><span class="tag plan">Coming soon</span></div>
+      <div class="amt"><b class="tbd">Coming soon</b></div>
+      <p>For agencies and growing teams.</p>
+      <ul>
+        <li>More monitored sites</li>
+        <li>Larger and longer crawls</li>
+        <li>Daily scheduled crawls</li>
+        <li>Slack, Discord and webhook alerts</li>
+        <li>A year of history</li>
+        <li>Higher API limits</li>
+      </ul>
+      <span class="btn dis" aria-disabled="true">Pricing coming soon</span>
+    </div>
+    <div class="price">
+      <div class="ph"><h3>Self-hosted</h3><span class="tag ship">Open source</span></div>
+      <div class="amt"><b>$0</b><span>AGPL-3.0</span></div>
+      <p>The full web app on your own servers.</p>
+      <ul>
+        {%- for f in self_hosted %}
+        <li>{{ f }}</li>
+        {%- endfor %}
+        <li>Your data stays on your servers</li>
+      </ul>
+      <a class="btn out" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Read the self-hosting guide</a>
+    </div>
+  </div>
+  <p class="fine">Want to try it first? Run a one-off audit of up to {{ quick_pages }} pages <a href="#audit">from the box at the top</a>, no signup needed. The CLI is free and has no page cap of its own.</p>
+</section>
 
-  <section class="l-wrap l-steps" data-reveal aria-labelledby="how">
-    <h2 id="how">How it works</h2>
-    <ol>
-      <li><b>1 · Paste your URL.</b><span>We crawl up to 100 pages politely, at 5 requests per second, as CodoSEObot.</span></li>
-      <li><b>2 · See your score.</b><span>A 0–100 health score from {{ checks }} checks, and the issues that matter most.</span></li>
-      <li><b>3 · Keep watching.</b><span>Give your email to unlock every URL per issue, a 500-page crawl and weekly monitoring with alerts.</span></li>
-    </ol>
-  </section>
+<section class="blk wrap reveal" id="docs">
+  <div class="shead">
+    <div><div class="eyebrow">Documentation</div><h2>Up and running in minutes.</h2></div>
+    <p>Guides for every way to run CodoSEO, from a first crawl to a self-hosted install. The docs live with the code on GitHub.</p>
+  </div>
+  <div class="docs mt">
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#quick-start" target="_blank" rel="noopener"><b>Quick start</b><span>Your first crawl, a saved audit and a diff.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#commands" target="_blank" rel="noopener"><b>CLI reference</b><span>Every command and flag, with defaults.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener"><b>Check reference</b><span>All {{ checks }} checks with severity and slug.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#ci-integration" target="_blank" rel="noopener"><b>CI integration</b><span>Exit codes, baselines and a GitHub Actions example.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md" target="_blank" rel="noopener"><b>MCP server</b><span>Connect Claude, Cursor and other MCP clients.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener"><b>REST API</b><span>Sites, issues, pages and changes as JSON.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener"><b>Self-hosting</b><span>Docker Compose, email, sign-in, upgrades and backups.</span></a>
+    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/configuration.md" target="_blank" rel="noopener"><b>Configuration</b><span>Every environment variable for the web app.</span></a>
+  </div>
+  <div class="get mt" id="install-options">
+    <div>
+      <h3>Install the CLI your way</h3>
+      <p>Prebuilt binaries for Linux, macOS and Windows are on the releases page, each with a checksum. Every crate is on crates.io, so you can embed the crawler or the checks in your own project.</p>
+      <div class="crates">
+        <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">codoseo</a>
+        <a href="https://crates.io/crates/codoseo-core" target="_blank" rel="noopener">codoseo-core</a>
+        <a href="https://crates.io/crates/codoseo-crawler" target="_blank" rel="noopener">codoseo-crawler</a>
+      </div>
+    </div>
+    <div class="panel term">
+      <div class="tabs"><span>Install</span></div>
+<pre><span class="c-dim"># Homebrew (macOS, Linux)</span>
+brew install safrowlabs/codoseo/codoseo
 
-  <section class="l-wrap l-cats" data-reveal aria-labelledby="checks">
-    <h2 id="checks">{{ checks }} checks after every crawl</h2>
-    <ul>
-      <li><b>Indexability</b><span>noindex, canonicals, robots.txt blocks</span></li>
-      <li><b>Links and redirects</b><span>broken links, chains, loops</span></li>
-      <li><b>On-page</b><span>titles, descriptions, headings</span></li>
-      <li><b>Content</b><span>thin and duplicate pages</span></li>
-      <li><b>Technical and sitemap</b><span>status codes, mixed content, sitemap health</span></li>
-      <li><b>Social and schema</b><span>Open Graph, structured data</span></li>
-    </ul>
-  </section>
+<span class="c-dim"># npm</span>
+npx codoseo --help
 
-  <section class="l-wrap l-oss" data-reveal>
-    <h2>Open source. Run it yourself.</h2>
-    <p>CodoSEO is one Rust binary under AGPL-3.0: a CLI, an MCP server for your coding agent, and a self-hostable web app. The cloud runs the same code.</p>
-    <p><code>cargo install codoseo</code></p>
-  </section>
+<span class="c-dim"># Cargo (Rust 1.88+)</span>
+cargo install codoseo
+
+<span class="c-dim"># Docker</span>
+docker run --rm ghcr.io/safrowlabs/codoseo crawl https://example.com</pre>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap reveal" id="faq">
+  <div class="shead">
+    <div><div class="eyebrow">FAQ</div><h2>Questions, answered.</h2></div>
+    <p>Something else on your mind? <a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Open an issue on GitHub</a> and we'll get back to you.</p>
+  </div>
+  <div class="faq mt">
+    <details open>
+      <summary>Is CodoSEO free?</summary>
+      <p>Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site. Paid plans for more sites and bigger crawls are coming soon.</p>
+    </details>
+    <details>
+      <summary>Do I need an account?</summary>
+      <p>Not for the CLI or the local MCP server, and not for a one-off audit of up to {{ quick_pages }} pages in the hosted app. A free account lets you monitor a site on a schedule and get alerts.</p>
+    </details>
+    <details>
+      <summary>How do I install the CLI?</summary>
+      <p>Run <code class="k">brew install safrowlabs/codoseo/codoseo</code>, <code class="k">npx codoseo</code>, or <code class="k">cargo install codoseo</code> (Rust 1.88 or newer). Prebuilt binaries for Linux, macOS and Windows are on the <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">GitHub releases page</a>, and a Docker image is at <code class="k">ghcr.io/safrowlabs/codoseo</code>.</p>
+    </details>
+    <details>
+      <summary>What does CodoSEO check?</summary>
+      <p>{{ checks }} checks across {{ categories.len() }} categories: response codes and redirects, indexability (noindex, canonicals, robots.txt), on-page (titles, meta descriptions, H1s), content (thin and duplicate pages, image alt text), links (broken links, orphan pages, click depth), technical (HTTPS, mixed content, slow responses), sitemaps, Open Graph and structured data (JSON-LD, hreflang).</p>
+    </details>
+    <details>
+      <summary>Will crawling slow down my site?</summary>
+      <p>CodoSEO is built to be polite. It obeys robots.txt and Crawl-delay, slows down on its own when a server answers 429 or 503, and identifies itself as <a href="/bot">CodoSEObot</a> so you can spot it in your logs.</p>
+    </details>
+    <details>
+      <summary>Does it work with AI assistants?</summary>
+      <p>Yes. CodoSEO includes an MCP server. Run <code class="k">codoseo mcp</code> on your machine, or connect the hosted server at <code class="k">{{ base }}/mcp</code>, and Claude, Cursor or any MCP client can run audits and read the results.</p>
+    </details>
+    <details>
+      <summary>Can I self-host the web app?</summary>
+      <p>Yes. Docker Compose brings it up in three commands and it needs nothing but Postgres. The <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">self-hosting guide</a> covers email, sign-in, reverse proxies, upgrades and backups.</p>
+    </details>
+  </div>
+</section>
+
+<section class="wrap reveal">
+  <div class="cta">
+    <div class="cta-eyes" data-mascot="look" data-follow aria-hidden="true"></div>
+    <h2>Run your first audit in a minute.</h2>
+    <div class="acts">
+      <a class="btn" href="#audit">Start free audit <span class="ar" aria-hidden="true">→</span></a>
+      <a class="btn out" href="#install-options">Install the CLI</a>
+      <a class="btn out" href="#docs">Read the docs</a>
+    </div>
+  </div>
+</section>
 </main>
 
-<footer class="l-wrap l-foot">
-  <span>© SafrowLabs · AGPL-3.0</span>
-  <span><a href="https://github.com/SafrowLabs/CodoSEO">GitHub</a> · <a href="/bot">About CodoSEObot</a> · <a href="/llms.txt">llms.txt</a></span>
+<footer>
+  <div class="wrap">
+    <div class="fgrid">
+      <div class="fbrand">
+        <a href="/" class="wm" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
+        <p>Know the moment your SEO breaks. An open-source SEO crawler and site monitor, written in Rust.</p>
+      </div>
+      <div class="fcol">
+        <p class="fh">Product</p>
+        <a href="#features">Features</a>
+        <a href="#checks">SEO checks</a>
+        <a href="#ai">AI agents</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/login">Sign in</a>
+      </div>
+      <div class="fcol">
+        <p class="fh">Docs</p>
+        <a href="https://github.com/SafrowLabs/CodoSEO#quick-start" target="_blank" rel="noopener">Quick start</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO#commands" target="_blank" rel="noopener">CLI reference</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md" target="_blank" rel="noopener">MCP server</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener">REST API</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Self-hosting</a>
+        <a href="/bot">CodoSEObot</a>
+      </div>
+      <div class="fcol">
+        <p class="fh">Open source</p>
+        <a href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">crates.io</a>
+        <a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Issues</a>
+      </div>
+      <div class="fcol">
+        <p class="fh">From the makers</p>
+        <a href="https://safrow.com/" target="_blank" rel="noopener">SafrowLabs</a>
+        <a href="https://rankorg.com/" target="_blank" rel="noopener">RankOrg</a>
+      </div>
+    </div>
+    <div class="fbot">
+      <span>© 2026 SafrowLabs. CodoSEO is open source under AGPL-3.0.</span>
+      <span>Built by <a href="https://safrow.com/" target="_blank" rel="noopener">SafrowLabs</a>, the team behind <a href="https://rankorg.com/" target="_blank" rel="noopener">RankOrg</a>.</span>
+    </div>
+  </div>
 </footer>
-{% endblock %}
+</body>
+</html>

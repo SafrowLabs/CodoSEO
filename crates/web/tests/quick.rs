@@ -105,11 +105,29 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         r#"<meta name="twitter:image" content="https://codoseo.com/og.png">"#,
         r#""@type":"SoftwareApplication""#,
         r#""logo":"https://codoseo.com/assets/icon-512."#,
-        // The hero mascot that watches the cursor.
-        "data-watch",
+        // The hero mascot that follows the cursor, and the page's own styles and script.
+        "data-follow",
+        "/assets/home.",
+        // The marketing sections, with numbers taken from the code.
+        r#"id="pricing""#,
+        r#"id="faq""#,
+        r#""@type":"FAQPage""#,
+        "44 checks after every crawl",
+        "Up to 500 pages per crawl",
+        "A scheduled crawl every week",
+        "Free · first 100 pages · no signup",
+        "https://codoseo.com/mcp",
+        r#"href="https://rankorg.com/""#,
+        r#"href="https://safrow.com/""#,
     ] {
         assert!(res.body.contains(needle), "{needle}: {}", res.body);
     }
+    // The GitHub Actions example keeps its expression rather than being read as a template.
+    assert!(res.body.contains("${{ env.SITE_URL }}"));
+    assert!(
+        !res.body.contains("data-website-id"),
+        "no analytics without UMAMI_*"
+    );
     assert!(
         !res.body.contains(r#"content="noindex"#),
         "the landing page is for search engines"
@@ -145,6 +163,23 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
     let res = selfhost.post("/audit", "url=example.com", None).await;
     assert_eq!(res.status, StatusCode::NOT_FOUND);
     assert_eq!(count(&selfhost, "SELECT count(*) FROM crawls").await, 0);
+}
+
+#[tokio::test]
+async fn umami_loads_on_the_public_pages_when_configured() {
+    let app = TestApp::with_config(cloud_config_with(&[
+        ("UMAMI_SCRIPT_URL", "https://stats.example.com/script.js"),
+        ("UMAMI_WEBSITE_ID", "site-123"),
+    ]))
+    .await;
+    let tag = r#"<script defer src="https://stats.example.com/script.js" data-website-id="site-123"></script>"#;
+    for path in ["/", "/bot"] {
+        let res = app.get(path, None).await;
+        assert!(res.body.contains(tag), "{path}: {}", res.body);
+    }
+    let crawl = crawl_id(&submit(&app, "example.com").await);
+    let res = app.get(&format!("/audit/{crawl}"), None).await;
+    assert!(res.body.contains(tag), "report: {}", res.body);
 }
 
 #[tokio::test]
