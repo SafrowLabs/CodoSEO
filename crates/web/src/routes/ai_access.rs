@@ -247,13 +247,16 @@ pub struct Overview {
     pub failed: Option<String>,
     pub tiles: Vec<Tile>,
     pub incidents: Vec<IncidentView>,
-    /// What the screen watches, for the empty "Open issues" state.
-    pub watched: &'static str,
+    /// The empty "Open issues" state: its heading, its text and the mascot's mood.
+    pub clear: (&'static str, &'static str, &'static str),
     /// Shown instead of the bots table when robots.txt gave no verdicts.
     pub robots_callout: Option<Callout>,
     /// `robots.txt · HTTP 200`
     pub robots_aside: String,
     pub bot_groups: Vec<BotGroup>,
+    /// Bots whose status conflicts with the intent ("Needs attention").
+    pub bot_attention: usize,
+    pub bot_total: usize,
     pub engines: Vec<EngineRow>,
     pub declared: Vec<DeclaredItem>,
     pub important: Vec<ImportantRow>,
@@ -347,6 +350,8 @@ pub struct BotGroup {
     pub stance: &'static str,
     pub stance_class: &'static str,
     pub count: String,
+    /// `2 conflicts`, or empty.
+    pub conflicts: String,
     pub rows: Vec<BotRow>,
 }
 
@@ -370,6 +375,10 @@ pub struct BotRow {
     pub status: &'static str,
     pub status_class: &'static str,
     pub status_tip: &'static str,
+    /// The status conflicts with the intent: the row stays under "Needs attention".
+    pub attention: bool,
+    /// The last such row of its group (it draws no bottom border while the others are hidden).
+    pub last_attention: bool,
 }
 
 pub struct CauseChip {
@@ -386,6 +395,7 @@ pub struct EngineRow {
     pub reach: String,
     pub reach_class: &'static str,
     pub eligible: String,
+    pub eligible_class: &'static str,
     pub limited: String,
     pub limited_class: &'static str,
     pub excluded: String,
@@ -480,6 +490,7 @@ async fn render_page(
         .filter(|i| i.severity == Severity::Critical)
         .count();
 
+    let bot_groups = bot_groups(report, &intent);
     let view = Overview {
         checked: fmt::ago(latest.created_at),
         checked_full: fmt::datetime(latest.created_at),
@@ -492,10 +503,30 @@ async fn render_page(
         }),
         tiles: tiles(report, &intent, open.len(), critical),
         incidents,
-        watched: "Watching robots.txt for every known AI bot, and the page markup each AI engine honours, on every crawl.",
+        clear: if report.robots.availability == RobotsAvailability::Unknown
+            && report.html_important() == 0
+        {
+            (
+                "Nothing to check yet",
+                "The latest crawl could read neither robots.txt nor an HTML page. Check that the site is up, then run a crawl.",
+                "idle",
+            )
+        } else {
+            (
+                "No AI access issues",
+                "Watching robots.txt for every known AI bot, and the page markup each AI engine honours, on every crawl.",
+                "ok",
+            )
+        },
         robots_callout: robots_callout(report),
         robots_aside: robots_aside(report),
-        bot_groups: bot_groups(report, &intent),
+        bot_attention: bot_groups
+            .iter()
+            .flat_map(|g| &g.rows)
+            .filter(|r| r.attention)
+            .count(),
+        bot_total: registry().bots.len(),
+        bot_groups,
         engines: engine_rows(report, &intent),
         declared: declared_items(&report.declared),
         important: report
@@ -574,6 +605,10 @@ fn tiles(report: &AccessReport, intent: &Intent, open: usize, critical: usize) -
             sub_class: "",
         });
     } else {
+        let why = match report.robots.availability {
+            RobotsAvailability::Unknown => "robots.txt not checked",
+            _ => "robots.txt not readable",
+        };
         for (label, bots) in [
             ("AI search bots allowed", &search),
             ("Training bots blocked", &training),
@@ -582,7 +617,7 @@ fn tiles(report: &AccessReport, intent: &Intent, open: usize, critical: usize) -
                 label,
                 value: "—".to_owned(),
                 of: of(bots),
-                sub: "robots.txt not readable".to_owned(),
+                sub: why.to_owned(),
                 class: "c-ghost",
                 sub_class: "",
             });
@@ -637,14 +672,14 @@ fn tiles(report: &AccessReport, intent: &Intent, open: usize, critical: usize) -
     out
 }
 
+/// What robots.txt answered, beside the bots table's filter (which carries the bot count).
 fn robots_aside(report: &AccessReport) -> String {
-    let bots = plural(registry().bots.len(), "bot", "bots");
     match (report.robots.availability, report.robots.status) {
-        (RobotsAvailability::Ok, Some(s)) => format!("robots.txt · HTTP {s} · {bots}"),
+        (RobotsAvailability::Ok, Some(s)) => format!("robots.txt · HTTP {s}"),
         (RobotsAvailability::Missing, Some(s)) => {
             format!("no robots.txt (HTTP {s}): every bot may crawl")
         }
-        _ => bots,
+        _ => plural(registry().bots.len(), "bot", "bots"),
     }
 }
 
@@ -907,12 +942,22 @@ fn bot_groups(report: &AccessReport, intent: &Intent) -> Vec<BotGroup> {
                 return None;
             }
             let stance = intent.purpose_stance(p);
+            let mut rows: Vec<BotRow> = bots.iter().map(|b| bot_row(report, intent, b)).collect();
+            if let Some(last) = rows.iter_mut().rev().find(|r| r.attention) {
+                last.last_attention = true;
+            }
+            let conflicts = rows.iter().filter(|r| r.attention).count();
             Some(BotGroup {
                 label: purpose_label(p),
                 stance: stance_label(stance),
                 stance_class: stance_class(stance),
                 count: plural(bots.len(), "bot", "bots"),
-                rows: bots.iter().map(|b| bot_row(report, intent, b)).collect(),
+                conflicts: if conflicts == 0 {
+                    String::new()
+                } else {
+                    plural(conflicts, "conflict", "conflicts")
+                },
+                rows,
             })
         })
         .collect()
@@ -923,10 +968,17 @@ fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
     let stance = intent.effective(bot);
     let total = report.important.len();
     let home_allowed = access.and_then(|a| a.home_allowed);
+    let honoured = bot.honours_robots == Honours::Yes;
+    // Coloured by the intent: green where robots.txt does what you want, red or amber where it
+    // doesn't, plain where you have no preference.
     let (home, home_class, home_tip) = match (access, home_allowed) {
         (Some(a), Some(true)) => (
             "Allowed".to_owned(),
-            "c-ok",
+            match stance {
+                Stance::Allow => "c-ok",
+                Stance::Block if honoured => "c-warn",
+                _ => "",
+            },
             rule_tip(a.home_rule.as_ref(), a.group, &bot.token),
         ),
         (Some(a), Some(false)) => (
@@ -934,13 +986,16 @@ fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
                 Some(r) => format!("Blocked · line {}", r.line),
                 None => "Blocked".to_owned(),
             },
-            "c-err",
+            match stance {
+                Stance::Allow => "c-err",
+                Stance::Block => "c-ok",
+                Stance::Any => "",
+            },
             rule_tip(a.home_rule.as_ref(), a.group, &bot.token),
         ),
         _ => ("—".to_owned(), "c-ghost", String::new()),
     };
     let blocked_n = access.map_or(0, |a| a.blocked.len());
-    let honoured = bot.honours_robots == Honours::Yes;
     let (honours, honours_class) = match bot.honours_robots {
         Honours::Yes => ("Yes", ""),
         Honours::Partial | Honours::No => ("May ignore", "c-muted"),
@@ -989,9 +1044,15 @@ fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
         } else {
             format!("{blocked_n}/{total}")
         },
-        blocked_class: if blocked_n > 0 { "c-err" } else { "c-muted" },
+        blocked_class: match (blocked_n, stance) {
+            (0, _) => "c-muted",
+            (_, Stance::Allow) => "c-err",
+            _ => "",
+        },
         honours,
         honours_class,
+        attention: status == "Conflicts",
+        last_attention: false,
         status,
         status_class,
         status_tip,
@@ -1067,6 +1128,7 @@ fn engine_rows(report: &AccessReport, intent: &Intent) -> Vec<EngineRow> {
                     if n > 0 { class } else { "c-ghost" },
                 )
             };
+            let (eligible, eligible_class) = count(html_pages.saturating_sub(affected), "");
             let (limited, limited_class) = count(limited, "c-warn");
             let (excluded, excluded_class) = count(excluded, "c-err");
             let site_pages = access.map_or(0, |a| a.site.pages);
@@ -1077,7 +1139,8 @@ fn engine_rows(report: &AccessReport, intent: &Intent) -> Vec<EngineRow> {
                 page_controls: e.page_controls,
                 reach,
                 reach_class,
-                eligible: fmt::thousands(html_pages.saturating_sub(affected) as i64),
+                eligible,
+                eligible_class,
                 limited,
                 limited_class,
                 excluded,
@@ -1578,7 +1641,7 @@ async fn apply_intent(state: &AppState, site: &Site, intent: &Intent) -> Result<
             IntentError::Invalid(m) => AppError::BadRequest(m),
             IntentError::Db(e) => e.into(),
         })?;
-    let has_report = geo::latest_report(&state.pool, site.id).await?.is_some();
+    let has_report = geo::has_report(&state.pool, site.id).await?;
     let (opened, resolved) = geo::reevaluate_quietly(&state.pool, site.id).await?;
     Ok(outcome(has_report, opened, resolved))
 }

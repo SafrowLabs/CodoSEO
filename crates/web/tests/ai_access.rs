@@ -608,3 +608,182 @@ async fn the_changes_screen_renders_every_ai_kind() {
         assert!(alerts[ai..].contains(label), "{label} sits under AI access");
     }
 }
+
+#[tokio::test]
+async fn an_incident_id_only_works_under_its_own_site() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    // Bo has a site of his own and aims at Ana's incident through it.
+    let (bo, bo_cookie) = app.login("bo@example.com").await;
+    let bo_site = app.site(&bo, "bo.example").await;
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/incidents/{id}/intended", bo_site.id),
+            "",
+            Some(&bo_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    // Ana's own second site can't reach it either.
+    let (ana, _) = app.login("ana@example.com").await;
+    let other = app.site(&ana, "two.example").await;
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/incidents/{id}/intended", other.id),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    // A non-numeric id is a bad request, not a server error.
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/incidents/nope/intended", site.id),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert!(res.status.is_client_error(), "{}", res.status);
+    assert_eq!(
+        geo::open_incidents(app.pool(), site.id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        geo::get_intent(app.pool(), site.id).await.unwrap(),
+        Default::default()
+    );
+}
+
+#[tokio::test]
+async fn posts_from_another_origin_are_refused() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    let base = format!("/s/{}/ai-access", site.id);
+    for path in [
+        format!("{base}/intent"),
+        format!("{base}/intent/reset"),
+        format!("{base}/incidents/{id}/intended"),
+    ] {
+        let res = app
+            .post_with_headers(
+                &path,
+                "p.training=block",
+                Some(&cookie),
+                &[("origin", "https://evil.example")],
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::FORBIDDEN, "{path}");
+    }
+    assert_eq!(
+        geo::get_intent(app.pool(), site.id).await.unwrap(),
+        Default::default()
+    );
+    assert_eq!(
+        geo::open_incidents(app.pool(), site.id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn unknown_form_values_are_a_bad_request() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let path = format!("/s/{}/ai-access/intent", site.id);
+    for form in [
+        "p.training=sometimes",
+        "p.nothing=allow",
+        "b.NoSuchBot=allow",
+        "b.GPTBot=maybe",
+        "p.search=%3Cscript%3E",
+    ] {
+        let res = app.post_hx(&path, form, Some(&cookie)).await;
+        assert_eq!(res.status, StatusCode::BAD_REQUEST, "{form}");
+        assert!(!res.body.contains("<script>"), "{form}: {}", res.body);
+    }
+    assert_eq!(
+        geo::get_intent(app.pool(), site.id).await.unwrap(),
+        Default::default()
+    );
+}
+
+#[tokio::test]
+async fn robots_txt_content_is_escaped_everywhere_it_shows() {
+    let (app, site, cookie) = setup().await;
+    let robots = "User-agent: *\nAllow: /\nContent-Signal: search=yes, x=<script>alert(1)</script>\nContent-Usage: /\"><svg/onload=alert(2)> train-ai=n\n\nUser-agent: OAI-SearchBot\nDisallow: /\n";
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    app.finished_crawl_with_robots(&site, pages(), (200, robots), Vec::new())
+        .await;
+    let body = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(!body.contains("<script>alert(1)"), "{body}");
+    assert!(!body.contains("<svg/onload"), "{body}");
+    assert!(
+        body.contains("x=&#60;script&#62;alert(1)&#60;/script&#62;"),
+        "{body}"
+    );
+    assert!(
+        body.contains("/&#34;&#62;&#60;svg/onload=alert(2)&#62;"),
+        "{body}"
+    );
+    // The changes screen shows the declared preferences change as text too.
+    let changes = app
+        .get(&format!("/s/{}/changes", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(!changes.contains("<script>alert(1)"), "{changes}");
+}
+
+#[tokio::test]
+async fn the_bots_table_opens_on_what_needs_attention() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let body = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
+        .await
+        .body;
+    // Nothing conflicts: every bot shows, and "Needs attention" can't be picked.
+    let total = registry().bots.len();
+    assert!(
+        body.contains(
+            r#"id="aia-f-attn" value="attention" aria-controls="aia-bots-table" disabled>"#
+        ),
+        "{body}"
+    );
+    assert!(body.contains(r#"id="aia-f-all" value="all" aria-controls="aia-bots-table" checked>"#));
+    assert!(body.contains(&format!(r#"All bots<span class="n">{total}</span>"#)));
+    assert!(!body.contains(r#"class="is-attn"#));
+
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    let body = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(
+        body.contains(
+            r#"id="aia-f-attn" value="attention" aria-controls="aia-bots-table" checked>"#
+        )
+    );
+    assert!(body.contains(r#"Needs attention<span class="n">1</span>"#));
+    assert!(body.contains(r#"<tr class="is-attn is-attn-last">"#));
+    assert_eq!(body.matches(r#"<tr class="is-attn"#).count(), 1);
+    assert_eq!(body.matches(r#"<tr class="is-ok">"#).count(), total - 1);
+    // The group says how many conflict; the others say none do (shown while filtered).
+    assert!(body.contains(r#"<span class="aia-group-flag">1 conflict</span>"#));
+    assert!(body.contains(r#"<tbody class="is-clear">"#));
+}

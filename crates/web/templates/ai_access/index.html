@@ -41,9 +41,9 @@
     {% if v.incidents.is_empty() %}
     <div class="card">
       <div class="empty aia-clear">
-        {% call m::eyes("ok", "mascot-empty") %}{% endcall %}
-        <h2>No AI access issues</h2>
-        <p>{{ v.watched }}</p>
+        {% call m::eyes(v.clear.2, "mascot-empty") %}{% endcall %}
+        <h2>{{ v.clear.0 }}</h2>
+        <p>{{ v.clear.1 }}</p>
       </div>
     </div>
     {% else %}
@@ -53,23 +53,33 @@
     {% endif %}
   </section>
 
-  <section class="card aia-section" aria-labelledby="aia-bots">
-    <div class="card-head"><h2 class="card-title" id="aia-bots">AI bots</h2><span class="card-aside">{{ v.robots_aside }}</span></div>
+  <section class="card aia-section aia-botcard" aria-labelledby="aia-bots">
+    <div class="card-head aia-bots-head">
+      <h2 class="card-title" id="aia-bots">AI bots</h2>
+      {% if v.robots_callout.is_none() %}
+      <fieldset class="tabs aia-filter">
+        <legend class="sr-only">Show</legend>
+        <input class="sr-only" type="radio" name="aia-filter" id="aia-f-attn" value="attention" aria-controls="aia-bots-table"{% if v.bot_attention > 0 %} checked{% else %} disabled{% endif %}><label class="tab" for="aia-f-attn">Needs attention<span class="n">{{ v.bot_attention }}</span></label>
+        <input class="sr-only" type="radio" name="aia-filter" id="aia-f-all" value="all" aria-controls="aia-bots-table"{% if v.bot_attention == 0 %} checked{% endif %}><label class="tab" for="aia-f-all">All bots<span class="n">{{ v.bot_total }}</span></label>
+      </fieldset>
+      {% endif %}
+      <span class="card-aside">{{ v.robots_aside }}</span>
+    </div>
     {% if let Some(c) = v.robots_callout %}
     <div class="card-pad">
       <div class="aia-callout" role="note"><svg class="icon"><use href="#i-alert"/></svg><div><b>{{ c.title }}</b><p>{{ c.text }}</p></div></div>
     </div>
     {% else %}
     <div class="aia-scroll">
-      <table class="aia-table aia-bots-table">
+      <table class="aia-table aia-bots-table" id="aia-bots-table">
         <thead>
           <tr><th scope="col">Bot</th><th scope="col">Your intent</th><th scope="col">Home page</th><th scope="col" class="r">Important pages blocked</th><th scope="col">Follows robots.txt</th><th scope="col">Status</th></tr>
         </thead>
         {% for g in v.bot_groups %}
-        <tbody>
-          <tr class="aia-group"><th colspan="6" scope="colgroup"><span class="aia-group-name">{{ g.label }}</span><span class="aia-group-meta">intent <span class="badge {{ g.stance_class }}">{{ g.stance }}</span><span class="aia-dot">·</span>{{ g.count }}</span></th></tr>
+        <tbody{% if g.conflicts.is_empty() %} class="is-clear"{% endif %}>
+          <tr class="aia-group"><th colspan="6" scope="colgroup"><span class="aia-group-name">{{ g.label }}</span><span class="aia-group-meta">intent <span class="badge {{ g.stance_class }}">{{ g.stance }}</span><span class="aia-dot">·</span>{{ g.count }}{% if g.conflicts.is_empty() %}<span class="aia-group-none"><span class="aia-dot">·</span>no conflicts</span>{% else %}<span class="aia-dot">·</span><span class="aia-group-flag">{{ g.conflicts }}</span>{% endif %}</span></th></tr>
           {% for r in g.rows %}
-          <tr>
+          <tr class="{% if r.attention %}is-attn{% if r.last_attention %} is-attn-last{% endif %}{% else %}is-ok{% endif %}">
             <th scope="row" class="aia-bot-cell"><span class="aia-token">{{ r.token }}</span>{% if r.control %}<span class="tag" title="{{ r.notes }}">control token</span>{% endif %}<span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></th>
             <td data-label="Intent"><span class="aia-inline"><span class="badge {{ r.stance_class }}">{{ r.stance }}</span>{% if r.overridden %}<span class="tag" title="Set for this bot, not by its purpose">override</span>{% endif %}</span></td>
             <td data-label="Home"><span class="{{ r.home_class }}"{% if !r.home_tip.is_empty() %} title="{{ r.home_tip }}"{% endif %}>{{ r.home }}</span></td>
@@ -86,7 +96,7 @@
   </section>
 
   <section class="card aia-section" aria-labelledby="aia-answers">
-    <div class="card-head"><h2 class="card-title" id="aia-answers">AI answers</h2><span class="card-aside">the page markup each engine documents</span></div>
+    <div class="card-head"><h2 class="card-title" id="aia-answers">AI answers</h2><span class="card-aside">the markup each engine documents</span></div>
     <div class="aia-scroll">
       <table class="aia-table aia-engines-table">
         <thead>
@@ -99,7 +109,7 @@
             <th scope="row" class="aia-bot-cell"><span class="aia-engine">{{ e.name }}</span><span class="aia-sub"><span class="mono">{{ e.crawler }}</span> · intent {{ e.stance }}</span></th>
             <td data-label="Reach"><span class="{{ e.reach_class }}">{{ e.reach }}</span></td>
             {% if e.page_controls %}
-            <td data-label="Eligible" class="r num">{{ e.eligible }}</td>
+            <td data-label="Eligible" class="r num"><span class="{{ e.eligible_class }}">{{ e.eligible }}</span></td>
             <td data-label="Limited" class="r num"><span class="{{ e.limited_class }}">{{ e.limited }}</span></td>
             <td data-label="Excluded" class="r num"><span class="{{ e.excluded_class }}">{{ e.excluded }}</span></td>
             <td data-label="Found" class="aia-wide">{% if e.causes.is_empty() %}<span class="c-ghost">nothing</span>{% else %}<span class="aia-chips">{% for c in e.causes %}<span class="chip" title="{{ c.tip }}">{{ c.label }}</span>{% endfor %}</span>{% endif %}</td>

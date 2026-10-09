@@ -410,6 +410,60 @@ async fn an_intent_change_resolves_and_opens_quietly_without_changes() {
     assert_eq!(total, 1);
 }
 
+/// `(last_seen_crawl_id, last_seen_at)` of the site's open incident of this kind.
+async fn last_seen(pool: &PgPool, site: Uuid, kind: &str) -> (Uuid, time::OffsetDateTime) {
+    sqlx::query_as(
+        "SELECT last_seen_crawl_id, last_seen_at FROM ai_incidents \
+         WHERE site_id = $1 AND kind = $2 AND resolved_at IS NULL",
+    )
+    .bind(site)
+    .bind(kind)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn only_a_crawl_moves_last_seen_never_an_intent_change() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let second = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    // Pretend the crawl that saw it ran a while ago.
+    let then = time::macros::datetime!(2026-01-02 03:04:05 UTC);
+    sqlx::query("UPDATE ai_incidents SET last_seen_at = $2 WHERE site_id = $1")
+        .bind(site)
+        .bind(then)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        last_seen(&db.pool, site, "bots_blocked").await,
+        (second, then)
+    );
+
+    // An intent change that keeps it open (and opens another one) only re-reads the stored
+    // report: nothing was seen again, twice over.
+    let intent = Intent {
+        purposes: [(Purpose::Training, Stance::Block)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    let (opened, resolved) = geo::reevaluate_quietly(&db.pool, site).await.unwrap();
+    assert_eq!((opened, resolved), (1, 0));
+    geo::reevaluate_quietly(&db.pool, site).await.unwrap();
+    assert_eq!(
+        last_seen(&db.pool, site, "bots_blocked").await,
+        (second, then)
+    );
+
+    // The next crawl that still finds it moves it.
+    let third = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let (crawl, at) = last_seen(&db.pool, site, "bots_blocked").await;
+    assert_eq!(crawl, third);
+    assert!(at > then);
+}
+
 #[tokio::test]
 async fn reevaluating_after_a_failed_crawl_keeps_what_that_report_could_not_judge() {
     let db = TestDb::new().await;

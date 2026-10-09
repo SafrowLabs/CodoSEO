@@ -38,7 +38,7 @@
       <button class="btn btn-primary" type="submit"><svg class="icon"><use href="#i-check"/></svg>Save intent</button>
       <a class="btn btn-ghost" href="{{ base }}/ai-access">Cancel</a>
       <span class="grow"></span>
-      <button class="btn btn-ghost" type="submit" form="intent-reset"{% if !custom %} disabled title="Already the defaults"{% endif %}>Reset to defaults</button>
+      <button class="btn btn-ghost" type="submit" form="intent-reset" aria-label="Reset to defaults"{% if !custom %} disabled title="Already the defaults"{% endif %}><span class="aia-wide-only">Reset to defaults</span><span class="aia-narrow-only">Reset</span></button>
     </div>
   </form>
   <form id="intent-reset" method="post" action="{{ base }}/ai-access/intent/reset" hx-confirm="Reset every purpose and bot to the defaults?"></form>

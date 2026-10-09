@@ -219,6 +219,14 @@ where
     )
 }
 
+/// Whether the site has any stored report (without reading it).
+pub async fn has_report(pool: &PgPool, site_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM ai_reports WHERE site_id = $1)")
+        .bind(site_id)
+        .fetch_one(pool)
+        .await
+}
+
 /// When each of the site's stored reports was written, by crawl. An incident opened in the same
 /// transaction as its crawl's report (the same instant) was opened by that crawl; a quiet one
 /// opened later came from an intent change.
@@ -299,7 +307,8 @@ pub async fn open_counts(pool: &PgPool, site_id: Uuid) -> Result<(i64, i64), sql
 /// After an intent change: the findings on the site's latest report under the new intent,
 /// reconciled with the open incidents. Newly wanted findings open `quiet`, findings the intent
 /// made moot resolve with `resolution = 'intent'`, and no change rows or alerts are written: the
-/// owner just made the choice. Returns how many were (opened, resolved).
+/// owner just made the choice. Incidents that stay open keep their `last_seen_*`: no crawl saw
+/// them again. Returns how many were (opened, resolved).
 pub async fn reevaluate_quietly(
     pool: &PgPool,
     site_id: Uuid,
@@ -338,6 +347,7 @@ pub async fn reevaluate_quietly(
             quiet: true,
             changes: false,
             resolution: "intent",
+            seen: false,
         },
     )
     .await?;
@@ -422,6 +432,7 @@ pub(crate) async fn apply_geo(
             quiet: baseline,
             changes: !baseline,
             resolution: "fixed",
+            seen: true,
         },
     )
     .await?;
@@ -443,6 +454,9 @@ struct Mode {
     changes: bool,
     /// The `resolution` recorded on resolved incidents.
     resolution: &'static str,
+    /// A crawl read the site: the incidents it keeps open were seen again by it. A quiet
+    /// re-evaluation only re-reads the stored report, so their `last_seen_*` stay as they were.
+    seen: bool,
 }
 
 /// An open incident as read for reconciling.
@@ -517,7 +531,9 @@ async fn write_transitions(
                      ON CONFLICT (site_id, kind, subject) WHERE resolved_at IS NULL DO UPDATE SET \
                        severity = EXCLUDED.severity, title = EXCLUDED.title, \
                        summary = EXCLUDED.summary, evidence = EXCLUDED.evidence, \
-                       last_seen_crawl_id = EXCLUDED.last_seen_crawl_id, last_seen_at = now()",
+                       last_seen_crawl_id = CASE WHEN $10 THEN EXCLUDED.last_seen_crawl_id \
+                         ELSE ai_incidents.last_seen_crawl_id END, \
+                       last_seen_at = CASE WHEN $10 THEN now() ELSE ai_incidents.last_seen_at END",
                 )
                 .bind(site_id)
                 .bind(finding.kind.slug())
@@ -528,6 +544,7 @@ async fn write_transitions(
                 .bind(evidence)
                 .bind(crawl_id)
                 .bind(mode.quiet)
+                .bind(mode.seen)
                 .execute(&mut **tx)
                 .await?;
                 if mode.changes {
@@ -544,7 +561,9 @@ async fn write_transitions(
                 strip_nul(&mut evidence);
                 sqlx::query(
                     "UPDATE ai_incidents SET severity = $2::severity, title = $3, summary = $4, \
-                       evidence = $5, last_seen_crawl_id = $6, last_seen_at = now() \
+                       evidence = $5, \
+                       last_seen_crawl_id = CASE WHEN $7 THEN $6 ELSE last_seen_crawl_id END, \
+                       last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END \
                      WHERE id = $1",
                 )
                 .bind(id)
@@ -553,6 +572,7 @@ async fn write_transitions(
                 .bind(without_nul(&finding.summary))
                 .bind(evidence)
                 .bind(crawl_id)
+                .bind(mode.seen)
                 .execute(&mut **tx)
                 .await?;
                 if mode.changes && *escalated {

@@ -1058,6 +1058,22 @@ body.solo { overflow: auto; }
 .aia-group-name { margin-right: 10px; }
 .aia-group-meta { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; color: var(--muted-2); }
 .aia-dot { color: var(--ghost); }
+.aia-group-flag { color: var(--orange); font-weight: 500; }
+.aia-group-none { display: none; align-items: center; gap: 6px; color: var(--faint-2); }
+
+/* The bots table's filter: two radios styled as the app's tabs. "Needs attention" keeps the
+   rows that conflict with the intent and every group's header (with its counts); without
+   :has() support every row stays. */
+.aia-filter { border: 0; margin: 0 0 0 6px; padding: 0; min-width: 0; }
+.aia-filter .tab { cursor: pointer; }
+.aia-filter input:checked + .tab { background: var(--surface-sunk); color: var(--ink); font-weight: 500; }
+.aia-filter input:checked + .tab .n { color: var(--muted-2); }
+.aia-filter input:focus-visible + .tab { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.aia-filter input:disabled + .tab { cursor: default; color: var(--faint); background: transparent; }
+.aia-botcard:has(#aia-f-attn:checked) .aia-bots-table tr.is-ok { display: none; }
+.aia-botcard:has(#aia-f-attn:checked) .aia-group-none { display: inline-flex; }
+.aia-botcard:has(#aia-f-attn:checked) tbody.is-clear .aia-group th,
+.aia-botcard:has(#aia-f-attn:checked) tr.is-attn-last > * { border-bottom: 0; }
 .aia-bot-cell { font-weight: 400; min-width: 200px; }
 .aia-token { font: 500 12.5px var(--mono); color: var(--ink); }
 .aia-bot-cell .tag { margin-left: 6px; vertical-align: 1px; }
@@ -1143,6 +1159,8 @@ body.solo { overflow: auto; }
   border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-md);
 }
 
+.aia-narrow-only { display: none; }
+
 /* Hover tooltips mean nothing on a touch screen, and one at the edge would widen the page. */
 @media (max-width: 767px) {
   [data-tip]::after { display: none; }
@@ -1153,6 +1171,9 @@ body.solo { overflow: auto; }
 .change-link .icon { width: 13px; height: 13px; }
 .change-link:hover { text-decoration: underline; }
 .diff.diff-wrap > div { white-space: normal; overflow-wrap: anywhere; font-family: var(--font); font-size: 12.5px; }
+/* An AI access row has no URL to truncate: on a narrow screen its head wraps instead. */
+.change-head-wrap { flex-wrap: wrap; row-gap: 6px; }
+.change-head-wrap > :not(.grow) { flex: none; }
 .diff .after.resolved { background: var(--ok-bg); color: var(--ok); }
 .rules .rules-section th { text-align: left; padding: 14px 0 6px; font: 500 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
 .rules tbody tr.rules-section:first-child th { padding-top: 6px; }
@@ -1171,10 +1192,18 @@ body.solo { overflow: auto; }
   .aia-tile-sub { white-space: normal; }
   .aia-tiles .tile { padding: 14px; }
   .aia-tiles .tile-value { font-size: 22px; }
-  .aia-issue { padding: 14px 14px 12px 17px; }
-  .aia-issue-head { flex-wrap: wrap; }
-  .aia-issue-title { flex-basis: calc(100% - 90px); }
-  .aia-intend { order: 3; margin: 2px 0 0 -10px; flex-basis: 100%; }
+  /* An issue card: severity and title on top, "Mark intended" as a plain button at the end. */
+  .aia-issue { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; padding: 14px 14px 14px 17px; }
+  .aia-issue > * { grid-column: 1 / -1; }
+  .aia-issue-head { display: contents; }
+  .aia-issue-head .badge { grid-column: 1; align-self: start; }
+  .aia-issue-head .aia-issue-title { grid-column: 2; }
+  .aia-issue-head .aia-intend { grid-column: 1 / -1; order: 1; justify-self: start; margin: 12px 0 0; }
+  .aia-intend .btn { border-color: var(--line); background: var(--surface); }
+  .aia-rule { white-space: normal; overflow-wrap: anywhere; }
+  .aia-bots-head .aia-filter { order: 3; flex-basis: 100%; margin: 8px 0 0 -2px; }
+  .aia-wide-only { display: none; }
+  .aia-narrow-only { display: inline; }
   /* Tables become compact rows: the first cell is the row's title (with the status on its
      right), the other cells follow inline, each with its short label. */
   .aia-scroll { overflow: visible; }
@@ -1193,7 +1222,9 @@ body.solo { overflow: auto; }
   .aia-table tr.aia-group { display: block; padding: 10px 16px 8px; background: var(--surface-2); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
   .aia-table .aia-group th, .aia-table tbody + tbody .aia-group th { padding: 0; background: transparent; border: 0; }
   .aia-table tbody:first-of-type tr.aia-group { border-top: 0; }
-  .aia-group-meta { display: flex; margin-top: 4px; }
+  .aia-group-meta { display: flex; flex-wrap: wrap; margin-top: 4px; }
+  .aia-botcard:has(#aia-f-attn:checked) tbody.is-clear tr.aia-group,
+  .aia-botcard:has(#aia-f-attn:checked) tr.is-attn-last { border-bottom: 0; }
   .aia-table td .aia-lines { display: inline-grid; justify-items: start; vertical-align: top; }
   .aia-ev-engines { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
   .aia-ev-engines .aia-ev-detail { grid-column: 1 / -1; margin-bottom: 4px; }
