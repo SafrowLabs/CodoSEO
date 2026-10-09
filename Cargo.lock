@@ -722,9 +722,11 @@ name = "codoseo-geo"
 version = "0.1.0-rc.1"
 dependencies = [
  "codoseo-core",
+ "codoseo-diff",
  "reqwest",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]
