@@ -122,6 +122,33 @@ fn declared_value_parsers() {
 }
 
 #[test]
+fn declared_pairs_tolerate_spaces_around_equals() {
+    assert_eq!(
+        parse_content_signal("search = yes, ai-train =no ,ai-input= yes"),
+        [
+            ("search".into(), "yes".into()),
+            ("ai-train".into(), "no".into()),
+            ("ai-input".into(), "yes".into())
+        ]
+    );
+    let (path, pairs) = parse_content_usage("/ai-ok/ train-ai = n, search =y");
+    assert_eq!(path.as_deref(), Some("/ai-ok/"));
+    assert_eq!(
+        pairs,
+        [
+            ("train-ai".to_owned(), "n".to_owned()),
+            ("search".to_owned(), "y".to_owned())
+        ]
+    );
+    assert_eq!(parse_content_usage("train-ai = n").0, None);
+    // A dangling `=` still yields nothing rather than swallowing the next key.
+    assert_eq!(
+        parse_content_signal("search=, ai-train=no"),
+        [("ai-train".to_owned(), "no".to_owned())]
+    );
+}
+
+#[test]
 fn tdmrep_valid_and_invalid() {
     let ok = parse_tdmrep(
         r#"[{"location":"/*","tdm-reservation":1,"tdm-policy":"https://e.test/policy.json"},{"location":"/free/","tdm-reservation":0}]"#,

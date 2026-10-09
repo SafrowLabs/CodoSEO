@@ -5,7 +5,7 @@
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
 use codoseo_core::output::{Progress, SiteFault, StopReason};
-use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
+use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::snapshot::Snapshot;
 use serde::Deserialize;
 use sqlx::{FromRow, PgPool, Row};
@@ -250,7 +250,7 @@ impl CrawlQueue {
                     size_bytes, content_type, depth, in_sitemap, indexability::text AS indexability, \
                     title, meta_description, meta_robots, x_robots_tag, canonical, hreflang, h1, h2, \
                     word_count, content_hash, images_missing_alt, og, jsonld_status, mixed_content, \
-                    inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target \
+                    inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target, ai_meta \
              FROM pages WHERE crawl_id = $1",
         )
         .bind(crawl_id)
@@ -316,6 +316,10 @@ fn page_record_from_row(row: sqlx::postgres::PgRow) -> PageRecord {
     let og: OgTags = og
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
+    let ai_meta: Option<serde_json::Value> = row.get("ai_meta");
+    let ai: AiMeta = ai_meta
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
     let jsonld_status: Option<String> = row.get("jsonld_status");
     let jsonld: JsonLdStatus = jsonld_status
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -356,6 +360,7 @@ fn page_record_from_row(row: sqlx::postgres::PgRow) -> PageRecord {
             og,
             jsonld,
             mixed_content: row.get::<Option<i32>, _>("mixed_content").unwrap_or(0) as u32,
+            ai,
         },
         inlinks: row.get::<i32, _>("inlinks") as u32,
         outlinks_internal: row.get::<i32, _>("outlinks_internal") as u32,

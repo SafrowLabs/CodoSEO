@@ -8,7 +8,7 @@ use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::{IssueBits, Severity};
 use codoseo_core::crawl::SitemapSummary;
 use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
-use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
+use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::report::{CrawlReport, CrawlSummary};
 use sqlx::Row;
 use support::TestDb;
@@ -74,6 +74,7 @@ fn sample_page(idx: u64) -> PageRecord {
             og: OgTags::default(),
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
+            ai: AiMeta::default(),
         },
         inlinks: 0,
         outlinks_internal: 0,
@@ -199,6 +200,60 @@ async fn finalize_round_trips_the_stop_reason_for_previous_snapshot() {
         snapshot.stop,
         StopReason::Blocked("site blocked our crawler".to_string())
     );
+}
+
+#[tokio::test]
+async fn finalize_round_trips_ai_meta_and_stores_null_when_empty() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "aimeta.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "aimeta.example").await;
+
+    let plain = sample_page(1);
+    let mut marked = sample_page(2);
+    marked.fields.ai = AiMeta {
+        bot_meta: vec![("bingbot".into(), "noarchive, \"tab\\\there\"".into())],
+        nosnippet_words: 17,
+        tdm_reservation: Some("1".into()),
+        tdm_policy: Some("https://example.com/tdm.json".into()),
+    };
+    let out = empty_output(vec![plain, marked.clone()], StopReason::Completed);
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize");
+
+    let nulls: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pages WHERE crawl_id = $1 AND ai_meta IS NULL")
+            .bind(crawl_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(nulls, 1, "only the page without AI markup is NULL");
+
+    let snapshot = CrawlQueue::new(db.pool.clone())
+        .previous_snapshot(site_id)
+        .await
+        .unwrap()
+        .expect("a done crawl exists");
+    let read = |hash: u64| {
+        snapshot
+            .pages
+            .iter()
+            .find(|p| p.url_hash == hash)
+            .expect("page")
+            .fields
+            .ai
+            .clone()
+    };
+    assert!(read(1).is_empty());
+    assert_eq!(read(2), marked.fields.ai);
 }
 
 #[tokio::test]

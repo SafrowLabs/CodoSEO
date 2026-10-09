@@ -9,9 +9,11 @@
 //! Malformed input never panics: a parser error just ends extraction early.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
-use codoseo_core::page::{JsonLdStatus, OgTags, PageFields};
+use codoseo_core::page::{AiMeta, JsonLdStatus, OgTags, PageFields};
 use codoseo_core::url::normalize;
 use encoding_rs::{Decoder, Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use lol_html::html_content::{Element, EndTag};
@@ -25,6 +27,19 @@ const MAX_HEADING_CHARS: usize = 300;
 const MAX_ANCHOR_CHARS: usize = 200;
 const MAX_HEADINGS: usize = 50;
 const MAX_LINKS: usize = 5_000;
+/// Bot-named robots metas kept per page.
+const MAX_BOT_META: usize = 16;
+/// Robots-style meta names read besides every registry token (lower-cased).
+const BOT_META_NAMES: [&str; 8] = [
+    "googlebot",
+    "googlebot-news",
+    "bingbot",
+    "msnbot",
+    "applebot",
+    "amazonbot",
+    "amzn-searchbot",
+    "codoseobot",
+];
 /// JSON-LD blocks bigger than this are reported as too large instead of parsed.
 const MAX_JSONLD_BYTES: usize = 1024 * 1024;
 /// How far to look for `<meta charset>` before parsing, as browsers do.
@@ -196,7 +211,9 @@ fn build_rewriter(
         s_skip,
         s_media,
         s_text,
+        s_nosnippet,
     ) = (
+        s(state),
         s(state),
         s(state),
         s(state),
@@ -217,10 +234,20 @@ fn build_rewriter(
         .append_element_content_handler(element!("*", move |el| {
             let mut st = s_any.borrow_mut();
             st.words.break_word();
+            st.nosnippet.in_word = false;
             if is_block_or_break(&el.tag_name()) {
                 st.separate_open_text();
             }
             Ok(())
+        }))
+        .append_element_content_handler(element!("[data-nosnippet]", move |el| {
+            s_nosnippet.borrow_mut().nosnippet_depth += 1;
+            let st = Rc::clone(&s_nosnippet);
+            on_end(el, move || {
+                let mut st = st.borrow_mut();
+                st.nosnippet_depth = st.nosnippet_depth.saturating_sub(1);
+                st.nosnippet.in_word = false;
+            })
         }))
         .append_element_content_handler(element!("svg", move |el| {
             s_svg.borrow_mut().svg_depth += 1;
@@ -386,6 +413,44 @@ impl WordCounter {
     }
 }
 
+/// Counts words like [`WordCounter`] does (whitespace-separated, broken at every element
+/// start) so its total is comparable with the page's `word_count`, without hashing.
+#[derive(Default)]
+struct SnippetWords {
+    count: u32,
+    in_word: bool,
+}
+
+impl SnippetWords {
+    fn feed(&mut self, text: &str) {
+        for ch in text.chars() {
+            if ch.is_whitespace() {
+                self.in_word = false;
+            } else if !self.in_word {
+                self.in_word = true;
+                self.count = self.count.saturating_add(1);
+            }
+        }
+    }
+}
+
+/// Lower-cased names of the `<meta name>` tags that address one crawler.
+fn bot_meta_names() -> &'static HashSet<String> {
+    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        BOT_META_NAMES
+            .iter()
+            .map(|n| (*n).to_owned())
+            .chain(
+                codoseo_geo::registry::registry()
+                    .bots
+                    .iter()
+                    .map(|b| b.token.to_ascii_lowercase()),
+            )
+            .collect()
+    })
+}
+
 struct State {
     page_is_https: bool,
     svg_depth: u32,
@@ -413,6 +478,12 @@ struct State {
     jsonld_too_large: bool,
     mixed_content: u32,
     words: WordCounter,
+    ai_bot_meta: Vec<(String, String)>,
+    tdm_reservation: Option<String>,
+    tdm_policy: Option<String>,
+    /// Open elements that carry `data-nosnippet`; their text is counted once however deep.
+    nosnippet_depth: u32,
+    nosnippet: SnippetWords,
 }
 
 impl State {
@@ -449,6 +520,11 @@ impl State {
                 hashed_any: false,
                 hasher: Xxh3::new(),
             },
+            ai_bot_meta: Vec::new(),
+            tdm_reservation: None,
+            tdm_policy: None,
+            nosnippet_depth: 0,
+            nosnippet: SnippetWords::default(),
         }
     }
 
@@ -480,6 +556,9 @@ impl State {
             push_capped(&mut link.anchor, raw, MAX_ANCHOR_CHARS * 4);
         }
         self.words.feed(raw);
+        if self.nosnippet_depth > 0 {
+            self.nosnippet.feed(raw);
+        }
     }
 
     /// A block element or `<br>` starts: keep words apart in open heading and link text.
@@ -500,11 +579,23 @@ impl State {
                 .map(|c| clean_attribute(&c, MAX_TITLE_CHARS))
         };
         if let Some(name) = el.get_attribute("name") {
-            match name.trim().to_ascii_lowercase().as_str() {
+            let name = name.trim().to_ascii_lowercase();
+            match name.as_str() {
                 "description" if self.meta_description.is_none() => {
                     self.meta_description = content()
                 }
                 "robots" => self.meta_robots.extend(content()),
+                "tdm-reservation" if self.tdm_reservation.is_none() => {
+                    self.tdm_reservation = content().filter(|c| !c.is_empty())
+                }
+                "tdm-policy" if self.tdm_policy.is_none() => {
+                    self.tdm_policy = content().filter(|c| !c.is_empty())
+                }
+                _ if self.ai_bot_meta.len() < MAX_BOT_META && bot_meta_names().contains(&name) => {
+                    if let Some(c) = content() {
+                        self.ai_bot_meta.push((name, c));
+                    }
+                }
                 _ => {}
             }
         }
@@ -648,6 +739,12 @@ impl State {
             og: std::mem::take(&mut self.og),
             jsonld,
             mixed_content: self.mixed_content,
+            ai: AiMeta {
+                bot_meta: std::mem::take(&mut self.ai_bot_meta),
+                nosnippet_words: self.nosnippet.count,
+                tdm_reservation: self.tdm_reservation.take(),
+                tdm_policy: self.tdm_policy.take(),
+            },
         };
         Extracted { fields, links }
     }

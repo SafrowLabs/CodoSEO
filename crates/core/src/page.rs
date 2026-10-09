@@ -69,6 +69,57 @@ pub struct PageFields {
     pub og: OgTags,
     pub jsonld: JsonLdStatus,
     pub mixed_content: u32,
+    /// What the page says to AI answer engines; empty for pages without any such markup.
+    #[serde(default)]
+    pub ai: AiMeta,
+}
+
+/// Page-level markup that speaks to AI and answer engines, read by the extractor.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiMeta {
+    /// `<meta name="X" content="…">` for robots-style names other than `robots`
+    /// (`googlebot`, `bingbot`, a registry token…): name lower-cased, content cleaned like
+    /// `meta_robots`. At most 16 entries.
+    #[serde(default)]
+    pub bot_meta: Vec<(String, String)>,
+    /// Words of visible text inside elements carrying `data-nosnippet`, nested ones once.
+    #[serde(default)]
+    pub nosnippet_words: u32,
+    /// `<meta name="tdm-reservation">`.
+    #[serde(default)]
+    pub tdm_reservation: Option<String>,
+    /// `<meta name="tdm-policy">`.
+    #[serde(default)]
+    pub tdm_policy: Option<String>,
+}
+
+impl AiMeta {
+    pub fn is_empty(&self) -> bool {
+        *self == AiMeta::default()
+    }
+}
+
+impl PageFields {
+    /// [`is_noindex`] plus `<meta name="googlebot">` and `<meta name="codoseobot">`, which
+    /// apply to us like the `googlebot:` prefix does.
+    pub fn is_noindex(&self) -> bool {
+        is_noindex(self.meta_robots.as_deref(), self.x_robots_tag.as_deref())
+            || self.our_bot_meta_has(["noindex", "none"])
+    }
+
+    /// [`is_nofollow`] plus the bot-named metas, as for [`PageFields::is_noindex`].
+    pub fn is_nofollow(&self) -> bool {
+        is_nofollow(self.meta_robots.as_deref(), self.x_robots_tag.as_deref())
+            || self.our_bot_meta_has(["nofollow", "none"])
+    }
+
+    fn our_bot_meta_has(&self, words: [&str; 2]) -> bool {
+        self.ai
+            .bot_meta
+            .iter()
+            .filter(|(name, _)| OUR_AGENTS.contains(&name.as_str()))
+            .any(|(_, content)| has_directive(Some(content), words))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +170,14 @@ impl PageRecord {
         h.update(&[indexability_code(self.indexability)]);
         hash_str(&mut h, self.redirect_target.as_ref().map(Url::as_str));
         h.update(&[u8::from(self.in_sitemap)]);
+        // Only when present, so pages without bot-named metas keep the hash they had before.
+        if !self.fields.ai.bot_meta.is_empty() {
+            h.update(&(self.fields.ai.bot_meta.len() as u64).to_le_bytes());
+            for (name, content) in &self.fields.ai.bot_meta {
+                hash_str(&mut h, Some(name));
+                hash_str(&mut h, Some(content));
+            }
+        }
         h.digest()
     }
 
@@ -178,21 +237,44 @@ const VALUE_DIRECTIVES: [&str; 4] = [
 /// directive until the next prefix, directives before any prefix apply to all bots, and only
 /// `codoseobot` and `googlebot` scopes apply to us.
 fn has_directive(value: Option<&str>, words: [&str; 2]) -> bool {
-    let Some(value) = value else { return false };
+    directives_for(value, &OUR_AGENTS)
+        .iter()
+        .any(|d| words.contains(&d.as_str()))
+}
+
+/// The directives of a robots list (meta robots or `X-Robots-Tag`) that apply to a crawler
+/// answering to any of `scopes` (lower-case agent names, e.g. `robots`, `googlebot`).
+/// Same rules as Google's: an `agent:` prefix scopes every following comma-separated directive
+/// until the next prefix, and directives before any prefix apply to all. Directives come back
+/// lower-cased and trimmed; value directives (`max-snippet:50`) are kept whole with the
+/// whitespace after the colon removed.
+pub fn directives_for(value: Option<&str>, scopes: &[&str]) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
     let mut applies = true;
+    let mut out = Vec::new();
     for token in value.to_ascii_lowercase().split(',') {
         let directive = match token.split_once(':') {
             Some((name, rest)) if !VALUE_DIRECTIVES.contains(&name.trim()) => {
-                applies = OUR_AGENTS.contains(&name.trim());
+                applies = scopes.contains(&name.trim());
                 rest
             }
             _ => token,
         };
-        if applies && words.contains(&directive.trim()) {
-            return true;
+        if applies {
+            let directive = directive.trim();
+            if directive.is_empty() {
+                continue;
+            }
+            if directive.contains(':') {
+                out.push(directive.split_whitespace().collect());
+            } else {
+                out.push(directive.to_owned());
+            }
         }
     }
-    false
+    out
 }
 
 /// `noindex` or `none` in the meta robots tag or the `X-Robots-Tag` header.
@@ -222,10 +304,7 @@ pub fn indexability(
         300..=399 => Indexability::Redirected,
         400..=499 => Indexability::ClientError,
         200..=299 => {
-            if is_noindex(
-                fields.meta_robots.as_deref(),
-                fields.x_robots_tag.as_deref(),
-            ) {
+            if fields.is_noindex() {
                 Indexability::Noindex
             } else if fields.canonical.as_ref().is_some_and(|c| c != url) {
                 Indexability::Canonicalised

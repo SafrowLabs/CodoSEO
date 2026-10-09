@@ -482,6 +482,7 @@ fn record(path: &str, status: u16) -> PageRecord {
             og: OgTags::default(),
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
+            ai: Default::default(),
         },
         inlinks: 1,
         outlinks_internal: 0,

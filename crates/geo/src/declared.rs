@@ -22,7 +22,7 @@ pub fn is_known_usage_key(key: &str) -> bool {
 /// `search=yes, ai-train=no` → `[("search","yes"), ("ai-train","no")]`. Keys are
 /// lower-cased, values are kept as written (trimmed). Pieces without `=` are skipped.
 pub fn parse_content_signal(value: &str) -> Vec<(String, String)> {
-    pairs(value.split(|c: char| c == ',' || c.is_whitespace()))
+    pairs(split_pieces(&tighten_equals(value)))
 }
 
 /// `[/path] key=value …` → the optional path (starts with `/`) and the pairs, with the
@@ -30,10 +30,8 @@ pub fn parse_content_signal(value: &str) -> Vec<(String, String)> {
 pub fn parse_content_usage(value: &str) -> (Option<String>, Vec<(String, String)>) {
     let mut path = None;
     let mut rest = Vec::new();
-    for piece in value
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|p| !p.is_empty())
-    {
+    let value = tighten_equals(value);
+    for piece in split_pieces(&value) {
         if path.is_none() && rest.is_empty() && piece.starts_with('/') {
             path = Some(piece.to_owned());
         } else {
@@ -41,6 +39,39 @@ pub fn parse_content_usage(value: &str) -> (Option<String>, Vec<(String, String)
         }
     }
     (path, pairs(rest.into_iter()))
+}
+
+fn split_pieces(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|p| !p.is_empty())
+}
+
+/// Drops whitespace around every `=`, so `search = yes` reads as `search=yes`.
+fn tighten_equals(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut pending_space = false;
+    let mut after_equals = false;
+    for c in value.chars() {
+        if c.is_whitespace() {
+            if !after_equals {
+                pending_space = true;
+            }
+            continue;
+        }
+        if c == '=' {
+            pending_space = false;
+            after_equals = true;
+        } else {
+            if pending_space {
+                out.push(' ');
+            }
+            pending_space = false;
+            after_equals = false;
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn pairs<'a>(pieces: impl Iterator<Item = &'a str>) -> Vec<(String, String)> {

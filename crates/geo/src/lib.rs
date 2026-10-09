@@ -2,6 +2,7 @@
 //! modules) robots.txt verdicts and page-level answer eligibility per engine.
 
 pub mod declared;
+pub mod eligibility;
 pub mod registry;
 pub mod robots;
 

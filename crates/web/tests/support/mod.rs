@@ -468,6 +468,7 @@ pub fn page(domain: &str, path: &str) -> PageRecord {
             og: OgTags::default(),
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
+            ai: Default::default(),
         },
         inlinks: 0,
         outlinks_internal: 0,

@@ -281,3 +281,80 @@ fn heading_and_link_text_keep_word_breaks() {
     assert_eq!(e.fields.h2, vec!["B"]);
     assert_eq!(e.links[0].anchor, "Ridgeline 2P Light tent");
 }
+
+// AI answer-engine markup (GA.3).
+
+#[test]
+fn ai_meta_snapshot() {
+    insta::assert_yaml_snapshot!(extract_file("ai_meta.html").fields.ai);
+}
+
+#[test]
+fn collects_bot_named_metas_and_tdm() {
+    let ai = extract_file("ai_meta.html").fields.ai;
+    assert_eq!(
+        ai.bot_meta,
+        vec![
+            (
+                "googlebot".to_owned(),
+                "noarchive, max-snippet: 50".to_owned()
+            ),
+            ("bingbot".to_owned(), "nosnippet".to_owned()),
+            ("oai-searchbot".to_owned(), "noindex".to_owned()),
+            ("claude-searchbot".to_owned(), "noindex".to_owned()),
+        ],
+        "plain robots and unrelated metas are not bot metas"
+    );
+    assert_eq!(ai.tdm_reservation.as_deref(), Some("1"));
+    assert_eq!(
+        ai.tdm_policy.as_deref(),
+        Some("https://northwind.test/tdm-policy.json")
+    );
+}
+
+#[test]
+fn nested_data_nosnippet_counts_each_word_once() {
+    let e = extract_file("ai_meta.html");
+    // "Two nested words here" and "hidden"; the script text is not visible text.
+    assert_eq!(e.fields.ai.nosnippet_words, 5);
+    // 5 open words, the 4 in the first block, then "Open again hidden".
+    assert_eq!(e.fields.word_count, 5 + 4 + 3);
+}
+
+#[test]
+fn bot_meta_is_capped_and_empty_without_markup() {
+    let metas: String = (0..40)
+        .map(|i| format!(r#"<meta name="googlebot" content="max-snippet:{i}">"#))
+        .collect();
+    let e = extract_html(&format!("<head>{metas}</head><body>x</body>"));
+    assert_eq!(e.fields.ai.bot_meta.len(), 16);
+    assert!(extract_html("<p>plain</p>").fields.ai.is_empty());
+}
+
+#[test]
+fn data_nosnippet_edge_cases_never_stick() {
+    let n = |html: &str| extract_html(html).fields.ai.nosnippet_words;
+    // Void elements have no content.
+    assert_eq!(n(r#"<img data-nosnippet src="a.png"> after one"#), 0);
+    assert_eq!(n(r#"<br data-nosnippet>one two"#), 0);
+    // Self-closing and empty attribute forms.
+    assert_eq!(n(r#"<div data-nosnippet>a b</div> c d e"#), 2);
+    assert_eq!(n(r#"<div data-nosnippet="">a b</div> c d e"#), 2);
+    assert_eq!(n(r#"<DIV DATA-NOSNIPPET>a b</DIV> c"#), 2);
+    // Words glued across the boundary stay separate counts.
+    assert_eq!(n(r#"x<span data-nosnippet>y</span>z"#), 1);
+    // Style and script inside are ignored.
+    assert_eq!(n(r#"<p data-nosnippet>a<style>b c d</style> e</p>"#), 2);
+    // Broken markup: missing end tags, stray end tags and unclosed elements must not panic.
+    // An unclosed element runs to the end of the document, like the browser's tree would.
+    assert_eq!(n(r#"<div data-nosnippet>a b"#), 2);
+    assert_eq!(n(r#"</div></div><div data-nosnippet>a</div></div> b c"#), 1);
+    // An implied end tag (`<li>` closed by the next `<li>`) is only seen when an ancestor's
+    // end tag arrives, so the sibling's text is over-counted but " c d" is not.
+    assert_eq!(n("<ul><li data-nosnippet>a<li>b</ul> c d"), 2);
+    // Never past the element's parent.
+    assert_eq!(n("<div><p data-nosnippet>a</div> b c"), 1);
+    // With no closing tag at all it runs to the end of the document, and no further.
+    let e = extract_html("<p data-nosnippet>a<p>b c<div>d</div> e");
+    assert_eq!(e.fields.ai.nosnippet_words, e.fields.word_count);
+}

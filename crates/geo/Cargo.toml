@@ -10,6 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+codoseo-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

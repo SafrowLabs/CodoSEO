@@ -1,7 +1,9 @@
 mod common;
 
 use codoseo_core::Url;
-use codoseo_core::page::{Indexability, PageFields, indexability, is_nofollow, is_noindex};
+use codoseo_core::page::{
+    AiMeta, Indexability, PageFields, directives_for, indexability, is_nofollow, is_noindex,
+};
 use common::sample_record;
 
 #[test]
@@ -160,4 +162,77 @@ fn html_ok_rules() {
     let mut p = sample_record();
     p.error = Some(codoseo_core::page::FetchFailure::Timeout);
     assert!(!p.is_html_ok());
+}
+
+#[test]
+fn key_hash_is_stable_when_ai_meta_is_empty() {
+    // Values computed with the hasher before `AiMeta` existed: a deploy must not turn every
+    // stored page into a change.
+    assert_eq!(sample_record().compute_key_hash(), 8758331034592253484);
+    let mut p = sample_record();
+    p.fields.meta_robots = Some("noindex, nofollow".into());
+    p.fields.x_robots_tag = Some("googlebot: nosnippet".into());
+    p.in_sitemap = true;
+    assert_eq!(p.compute_key_hash(), 1952386060705738542);
+    // Only the bot-named metas feed the hash; the other AI fields do not.
+    p.fields.ai.nosnippet_words = 40;
+    p.fields.ai.tdm_reservation = Some("1".into());
+    assert_eq!(p.compute_key_hash(), 1952386060705738542);
+    p.fields.ai.bot_meta = vec![("bingbot".into(), "noarchive".into())];
+    let with_meta = p.compute_key_hash();
+    assert_ne!(with_meta, 1952386060705738542);
+    p.fields.ai.bot_meta = vec![("bingbot".into(), "nosnippet".into())];
+    assert_ne!(p.compute_key_hash(), with_meta);
+}
+
+#[test]
+fn bot_named_metas_count_for_noindex_and_nofollow() {
+    let meta = |name: &str, content: &str| PageFields {
+        ai: AiMeta {
+            bot_meta: vec![(name.into(), content.into())],
+            ..AiMeta::default()
+        },
+        ..PageFields::default()
+    };
+    assert!(meta("googlebot", "noindex").is_noindex());
+    assert!(meta("codoseobot", "none").is_noindex());
+    assert!(meta("googlebot", "nofollow").is_nofollow());
+    assert!(!meta("bingbot", "noindex").is_noindex());
+    assert!(!meta("googlebot", "nosnippet").is_noindex());
+    // Combined with the plain robots meta.
+    let mut f = meta("googlebot", "index");
+    f.meta_robots = Some("noindex".into());
+    assert!(f.is_noindex());
+    let u = Url::parse("https://e.com/a").unwrap();
+    assert_eq!(
+        indexability(&u, 200, &meta("googlebot", "noindex"), false),
+        Indexability::Noindex
+    );
+    assert_eq!(
+        indexability(&u, 200, &meta("bingbot", "noindex"), false),
+        Indexability::Indexable
+    );
+}
+
+#[test]
+fn directives_for_scopes_and_keeps_value_directives() {
+    let d = |v: &str, scopes: &[&str]| directives_for(Some(v), scopes);
+    assert_eq!(
+        d(
+            "noarchive, bingbot: nosnippet, max-snippet: 50",
+            &["robots", "bingbot"]
+        ),
+        ["noarchive", "nosnippet", "max-snippet:50"]
+    );
+    // An unprefixed directive applies to everyone; a prefix scopes what follows it.
+    assert_eq!(
+        d(
+            "NoIndex, googlebot: nosnippet, bingbot: noarchive",
+            &["googlebot"]
+        ),
+        ["noindex", "nosnippet"]
+    );
+    assert_eq!(d("googlebot: noindex", &["bingbot"]), Vec::<String>::new());
+    assert!(directives_for(None, &["googlebot"]).is_empty());
+    assert!(d(" , ,", &["googlebot"]).is_empty());
 }

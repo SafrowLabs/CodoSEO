@@ -1,0 +1,16 @@
+---
+source: crates/crawler/tests/extract.rs
+expression: "extract_file(\"ai_meta.html\").fields.ai"
+---
+bot_meta:
+  - - googlebot
+    - "noarchive, max-snippet: 50"
+  - - bingbot
+    - nosnippet
+  - - oai-searchbot
+    - noindex
+  - - claude-searchbot
+    - noindex
+nosnippet_words: 5
+tdm_reservation: "1"
+tdm_policy: "https://northwind.test/tdm-policy.json"
