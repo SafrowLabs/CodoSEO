@@ -173,10 +173,13 @@ fn names(items: &[String]) -> String {
 /// `robots.txt line 5 · Disallow: / · User-agent: OAI-SearchBot`
 fn rule_line(rule: &MatchedRule, group: GroupMatch, token: &str) -> String {
     let word = if rule.allow { "Allow" } else { "Disallow" };
-    let agent = match group {
-        GroupMatch::Named => format!(" · User-agent: {token}"),
-        GroupMatch::Wildcard => " · User-agent: *".to_owned(),
-        GroupMatch::None => String::new(),
+    let agent = match (group, registry().robots_fallback(token)) {
+        (GroupMatch::Named, _) => format!(" · User-agent: {token}"),
+        (GroupMatch::Fallback, Some(fallback)) => {
+            format!(" · User-agent: {fallback} (followed by {token})")
+        }
+        (GroupMatch::Wildcard, _) => " · User-agent: *".to_owned(),
+        (GroupMatch::Fallback | GroupMatch::None, _) => String::new(),
     };
     format!(
         "robots.txt line {} · {word}: {}{agent}",
@@ -1196,9 +1199,11 @@ fn pair_chips(pairs: &[Pair]) -> Vec<PairChip> {
         .collect()
 }
 
-fn agents_label(agents: &[String]) -> String {
+fn agents_label(agents: &[String], more: u32) -> String {
     if agents.is_empty() || agents.iter().any(|a| a == "*") {
         "all bots".to_owned()
+    } else if more > 0 {
+        format!("User-agent: {} and {more} more", agents.join(", "))
     } else {
         format!("User-agent: {}", agents.join(", "))
     }
@@ -1217,7 +1222,11 @@ fn declared_items(d: &Declared) -> Vec<DeclaredItem> {
     for s in &d.content_signals {
         out.push(DeclaredItem {
             name: "Content-Signal",
-            place: format!("robots.txt line {} · {}", s.line, agents_label(&s.agents)),
+            place: format!(
+                "robots.txt line {} · {}",
+                s.line,
+                agents_label(&s.agents, s.more_agents)
+            ),
             pairs: pair_chips(&s.pairs),
             note: None,
         });
@@ -1228,7 +1237,7 @@ fn declared_items(d: &Declared) -> Vec<DeclaredItem> {
             place: format!(
                 "robots.txt line {} · {}{}",
                 u.line,
-                agents_label(&u.agents),
+                agents_label(&u.agents, u.more_agents),
                 u.path
                     .as_deref()
                     .map(|p| format!(" · {p}"))
@@ -1512,7 +1521,11 @@ async fn intent_page(
 /// are not stored, so a later change of default reaches them. Overrides for tokens the registry
 /// no longer lists (the form can't show them) are kept as they were.
 pub fn intent_from_form(current: &Intent, fields: &[(String, String)]) -> Result<Intent, String> {
-    let mut intent = Intent::default();
+    // The form sets stances only; accepted page directives are kept as they are.
+    let mut intent = Intent {
+        accepted_directives: current.accepted_directives.clone(),
+        ..Intent::default()
+    };
     for (token, stance) in &current.bots {
         if registry().bot(token).is_none() {
             intent.bots.insert(token.clone(), *stance);
@@ -1724,6 +1737,16 @@ mod tests {
         assert!(intent_from_form(&current, &pairs(&[("p.search", "maybe")])).is_err());
         assert!(intent_from_form(&current, &pairs(&[("p.nothing", "allow")])).is_err());
         assert!(intent_from_form(&current, &pairs(&[("b.NoSuchBot", "allow")])).is_err());
+    }
+
+    #[test]
+    fn the_form_keeps_accepted_directives() {
+        let current = Intent {
+            accepted_directives: [DirectiveSlug::Nosnippet].into(),
+            ..Intent::default()
+        };
+        let intent = intent_from_form(&current, &pairs(&[("p.training", "block")])).unwrap();
+        assert_eq!(intent.accepted_directives, current.accepted_directives);
     }
 
     #[test]

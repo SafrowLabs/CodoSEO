@@ -536,3 +536,68 @@ fn home_page_severity_counts_only_excluding_engines() {
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].severity, Severity::Critical);
 }
+
+#[test]
+fn an_accepted_directive_opens_no_finding_but_others_still_do() {
+    let out = site(6, |p| p.robots_meta("nosnippet, noarchive"));
+    let accepted = intent(r#"{"accepted_directives":["nosnippet"]}"#);
+    let f = run(&out, &accepted);
+    let subjects: Vec<&str> = f.iter().map(|f| f.subject.as_str()).collect();
+    assert_eq!(subjects, ["noarchive"]);
+    assert_eq!(run(&out, &Intent::default()).len(), 2);
+    // The report, and so the matrix, still shows it.
+    let google = report_for(&out);
+    let google = google.engine(EngineId::Google).expect("google");
+    assert_eq!(google.affected(), 6);
+    // Unknown fields aside, the slugs read back as written.
+    assert_eq!(
+        serde_json::to_value(&accepted).expect("json"),
+        serde_json::json!({"accepted_directives": ["nosnippet"]})
+    );
+}
+
+#[test]
+fn applebots_fallback_rule_is_described_as_googlebots() {
+    let out = with_robots(
+        site(3, |p| p),
+        200,
+        "User-agent: *\nAllow: /\n\nUser-agent: Googlebot\nDisallow: /\n",
+    );
+    let f = run(&out, &Intent::default());
+    let search = f
+        .iter()
+        .find(|f| f.kind == FindingKind::BotsBlocked)
+        .expect("search bots blocked");
+    let tokens: Vec<&str> = search
+        .evidence
+        .bots
+        .iter()
+        .map(|b| b.token.as_str())
+        .collect();
+    assert_eq!(tokens, ["Googlebot", "Applebot"]);
+    assert!(
+        search.summary.contains("(User-agent: Googlebot)"),
+        "{}",
+        search.summary
+    );
+    let apple = &search.evidence.bots[1];
+    assert_eq!(apple.group, codoseo_geo::robots::GroupMatch::Fallback);
+}
+
+#[test]
+fn a_redirecting_robots_txt_is_missing_not_off_limits() {
+    let out = with_robots(site(3, |p| p), 301, "");
+    let f = run(&out, &intent(r#"{"purposes":{"training":"block"}}"#));
+    assert!(f.iter().all(|f| f.kind != FindingKind::RobotsUnavailable));
+    let not_blocked = f
+        .iter()
+        .find(|f| f.kind == FindingKind::BotsNotBlocked)
+        .expect("training bots get in");
+    assert!(
+        not_blocked
+            .summary
+            .starts_with("robots.txt redirects without reaching a file (HTTP 301)."),
+        "{}",
+        not_blocked.summary
+    );
+}

@@ -114,6 +114,18 @@ pub struct Evidence {
     pub robots_status: Option<u16>,
 }
 
+impl Evidence {
+    /// Who the finding is about: its bots' tokens (lower-cased) and its engines' names. An
+    /// incident whose finding gains a member has widened.
+    pub fn members(&self) -> BTreeSet<String> {
+        self.bots
+            .iter()
+            .map(|b| b.token.to_ascii_lowercase())
+            .chain(self.engines.iter().map(|e| e.name.clone()))
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Finding {
     pub kind: FindingKind,
@@ -231,11 +243,15 @@ fn directive_label(d: DirectiveSlug) -> &'static str {
     }
 }
 
-fn rule_text(rule: &MatchedRule, group: GroupMatch, token: &str) -> String {
-    let who = match group {
-        GroupMatch::Named => format!(" (User-agent: {token})"),
-        GroupMatch::Wildcard => " (User-agent: *)".to_owned(),
-        GroupMatch::None => String::new(),
+fn rule_text(rule: &MatchedRule, group: GroupMatch, bot: &Bot) -> String {
+    let token = &bot.token;
+    let who = match (group, &bot.robots_fallback) {
+        (GroupMatch::Named, _) => format!(" (User-agent: {token})"),
+        (GroupMatch::Fallback, Some(fallback)) => {
+            format!(" (User-agent: {fallback}, which {token} follows when no group names it)")
+        }
+        (GroupMatch::Wildcard, _) => " (User-agent: *)".to_owned(),
+        (GroupMatch::Fallback | GroupMatch::None, _) => String::new(),
     };
     let word = if rule.allow { "Allow" } else { "Disallow" };
     format!(
@@ -317,7 +333,10 @@ fn bot_row<'a>(
     access: &'a crate::report::BotAccess,
     bot: &'a Bot,
 ) -> BotRow<'a> {
-    let first_block = access.blocked.first().and_then(|b| access.rule_of(b));
+    let first_block = access
+        .blocked
+        .first()
+        .and_then(|b| report.rule_of(access, b));
     BotRow {
         bot,
         evidence: BotEvidence {
@@ -390,7 +409,7 @@ fn bots_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
                     }
                     if !described {
                         summary.push(' ');
-                        summary.push_str(&rule_text(rule, r.evidence.group, &r.bot.token));
+                        summary.push_str(&rule_text(rule, r.evidence.group, r.bot));
                         summary.push('.');
                         described = true;
                     }
@@ -536,10 +555,12 @@ fn bots_not_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
             };
             let mut summary = String::new();
             if report.robots.availability == RobotsAvailability::Missing {
-                summary.push_str(&format!(
-                    "There is no robots.txt (HTTP {}). ",
-                    report.robots.status.unwrap_or(404)
-                ));
+                let status = report.robots.status.unwrap_or(404);
+                summary.push_str(&if (300..400).contains(&status) {
+                    format!("robots.txt redirects without reaching a file (HTTP {status}). ")
+                } else {
+                    format!("There is no robots.txt (HTTP {status}). ")
+                });
             }
             summary.push_str(&format!(
                 "{choice}, but robots.txt doesn't stop {}. Add `User-agent: {}` and `Disallow: /` to robots.txt.",
@@ -598,8 +619,11 @@ fn answers_restricted(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
             let mut per_directive: BTreeMap<&'static str, (DirectiveSlug, Effect)> =
                 BTreeMap::new();
             for cause in &entry.causes {
-                // `noindex` is the SEO checks' business; the matrix still shows it.
-                if cause.directive == DirectiveSlug::Noindex {
+                // `noindex` is the SEO checks' business, and a directive the owner accepted is
+                // their choice; the matrix still shows both.
+                if cause.directive == DirectiveSlug::Noindex
+                    || intent.accepted_directives.contains(&cause.directive)
+                {
                     continue;
                 }
                 let e = per_directive

@@ -168,6 +168,41 @@ fn rate_limited_robots_txt_blocks_everything() {
 }
 
 #[test]
+fn a_redirect_that_never_reached_a_file_still_keeps_us_out() {
+    // The AI access report reads a final 3xx as a missing file; our own crawler stays out.
+    for status in [301, 302, 308] {
+        assert!(
+            RobotsRules::from_status(status).blocks_everything(),
+            "{status}"
+        );
+        assert!(RobotsRules::from_response(status, b"", AGENT).blocks_everything());
+    }
+}
+
+#[test]
+fn our_groups_are_chosen_once_not_on_every_url() {
+    // 20,000 groups: choosing among them on every call cost a quarter of a millisecond.
+    let mut body = b"User-agent: *\nDisallow: /private\n".to_vec();
+    let mut i = 0;
+    while body.len() < 500 * 1024 - 40 {
+        body.extend_from_slice(format!("User-agent:{i:x}\nAllow:/\n").as_bytes());
+        i += 1;
+    }
+    assert!(i >= 20_000, "{i} groups");
+    let r = RobotsRules::parse(&body, AGENT);
+    let started = std::time::Instant::now();
+    for n in 0..10_000 {
+        assert!(r.allowed(&format!("/products/{n}")));
+    }
+    assert!(!r.allowed("/private/x"));
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn versioned_agent_lines_match_our_product_token() {
     let r = RobotsRules::parse(
         b"User-agent: *\nDisallow: /\n\nUser-agent: CodoSEObot/0.1\nAllow: /\n",

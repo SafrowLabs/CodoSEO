@@ -85,7 +85,6 @@ fn verdicts_cover_every_registry_bot_including_control_tokens() {
     let r = report_for(&out);
     assert_eq!(r.version, REPORT_VERSION);
     assert_eq!(r.robots.availability, RobotsAvailability::Ok);
-    assert_eq!(r.robots.hash, Some(9));
     assert_eq!(r.bots.len(), registry().bots.len());
     let ge = r.bot("Google-Extended").expect("control token");
     assert_eq!(ge.home_allowed, Some(false));
@@ -101,7 +100,7 @@ fn verdicts_cover_every_registry_bot_including_control_tokens() {
         .position(|i| i.url.ends_with("/p1"))
         .expect("p1");
     assert_eq!(usize::from(gpt.blocked[0].url), p1);
-    assert_eq!(gpt.rule_of(&gpt.blocked[0]).expect("rule").line, 5);
+    assert_eq!(r.rule_of(gpt, &gpt.blocked[0]).expect("rule").line, 5);
 }
 
 #[test]
@@ -127,7 +126,6 @@ fn an_unavailable_or_unfetched_robots_file_has_no_verdicts() {
     let r = report_for(&out);
     assert_eq!(r.robots.availability, RobotsAvailability::Unknown);
     assert!(r.bots.is_empty());
-    assert_eq!(r.robots.hash, None);
 }
 
 #[test]
@@ -171,7 +169,6 @@ fn non_html_and_failed_pages_are_not_eligibility_candidates() {
     let google = r.engine(EngineId::Google).expect("google");
     assert_eq!(google.html_pages, 1);
     assert_eq!(google.site.pages, 1);
-    assert_eq!(r.pages_crawled, 3);
 }
 
 #[test]
@@ -291,4 +288,153 @@ fn even_pages_that_all_differ_stay_bounded() {
     // The pathological case: no two pages share a group, five directives each.
     let (_, size) = heavy_report(60);
     assert!(size < 130_000, "{size} bytes");
+}
+
+/// 60 important URLs of a 70-page site, starred pages filling the cap.
+fn sixty_urls(out: &CrawlOutput) -> AccessReport {
+    let starred: HashSet<u64> = out.pages.iter().skip(1).map(|p| url_hash(&p.url)).collect();
+    let important = important_urls(&out.pages, &out.origin, &starred);
+    let r = build_report(out, &important);
+    assert_eq!(r.important.len(), MAX_IMPORTANT);
+    r
+}
+
+#[test]
+fn a_hostile_robots_file_gives_a_bounded_report() {
+    let mut body = String::new();
+    // Thousands of agents in one group, with long declared lines that would copy them all.
+    for i in 0..2_000 {
+        body.push_str(&format!("User-agent: agent-{i}\n"));
+    }
+    let pairs: Vec<String> = (0..60)
+        .map(|k| format!("key{k}={}", "v".repeat(40)))
+        .collect();
+    for _ in 0..40 {
+        body.push_str(&format!("Content-Signal: {}\n", pairs.join(", ")));
+        body.push_str(&format!("Content-Usage: /x {}\n", pairs.join(" ")));
+    }
+    // A long wildcard rule that blocks everything, and every bot blocked on every page by long
+    // rules of its own.
+    body.push_str(&format!(
+        "User-agent: *\nDisallow: /{}\n",
+        "*".repeat(1_000)
+    ));
+    for (b, bot) in registry().bots.iter().enumerate() {
+        body.push_str(&format!("User-agent: {}\n", bot.token));
+        for i in 0..70 {
+            body.push_str(&format!("Disallow: /p{i}{}$\n", "*".repeat(150 + b)));
+        }
+    }
+    assert!(body.len() >= 500 * 1024, "{} bytes", body.len());
+    let out = with_robots(site(70, |p| p), 200, &body);
+    let r = sixty_urls(&out);
+    let size = serde_json::to_vec(&r).expect("json").len();
+    println!("hostile report: {size} bytes");
+    assert!(size < 150_000, "{size} bytes");
+    assert!(r.rules.len() <= 128);
+    assert!(
+        r.rules
+            .iter()
+            .all(|rule| rule.pattern.chars().count() <= 201)
+    );
+    let signal = &r.declared.content_signals[0];
+    assert!(signal.agents.len() <= 20 && signal.more_agents > 0);
+    // Every block is still listed, with or without its rule.
+    assert!(r.bots.iter().all(|b| b.blocked.len() >= 59));
+}
+
+#[test]
+fn a_realistic_site_stays_well_under_100_kb() {
+    let robots = "# Managed robots.txt\nUser-agent: *\nContent-Signal: search=yes, ai-train=no\nAllow: /\nDisallow: /cart\nDisallow: /account/\nDisallow: /*?sort=\n\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: ClaudeBot\nDisallow: /\n\nUser-agent: Google-Extended\nDisallow: /\n\nUser-agent: CCBot\nDisallow: /\n\nUser-agent: Applebot-Extended\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n";
+    let out = with_robots(site(70, |p| p), 200, robots);
+    let r = sixty_urls(&out);
+    let size = serde_json::to_vec(&r).expect("json").len();
+    println!("realistic report: {size} bytes");
+    assert!(size < 40_000, "{size} bytes");
+}
+
+#[test]
+fn a_wildcard_rule_is_stored_once_for_every_bot_with_its_pattern_cut() {
+    let long = format!("/{}", "a".repeat(300));
+    let out = with_robots(
+        site(3, |p| p),
+        200,
+        &format!("User-agent: *\nDisallow: /\nDisallow: {long}\n"),
+    );
+    let r = report_for(&out);
+    assert_eq!(r.rules.len(), 1, "one rule, pooled once");
+    assert!(r.bots.iter().all(|b| b.rules.is_empty()));
+    let gpt = r.bot("GPTBot").expect("gptbot");
+    assert_eq!(gpt.blocked.len(), 3);
+    assert_eq!(r.rule_of(gpt, &gpt.blocked[0]).expect("rule").pattern, "/");
+
+    // A long pattern that decides a block is kept cut, with a closing ellipsis.
+    let out = with_robots(
+        site(1, |p| p),
+        200,
+        &format!("User-agent: *\nDisallow: /*{}\n", "b".repeat(300)),
+    );
+    let mut out = out;
+    out.pages[0].url =
+        url::Url::parse(&format!("https://example.com/x{}", "b".repeat(300))).expect("url");
+    let important = vec![codoseo_geo::report::ImportantUrl {
+        url: out.pages[0].url.to_string(),
+        reason: Reason::Home,
+        status: Some(200),
+        html_ok: true,
+    }];
+    let r = build_report(&out, &important);
+    let pattern = &r.rules[0].pattern;
+    assert_eq!(pattern.chars().count(), 201);
+    assert!(pattern.ends_with('…'), "{pattern}");
+    assert_eq!(
+        r.bots[0].home_rule.as_ref().expect("home rule").pattern,
+        *pattern
+    );
+}
+
+#[test]
+fn an_older_report_with_rules_per_bot_still_names_its_rules() {
+    let old = r#"{"registry_version":1,"robots":{"status":200,"availability":"ok","hash":9},"important":[{"url":"https://example.com/","reason":"home","status":200,"html_ok":true}],"bots":[{"token":"GPTBot","home_allowed":false,"group":"named","rules":[{"line":2,"allow":false,"pattern":"/"}],"blocked":[{"url":0,"rule":0}]}],"pages_crawled":1}"#;
+    let r: AccessReport = serde_json::from_str(old).expect("old shape");
+    let gpt = r.bot("GPTBot").expect("gptbot");
+    assert_eq!(r.rule_of(gpt, &gpt.blocked[0]).map(|x| x.line), Some(2));
+}
+
+#[test]
+fn headers_and_meta_of_an_error_home_page_are_unknown() {
+    let mut out = site(2, |p| p);
+    out.signals.home_headers = vec![("content-signal".to_owned(), "ai-train=no".to_owned())];
+    out.pages[0].fields.ai.tdm_reservation = Some("1".to_owned());
+    let read = report_for(&out);
+    assert!(read.declared.home_read);
+    assert!(read.preferences_known());
+    assert_eq!(read.declared.headers.content_signal.len(), 1);
+
+    out.pages[0] = out.pages[0].clone().status(503);
+    let r = report_for(&out);
+    assert!(!r.declared.home_read);
+    assert!(!r.preferences_known());
+    assert!(r.declared.headers.content_signal.is_empty());
+    assert_eq!(r.declared.tdm_meta.reservation, None);
+}
+
+#[test]
+fn applebot_follows_googlebots_group_when_none_names_it() {
+    let out = with_robots(
+        site(3, |p| p),
+        200,
+        "User-agent: *\nDisallow: /\n\nUser-agent: Googlebot\nAllow: /\nDisallow: /p1\n",
+    );
+    let r = report_for(&out);
+    let apple = r.bot("Applebot").expect("applebot");
+    assert_eq!(apple.group, GroupMatch::Fallback);
+    assert_eq!(apple.home_allowed, Some(true));
+    assert_eq!(apple.blocked.len(), 1);
+    // Apple's engine uses the same verdict; a bot without a documented fallback gets `*`.
+    let engine = r.engine(EngineId::Apple).expect("apple");
+    assert_eq!(engine.groups.iter().filter(|g| g.robots_blocked).count(), 1);
+    let ext = r.bot("Applebot-Extended").expect("applebot-extended");
+    assert_eq!(ext.group, GroupMatch::Wildcard);
+    assert_eq!(ext.home_allowed, Some(false));
 }

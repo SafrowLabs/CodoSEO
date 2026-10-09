@@ -1,5 +1,8 @@
 use codoseo_geo::declared::{parse_content_signal, parse_content_usage, parse_tdmrep};
-use codoseo_geo::robots::{GroupMatch, RobotsAvailability, RobotsTxt, availability};
+use codoseo_geo::robots::{
+    GroupMatch, MAX_DECLARED_AGENTS, MAX_DECLARED_PAIRS, RobotsAvailability, RobotsTxt,
+    availability,
+};
 
 fn allowed(file: &str, token: &str, path: &str) -> bool {
     RobotsTxt::parse(file.as_bytes())
@@ -172,6 +175,8 @@ fn availability_table() {
         (None, Unknown),
         (Some(200), Ok),
         (Some(204), Ok),
+        (Some(301), Missing),
+        (Some(308), Missing),
         (Some(404), Missing),
         (Some(410), Missing),
         (Some(429), Unavailable),
@@ -228,4 +233,94 @@ fn a_hostile_file_stays_cheap() {
     }
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
     assert!(t.content_signals().len() <= 100);
+}
+
+#[test]
+fn a_redirect_that_never_reaches_a_file_reads_as_missing() {
+    // RFC 9309: past the redirect limit robots.txt may be treated as unavailable (4xx), so
+    // everything is allowed, not off limits.
+    let t = RobotsTxt::from_response(Some(301), b"").expect("rules");
+    assert!(t.verdict("GPTBot", "/x").allowed);
+    assert!(RobotsTxt::from_response(Some(503), b"").is_none());
+}
+
+#[test]
+fn resolving_once_gives_the_same_verdicts_as_asking_each_time() {
+    let file = "User-agent: *\nDisallow: /a\nCrawl-delay: 3\n\nUser-agent: GPTBot\nDisallow: /\nAllow: /ok\n";
+    let t = RobotsTxt::parse(file.as_bytes());
+    for token in ["GPTBot", "gptbot/1.1", "ClaudeBot", "CodoSEObot"] {
+        let agent = t.resolve(token, None);
+        for path in ["/", "/a", "/a/b", "/ok", "/okay?x=1", "/robots.txt"] {
+            assert_eq!(
+                t.verdict_for(&agent, path),
+                t.verdict(token, path),
+                "{token} {path}"
+            );
+            assert_eq!(t.allowed_for(&agent, path), t.verdict(token, path).allowed);
+        }
+        assert_eq!(agent.crawl_delay(), t.crawl_delay(token));
+    }
+    assert_eq!(t.resolve("GPTBot", None).group(), GroupMatch::Named);
+    assert_eq!(t.resolve("ClaudeBot", None).crawl_delay(), Some(3.0));
+}
+
+#[test]
+fn a_fallback_token_comes_after_the_bots_own_groups_and_before_the_wildcard() {
+    let file = "User-agent: *\nDisallow: /\n\nUser-agent: Googlebot\nDisallow: /private\n";
+    let t = RobotsTxt::parse(file.as_bytes());
+    let apple = t.resolve("Applebot", Some("Googlebot"));
+    assert_eq!(apple.group(), GroupMatch::Fallback);
+    assert!(t.allowed_for(&apple, "/page"));
+    assert!(!t.allowed_for(&apple, "/private/x"));
+    // Without the fallback the wildcard applies.
+    assert!(!t.verdict("Applebot", "/page").allowed);
+    // A group naming the bot itself wins over the fallback.
+    let own = RobotsTxt::parse(format!("{file}\nUser-agent: Applebot\nAllow: /\n").as_bytes());
+    let apple = own.resolve("Applebot", Some("Googlebot"));
+    assert_eq!(apple.group(), GroupMatch::Named);
+    assert!(own.allowed_for(&apple, "/private/x"));
+    // A fallback no group names leaves the wildcard.
+    let t = RobotsTxt::parse(b"User-agent: *\nDisallow: /\n");
+    assert_eq!(
+        t.resolve("Applebot", Some("Googlebot")).group(),
+        GroupMatch::Wildcard
+    );
+}
+
+#[test]
+fn declared_lines_copy_a_few_agents_and_pairs_and_no_control_characters() {
+    let mut body = String::new();
+    for i in 0..50 {
+        body.push_str(&format!("User-agent: bot{i}\n"));
+    }
+    let pairs: Vec<String> = (0..40).map(|i| format!("k{i}=v{i}")).collect();
+    body.push_str(&format!("Content-Signal: {}\n", pairs.join(", ")));
+    body.push_str(&format!(
+        "Content-Usage: /p\x1b[31m train-ai=n\x1b[0m, search={}\rx\n",
+        "y".repeat(2_000)
+    ));
+    let t = RobotsTxt::parse(body.as_bytes());
+    let signal = &t.content_signals()[0];
+    assert_eq!(signal.agents.len(), MAX_DECLARED_AGENTS);
+    assert_eq!(signal.more_agents, 30);
+    assert_eq!(signal.pairs.len(), MAX_DECLARED_PAIRS);
+    let usage = &t.content_usage()[0];
+    let all: Vec<&str> = usage
+        .path
+        .iter()
+        .map(String::as_str)
+        .chain(
+            usage
+                .pairs
+                .iter()
+                .flat_map(|p| [p.key.as_str(), p.value.as_str()]),
+        )
+        .collect();
+    assert!(
+        all.iter().all(|s| !s.chars().any(char::is_control)),
+        "{all:?}"
+    );
+    assert_eq!(usage.path.as_deref(), Some("/p[31m"));
+    assert_eq!(usage.pairs[0].value, "n[0m");
+    assert_eq!(usage.pairs[1].value.chars().count(), 512);
 }

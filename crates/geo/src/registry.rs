@@ -57,6 +57,10 @@ pub struct Bot {
     pub last_reviewed: String,
     /// One sentence of context.
     pub notes: String,
+    /// The token whose robots.txt groups the bot follows when no group names it, before the `*`
+    /// groups, when its operator documents one (Applebot follows Googlebot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub robots_fallback: Option<String>,
 }
 
 /// The whole registry file.
@@ -80,6 +84,11 @@ impl Registry {
         self.bots
             .iter()
             .find(|b| b.token.eq_ignore_ascii_case(token))
+    }
+
+    /// The fallback token of the bot named `token`, if its operator documents one.
+    pub fn robots_fallback(&self, token: &str) -> Option<&str> {
+        self.bot(token)?.robots_fallback.as_deref()
     }
 }
 

@@ -112,6 +112,16 @@ fn lint(r: &Registry) -> Vec<String> {
         if !b.crawls && (b.user_agent_contains.is_some() || b.ip_ranges_url.is_some()) {
             problems.push(format!("control token {t} has a network identity"));
         }
+        if let Some(fallback) = &b.robots_fallback {
+            let known = r.bots.iter().any(|o| {
+                o.token.eq_ignore_ascii_case(fallback) && !o.token.eq_ignore_ascii_case(t)
+            });
+            if !known {
+                problems.push(format!(
+                    "{t} falls back to {fallback}, which is not another bot"
+                ));
+            }
+        }
     }
     let ops: HashSet<&str> = r.bots.iter().map(|b| b.operator.as_str()).collect();
     for want in OPERATORS {
@@ -175,6 +185,25 @@ fn the_lint_catches_each_kind_of_mistake() {
         broken(&|r| r.bots.retain(|b| b.operator != "Microsoft")),
         "missing operator Microsoft",
     );
+    has(
+        broken(&|r| r.bots[0].robots_fallback = Some("NoSuchBot".into())),
+        "not another bot",
+    );
+    has(
+        broken(&|r| r.bots[0].robots_fallback = Some(r.bots[0].token.clone())),
+        "not another bot",
+    );
+}
+
+#[test]
+fn only_applebot_documents_a_fallback() {
+    let with: Vec<(&str, &str)> = registry()
+        .bots
+        .iter()
+        .filter_map(|b| Some((b.token.as_str(), b.robots_fallback.as_deref()?)))
+        .collect();
+    assert_eq!(with, [("Applebot", "Googlebot")]);
+    assert_eq!(registry().robots_fallback("applebot"), Some("Googlebot"));
 }
 
 #[test]
@@ -209,13 +238,26 @@ fn schema_matches_the_rust_fields_and_enums() {
         .collect();
     required.sort_unstable();
     assert_eq!(required, fields);
+    // The optional fields are properties too, and nothing else is.
+    const OPTIONAL: [&str; 1] = ["robots_fallback"];
     let props: HashSet<&str> = bot["properties"]
         .as_object()
         .unwrap()
         .keys()
         .map(String::as_str)
         .collect();
-    assert_eq!(props, fields.iter().copied().collect::<HashSet<_>>());
+    assert_eq!(
+        props,
+        fields
+            .iter()
+            .copied()
+            .chain(OPTIONAL)
+            .collect::<HashSet<_>>()
+    );
+    let applebot = serde_json::to_value(registry().bot("Applebot").unwrap()).unwrap();
+    for f in OPTIONAL {
+        assert!(applebot.get(f).is_some(), "{f} is set somewhere");
+    }
 
     // Every bot in the data uses only enum values the schema allows.
     let allowed = |name: &str| -> HashSet<String> {

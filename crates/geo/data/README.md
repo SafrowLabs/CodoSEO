@@ -25,6 +25,9 @@ crate is AGPL-3.0-only.
 - `source_url`: the operator page the entry was checked against.
 - `last_reviewed`: the date (YYYY-MM-DD) the entry was last checked.
 - `notes`: one sentence of context.
+- `robots_fallback` (optional): the token of another bot in this file whose robots.txt groups this
+  bot follows when no group names it, before the `*` groups. Only set when the operator documents
+  it: Applebot follows Googlebot's rules.
 
 ## Proposing a change
 

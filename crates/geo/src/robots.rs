@@ -6,9 +6,11 @@
 //! can't cost more than [`MAX_RULES`] rules of at most [`MAX_PATTERN_LEN`] bytes each;
 //! anything beyond that is skipped, not the whole file.
 
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
 
-use crate::declared::{is_known_signal_key, is_known_usage_key};
+use crate::declared::{clean_declared, is_known_signal_key, is_known_usage_key};
 use crate::declared::{parse_content_signal, parse_content_usage};
 
 /// Google ignores everything after the first 500 KiB.
@@ -18,6 +20,15 @@ pub const MAX_PATTERN_LEN: usize = 1_024;
 /// Most `Content-Signal` and `Content-Usage` lines kept, each: they copy the agents of
 /// their group, so an unbounded count would cost quadratic memory on a hostile file.
 const MAX_DECLARED_LINES: usize = 100;
+/// Most agents a declared line copies from its group; the rest are only counted.
+pub const MAX_DECLARED_AGENTS: usize = 20;
+/// Longest product token a declared line copies, in characters.
+const MAX_DECLARED_AGENT_LEN: usize = 64;
+/// Most `key=value` pairs kept per declared line.
+pub const MAX_DECLARED_PAIRS: usize = 20;
+/// Declared lines stop being kept once the text they hold passes this many bytes, so a
+/// hostile file can't make a stored report large whatever its line count.
+const MAX_DECLARED_BYTES: usize = 8 * 1024;
 
 /// `CodoSEObot/0.1 (+https://…)` → `codoseobot`; `*` stays `*`.
 pub fn product_token(value: &str) -> String {
@@ -103,10 +114,11 @@ impl Rule {
     }
 }
 
-#[derive(Default)]
 struct Group {
     agents: Vec<String>,
-    rules: Vec<Rule>,
+    /// The group's rules in `RobotsTxt::rules`: only the newest group gets rules, so they are
+    /// one contiguous run.
+    rules: Range<usize>,
     delay: Option<String>,
 }
 
@@ -126,9 +138,13 @@ pub struct Pair {
 pub struct ContentSignal {
     /// 1-based line number.
     pub line: u32,
-    /// Product tokens of the group the line sits in; empty when it sits in no group,
-    /// which means it applies to everyone.
+    /// Product tokens of the group the line sits in (the first [`MAX_DECLARED_AGENTS`]);
+    /// empty when it sits in no group, which means it applies to everyone.
     pub agents: Vec<String>,
+    /// How many more agents the group names.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub more_agents: u32,
+    /// At most [`MAX_DECLARED_PAIRS`].
     pub pairs: Vec<Pair>,
 }
 
@@ -137,13 +153,24 @@ pub struct ContentSignal {
 pub struct ContentUsage {
     pub line: u32,
     pub agents: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub more_agents: u32,
     /// The optional leading path (starts with `/`) the preference is limited to.
     pub path: Option<String>,
     pub pairs: Vec<Pair>,
 }
 
-fn to_pairs(raw: Vec<(String, String)>, known: fn(&str) -> bool) -> Vec<Pair> {
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// The pairs of a declared line as they are kept: at most [`MAX_DECLARED_PAIRS`], keys and
+/// values cleaned by [`clean_declared`]. Shared by robots.txt lines and response headers.
+pub fn declared_pairs(raw: Vec<(String, String)>, known: fn(&str) -> bool) -> Vec<Pair> {
     raw.into_iter()
+        .map(|(key, value)| (clean_declared(&key), clean_declared(&value)))
+        .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+        .take(MAX_DECLARED_PAIRS)
         .map(|(key, value)| Pair {
             known: known(&key),
             key,
@@ -152,9 +179,37 @@ fn to_pairs(raw: Vec<(String, String)>, known: fn(&str) -> bool) -> Vec<Pair> {
         .collect()
 }
 
+/// The agents a declared line copies from its group: at most [`MAX_DECLARED_AGENTS`] tokens of
+/// at most [`MAX_DECLARED_AGENT_LEN`] characters, and how many more there are.
+fn declared_agents(group: Option<&Group>) -> (Vec<String>, u32) {
+    let Some(group) = group else {
+        return (Vec::new(), 0);
+    };
+    let agents = group
+        .agents
+        .iter()
+        .take(MAX_DECLARED_AGENTS)
+        .map(|a| a.chars().take(MAX_DECLARED_AGENT_LEN).collect())
+        .collect();
+    let more = group.agents.len().saturating_sub(MAX_DECLARED_AGENTS);
+    (agents, u32::try_from(more).unwrap_or(u32::MAX))
+}
+
+/// What a declared line costs against [`MAX_DECLARED_BYTES`].
+fn declared_bytes(agents: &[String], path: Option<&str>, pairs: &[Pair]) -> usize {
+    agents.iter().map(String::len).sum::<usize>()
+        + path.map_or(0, str::len)
+        + pairs
+            .iter()
+            .map(|p| p.key.len() + p.value.len())
+            .sum::<usize>()
+}
+
 /// A parsed robots.txt.
 pub struct RobotsTxt {
     groups: Vec<Group>,
+    /// Every group's rules, in file order.
+    rules: Vec<Rule>,
     sitemaps: Vec<String>,
     content_signals: Vec<ContentSignal>,
     content_usage: Vec<ContentUsage>,
@@ -166,10 +221,37 @@ pub struct RobotsTxt {
 pub enum GroupMatch {
     /// A group names the token.
     Named,
+    /// No group names the token, but groups name the token its operator says it follows
+    /// instead (Applebot follows Googlebot's rules).
+    Fallback,
     /// No group names it, the `*` groups apply.
     Wildcard,
     /// No group applies: everything is allowed.
     None,
+}
+
+/// The rules that apply to one product token, chosen once so that repeated verdicts for the
+/// same token don't select the groups again. It points into the [`RobotsTxt`] it came from
+/// and means nothing with another file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentRules {
+    group: GroupMatch,
+    /// Indexes into `RobotsTxt::rules`, in file order, at most [`MAX_RULES`].
+    rules: Vec<u32>,
+    delay: Option<f64>,
+}
+
+impl AgentRules {
+    /// Which groups were chosen.
+    pub fn group(&self) -> GroupMatch {
+        self.group
+    }
+
+    /// The first `Crawl-delay` of the chosen groups, in seconds. Not capped here; positive
+    /// and finite only.
+    pub fn crawl_delay(&self) -> Option<f64> {
+        self.delay
+    }
 }
 
 /// The rule that won, with its 1-based line in the file and the pattern as written.
@@ -190,7 +272,8 @@ pub struct Verdict {
 
 impl RobotsTxt {
     /// The rules a robots.txt response gives, or `None` when there are no verdicts to speak of
-    /// (a 5xx, 429 or a connection failure). A missing file (4xx) parses as an empty one.
+    /// (a 5xx, 429 or a connection failure). A missing file (4xx, or a redirect that never
+    /// reached one) parses as an empty one.
     pub fn from_response(status: Option<u16>, body: &[u8]) -> Option<RobotsTxt> {
         match availability(status) {
             RobotsAvailability::Ok => Some(RobotsTxt::parse(body)),
@@ -205,9 +288,11 @@ impl RobotsTxt {
         // A byte order mark is not part of the first line's field name.
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
         let mut groups: Vec<Group> = Vec::new();
+        let mut rules: Vec<Rule> = Vec::new();
         let mut sitemaps = Vec::new();
         let mut content_signals = Vec::new();
         let mut content_usage = Vec::new();
+        let mut declared = 0usize;
         let mut reading_agents = false;
 
         for (index, line) in text.lines().enumerate() {
@@ -220,7 +305,11 @@ impl RobotsTxt {
             match key.trim().to_ascii_lowercase().as_str() {
                 "user-agent" => {
                     if !reading_agents {
-                        groups.push(Group::default());
+                        groups.push(Group {
+                            agents: Vec::new(),
+                            rules: rules.len()..rules.len(),
+                            delay: None,
+                        });
                     }
                     reading_agents = true;
                     if let Some(group) = groups.last_mut() {
@@ -230,22 +319,32 @@ impl RobotsTxt {
                 "sitemap" => sitemaps.push(value.to_owned()),
                 key => {
                     reading_agents = false;
-                    let agents = || groups.last().map(|g| g.agents.clone()).unwrap_or_default();
+                    let room = declared < MAX_DECLARED_BYTES;
                     match key {
-                        "content-signal" if content_signals.len() < MAX_DECLARED_LINES => {
+                        "content-signal" if room && content_signals.len() < MAX_DECLARED_LINES => {
+                            let (agents, more_agents) = declared_agents(groups.last());
+                            let pairs =
+                                declared_pairs(parse_content_signal(value), is_known_signal_key);
+                            declared += declared_bytes(&agents, None, &pairs);
                             content_signals.push(ContentSignal {
                                 line: number,
-                                agents: agents(),
-                                pairs: to_pairs(parse_content_signal(value), is_known_signal_key),
+                                agents,
+                                more_agents,
+                                pairs,
                             });
                         }
-                        "content-usage" if content_usage.len() < MAX_DECLARED_LINES => {
+                        "content-usage" if room && content_usage.len() < MAX_DECLARED_LINES => {
+                            let (agents, more_agents) = declared_agents(groups.last());
                             let (path, pairs) = parse_content_usage(value);
+                            let path = path.map(|p| clean_declared(&p));
+                            let pairs = declared_pairs(pairs, is_known_usage_key);
+                            declared += declared_bytes(&agents, path.as_deref(), &pairs);
                             content_usage.push(ContentUsage {
                                 line: number,
-                                agents: agents(),
+                                agents,
+                                more_agents,
                                 path,
-                                pairs: to_pairs(pairs, is_known_usage_key),
+                                pairs,
                             });
                         }
                         _ => {}
@@ -256,7 +355,8 @@ impl RobotsTxt {
                     match key {
                         "allow" | "disallow" if !value.is_empty() => {
                             if let Some(rule) = Rule::new(value, key == "allow", number) {
-                                group.rules.push(rule);
+                                rules.push(rule);
+                                group.rules.end = rules.len();
                             }
                         }
                         "crawl-delay" if group.delay.is_none() => {
@@ -269,60 +369,90 @@ impl RobotsTxt {
         }
         RobotsTxt {
             groups,
+            rules,
             sitemaps,
             content_signals,
             content_usage,
         }
     }
 
-    /// The groups that apply to `token`: every group naming it, else every `*` group.
-    fn chosen(&self, token: &str) -> (GroupMatch, Vec<&Group>) {
-        let token = product_token(token);
-        let named: Vec<&Group> = self
-            .groups
-            .iter()
-            .filter(|g| g.agents.contains(&token))
-            .collect();
-        if !named.is_empty() {
-            return (GroupMatch::Named, named);
+    /// Chooses the groups that apply to `token`, as Google does: every group naming it, else
+    /// every `*` group. `fallback` is the token the bot's operator says it follows when no
+    /// group names it (Applebot follows Googlebot); its groups come before the `*` ones.
+    /// Resolve once per token and keep the result: this walks every group.
+    pub fn resolve(&self, token: &str, fallback: Option<&str>) -> AgentRules {
+        let named = |token: &str| -> Vec<&Group> {
+            let token = product_token(token);
+            self.groups
+                .iter()
+                .filter(|g| g.agents.contains(&token))
+                .collect()
+        };
+        let mut chosen = named(token);
+        let mut group = GroupMatch::Named;
+        if chosen.is_empty()
+            && let Some(fallback) = fallback
+        {
+            chosen = named(fallback);
+            group = GroupMatch::Fallback;
         }
-        let wild: Vec<&Group> = self
-            .groups
+        if chosen.is_empty() {
+            chosen = self
+                .groups
+                .iter()
+                .filter(|g| g.agents.iter().any(|a| a == "*"))
+                .collect();
+            group = if chosen.is_empty() {
+                GroupMatch::None
+            } else {
+                GroupMatch::Wildcard
+            };
+        }
+        let rules = chosen
             .iter()
-            .filter(|g| g.agents.iter().any(|a| a == "*"))
+            .flat_map(|g| g.rules.clone())
+            .take(MAX_RULES)
+            .map(|i| i as u32)
             .collect();
-        if wild.is_empty() {
-            (GroupMatch::None, wild)
-        } else {
-            (GroupMatch::Wildcard, wild)
+        let delay = chosen
+            .iter()
+            .find_map(|g| g.delay.as_deref())
+            .and_then(|d| d.trim().parse::<f64>().ok())
+            .filter(|secs| secs.is_finite() && *secs > 0.0);
+        AgentRules {
+            group,
+            rules,
+            delay,
         }
     }
 
-    /// May `token` fetch `path` (with its query, if any)? The longest matching pattern
-    /// wins, `Allow` wins ties, and `/robots.txt` is always allowed.
-    pub fn verdict(&self, token: &str, path: &str) -> Verdict {
-        let (group, chosen) = self.chosen(token);
-        if path == "/robots.txt" {
-            return Verdict {
-                allowed: true,
-                group,
-                rule: None,
-            };
-        }
+    /// The longest matching rule of `agent` for `path`; `Allow` wins ties.
+    fn best(&self, agent: &AgentRules, path: &str) -> Option<&Rule> {
         let mut best: Option<&Rule> = None;
-        for rule in chosen
+        for rule in agent
+            .rules
             .iter()
-            .flat_map(|g| g.rules.iter())
-            .take(MAX_RULES)
+            .filter_map(|i| self.rules.get(*i as usize))
             .filter(|r| r.matches(path))
         {
             if best.is_none_or(|b| (rule.len, rule.allow) > (b.len, b.allow)) {
                 best = Some(rule);
             }
         }
+        best
+    }
+
+    /// May the agent fetch `path` (with its query, if any)? The longest matching pattern wins,
+    /// `Allow` wins ties, and `/robots.txt` is always allowed.
+    pub fn verdict_for(&self, agent: &AgentRules, path: &str) -> Verdict {
+        let best = if path == "/robots.txt" {
+            None
+        } else {
+            self.best(agent, path)
+        };
         Verdict {
             allowed: best.is_none_or(|r| r.allow),
-            group,
+            group: agent.group,
             rule: best.map(|r| MatchedRule {
                 line: r.line,
                 allow: r.allow,
@@ -331,17 +461,20 @@ impl RobotsTxt {
         }
     }
 
+    /// [`verdict_for`](Self::verdict_for) without the rule: allocates nothing.
+    pub fn allowed_for(&self, agent: &AgentRules, path: &str) -> bool {
+        path == "/robots.txt" || self.best(agent, path).is_none_or(|r| r.allow)
+    }
+
+    /// May `token` fetch `path`? For one question; resolve the token once when asking many.
+    pub fn verdict(&self, token: &str, path: &str) -> Verdict {
+        self.verdict_for(&self.resolve(token, None), path)
+    }
+
     /// The first `Crawl-delay` of the groups that apply to `token`, in seconds. Not
     /// capped here; positive and finite only.
     pub fn crawl_delay(&self, token: &str) -> Option<f64> {
-        let (_, chosen) = self.chosen(token);
-        let secs: f64 = chosen
-            .iter()
-            .find_map(|g| g.delay.as_deref())?
-            .trim()
-            .parse()
-            .ok()?;
-        (secs.is_finite() && secs > 0.0).then_some(secs)
+        self.resolve(token, None).delay
     }
 
     pub fn sitemaps(&self) -> &[String] {
@@ -357,15 +490,17 @@ impl RobotsTxt {
     }
 }
 
-/// What the robots.txt response means for crawling, as Google reads it.
+/// What the robots.txt response means for crawling, as Google and RFC 9309 read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RobotsAvailability {
     /// 2xx: the rules in the file apply.
     Ok,
-    /// 4xx except 429: no rules, everything is allowed.
+    /// 4xx except 429: no rules, everything is allowed. A final 3xx (redirects that never
+    /// reached a file) counts the same: RFC 9309 lets a crawler treat it as unavailable in the
+    /// 4xx sense.
     Missing,
-    /// 429, 5xx (and anything else that is not a 2xx or 4xx): the whole site is off
+    /// 429, 5xx (and anything else that is not a 2xx, 3xx or 4xx): the whole site is off
     /// limits for now.
     Unavailable,
     /// Not fetched.
@@ -376,6 +511,7 @@ pub fn availability(status: Option<u16>) -> RobotsAvailability {
     match status {
         None => RobotsAvailability::Unknown,
         Some(s) if (200..300).contains(&s) => RobotsAvailability::Ok,
+        Some(s) if (300..400).contains(&s) => RobotsAvailability::Missing,
         Some(s) if (400..500).contains(&s) && s != 429 => RobotsAvailability::Missing,
         Some(_) => RobotsAvailability::Unavailable,
     }

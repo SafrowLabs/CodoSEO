@@ -38,7 +38,8 @@
         "signature_agent": { "anyOf": [{ "$ref": "#/$defs/httpsUri" }, { "type": "null" }] },
         "source_url": { "$ref": "#/$defs/httpsUri" },
         "last_reviewed": { "$ref": "#/$defs/date" },
-        "notes": { "type": "string" }
+        "notes": { "type": "string" },
+        "robots_fallback": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$", "description": "Optional. The token of another bot in this file whose robots.txt groups this bot follows when no group names it, as its operator documents." }
       }
     }
   }

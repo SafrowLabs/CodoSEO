@@ -19,6 +19,19 @@ pub fn is_known_usage_key(key: &str) -> bool {
     USAGE_KEYS.contains(&key)
 }
 
+/// Longest declared string kept, in characters.
+pub const MAX_DECLARED_TEXT: usize = 512;
+
+/// A declared string as it is kept: trimmed, without control characters (a stray `\r` or escape
+/// would otherwise reach change rows and alerts) and cut to [`MAX_DECLARED_TEXT`] characters.
+pub fn clean_declared(s: &str) -> String {
+    s.trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_DECLARED_TEXT)
+        .collect()
+}
+
 /// `search=yes, ai-train=no` → `[("search","yes"), ("ai-train","no")]`. Keys are
 /// lower-cased, values are kept as written (trimmed). Pieces without `=` are skipped.
 pub fn parse_content_signal(value: &str) -> Vec<(String, String)> {

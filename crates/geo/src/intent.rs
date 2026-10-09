@@ -1,9 +1,10 @@
 //! What the site owner wants from each kind of AI bot, so a finding can tell a mistake from a choice.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::eligibility::DirectiveSlug;
 use crate::registry::{Bot, Purpose};
 
 /// The owner's stance towards a bot or a whole purpose.
@@ -27,6 +28,10 @@ pub struct Intent {
     /// Keyed by robots.txt token, matched ignoring case.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bots: BTreeMap<String, Stance>,
+    /// Page directives the owner set on purpose (`nosnippet`, `max_snippet`, ...): pages carrying
+    /// them still show in the per-engine matrix but open no answer-restriction incident.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub accepted_directives: BTreeSet<DirectiveSlug>,
 }
 
 impl Intent {

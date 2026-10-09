@@ -1,8 +1,9 @@
 //! The AI access report: what one crawl says about who can reach, read and quote a site.
 //!
 //! Pure data built from a [`CrawlOutput`]. It is stored as JSONB per crawl and read back by the web
-//! UI, so it stays compact (URLs are `u16` indexes into `important`, rules are pooled per bot) and
-//! every later-added field is `#[serde(default)]`. Findings are derived from it, never from the crawl.
+//! UI, so it stays compact (URLs are `u16` indexes into `important`, the rules that block them are
+//! pooled once per report with their patterns cut short, declared preferences are capped) and every
+//! later-added field is `#[serde(default)]`. Findings are derived from it, never from the crawl.
 
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
@@ -15,14 +16,14 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::declared::{
-    TdmRepEntry, is_known_signal_key, is_known_usage_key, parse_content_signal,
+    TdmRepEntry, clean_declared, is_known_signal_key, is_known_usage_key, parse_content_signal,
     parse_content_usage, parse_tdmrep,
 };
 use crate::eligibility::{Cause, DirectiveSlug, Effect, EngineId, engines, record_effect};
 use crate::registry::{Honours, Purpose, registry};
 use crate::robots::{
-    ContentSignal, ContentUsage, GroupMatch, MatchedRule, Pair, RobotsAvailability, RobotsTxt,
-    availability,
+    AgentRules, ContentSignal, ContentUsage, GroupMatch, MatchedRule, Pair, RobotsAvailability,
+    RobotsTxt, availability, declared_pairs,
 };
 
 /// Bumped when a stored report can no longer be read by the code that wrote the older shape.
@@ -32,8 +33,11 @@ pub const REPORT_VERSION: u32 = 1;
 pub const MAX_IMPORTANT: usize = 60;
 /// Declared preferences kept per list (header values, tdmrep entries).
 const MAX_DECLARED: usize = 100;
-/// Longest declared string kept, in characters.
-const MAX_DECLARED_TEXT: usize = 512;
+/// Most distinct blocking rules a report keeps; a block past that is still listed, without its
+/// rule. Real files need a handful: the cap only bounds a hostile one.
+const MAX_POOLED_RULES: usize = 128;
+/// Longest rule pattern a report keeps, in characters; matching used the whole pattern.
+const MAX_STORED_PATTERN: usize = 200;
 /// Pages from the top of the inlink ranking that count as important (as in `codoseo_diff::key_pages`).
 const TOP_PAGES: usize = 20;
 
@@ -135,9 +139,6 @@ fn same_origin(url: &Url, origin: &Url) -> bool {
 pub struct RobotsInfo {
     pub status: Option<u16>,
     pub availability: RobotsAvailability,
-    /// The crawl's fingerprint of the rules, for change detection.
-    #[serde(default)]
-    pub hash: Option<u64>,
 }
 
 /// One important URL a bot may not fetch.
@@ -145,7 +146,8 @@ pub struct RobotsInfo {
 pub struct BlockedUrl {
     /// Index into `AccessReport::important`.
     pub url: u16,
-    /// Index into the bot's `rules`; `None` when no rule matched (never the case for a block, kept for safety).
+    /// Index into `AccessReport::rules` (see [`AccessReport::rule_of`]); `None` when the pool was
+    /// full, or no rule matched (never the case for a block, kept for safety).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<u8>,
 }
@@ -157,21 +159,15 @@ pub struct BotAccess {
     /// The home page verdict; `None` when there are no important URLs.
     pub home_allowed: Option<bool>,
     pub group: GroupMatch,
-    /// The rule that decided the home page.
+    /// The rule that decided the home page, its pattern cut like the pooled ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_rule: Option<MatchedRule>,
-    /// The distinct rules that blocked something, referenced by `blocked[].rule`.
+    /// Only in reports written before the rules were pooled per report: this bot's own pool,
+    /// which its `blocked[].rule` then indexes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<MatchedRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked: Vec<BlockedUrl>,
-}
-
-impl BotAccess {
-    /// The rule that blocked `b`.
-    pub fn rule_of(&self, b: &BlockedUrl) -> Option<&MatchedRule> {
-        b.rule.and_then(|i| self.rules.get(usize::from(i)))
-    }
 }
 
 /// Important pages that look the same to one engine (same effect, same causes, same robots
@@ -196,6 +192,8 @@ fn is_false(b: &bool) -> bool {
 pub struct SiteCounts {
     /// On-origin pages that answered 200 with HTML.
     pub pages: u32,
+    /// Of those, pages the engine leaves out and pages it limits: for readers of saved reports and
+    /// audit JSON (the UI counts important pages).
     pub excluded: u32,
     pub limited: u32,
     /// Pages carrying each directive (one count per page), most first.
@@ -267,24 +265,32 @@ pub struct Declared {
     pub tdm_meta: TdmMeta,
     #[serde(default)]
     pub tdmrep: Option<TdmRepFile>,
+    /// The home page answered 2xx with HTML, so `headers` and `tdm_meta` were read. When false
+    /// they are unknown, not absent, and preferences are not compared against them.
+    #[serde(default)]
+    pub home_read: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccessReport {
     #[serde(default)]
     pub version: u32,
+    /// The registry the bot list was built from: written for readers of saved reports and audit
+    /// JSON, never read back by CodoSEO.
     pub registry_version: u32,
     pub robots: RobotsInfo,
     pub important: Vec<ImportantUrl>,
     /// Empty unless robots.txt is available (2xx) or missing (4xx), the only cases with verdicts.
     #[serde(default)]
     pub bots: Vec<BotAccess>,
+    /// The distinct rules that block an important URL for some bot, referenced by
+    /// `bots[].blocked[].rule`; at most 128, patterns cut to 200 characters.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<MatchedRule>,
     #[serde(default)]
     pub engines: Vec<EngineAccess>,
     #[serde(default)]
     pub declared: Declared,
-    #[serde(default)]
-    pub pages_crawled: u32,
 }
 
 impl EngineAccess {
@@ -303,10 +309,27 @@ impl AccessReport {
         )
     }
 
+    /// Robots.txt was read (or there is none) and so was the home page: every declared preference
+    /// is known, so two such reports can be compared.
+    pub fn preferences_known(&self) -> bool {
+        self.has_verdicts() && self.declared.home_read
+    }
+
     pub fn bot(&self, token: &str) -> Option<&BotAccess> {
         self.bots
             .iter()
             .find(|b| b.token.eq_ignore_ascii_case(token))
+    }
+
+    /// The rule that blocked `b` for `access`, from the report's pool (or, in an older report, the
+    /// bot's own).
+    pub fn rule_of<'a>(&'a self, access: &'a BotAccess, b: &BlockedUrl) -> Option<&'a MatchedRule> {
+        let pool = if access.rules.is_empty() {
+            &self.rules
+        } else {
+            &access.rules
+        };
+        b.rule.and_then(|i| pool.get(usize::from(i)))
     }
 
     pub fn engine(&self, id: EngineId) -> Option<&EngineAccess> {
@@ -347,11 +370,20 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
     let by_url: HashMap<&str, &PageRecord> =
         out.pages.iter().map(|p| (p.url.as_str(), p)).collect();
 
-    let bots = match &parsed {
+    // Each bot's groups are chosen once, not once per URL.
+    let resolved: Vec<(&str, AgentRules)> = match &parsed {
         Some(robots) => registry()
             .bots
             .iter()
-            .map(|bot| bot_access(robots, &bot.token, &paths))
+            .map(|bot| (bot.token.as_str(), agent_rules(robots, &bot.token)))
+            .collect(),
+        None => Vec::new(),
+    };
+    let mut rules: Vec<MatchedRule> = Vec::new();
+    let bots = match &parsed {
+        Some(robots) => resolved
+            .iter()
+            .map(|(token, agent)| bot_access(robots, agent, token, &paths, &mut rules))
             .collect(),
         None => Vec::new(),
     };
@@ -366,6 +398,12 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         .map(|engine| {
             let mut groups: Vec<EngineGroup> = Vec::new();
             let mut html_pages = 0u16;
+            let crawler = parsed.as_ref().map(|robots| {
+                resolved
+                    .iter()
+                    .find(|(token, _)| token.eq_ignore_ascii_case(engine.crawler))
+                    .map_or_else(|| agent_rules(robots, engine.crawler), |(_, a)| a.clone())
+            });
             for (i, imp) in important.iter().enumerate() {
                 let Some(page) = by_url.get(imp.url.as_str()) else {
                     continue;
@@ -374,9 +412,10 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
                     continue;
                 };
                 html_pages = html_pages.saturating_add(1);
-                let robots_blocked = parsed
-                    .as_ref()
-                    .is_some_and(|r| !r.verdict(engine.crawler, &paths[i]).allowed);
+                let robots_blocked = match (&parsed, &crawler) {
+                    (Some(robots), Some(agent)) => !robots.allowed_for(agent, &paths[i]),
+                    _ => false,
+                };
                 if robots_blocked || effect != Effect::Eligible {
                     match groups.iter_mut().find(|g| {
                         g.effect == effect
@@ -430,20 +469,37 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         .first()
         .and_then(|i| by_url.get(i.url.as_str()))
         .copied();
+    let readable_robots = parsed.as_ref().filter(|_| avail == RobotsAvailability::Ok);
     AccessReport {
         version: REPORT_VERSION,
         registry_version: registry().version,
         robots: RobotsInfo {
             status,
             availability: avail,
-            hash: robots_file.map(|r| r.hash),
         },
         important,
         bots,
+        rules,
         engines: engines_out,
-        declared: declared(out, avail, robots_file, home),
-        pages_crawled: out.pages.len() as u32,
+        declared: declared(out, readable_robots, home),
     }
+}
+
+/// The rules for a registry token, with the fallback its operator documents (Applebot follows
+/// Googlebot when no group names it).
+pub fn agent_rules(robots: &RobotsTxt, token: &str) -> AgentRules {
+    robots.resolve(token, registry().robots_fallback(token))
+}
+
+/// A rule as the report keeps it: without control characters and with the pattern cut to
+/// [`MAX_STORED_PATTERN`] characters and a closing "…".
+fn stored(rule: MatchedRule) -> MatchedRule {
+    let mut chars = rule.pattern.chars().filter(|c| !c.is_control());
+    let mut pattern: String = chars.by_ref().take(MAX_STORED_PATTERN).collect();
+    if chars.next().is_some() {
+        pattern.push('…');
+    }
+    MatchedRule { pattern, ..rule }
 }
 
 fn path_and_query(url: &str) -> String {
@@ -456,22 +512,33 @@ fn path_and_query(url: &str) -> String {
     }
 }
 
-fn bot_access(robots: &RobotsTxt, token: &str, paths: &[String]) -> BotAccess {
-    let mut rules: Vec<MatchedRule> = Vec::new();
+/// One bot's verdicts on the important `paths`. The rules that block go into the report's `pool`
+/// once, however many bots and URLs they block.
+fn bot_access(
+    robots: &RobotsTxt,
+    agent: &AgentRules,
+    token: &str,
+    paths: &[String],
+    pool: &mut Vec<MatchedRule>,
+) -> BotAccess {
     let mut blocked = Vec::new();
-    let mut home: Option<(bool, GroupMatch, Option<MatchedRule>)> = None;
+    let mut home: Option<(bool, Option<MatchedRule>)> = None;
     for (i, path) in paths.iter().enumerate() {
-        let v = robots.verdict(token, path);
+        let v = robots.verdict_for(agent, path);
         if i == 0 {
-            home = Some((v.allowed, v.group, v.rule.clone()));
+            home = Some((v.allowed, v.rule.clone().map(stored)));
         }
         if !v.allowed {
-            let rule = v.rule.map(|r| match rules.iter().position(|x| *x == r) {
-                Some(p) => p as u8,
-                None => {
-                    rules.push(r);
-                    (rules.len() - 1) as u8
-                }
+            let rule = v.rule.map(stored).and_then(|r| {
+                let at = match pool.iter().position(|x| *x == r) {
+                    Some(at) => at,
+                    None if pool.len() < MAX_POOLED_RULES => {
+                        pool.push(r);
+                        pool.len() - 1
+                    }
+                    None => return None,
+                };
+                u8::try_from(at).ok()
             });
             blocked.push(BlockedUrl {
                 url: i as u16,
@@ -479,87 +546,75 @@ fn bot_access(robots: &RobotsTxt, token: &str, paths: &[String]) -> BotAccess {
             });
         }
     }
-    // The group is the same for every path; with no URLs, ask about the root.
-    let (home_allowed, group, home_rule) = match home {
-        Some((allowed, group, rule)) => (Some(allowed), group, rule),
-        None => (None, robots.verdict(token, "/").group, None),
+    let (home_allowed, home_rule) = match home {
+        Some((allowed, rule)) => (Some(allowed), rule),
+        None => (None, None),
     };
     BotAccess {
         token: token.to_owned(),
         home_allowed,
-        group,
+        group: agent.group(),
         home_rule,
-        rules,
+        rules: Vec::new(),
         blocked,
     }
 }
 
-fn declared(
-    out: &CrawlOutput,
-    avail: RobotsAvailability,
-    robots_file: Option<&RobotsFile>,
-    home: Option<&PageRecord>,
-) -> Declared {
+/// The declared preferences: robots.txt lines when the file was read, the home page's headers and
+/// meta tags only when it answered 2xx with HTML (an error page's headers say nothing about the
+/// site), and tdmrep.json.
+fn declared(out: &CrawlOutput, robots: Option<&RobotsTxt>, home: Option<&PageRecord>) -> Declared {
     let mut d = Declared::default();
-    if let (RobotsAvailability::Ok, Some(f)) = (avail, robots_file) {
-        let robots = RobotsTxt::parse(f.body.as_bytes());
+    if let Some(robots) = robots {
         d.content_signals = robots.content_signals().to_vec();
         d.content_usage = robots.content_usage().to_vec();
     }
+    let Some(page) = home.filter(|p| p.is_html_ok()) else {
+        d.tdmrep = out.signals.tdmrep.as_ref().map(tdmrep_file);
+        return d;
+    };
+    d.home_read = true;
     for (name, value) in &out.signals.home_headers {
-        let value = &clip(value);
         match name.to_ascii_lowercase().as_str() {
-            "content-signal" => d.headers.content_signal.extend(
-                parse_content_signal(value)
-                    .into_iter()
-                    .map(|(key, value)| pair(key, value, is_known_signal_key))
-                    .take(MAX_DECLARED.saturating_sub(d.headers.content_signal.len())),
-            ),
+            "content-signal" => {
+                let room = MAX_DECLARED.saturating_sub(d.headers.content_signal.len());
+                d.headers.content_signal.extend(
+                    declared_pairs(parse_content_signal(value), is_known_signal_key)
+                        .into_iter()
+                        .take(room),
+                );
+            }
             "content-usage" if d.headers.content_usage.len() < MAX_DECLARED => {
                 let (path, pairs) = parse_content_usage(value);
                 d.headers.content_usage.push(HeaderUsage {
-                    path,
-                    pairs: pairs
-                        .into_iter()
-                        .map(|(key, value)| pair(key, value, is_known_usage_key))
-                        .take(MAX_DECLARED)
-                        .collect(),
+                    path: path.map(|p| clean_declared(&p)),
+                    pairs: declared_pairs(pairs, is_known_usage_key),
                 });
             }
             "tdm-reservation" => {
                 d.headers
                     .tdm_reservation
-                    .get_or_insert_with(|| value.trim().to_owned());
+                    .get_or_insert_with(|| clean_declared(value));
             }
             "tdm-policy" => {
                 d.headers
                     .tdm_policy
-                    .get_or_insert_with(|| value.trim().to_owned());
+                    .get_or_insert_with(|| clean_declared(value));
             }
             _ => {}
         }
     }
-    if let Some(page) = home {
-        d.tdm_meta = TdmMeta {
-            reservation: page.fields.ai.tdm_reservation.as_deref().map(clip),
-            policy: page.fields.ai.tdm_policy.as_deref().map(clip),
-        };
-    }
+    d.tdm_meta = TdmMeta {
+        reservation: page
+            .fields
+            .ai
+            .tdm_reservation
+            .as_deref()
+            .map(clean_declared),
+        policy: page.fields.ai.tdm_policy.as_deref().map(clean_declared),
+    };
     d.tdmrep = out.signals.tdmrep.as_ref().map(tdmrep_file);
     d
-}
-
-/// A declared string cut to [`MAX_DECLARED_TEXT`] characters.
-fn clip(s: &str) -> String {
-    s.trim().chars().take(MAX_DECLARED_TEXT).collect()
-}
-
-fn pair(key: String, value: String, known: fn(&str) -> bool) -> Pair {
-    Pair {
-        known: known(&key),
-        key,
-        value,
-    }
 }
 
 fn tdmrep_file(f: &WellKnownFile) -> TdmRepFile {
@@ -576,8 +631,8 @@ fn tdmrep_file(f: &WellKnownFile) -> TdmRepFile {
             entries: {
                 entries.truncate(MAX_DECLARED);
                 for e in &mut entries {
-                    e.location = clip(&e.location);
-                    e.policy = e.policy.as_deref().map(clip);
+                    e.location = clean_declared(&e.location);
+                    e.policy = e.policy.as_deref().map(clean_declared);
                 }
                 entries
             },
@@ -586,7 +641,7 @@ fn tdmrep_file(f: &WellKnownFile) -> TdmRepFile {
         Err(error) => TdmRepFile {
             status: f.status,
             entries: Vec::new(),
-            error: Some(clip(&error)),
+            error: Some(clean_declared(&error)),
         },
     }
 }
@@ -627,7 +682,7 @@ pub fn bot_verdicts(robots: &RobotsTxt, path: &str) -> Vec<BotVerdict> {
         .bots
         .iter()
         .map(|bot| {
-            let v = robots.verdict(&bot.token, path);
+            let v = robots.verdict_for(&agent_rules(robots, &bot.token), path);
             BotVerdict {
                 token: bot.token.clone(),
                 operator: bot.operator.clone(),

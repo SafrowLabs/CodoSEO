@@ -3,12 +3,12 @@
 //!
 //! The parsing and matching live in [`codoseo_geo::robots`], shared with the AI-access
 //! report; this wrapper adds the status handling, URL-or-path input and the crawl-delay
-//! cap the crawler needs.
+//! cap the crawler needs, and chooses our groups once, not on every URL.
 
 use std::time::Duration;
 
 use codoseo_core::crawl::{Politeness, RobotsFile};
-use codoseo_geo::robots::{MAX_ROBOTS_BYTES, RobotsAvailability, RobotsTxt, availability};
+use codoseo_geo::robots::{AgentRules, MAX_ROBOTS_BYTES, RobotsTxt};
 use url::Url;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -22,8 +22,8 @@ pub const ROBOTS_AGENT: &str = "CodoSEObot";
 enum Kind {
     AllowAll,
     BlockAll,
-    /// The parsed file and the product token it was read for.
-    Rules(Box<RobotsTxt>, String),
+    /// The parsed file and the rules it gives the product token it was read for.
+    Rules(Box<RobotsTxt>, AgentRules),
 }
 
 pub struct RobotsRules {
@@ -36,21 +36,23 @@ impl RobotsRules {
     /// Parses a robots.txt body for `agent`. Lines it doesn't understand are ignored.
     pub fn parse(body: &[u8], agent: &str) -> RobotsRules {
         let txt = RobotsTxt::parse(body);
-        let delay = txt.crawl_delay(agent).map(cap_delay);
+        let rules = txt.resolve(agent, None);
         RobotsRules {
             sitemaps: txt.sitemaps().to_vec(),
-            kind: Kind::Rules(Box::new(txt), agent.to_owned()),
-            delay,
+            delay: rules.crawl_delay().map(cap_delay),
+            kind: Kind::Rules(Box::new(txt), rules),
         }
     }
 
     /// Rules for a robots.txt that didn't return 2xx. Like Google: a 4xx (except 429)
-    /// means there are no rules; 429 and 5xx mean the whole site is off limits for now.
+    /// means there are no rules; 429 and 5xx mean the whole site is off limits for now. A
+    /// redirect that never reached a file (a final 3xx) keeps us out too: more cautious than
+    /// the AI access report, which reads it as missing as RFC 9309 allows.
     pub fn from_status(status: u16) -> RobotsRules {
-        let kind = if availability(Some(status)) == RobotsAvailability::Missing {
-            Kind::AllowAll
-        } else {
-            Kind::BlockAll
+        let kind = match status {
+            429 => Kind::BlockAll,
+            400..=499 => Kind::AllowAll,
+            _ => Kind::BlockAll,
         };
         RobotsRules {
             kind,
@@ -60,7 +62,7 @@ impl RobotsRules {
     }
 
     pub fn from_response(status: u16, body: &[u8], agent: &str) -> RobotsRules {
-        if availability(Some(status)) == RobotsAvailability::Ok {
+        if (200..300).contains(&status) {
             RobotsRules::parse(body, agent)
         } else {
             RobotsRules::from_status(status)
@@ -69,10 +71,10 @@ impl RobotsRules {
 
     /// Takes an absolute URL or a path (with optional query).
     pub fn allowed(&self, url_or_path: &str) -> bool {
-        let (txt, agent) = match &self.kind {
+        let (txt, rules) = match &self.kind {
             Kind::AllowAll => return true,
             Kind::BlockAll => return false,
-            Kind::Rules(txt, agent) => (txt, agent),
+            Kind::Rules(txt, rules) => (txt, rules),
         };
         let owned;
         let path = match Url::parse(url_or_path) {
@@ -85,7 +87,7 @@ impl RobotsRules {
             }
             Err(_) => url_or_path,
         };
-        txt.verdict(agent, path).allowed
+        txt.allowed_for(rules, path)
     }
 
     /// True when the homepage itself is off limits, so there is nothing to crawl.

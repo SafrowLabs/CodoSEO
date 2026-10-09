@@ -208,7 +208,8 @@
       "signature_agent": null,
       "source_url": "https://support.apple.com/en-us/119829",
       "last_reviewed": "2026-10-09",
-      "notes": "Crawls for Apple search features; its data may also be used to train Apple foundation models."
+      "notes": "Crawls for Apple search features; its data may also be used to train Apple foundation models.",
+      "robots_fallback": "Googlebot"
     },
     {
       "token": "Applebot-Extended",
