@@ -6,11 +6,11 @@ AI access monitoring answers one question: can the AI crawlers and answer engine
 
 ## What is checked
 
-**robots.txt, per bot.** For each bot in the [registry](#the-public-registry) (OpenAI, Anthropic, Perplexity, Google, Apple, Meta, Amazon, Microsoft, DuckDuckGo, Mistral, Common Crawl and more) CodoSEO reads the group of your robots.txt that applies to its product token, applies the longest-match rule the way the operators describe, and records whether the home page and the other important pages are allowed, with the winning rule and its line. Important pages are the home page and the most linked ones, up to 60. Control tokens such as `Google-Extended` never make requests but still decide what the operator may do, so they are listed too. A robots.txt that answers 5xx or 429 is its own finding: crawlers are told to stay away until it recovers.
+**robots.txt, per bot.** For each bot in the [registry](#the-public-registry) (OpenAI, Anthropic, Perplexity, Google, Apple, Meta, Amazon, Microsoft, DuckDuckGo, Mistral, Common Crawl and more) CodoSEO reads the group of your robots.txt that applies to its product token, applies the longest-match rule the way the operators describe, and records whether the home page and the other important pages are allowed, with the winning rule and its line. Important pages are the home page, the 20 most linked pages and any you star, up to 60. Control tokens such as `Google-Extended` never make requests but still decide what the operator may do, so they are listed too. A robots.txt that answers 5xx or 429 is its own finding: crawlers are told to stay away until it recovers.
 
-**Page-level controls, per engine.** For each of ten engines (Google Search, AI Overviews and AI Mode, Bing and Copilot, Apple, Amazon, ChatGPT, Claude, Perplexity, Meta AI, DuckDuckGo, Mistral) CodoSEO reads the controls that engine documents on each important page: the robots meta tag, `X-Robots-Tag` and `data-nosnippet`. Only controls the operator documents count, and only for the engines that honour them: `noarchive` removes a page from Copilot's answers but does nothing to Google's. A page is *eligible*, *limited* (a snippet cap, or a large share of its text under `data-nosnippet`) or *excluded*.
+**Page-level controls, per engine.** For each of ten engines (Google Search, AI Overviews and AI Mode, Bing and Copilot, Apple, Amazon, ChatGPT, Claude, Perplexity, Meta AI, DuckDuckGo, Mistral) CodoSEO reads the controls that engine documents on each important page: the robots meta tag, `X-Robots-Tag` and `data-nosnippet`. Only controls the operator documents count, and only for the engines that honour them: `noarchive` removes a page from Copilot's answers, does nothing to Google's, and for Amazon means only "do not use for model training", so it is not counted there. A page is *eligible*, *limited* (a snippet cap, or a large share of its text under `data-nosnippet`) or *excluded*.
 
-**Robots-only engines.** Some engines document no page-level control at all. For those the page is always eligible, and robots.txt is the only lever; the screen says so instead of implying a clean bill of health.
+**Robots-only engines.** ChatGPT, Claude, Perplexity, Meta AI, DuckDuckGo and Mistral document no page-level control, so for them a page is always eligible and robots.txt is the only lever; the screen says so instead of implying a clean bill of health.
 
 **Declared preferences, declared, not enforced.** `Content-Signal` and `Content-Usage` lines in robots.txt and response headers, and TDM reservation (`tdm-reservation` meta tag and header, `/.well-known/tdmrep.json`) are listed as the site states them. Nothing enforces them, and CodoSEO does not claim any bot honours them.
 
@@ -75,6 +75,7 @@ codoseo robots https://example.com/ --path /pricing
 
 ```
 AI bots (path /pricing)
+  Token          Operator   Purpose     Verdict
   GPTBot         OpenAI     training    Blocked  line 2
   OAI-SearchBot  OpenAI     search      Allowed
   ChatGPT-User   OpenAI     user fetch  Allowed  may ignore robots.txt
@@ -117,7 +118,11 @@ curl -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/
     { "id": "google", "name": "Google Search, AI Overviews & AI Mode",
       "eligible": 3, "limited": 0, "excluded": 0, "page_controls": true }
   ],
-  "declared": { "content_signals": [], "content_usage": [] }
+  "declared": {
+    "content_signals": [], "content_usage": [],
+    "headers": { "content_signal": [], "content_usage": [], "tdm_reservation": null, "tdm_policy": null },
+    "tdm_meta": { "reservation": null, "policy": null }, "tdmrep": null
+  }
 }
 ```
 

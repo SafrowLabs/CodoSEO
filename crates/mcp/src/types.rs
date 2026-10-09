@@ -138,7 +138,7 @@ pub struct AiAccessReport {
     /// Every registry bot's verdict for the path.
     pub bots: Vec<codoseo_geo::report::BotVerdict>,
     /// Stated preferences in robots.txt. Declared, not enforced.
-    pub declared: AiDeclared,
+    pub declared: codoseo_geo::report::RobotsDeclared,
     /// Empty when the page was not a successful HTML response.
     pub engines: Vec<AiEngine>,
     /// The page's HTTP status, `None` when it could not be fetched.
@@ -149,12 +149,6 @@ pub struct AiAccessReport {
 pub struct AiRobots {
     pub status: u16,
     pub availability: codoseo_geo::robots::RobotsAvailability,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AiDeclared {
-    pub content_signals: Vec<codoseo_geo::robots::ContentSignal>,
-    pub content_usage: Vec<codoseo_geo::robots::ContentUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

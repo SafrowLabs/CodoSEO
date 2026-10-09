@@ -29,7 +29,7 @@ pub fn run(args: BotsArgs) -> Outcome {
     Ok(EXIT_OK)
 }
 
-fn purpose_label(p: Purpose) -> &'static str {
+pub(super) fn purpose_label(p: Purpose) -> &'static str {
     match p {
         Purpose::Search => "search",
         Purpose::UserFetch => "user fetch",

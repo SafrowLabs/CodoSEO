@@ -6,12 +6,13 @@ use clap::Args;
 use codoseo_core::crawl::AddressPolicy;
 use codoseo_crawler::fetch::{Fetcher, FetcherConfig};
 use codoseo_crawler::robots::fetch_robots;
-use codoseo_geo::registry::{Honours, Purpose};
-use codoseo_geo::report::{BotVerdict, bot_verdicts};
-use codoseo_geo::robots::{ContentSignal, ContentUsage, Pair, RobotsTxt};
+use codoseo_geo::registry::Honours;
+use codoseo_geo::report::{BotVerdict, RobotsDeclared, bot_verdicts};
+use codoseo_geo::robots::{Pair, RobotsTxt};
 use serde::Serialize;
 use url::Url;
 
+use super::bots::purpose_label;
 use super::output::{clean, write_json, write_pairs};
 use super::{CliError, EXIT_OK, Outcome, PlainFormat};
 
@@ -35,14 +36,7 @@ struct RobotsReport {
     sitemaps: Vec<String>,
     /// Each registry bot's verdict for the path; empty when robots.txt could not be read (5xx).
     bots: Vec<BotVerdict>,
-    declared: Declared,
-}
-
-/// What robots.txt says about use of the content: stated preferences, not enforced.
-#[derive(Debug, Default, Serialize)]
-struct Declared {
-    content_signals: Vec<ContentSignal>,
-    content_usage: Vec<ContentUsage>,
+    declared: RobotsDeclared,
 }
 
 pub async fn run(args: RobotsArgs) -> Outcome {
@@ -53,14 +47,8 @@ pub async fn run(args: RobotsArgs) -> Outcome {
     let path = args.path.unwrap_or_else(|| args.url.path().to_owned());
     let parsed = RobotsTxt::from_response(Some(file.status), file.body.as_bytes());
     let (bots, declared) = match &parsed {
-        Some(txt) => (
-            bot_verdicts(txt, &path),
-            Declared {
-                content_signals: txt.content_signals().to_vec(),
-                content_usage: txt.content_usage().to_vec(),
-            },
-        ),
-        None => (Vec::new(), Declared::default()),
+        Some(txt) => (bot_verdicts(txt, &path), RobotsDeclared::of(txt)),
+        None => (Vec::new(), RobotsDeclared::default()),
     };
     let report = RobotsReport {
         status: file.status,
@@ -110,16 +98,6 @@ fn write_table(w: &mut impl Write, r: &RobotsReport) -> std::io::Result<()> {
     write_ai_bots(w, r)
 }
 
-fn purpose_label(p: Purpose) -> &'static str {
-    match p {
-        Purpose::Search => "search",
-        Purpose::UserFetch => "user fetch",
-        Purpose::Agent => "agent",
-        Purpose::Training => "training",
-        Purpose::Ads => "ads",
-    }
-}
-
 fn pairs_text(pairs: &[Pair]) -> String {
     pairs
         .iter()
@@ -139,8 +117,13 @@ fn write_ai_bots(w: &mut impl Write, r: &RobotsReport) -> std::io::Result<()> {
         );
     }
     let width = |f: fn(&BotVerdict) -> usize| r.bots.iter().map(f).max().unwrap_or(0);
-    let token = width(|b| b.token.chars().count());
-    let operator = width(|b| b.operator.chars().count());
+    let token = width(|b| b.token.chars().count()).max("Token".len());
+    let operator = width(|b| b.operator.chars().count()).max("Operator".len());
+    writeln!(
+        w,
+        "  {:<token$}  {:<operator$}  {:<10}  Verdict",
+        "Token", "Operator", "Purpose"
+    )?;
     for b in &r.bots {
         let verdict = if b.allowed { "Allowed" } else { "Blocked" };
         let by = b.line.map_or_else(String::new, |n| format!("  line {n}"));

@@ -605,6 +605,22 @@ pub struct BotVerdict {
     pub rule: Option<String>,
 }
 
+/// The Content-Signal and Content-Usage lines of a robots.txt: stated preferences, not enforced.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RobotsDeclared {
+    pub content_signals: Vec<ContentSignal>,
+    pub content_usage: Vec<ContentUsage>,
+}
+
+impl RobotsDeclared {
+    pub fn of(robots: &RobotsTxt) -> Self {
+        RobotsDeclared {
+            content_signals: robots.content_signals().to_vec(),
+            content_usage: robots.content_usage().to_vec(),
+        }
+    }
+}
+
 /// Every registry bot's verdict for `path` (with its query, if any), in registry order.
 pub fn bot_verdicts(robots: &RobotsTxt, path: &str) -> Vec<BotVerdict> {
     registry()

@@ -20,14 +20,14 @@ use codoseo_crawler::fetch::{FetchError, Fetcher, FetcherConfig, Hop};
 use codoseo_crawler::robots::fetch_robots;
 use codoseo_diff::{diff, key_pages};
 use codoseo_geo::eligibility::{Effect, engines, record_effect};
-use codoseo_geo::report::{BotVerdict, bot_verdicts};
+use codoseo_geo::report::{BotVerdict, RobotsDeclared, bot_verdicts};
 use codoseo_geo::robots::{RobotsTxt, availability};
 use url::Url;
 
 use crate::backend::{Backend, BackendError};
 use crate::cache::{AuditCache, CacheError};
 use crate::types::{
-    AiAccessReport, AiDeclared, AiEngine, AiRobots, AuditHandle, AuditId, AuditState, AuditStatus,
+    AiAccessReport, AiEngine, AiRobots, AuditHandle, AuditId, AuditState, AuditStatus,
     AuditSummary, FailingCheck, MAX_FAILING_CHECKS, RedirectReport, RobotsReport, UrlRow,
     rank_failing,
 };
@@ -241,14 +241,8 @@ impl Backend for LocalBackend {
         };
         let parsed = RobotsTxt::from_response(Some(file.status), file.body.as_bytes());
         let (bots, declared) = match &parsed {
-            Some(txt) => (
-                bot_verdicts(txt, &path),
-                AiDeclared {
-                    content_signals: txt.content_signals().to_vec(),
-                    content_usage: txt.content_usage().to_vec(),
-                },
-            ),
-            None => (Vec::new(), AiDeclared::default()),
+            Some(txt) => (bot_verdicts(txt, &path), RobotsDeclared::of(txt)),
+            None => (Vec::new(), RobotsDeclared::default()),
         };
 
         // A page that cannot be fetched still gets the robots answer; only the engines are empty.
