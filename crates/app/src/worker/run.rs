@@ -355,30 +355,31 @@ async fn run_one_crawl(
         .previous_snapshot(claimed.site_id)
         .await
         .map_err(|e| format!("could not load previous snapshot: {e}"))?;
+    // A no-signup audit has no site owner to tell: the AI access state starts with the first
+    // full crawl. The findings are drawn in `finalize`, under the intent the site has then.
+    let with_geo = claimed.trigger != CrawlTrigger::Quick;
+    // The pages the user starred: key pages for the diff, important pages for AI access. Loaded
+    // once, and only when either needs them.
+    let starred = if previous.is_some() || with_geo {
+        codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
+            .await
+            .map_err(|e| format!("could not load starred pages: {e}"))?
+    } else {
+        Default::default()
+    };
     let changes = match previous {
         Some(prev) => {
             let curr = codoseo_core::snapshot::Snapshot::from_output(&out);
             // Key pages: the origin, the top 20 by inlinks and the pages the user starred.
-            let starred = codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
-                .await
-                .map_err(|e| format!("could not load starred pages: {e}"))?;
             let key = key_pages(&curr, &starred);
             diff(&prev, &curr, &key)
         }
         None => Vec::new(),
     };
-
-    // A no-signup audit has no site owner to tell: the AI access state starts with the first
-    // full crawl. The findings are drawn in `finalize`, under the intent the site has then.
-    let geo = if claimed.trigger == CrawlTrigger::Quick {
-        None
-    } else {
-        let starred = codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
-            .await
-            .map_err(|e| format!("could not load starred pages: {e}"))?;
+    let geo = with_geo.then(|| {
         let important = important_urls(&out.pages, &out.origin, &starred);
-        Some(GeoInput::new(build_report(&out, &important)))
-    };
+        GeoInput::new(build_report(&out, &important))
+    });
 
     finalize(
         pool,

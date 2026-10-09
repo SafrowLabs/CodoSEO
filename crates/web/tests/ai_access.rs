@@ -96,12 +96,12 @@ async fn the_screen_shows_the_report_and_the_open_incidents() {
     ] {
         assert!(body.contains(needle), "missing {needle:?}");
     }
-    // Found by the second crawl, so it was alerted: no "first check" chip.
-    assert!(!body.contains("Found on first check"));
+    // Found by the second crawl, so it was alerted: no baseline chip.
+    assert!(!body.contains(">Baseline<"));
 }
 
 #[tokio::test]
-async fn the_baseline_report_marks_its_incidents_as_found_on_the_first_check() {
+async fn the_baseline_report_marks_its_incidents_as_the_baseline() {
     let (app, site, cookie) = setup().await;
     app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
         .await;
@@ -109,7 +109,12 @@ async fn the_baseline_report_marks_its_incidents_as_found_on_the_first_check() {
         .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
         .await
         .body;
-    assert!(body.contains("Found on first check"), "{body}");
+    assert!(
+        body.contains(
+            r#"<span class="chip" title="Found by the first crawl that could check this, so no alert was sent">Baseline</span>"#
+        ),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -234,6 +239,7 @@ async fn saving_the_intent_re_evaluates_the_latest_report_quietly() {
     }
 
     // Training set to Block: every training bot that honours robots.txt can still crawl.
+    // (No `d` box ticked: no page directive accepted.)
     let res = app
         .post_hx(
             &format!("/s/{}/ai-access/intent", site.id),
@@ -353,10 +359,7 @@ async fn mark_intended_turns_the_finding_into_a_choice() {
         )
         .await;
     assert_eq!(res.status, StatusCode::OK);
-    assert_eq!(
-        toast_message(&res),
-        "Marked as intended · OAI-SearchBot set to Block"
-    );
+    assert_eq!(toast_message(&res), "Marked as intended · 1 issue resolved");
     assert_eq!(
         res.header("hx-replace-url"),
         Some(format!("/s/{}/ai-access", site.id).as_str())
@@ -588,6 +591,8 @@ async fn the_changes_screen_renders_every_ai_kind() {
         &format!(r#"<a class="change-link" href="/s/{}/ai-access">"#, site.id),
         "<div class=\"tile-label\">AI access</div>",
         "AI bots blocked or answers restricted",
+        // The default rules card: an AI issue resolving is instant too.
+        r#"<span>AI issue resolved</span><span class="badge t-accent">Instant</span>"#,
     ] {
         assert!(body.contains(needle), "missing {needle:?}");
     }
@@ -786,4 +791,195 @@ async fn the_bots_table_opens_on_what_needs_attention() {
     // The group says how many conflict; the others say none do (shown while filtered).
     assert!(body.contains(r#"<span class="aia-group-flag">1 conflict</span>"#));
     assert!(body.contains(r#"<tbody class="is-clear">"#));
+}
+
+/// OAI-SearchBot kept out everywhere, PerplexityBot only from /docs/ (its home page is allowed).
+const BLOCK_OAI_AND_DOCS: &str = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: PerplexityBot\nDisallow: /docs/\n";
+
+#[tokio::test]
+async fn mark_intended_on_a_partly_blocked_bot_sets_no_preference() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI_AND_DOCS), Vec::new())
+        .await;
+    let open = geo::open_incidents(app.pool(), site.id).await.unwrap();
+    assert_eq!(open.len(), 1, "one issue for the search bots");
+    let body = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(
+        body.contains(
+            "Set OAI-SearchBot to Block, and PerplexityBot (blocked on some pages only) to No preference, in your intent?"
+        ),
+        "{body}"
+    );
+
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/incidents/{}/intended", site.id, open[0].id),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    // Block would have opened "can still crawl for AI search" for PerplexityBot at once.
+    assert_eq!(toast_message(&res), "Marked as intended · 1 issue resolved");
+    let intent = geo::get_intent(app.pool(), site.id).await.unwrap();
+    assert_eq!(intent.bot_override("OAI-SearchBot"), Some(Stance::Block));
+    assert_eq!(intent.bot_override("PerplexityBot"), Some(Stance::Any));
+    assert!(
+        geo::open_incidents(app.pool(), site.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn mark_intended_says_when_the_change_opens_another_issue() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    let open = geo::open_incidents(app.pool(), site.id).await.unwrap();
+    assert_eq!(open.len(), 1);
+    // Training set to Block without a re-evaluation (as a save in another tab could leave it
+    // for a moment): marking the search issue re-evaluates, and the training bots that can
+    // still crawl open an issue of their own.
+    let mut intent = codoseo_geo::Intent::default();
+    intent.purposes.insert(Purpose::Training, Stance::Block);
+    geo::set_intent(app.pool(), site.id, &intent).await.unwrap();
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/incidents/{}/intended", site.id, open[0].id),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(
+        toast_message(&res),
+        "Marked as intended · 1 issue resolved, 1 opened"
+    );
+}
+
+fn nosnippet(mut p: PageRecord) -> PageRecord {
+    p.fields.meta_robots = Some("nosnippet".to_owned());
+    p
+}
+
+#[tokio::test]
+async fn mark_intended_on_restricted_answers_accepts_the_directive() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let marked: Vec<PageRecord> = pages().into_iter().map(nosnippet).collect();
+    app.finished_crawl_with_robots(&site, marked, (200, OPEN), Vec::new())
+        .await;
+    let open = geo::open_incidents(app.pool(), site.id).await.unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].subject, "nosnippet");
+    let body = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(
+        body.contains(
+            "Accept nosnippet as intended? CodoSEO stops raising issues for it but still shows it in AI answers."
+        ),
+        "{body}"
+    );
+
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/incidents/{}/intended", site.id, open[0].id),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(toast_message(&res), "Marked as intended · 1 issue resolved");
+    let intent = geo::get_intent(app.pool(), site.id).await.unwrap();
+    assert_eq!(
+        intent.accepted_directives,
+        [codoseo_geo::eligibility::DirectiveSlug::Nosnippet].into()
+    );
+    // The engines' crawlers keep their stance: robots.txt is still watched for Googlebot.
+    assert!(intent.bots.is_empty(), "{:?}", intent.bots);
+    assert!(
+        geo::open_incidents(app.pool(), site.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // The matrix still shows it.
+    assert!(res.body.contains("nosnippet ×3"), "{}", res.body);
+
+    // The intent form shows it ticked, and unticking it brings the issue back.
+    let form = app
+        .get(&format!("/s/{}/ai-access/intent", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(
+        form.contains("Page directives you use on purpose"),
+        "{form}"
+    );
+    assert!(
+        form.contains(r#"name="d" value="nosnippet" checked>"#),
+        "{form}"
+    );
+    assert!(form.contains(r#"name="d" value="max_snippet">"#));
+    assert!(!form.contains(r#"value="noindex""#));
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/intent", site.id),
+            "p.search=allow&d=noarchive",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(toast_message(&res), "Intent saved · 1 issue opened");
+    let intent = geo::get_intent(app.pool(), site.id).await.unwrap();
+    assert_eq!(
+        intent.accepted_directives,
+        [codoseo_geo::eligibility::DirectiveSlug::Noarchive].into()
+    );
+    // noindex can't be accepted from the form.
+    let res = app
+        .post_hx(
+            &format!("/s/{}/ai-access/intent", site.id),
+            "d=noindex",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_bot_that_follows_another_bots_group_says_so() {
+    let (app, site, cookie) = setup().await;
+    let robots = "User-agent: Googlebot\nAllow: /\nDisallow: /docs/\n";
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    app.finished_crawl_with_robots(&site, pages(), (200, robots), Vec::new())
+        .await;
+    let body = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
+        .await
+        .body;
+    // The bots table: Applebot reads Googlebot's group.
+    assert!(
+        body.contains("Allowed · follows Googlebot&#39;s rules (line 2)"),
+        "{body}"
+    );
+    // The incident: both are kept out of /docs/ by the same line.
+    assert!(
+        body.contains(
+            "robots.txt line 3 · Disallow: /docs/ · User-agent: Googlebot (Applebot follows its rules)"
+        ),
+        "{body}"
+    );
 }

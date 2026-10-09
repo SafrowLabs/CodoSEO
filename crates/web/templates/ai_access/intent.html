@@ -34,6 +34,24 @@
     </section>
     {% endfor %}
 
+    <section class="card aia-directives" aria-labelledby="h-directives">
+      <div class="aia-purpose-main">
+        <div class="aia-purpose-text">
+          <h2 class="card-title" id="h-directives">Page directives you use on purpose</h2>
+          <p>Markup that limits what AI answers can quote. Tick the ones you set on purpose: pages that carry them still show under AI answers, but raise no issue. <code>noindex</code> isn't listed: the SEO checks report it.</p>
+        </div>
+      </div>
+      <fieldset class="aia-dirs">
+        <legend class="sr-only">Page directives you use on purpose</legend>
+        {% for d in directives %}
+        <label class="aia-dir" for="{{ d.id }}">
+          <input class="check" type="checkbox" id="{{ d.id }}" name="d" value="{{ d.value }}"{% if d.checked %} checked{% endif %}>
+          <span class="aia-dir-text"><code class="aia-token">{{ d.label }}</code><span class="aia-sub">{{ d.note }}</span></span>
+        </label>
+        {% endfor %}
+      </fieldset>
+    </section>
+
     <div class="aia-savebar">
       <button class="btn btn-primary" type="submit"><svg class="icon"><use href="#i-check"/></svg>Save intent</button>
       <a class="btn btn-ghost" href="{{ base }}/ai-access">Cancel</a>

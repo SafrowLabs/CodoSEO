@@ -17,7 +17,7 @@ use axum::{Form, Router};
 use codoseo_core::check::Severity;
 use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engines};
 use codoseo_geo::findings::{BotEvidence, Evidence, FindingKind, ROBOTS_DOC};
-use codoseo_geo::report::{AccessReport, Declared, Reason};
+use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str, slug_str};
 use codoseo_geo::robots::{GroupMatch, MatchedRule, Pair, RobotsAvailability};
 use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
 use codoseo_store::crawls;
@@ -54,7 +54,7 @@ const RESOLVED_SHOWN: i64 = 10;
 const URLS_SHOWN: usize = 5;
 
 /// Purposes in the order the screens list them.
-pub const PURPOSES: [Purpose; 5] = [
+const PURPOSES: [Purpose; 5] = [
     Purpose::Search,
     Purpose::UserFetch,
     Purpose::Agent,
@@ -64,7 +64,7 @@ pub const PURPOSES: [Purpose; 5] = [
 
 // ---- labels ----------------------------------------------------------------------------------
 
-pub fn purpose_label(p: Purpose) -> &'static str {
+pub(crate) fn purpose_label(p: Purpose) -> &'static str {
     match p {
         Purpose::Search => "Search",
         Purpose::UserFetch => "User-triggered fetchers",
@@ -102,7 +102,7 @@ fn purpose_blurb(p: Purpose) -> &'static str {
     }
 }
 
-pub fn stance_label(s: Stance) -> &'static str {
+fn stance_label(s: Stance) -> &'static str {
     match s {
         Stance::Allow => "Allow",
         Stance::Block => "Block",
@@ -170,13 +170,14 @@ fn names(items: &[String]) -> String {
     }
 }
 
-/// `robots.txt line 5 · Disallow: / · User-agent: OAI-SearchBot`
+/// `robots.txt line 5 · Disallow: / · User-agent: OAI-SearchBot`; for a bot that follows
+/// another's group, `… · User-agent: Googlebot (Applebot follows its rules)`.
 fn rule_line(rule: &MatchedRule, group: GroupMatch, token: &str) -> String {
     let word = if rule.allow { "Allow" } else { "Disallow" };
     let agent = match (group, registry().robots_fallback(token)) {
         (GroupMatch::Named, _) => format!(" · User-agent: {token}"),
         (GroupMatch::Fallback, Some(fallback)) => {
-            format!(" · User-agent: {fallback} (followed by {token})")
+            format!(" · User-agent: {fallback} ({token} follows its rules)")
         }
         (GroupMatch::Wildcard, _) => " · User-agent: *".to_owned(),
         (GroupMatch::Fallback | GroupMatch::None, _) => String::new(),
@@ -333,7 +334,7 @@ pub struct IncidentView {
     pub opened_full: String,
     pub last_seen: String,
     pub last_seen_full: String,
-    /// `Found on first check` or `After an intent change`, for incidents opened without an alert.
+    /// `Baseline` or `After an intent change`, for incidents opened without an alert.
     pub quiet: Option<(&'static str, &'static str)>,
     pub sources: Vec<SourceLink>,
     /// `robots.txt answered HTTP 503`
@@ -766,40 +767,106 @@ fn bot_detail(kind: FindingKind, b: &BotEvidence) -> String {
     out
 }
 
-/// The owner's intent change that turns this finding into a choice: the bots it names and the
-/// stance they get.
-fn intended_change(kind: FindingKind, ev: &Evidence) -> Option<(Vec<String>, Stance)> {
-    let tokens = |v: &[BotEvidence]| v.iter().map(|b| b.token.clone()).collect::<Vec<_>>();
+/// The owner's intent change that turns a finding into a choice ("Mark intended").
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IntendedChange {
+    /// Bots and the stance each gets.
+    Bots(Vec<(String, Stance)>),
+    /// A page directive the owner sets on purpose: it opens no answers issue any more, and the
+    /// engines' crawlers keep their stance (and robots.txt keeps being watched for them).
+    Directive(DirectiveSlug),
+}
+
+fn intended_change(kind: FindingKind, subject: &str, ev: &Evidence) -> Option<IntendedChange> {
     match kind {
-        FindingKind::RobotsUnavailable => None,
-        FindingKind::BotsBlocked if !ev.bots.is_empty() => Some((tokens(&ev.bots), Stance::Block)),
-        FindingKind::BotsNotBlocked if !ev.bots.is_empty() => Some((tokens(&ev.bots), Stance::Any)),
-        FindingKind::AnswersRestricted if !ev.engines.is_empty() => {
-            let mut crawlers: Vec<String> = Vec::new();
-            for e in &ev.engines {
-                if let Some(engine) = engines().iter().find(|x| x.id == e.engine)
-                    && !crawlers.iter().any(|c| c == engine.crawler)
-                {
-                    crawlers.push(engine.crawler.to_owned());
-                }
-            }
-            Some((crawlers, Stance::Any))
-        }
+        // A bot kept off the home page is blocked as wanted. One blocked only on some pages
+        // still gets in, so Block would open "can still crawl" at once: it gets No preference.
+        FindingKind::BotsBlocked if !ev.bots.is_empty() => Some(IntendedChange::Bots(
+            ev.bots
+                .iter()
+                .map(|b| {
+                    let stance = if b.home_blocked {
+                        Stance::Block
+                    } else {
+                        Stance::Any
+                    };
+                    (b.token.clone(), stance)
+                })
+                .collect(),
+        )),
+        FindingKind::BotsNotBlocked if !ev.bots.is_empty() => Some(IntendedChange::Bots(
+            ev.bots
+                .iter()
+                .map(|b| (b.token.clone(), Stance::Any))
+                .collect(),
+        )),
+        // `noindex` opens no answers issue (the SEO checks report it), so it never gets here.
+        FindingKind::AnswersRestricted => slug_from_str(subject)
+            .filter(|d| *d != DirectiveSlug::Noindex)
+            .map(IntendedChange::Directive),
         _ => None,
     }
 }
 
-fn intend_confirm(tokens: &[String], stance: Stance) -> String {
-    let who = names(tokens);
-    let them = if tokens.len() == 1 { "it" } else { "they" };
-    match stance {
-        Stance::Block => format!(
-            "Set {who} to Block in your intent? This issue closes, and you'll hear if {them} can crawl again."
+fn intend_confirm(kind: FindingKind, change: &IntendedChange) -> String {
+    let bots = match change {
+        IntendedChange::Directive(d) => {
+            return format!(
+                "Accept {} as intended? CodoSEO stops raising issues for it but still shows it in AI answers.",
+                directive_label(*d)
+            );
+        }
+        IntendedChange::Bots(bots) => bots,
+    };
+    let with = |stance: Stance| -> Vec<String> {
+        bots.iter()
+            .filter(|(_, s)| *s == stance)
+            .map(|(t, _)| t.clone())
+            .collect()
+    };
+    let (block, any) = (with(Stance::Block), with(Stance::Any));
+    let it = |v: &[String]| if v.len() == 1 { "it" } else { "they" };
+    match (block.is_empty(), any.is_empty()) {
+        (false, true) => format!(
+            "Set {} to Block in your intent? This issue closes, and you'll hear if {} can crawl again.",
+            names(&block),
+            it(&block)
+        ),
+        (true, false) if kind == FindingKind::BotsBlocked => format!(
+            "Set {} to No preference in your intent? {} blocked on some pages only, so Block wouldn't match. This issue closes, and {} won't be reported either way.",
+            names(&any),
+            if any.len() == 1 { "It's" } else { "They're" },
+            it(&any)
+        ),
+        (true, false) => format!(
+            "Set {} to No preference in your intent? This issue closes, and {} won't be reported either way.",
+            names(&any),
+            it(&any)
         ),
         _ => format!(
-            "Set {who} to No preference in your intent? This issue closes, and {them} won't be reported either way."
+            "Set {} to Block, and {} (blocked on some pages only) to No preference, in your intent? This issue closes, and you'll hear if {} can crawl again.",
+            names(&block),
+            names(&any),
+            names(&block)
         ),
     }
+}
+
+/// The intent with `change` made.
+fn with_change(mut intent: Intent, change: &IntendedChange) -> Intent {
+    match change {
+        IntendedChange::Bots(bots) => {
+            for (token, stance) in bots {
+                // Replace any override spelled in another case.
+                intent.bots.retain(|t, _| !t.eq_ignore_ascii_case(token));
+                intent.bots.insert(token.clone(), *stance);
+            }
+        }
+        IntendedChange::Directive(d) => {
+            intent.accepted_directives.insert(*d);
+        }
+    }
+    intent
 }
 
 fn incident_view(
@@ -890,10 +957,12 @@ fn incident_view(
         lines.join("\n")
     });
     let quiet = i.quiet.then(|| match report_at {
-        // The same transaction: Postgres' now() is the same instant for both rows.
+        // The same transaction: Postgres' now() is the same instant for both rows. Quiet then
+        // means no earlier crawl could check this kind of issue (the first one, or the first
+        // to read what earlier failed crawls couldn't).
         Some(at) if at == i.opened_at => (
-            "Found on first check",
-            "Part of the site's first AI access check, so no alert was sent",
+            "Baseline",
+            "Found by the first crawl that could check this, so no alert was sent",
         ),
         Some(_) => (
             "After an intent change",
@@ -901,7 +970,7 @@ fn incident_view(
         ),
         None => (
             "No alert sent",
-            "Opened by the first check or an intent change",
+            "Opened by a first check or an intent change",
         ),
     });
     IncidentView {
@@ -924,15 +993,18 @@ fn incident_view(
         urls,
         urls_more,
         fix,
-        intend: intended_change(i.kind, &ev).map(|(t, s)| intend_confirm(&t, s)),
+        intend: intended_change(i.kind, &i.subject, &ev).map(|c| intend_confirm(i.kind, &c)),
     }
 }
 
 fn rule_tip(rule: Option<&MatchedRule>, group: GroupMatch, token: &str) -> String {
-    match (rule, group) {
-        (Some(r), g) => rule_line(r, g, token),
-        (None, GroupMatch::None) => "No group in robots.txt applies to this bot".to_owned(),
-        (None, _) => "No rule in its group matches the home page".to_owned(),
+    match (rule, group, registry().robots_fallback(token)) {
+        (Some(r), g, _) => rule_line(r, g, token),
+        (None, GroupMatch::None, _) => "No group in robots.txt applies to this bot".to_owned(),
+        (None, GroupMatch::Fallback, Some(f)) => {
+            format!("No rule in the {f} group, whose rules {token} follows, matches the home page")
+        }
+        (None, ..) => "No rule in its group matches the home page".to_owned(),
     }
 }
 
@@ -972,11 +1044,21 @@ fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
     let total = report.important.len();
     let home_allowed = access.and_then(|a| a.home_allowed);
     let honoured = bot.honours_robots == Honours::Yes;
+    // A bot that reads another's group when none names it (Applebot, Googlebot's) says so.
+    let follows = access
+        .filter(|a| a.group == GroupMatch::Fallback)
+        .and_then(|_| registry().robots_fallback(&bot.token));
+    let home_text = |word: &str, line: Option<u32>| match (follows, line) {
+        (Some(f), Some(n)) => format!("{word} · follows {f}'s rules (line {n})"),
+        (Some(f), None) => format!("{word} · follows {f}'s rules"),
+        (None, Some(n)) if word == "Blocked" => format!("{word} · line {n}"),
+        (None, _) => word.to_owned(),
+    };
     // Coloured by the intent: green where robots.txt does what you want, red or amber where it
     // doesn't, plain where you have no preference.
     let (home, home_class, home_tip) = match (access, home_allowed) {
         (Some(a), Some(true)) => (
-            "Allowed".to_owned(),
+            home_text("Allowed", a.home_rule.as_ref().map(|r| r.line)),
             match stance {
                 Stance::Allow => "c-ok",
                 Stance::Block if honoured => "c-warn",
@@ -985,10 +1067,7 @@ fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
             rule_tip(a.home_rule.as_ref(), a.group, &bot.token),
         ),
         (Some(a), Some(false)) => (
-            match &a.home_rule {
-                Some(r) => format!("Blocked · line {}", r.line),
-                None => "Blocked".to_owned(),
-            },
+            home_text("Blocked", a.home_rule.as_ref().map(|r| r.line)),
             match stance {
                 Stance::Allow => "c-err",
                 Stance::Block => "c-ok",
@@ -1397,8 +1476,60 @@ pub struct IntentPage {
     pub shell: Shell,
     pub base: String,
     pub cards: Vec<PurposeCard>,
+    /// "Page directives you use on purpose".
+    pub directives: Vec<DirectivePick>,
     /// The saved intent differs from the defaults.
     pub custom: bool,
+}
+
+/// The page directives the intent form offers to accept, each with what it does (as
+/// `codoseo_geo::eligibility` reads the engines' documentation). `noindex` is not offered: the
+/// SEO checks report it.
+const ACCEPTABLE: [(DirectiveSlug, &str); 5] = [
+    (
+        DirectiveSlug::Nosnippet,
+        "Keeps pages out of Google's AI Overviews and AI Mode; Bing and Apple quote less of them.",
+    ),
+    (
+        DirectiveSlug::MaxSnippet,
+        "Caps how much Google can quote; max-snippet:0 keeps pages out of its AI features.",
+    ),
+    (
+        DirectiveSlug::Noarchive,
+        "Keeps pages out of Microsoft Copilot's answers; Google ignores it.",
+    ),
+    (
+        DirectiveSlug::Nocache,
+        "Copilot answers may use only the page's URL, title and snippet.",
+    ),
+    (
+        DirectiveSlug::DataNosnippet,
+        "Google and Bing don't quote the marked text; flagged once it covers a quarter of a page.",
+    ),
+];
+
+/// One checkbox of "Page directives you use on purpose" (form field `d`).
+pub struct DirectivePick {
+    pub id: String,
+    /// The stored slug: `max_snippet`.
+    pub value: &'static str,
+    /// As written in markup: `max-snippet`.
+    pub label: &'static str,
+    pub note: &'static str,
+    pub checked: bool,
+}
+
+fn directive_picks(intent: &Intent) -> Vec<DirectivePick> {
+    ACCEPTABLE
+        .iter()
+        .map(|&(d, note)| DirectivePick {
+            id: format!("d-{}", slug_str(d)),
+            value: slug_str(d),
+            label: directive_label(d),
+            note,
+            checked: intent.accepted_directives.contains(&d),
+        })
+        .collect()
 }
 
 pub struct Choice {
@@ -1512,6 +1643,7 @@ async fn intent_page(
         shell,
         base: format!("/s/{}", site.id),
         cards: intent_cards(&intent),
+        directives: directive_picks(&intent),
         custom: intent != Intent::default(),
     })?
     .into_response())
@@ -1519,13 +1651,10 @@ async fn intent_page(
 
 /// The intent the form describes. Purposes left at their default and bots left on "Inherit"
 /// are not stored, so a later change of default reaches them. Overrides for tokens the registry
-/// no longer lists (the form can't show them) are kept as they were.
-pub fn intent_from_form(current: &Intent, fields: &[(String, String)]) -> Result<Intent, String> {
-    // The form sets stances only; accepted page directives are kept as they are.
-    let mut intent = Intent {
-        accepted_directives: current.accepted_directives.clone(),
-        ..Intent::default()
-    };
+/// no longer lists (the form can't show them) are kept as they were. The accepted page
+/// directives are the ticked `d` boxes.
+fn intent_from_form(current: &Intent, fields: &[(String, String)]) -> Result<Intent, String> {
+    let mut intent = Intent::default();
     for (token, stance) in &current.bots {
         if registry().bot(token).is_none() {
             intent.bots.insert(token.clone(), *stance);
@@ -1556,6 +1685,11 @@ pub fn intent_from_form(current: &Intent, fields: &[(String, String)]) -> Result
                     intent.bots.insert(bot.token.clone(), stance);
                 }
             }
+        } else if key == "d" {
+            let directive = slug_from_str(value)
+                .filter(|d| ACCEPTABLE.iter().any(|(a, _)| a == d))
+                .ok_or_else(|| format!("\"{value}\" is not a page directive you can accept."))?;
+            intent.accepted_directives.insert(directive);
         }
     }
     Ok(intent)
@@ -1620,26 +1754,22 @@ async fn mark_intended(
         ));
     }
     let ev: Evidence = serde_json::from_value(incident.evidence.clone()).unwrap_or_default();
-    let (tokens, stance) = intended_change(incident.kind, &ev).ok_or_else(|| {
-        AppError::BadRequest("This issue can't be marked as intended: fix robots.txt.".to_owned())
+    let change = intended_change(incident.kind, &incident.subject, &ev).ok_or_else(|| {
+        AppError::BadRequest(match incident.kind {
+            FindingKind::RobotsUnavailable => {
+                "This issue can't be marked as intended: fix robots.txt.".to_owned()
+            }
+            _ => "This issue can't be marked as intended.".to_owned(),
+        })
     })?;
-    let mut intent = geo::get_intent(&state.pool, site.id).await?;
-    for token in &tokens {
-        // Replace any override spelled in another case.
-        intent.bots.retain(|t, _| !t.eq_ignore_ascii_case(token));
-        intent.bots.insert(token.clone(), stance);
-    }
-    apply_intent(&state, &site, &intent).await?;
+    let current = geo::get_intent(&state.pool, site.id).await?;
+    let outcome = apply_intent(&state, &site, &with_change(current, &change)).await?;
     respond(
         &state,
         &user,
         &site,
         hx,
-        &format!(
-            "Marked as intended · {} set to {}",
-            names(&tokens),
-            stance_label(stance)
-        ),
+        &format!("Marked as intended · {outcome}"),
         "hx-replace-url",
     )
     .await
@@ -1740,13 +1870,194 @@ mod tests {
     }
 
     #[test]
-    fn the_form_keeps_accepted_directives() {
+    fn the_form_sets_accepted_directives_from_its_boxes() {
         let current = Intent {
             accepted_directives: [DirectiveSlug::Nosnippet].into(),
             ..Intent::default()
         };
+        let intent = intent_from_form(
+            &current,
+            &pairs(&[
+                ("p.training", "block"),
+                ("d", "max_snippet"),
+                ("d", "noarchive"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            intent.accepted_directives,
+            [DirectiveSlug::MaxSnippet, DirectiveSlug::Noarchive].into()
+        );
+        // No box ticked: none accepted.
         let intent = intent_from_form(&current, &pairs(&[("p.training", "block")])).unwrap();
-        assert_eq!(intent.accepted_directives, current.accepted_directives);
+        assert!(intent.accepted_directives.is_empty());
+        // noindex isn't offered, and the markup spelling isn't the field value.
+        for bad in ["noindex", "max-snippet", "nothing"] {
+            assert!(
+                intent_from_form(&current, &pairs(&[("d", bad)])).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_directive_card_offers_every_directive_but_noindex() {
+        let intent = Intent {
+            accepted_directives: [DirectiveSlug::DataNosnippet].into(),
+            ..Intent::default()
+        };
+        let picks = directive_picks(&intent);
+        let labels: Vec<&str> = picks.iter().map(|p| p.label).collect();
+        assert_eq!(
+            labels,
+            [
+                "nosnippet",
+                "max-snippet",
+                "noarchive",
+                "nocache",
+                "data-nosnippet"
+            ]
+        );
+        let checked: Vec<&str> = picks
+            .iter()
+            .filter(|p| p.checked)
+            .map(|p| p.value)
+            .collect();
+        assert_eq!(checked, ["data_nosnippet"]);
+        assert!(picks.iter().all(|p| !p.note.is_empty()));
+    }
+
+    fn bot(token: &str, home_blocked: bool, blocked: u32) -> BotEvidence {
+        BotEvidence {
+            token: token.to_owned(),
+            operator: "Op".to_owned(),
+            purpose: Purpose::Search,
+            honours: Honours::Yes,
+            urls_blocked: blocked,
+            urls_total: 3,
+            home_blocked,
+            rule: None,
+            group: GroupMatch::Named,
+        }
+    }
+
+    fn bots_evidence(bots: Vec<BotEvidence>) -> Evidence {
+        Evidence {
+            bots,
+            ..Evidence::default()
+        }
+    }
+
+    #[test]
+    fn a_bot_blocked_on_the_home_page_is_marked_block() {
+        let ev = bots_evidence(vec![bot("OAI-SearchBot", true, 3)]);
+        let change = intended_change(FindingKind::BotsBlocked, "search", &ev).unwrap();
+        assert_eq!(
+            change,
+            IntendedChange::Bots(vec![("OAI-SearchBot".to_owned(), Stance::Block)])
+        );
+        let confirm = intend_confirm(FindingKind::BotsBlocked, &change);
+        assert!(
+            confirm.starts_with("Set OAI-SearchBot to Block in your intent?"),
+            "{confirm}"
+        );
+    }
+
+    #[test]
+    fn a_partly_blocked_bot_is_marked_no_preference() {
+        // Block would at once open "can still crawl": the home page lets it in.
+        let ev = bots_evidence(vec![bot("PerplexityBot", false, 1)]);
+        let change = intended_change(FindingKind::BotsBlocked, "search", &ev).unwrap();
+        assert_eq!(
+            change,
+            IntendedChange::Bots(vec![("PerplexityBot".to_owned(), Stance::Any)])
+        );
+        let confirm = intend_confirm(FindingKind::BotsBlocked, &change);
+        assert!(
+            confirm.starts_with(
+                "Set PerplexityBot to No preference in your intent? It's blocked on some pages only"
+            ),
+            "{confirm}"
+        );
+
+        // Both in one finding: each gets its own stance, and the confirmation names both.
+        let ev = bots_evidence(vec![
+            bot("OAI-SearchBot", true, 3),
+            bot("PerplexityBot", false, 1),
+        ]);
+        let change = intended_change(FindingKind::BotsBlocked, "search", &ev).unwrap();
+        assert_eq!(
+            change,
+            IntendedChange::Bots(vec![
+                ("OAI-SearchBot".to_owned(), Stance::Block),
+                ("PerplexityBot".to_owned(), Stance::Any),
+            ])
+        );
+        let confirm = intend_confirm(FindingKind::BotsBlocked, &change);
+        assert!(
+            confirm.starts_with(
+                "Set OAI-SearchBot to Block, and PerplexityBot (blocked on some pages only) to No preference"
+            ),
+            "{confirm}"
+        );
+        let intent = with_change(Intent::default(), &change);
+        assert_eq!(intent.bot_override("oai-searchbot"), Some(Stance::Block));
+        assert_eq!(intent.bot_override("PerplexityBot"), Some(Stance::Any));
+    }
+
+    #[test]
+    fn a_bot_that_still_gets_in_is_marked_no_preference() {
+        let ev = bots_evidence(vec![bot("GPTBot", false, 0)]);
+        let change = intended_change(FindingKind::BotsNotBlocked, "training", &ev).unwrap();
+        assert_eq!(
+            change,
+            IntendedChange::Bots(vec![("GPTBot".to_owned(), Stance::Any)])
+        );
+    }
+
+    #[test]
+    fn restricted_answers_accept_the_directive_and_leave_the_crawlers_alone() {
+        let ev = Evidence::default();
+        let change = intended_change(FindingKind::AnswersRestricted, "max_snippet", &ev).unwrap();
+        assert_eq!(change, IntendedChange::Directive(DirectiveSlug::MaxSnippet));
+        assert_eq!(
+            intend_confirm(FindingKind::AnswersRestricted, &change),
+            "Accept max-snippet as intended? CodoSEO stops raising issues for it but still shows it in AI answers."
+        );
+        let mut current = Intent::default();
+        current.bots.insert("Googlebot".to_owned(), Stance::Allow);
+        let intent = with_change(current.clone(), &change);
+        assert_eq!(intent.bots, current.bots);
+        assert_eq!(
+            intent.accepted_directives,
+            [DirectiveSlug::MaxSnippet].into()
+        );
+        // Nothing to accept: noindex, an unknown subject, a failing robots.txt.
+        for (kind, subject) in [
+            (FindingKind::AnswersRestricted, "noindex"),
+            (FindingKind::AnswersRestricted, "nope"),
+            (FindingKind::RobotsUnavailable, ""),
+            (FindingKind::BotsBlocked, "search"),
+        ] {
+            assert_eq!(intended_change(kind, subject, &ev), None, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn a_fallback_group_is_named_in_the_rule_line() {
+        let rule = MatchedRule {
+            line: 5,
+            allow: false,
+            pattern: "/".to_owned(),
+        };
+        assert_eq!(
+            rule_line(&rule, GroupMatch::Fallback, "Applebot"),
+            "robots.txt line 5 · Disallow: / · User-agent: Googlebot (Applebot follows its rules)"
+        );
+        assert_eq!(
+            rule_tip(None, GroupMatch::Fallback, "Applebot"),
+            "No rule in the Googlebot group, whose rules Applebot follows, matches the home page"
+        );
     }
 
     #[test]

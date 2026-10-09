@@ -1,4 +1,4 @@
-//! The 8 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
+//! The 9 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
 //! `wait_timeout` (50 s in production, shorter in tests) before reporting "still
 //! running" with an `audit_id` the caller polls with `get_audit`.
 

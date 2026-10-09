@@ -21,7 +21,8 @@ ALTER TYPE change_kind ADD VALUE 'ai_preferences_changed';
 ALTER TABLE sites ADD COLUMN ai_intent JSONB NOT NULL DEFAULT '{}';
 
 -- The intent-independent facts of one crawl (`codoseo_geo::report::AccessReport` as JSON). A
--- failed crawl that saw a failing robots.txt has one too; the newest two per site are kept.
+-- failed crawl that saw a failing robots.txt has one too. A site keeps its newest two, plus the
+-- newest that judged each kind of finding and the newest that knew the declared preferences.
 CREATE TABLE ai_reports (
   crawl_id UUID PRIMARY KEY REFERENCES crawls(id) ON DELETE CASCADE,
   site_id UUID NOT NULL REFERENCES sites(id) ON DELETE CASCADE,

@@ -34,7 +34,11 @@ A blocked bot is a mistake or a choice, and only you know which. The intent mode
 | AI training (GPTBot, ClaudeBot, Google-Extended, CCBot, ...) | No preference |
 | Ads | No preference |
 
-Set it per purpose, and override single bots, under **AI access, Intent** in the web app (`/s/{site}/ai-access/intent`). Severity follows the intent: blocking GPTBot is nothing to report when you have no preference, and a warning or worse when you said you want training crawlers in. A bot you want blocked that can still crawl is reported too. A bot with no preference is never reported either way. The CLI and MCP tools have nowhere to keep your intent, so they judge under the defaults above.
+Set it per purpose, and override single bots, with **Edit intent** on the AI access screen of the web app (`/s/{site}/ai-access/intent`). Severity follows the intent: blocking GPTBot is nothing to report when you have no preference, and a warning or worse when you said you want training crawlers in. A bot you want blocked that can still crawl is reported too. A bot with no preference is never reported either way.
+
+The same form has **Page directives you use on purpose**: tick `nosnippet`, `max-snippet`, `noarchive`, `nocache` or `data-nosnippet` when you set it deliberately, and pages that carry it still show in the AI answers table but raise no issue. `noindex` is not offered: the SEO checks report it.
+
+The CLI and the local MCP server have nowhere to keep your intent, so `codoseo crawl` and `audit_site` judge under the defaults above. The hosted MCP server and the REST API report the incidents drawn under the intent you saved.
 
 ## Incidents and alerts
 
@@ -48,13 +52,19 @@ The web app turns findings into incidents that open when a crawl first sees a pr
 | `ai_issue_resolved` | An AI access incident is gone |
 | `ai_preferences_changed` | Your declared Content-Signal, Content-Usage or TDM preferences changed |
 
-They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them.
+They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them. By default `ai_bot_blocked`, `ai_answers_restricted` and `ai_issue_resolved` alert at once; the other two wait for the Monday digest. An alert whose changes are all AI access ones links to the AI access screen. A crawl that failed on robots.txt is not a finished crawl, so its incident shows on the AI access screen and in alerts, not on the changes page.
 
 **The first check is quiet.** The incidents opened by the first report that could judge them are your baseline: they are listed but write no changes and send no alerts, so turning the feature on (or a site whose first crawls failed) does not fire a storm. Changing your intent re-evaluates quietly the same way. An open incident that gets worse, or names another bot or engine, writes a change again.
 
 **A failing robots.txt is checked twice.** A crawl stopped by a robots.txt that answers 5xx or 429 is retried 15 minutes later, like any failed crawl; the incident is recorded only when the retry fails too, so a short blip says nothing. Its alert then stands in for the generic "couldn't reach your site" one.
 
-**Mark intended** on an incident says "this is what I want": it sets the matching intent (for example, block this bot), re-evaluates quietly, and the incident resolves as a choice instead of a fix.
+**Mark intended** on an incident says "this is what I want" and changes your intent just enough:
+
+- a bot blocked on the home page is set to Block, so you hear if it can crawl again;
+- a bot blocked on some pages only is set to No preference (Block would report it as getting in), and so is a bot you wanted blocked that still gets in;
+- a page directive such as `nosnippet` joins the directives you use on purpose. The engines' crawlers keep their stance, so robots.txt is still watched for Googlebot, Bingbot and the rest.
+
+It then re-evaluates quietly, the incident resolves as a choice instead of a fix, and the notice says how many issues resolved or opened.
 
 ## The public registry
 
@@ -91,7 +101,7 @@ AI bots (path /pricing)
 
 ### Local MCP
 
-`check_ai_access` takes a `url` and fetches its robots.txt and the page right now. It returns a short `summary`, every registry bot's verdict for the path (`token`, `operator`, `purpose`, `allowed`, `line`, `rule`), the declared preferences, and for each engine the page's effect (`eligible`, `limited` or `excluded`) with its causes. See [mcp.md](mcp.md).
+`audit_site` saves the same `ai_access` section as `codoseo crawl` in the cached audit, under the default intent. `check_ai_access` takes a `url` and fetches its robots.txt and the page right now. It returns a short `summary`, every registry bot's verdict for the path (`token`, `operator`, `purpose`, `allowed`, `line`, `rule`), the declared preferences, and for each engine the page's effect (`eligible`, `limited` or `excluded`) with its causes. See [mcp.md](mcp.md).
 
 ### Hosted MCP and REST
 
@@ -129,3 +139,24 @@ curl -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/
 ```
 
 Before a site has a report, `checked_at` is `null` and `note` says it appears after the next crawl. The call counts once against the daily allowance like any other ([api.md](api.md)).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><a href="images/ai-access/ai-access-light.png"><img src="images/ai-access/ai-access-light.png" alt="The AI access screen, light theme"></a><br>The AI access screen</td>
+    <td width="50%"><a href="images/ai-access/ai-access-dark.png"><img src="images/ai-access/ai-access-dark.png" alt="The AI access screen, dark theme"></a><br>The same, dark theme</td>
+  </tr>
+  <tr>
+    <td><a href="images/ai-access/intent-light.png"><img src="images/ai-access/intent-light.png" alt="The intent form"></a><br>The intent form</td>
+    <td><a href="images/ai-access/ai-access-mobile.png"><img src="images/ai-access/ai-access-mobile.png" alt="The AI access screen on a phone"></a><br>On a phone</td>
+  </tr>
+  <tr>
+    <td><a href="images/ai-access/changes-light.png"><img src="images/ai-access/changes-light.png" alt="AI access changes on the changes page"></a><br>AI access changes on the changes page</td>
+    <td><a href="images/ai-access/ai-access-empty.png"><img src="images/ai-access/ai-access-empty.png" alt="The AI access screen before the first crawl"></a><br>Before the first crawl</td>
+  </tr>
+  <tr>
+    <td><a href="images/ai-access/ai-bots-light.png"><img src="images/ai-access/ai-bots-light.png" alt="The public AI bot registry"></a><br>The public AI bot registry at <code>/ai-bots</code></td>
+    <td></td>
+  </tr>
+</table>

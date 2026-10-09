@@ -493,6 +493,10 @@ kbd {
   box-shadow: var(--shadow-md); transition: opacity 0.12s, transform 0.12s var(--ease);
 }
 [data-tip]:hover::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 0.35s; }
+/* Run crawl sits at the right edge of the top bar (icon-only in a narrow window): its tip opens
+   leftwards, so it never reaches past the window and widens the page. */
+#run-crawl[data-tip]::after { left: auto; right: 0; transform: translate(0, -2px); }
+#run-crawl[data-tip]:hover::after { transform: translate(0, 0); }
 .nav-item[data-tip]::after { display: none; }
 :root.rail .nav-item[data-tip]::after { display: block; left: calc(100% + 10px); top: 50%; transform: translate(-2px, -50%); }
 :root.rail .nav-item[data-tip]:hover::after { transform: translate(0, -50%); transition-delay: 0.05s; }
@@ -1153,6 +1157,14 @@ body.solo { overflow: auto; }
 .aia-pick.is-set { box-shadow: inset 3px 0 0 var(--accent); }
 .aia-pick .tag.is-set { color: var(--warn); background: var(--warn-bg); border-color: color-mix(in oklab, var(--warn-bar) 45%, var(--line)); }
 .aia-pick .select { height: 32px; font-size: 13px; }
+.aia-directives .aia-purpose-text code { font: 12px var(--mono); }
+.aia-dirs { margin: 0; padding: 0; border: 0; border-top: 1px solid var(--line-soft); min-width: 0; }
+.aia-dir { display: flex; align-items: flex-start; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line-faint); cursor: pointer; }
+.aia-dir:last-child { border-bottom: 0; border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.aia-dir:hover { background: var(--surface-hover); }
+.aia-dir .check { flex: none; margin: 1px 0 0; }
+.aia-dir-text { min-width: 0; }
+.aia-dir:has(.check:checked) { box-shadow: inset 3px 0 0 var(--accent); }
 .aia-savebar {
   position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 10px 12px;
   background: color-mix(in oklab, var(--surface) 92%, transparent); backdrop-filter: blur(8px);
@@ -1161,8 +1173,9 @@ body.solo { overflow: auto; }
 
 .aia-narrow-only { display: none; }
 
-/* Hover tooltips mean nothing on a touch screen, and one at the edge would widen the page. */
-@media (max-width: 767px) {
+/* Hover tooltips mean nothing on a touch screen, and one at the edge would widen the page. A
+   narrow window on a computer keeps them. */
+@media (hover: none) {
   [data-tip]::after { display: none; }
 }
 
@@ -1232,6 +1245,7 @@ body.solo { overflow: auto; }
   .aia-seg { display: flex; width: 100%; }
   .aia-seg label { flex: 1; padding: 6px 8px; }
   .aia-pick { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 16px; }
+  .aia-dir { padding: 10px 16px; }
   .aia-overrides > summary { padding: 10px 16px; }
   .aia-savebar { flex-wrap: wrap; }
   .aia-imp { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 16px; }

@@ -295,17 +295,13 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
 }
 
 /// The AI access change kinds (`codoseo_geo` findings and declared preferences).
-pub const AI_KINDS: [ChangeKind; 5] = [
+const AI_KINDS: [ChangeKind; 5] = [
     ChangeKind::AiBotBlocked,
     ChangeKind::AiAnswersRestricted,
     ChangeKind::AiIssueResolved,
     ChangeKind::AiBlockNotApplied,
     ChangeKind::AiPreferencesChanged,
 ];
-
-pub fn is_ai_kind(kind: ChangeKind) -> bool {
-    AI_KINDS.contains(&kind)
-}
 
 fn tabs(base: &str, c: &ChangeCounts, current: Option<Severity>) -> Vec<Tab> {
     let mut tabs = vec![Tab {
@@ -443,7 +439,7 @@ fn change_view(
             )
         });
     let instant = is_instant(c.kind);
-    let ai = is_ai_kind(c.kind);
+    let ai = c.kind.is_ai();
     ChangeView {
         severity,
         severity_label,
@@ -526,6 +522,7 @@ fn rules() -> Vec<Rule> {
         instant("robots.txt changes"),
         instant("Sitemap loses 10%+ URLs"),
         instant("AI bots blocked or answers restricted"),
+        instant("AI issue resolved"),
         Rule {
             label: "Everything else",
             mode: "Monday digest",

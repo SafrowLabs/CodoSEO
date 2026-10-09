@@ -203,6 +203,18 @@ fn item(change: &StoredChange) -> AlertItem {
     }
 }
 
+/// Where a message about `changes` links: the AI access screen when they are all AI access
+/// changes, or when the crawl didn't finish (a failing robots.txt is recorded on a failed crawl,
+/// and the changes screen lists only the latest finished crawl's); the changes screen otherwise.
+fn changes_path(crawl: &AlertCrawl, changes: &[StoredChange]) -> String {
+    let ai = !crawl.done || changes.iter().all(|c| c.kind.is_ai());
+    format!(
+        "s/{}/{}",
+        crawl.site_id,
+        if ai { "ai-access" } else { "changes" }
+    )
+}
+
 fn channel_name(kind: ChannelKind) -> &'static str {
     match kind {
         ChannelKind::Email => "email",
@@ -246,10 +258,11 @@ pub async fn deliver_alert(
         return Ok(());
     };
 
-    let site_url = ctx
-        .base_url
-        .join(&format!("s/{}/changes", crawl.site_id))
-        .map_err(|e| format!("bad base URL: {e}"))?;
+    let site_url = |path: String| {
+        ctx.base_url
+            .join(&path)
+            .map_err(|e| format!("bad base URL: {e}"))
+    };
     let message = if delivery.unreachable {
         // Our own words per kind: the stored reason can carry resolver or socket details that
         // don't belong in a message to a channel we don't control.
@@ -261,7 +274,8 @@ pub async fn deliver_alert(
             Some(SiteFault::Blocked) => "it blocked our crawler",
             _ => "it didn't answer",
         };
-        AlertMessage::unreachable(&crawl.domain, site_url, delivery.crawl_id, reason)
+        let link = site_url(format!("s/{}/changes", crawl.site_id))?;
+        AlertMessage::unreachable(&crawl.domain, link, delivery.crawl_id, reason)
     } else {
         let changes = alert_rules::changes_by_ids(pool, delivery.crawl_id, &delivery.change_ids)
             .await
@@ -279,9 +293,10 @@ pub async fn deliver_alert(
             },
             crawl.domain
         );
+        let link = site_url(changes_path(&crawl, &changes))?;
         AlertMessage::changes(
             &crawl.domain,
-            site_url,
+            link,
             delivery.crawl_id,
             headline,
             changes.iter().map(item).collect(),

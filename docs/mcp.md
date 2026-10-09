@@ -49,7 +49,7 @@ With npx instead of an installed binary, use `"command": "npx", "args": ["-y", "
 | `check_redirects` | `url` | Follows a URL's redirects hop by hop. |
 | `compare_audits` | `audit_a`, `audit_b` | Compares two finished audits and lists what changed. |
 
-Audits are cached as JSON in your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS), so `get_audit`, `get_issue_urls`, `get_page` and `compare_audits` work after `audit_site` returns. The server writes only protocol messages to stdout.
+Audits are cached as JSON in your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS), in the format `codoseo crawl --format json` writes, AI access section included (judged under the default intent), so `get_audit`, `get_issue_urls`, `get_page` and `compare_audits` work after `audit_site` returns. The server writes only protocol messages to stdout.
 
 ## Hosted server (HTTP)
 

@@ -85,7 +85,7 @@ pub fn toast(kind: ToastKind, message: &str) -> (HeaderName, HeaderValue) {
 /// JSON with every non-ASCII character (and DEL, which serde_json leaves raw) written as a
 /// JSON escape (`·` as U+00B7's). Header values must be visible ASCII, and browsers read them
 /// as Latin-1, so raw UTF-8 in a toast would be refused or arrive garbled.
-pub fn ascii_json(v: &serde_json::Value) -> String {
+pub(crate) fn ascii_json(v: &serde_json::Value) -> String {
     let raw = v.to_string();
     let mut out = String::with_capacity(raw.len());
     for c in raw.chars() {

@@ -205,28 +205,41 @@ pub struct AlertCrawl {
     /// A no-signup audit: never alerts.
     pub quick: bool,
     pub failure_reason: Option<String>,
+    /// The crawl finished (`done`). A failed crawl can still have changes (a failing robots.txt),
+    /// but the changes screen, which shows the latest finished crawl's, doesn't list them.
+    pub done: bool,
     /// Starred key pages (URL hashes).
     pub starred: Vec<u64>,
 }
 
-type CrawlRow = (Uuid, String, Option<Uuid>, bool, Option<String>, Vec<i64>);
+type CrawlRow = (
+    Uuid,
+    String,
+    Option<Uuid>,
+    bool,
+    Option<String>,
+    bool,
+    Vec<i64>,
+);
 
 pub async fn alert_crawl(pool: &PgPool, crawl_id: Uuid) -> Result<Option<AlertCrawl>, sqlx::Error> {
     let row: Option<CrawlRow> = sqlx::query_as(
-        "SELECT s.id, s.domain, s.account_id, c.trigger = 'quick', c.failure_reason, s.key_pages \
+        "SELECT s.id, s.domain, s.account_id, c.trigger = 'quick', c.failure_reason, \
+           c.status = 'done', s.key_pages \
          FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
     )
     .bind(crawl_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(
-        |(site_id, domain, account_id, quick, failure_reason, key_pages)| AlertCrawl {
+        |(site_id, domain, account_id, quick, failure_reason, done, key_pages)| AlertCrawl {
             crawl_id,
             site_id,
             domain,
             account_id,
             quick,
             failure_reason,
+            done,
             starred: key_pages.into_iter().map(crate::hash::from_db).collect(),
         },
     ))

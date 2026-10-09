@@ -11,9 +11,7 @@ use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, U
 use codoseo_core::output::{Progress, StopReason};
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::crawl;
-use codoseo_geo::Intent;
-use codoseo_geo::findings::findings;
-use codoseo_geo::report::{build_report, important_urls};
+use codoseo_geo::assess_with_defaults;
 use url::Url;
 
 use super::output::write_crawl;
@@ -109,12 +107,7 @@ pub async fn run(args: CrawlArgs) -> Outcome {
     let duration_ms = out.duration_ms;
     // GEO stays out of the health score and `--fail-on`: it is a section of its own, judged under
     // the default intent because the CLI has nowhere to keep an owner's.
-    let ai_access = {
-        let important = important_urls(&out.pages, &out.origin, &Default::default());
-        let access = build_report(&out, &important);
-        let found = findings(&access, &Intent::default());
-        serde_json::json!({ "report": access, "findings": found })
-    };
+    let ai_access = assess_with_defaults(&out);
     let audit = Audit {
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),

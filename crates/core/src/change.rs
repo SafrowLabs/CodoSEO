@@ -78,6 +78,19 @@ impl ChangeKind {
             ChangeKind::AiPreferencesChanged => "AI preferences changed",
         }
     }
+
+    /// The AI access kinds (findings of `codoseo-geo` and the declared preferences): they live on
+    /// the AI access screen, not on a page of the crawl.
+    pub fn is_ai(self) -> bool {
+        matches!(
+            self,
+            ChangeKind::AiBotBlocked
+                | ChangeKind::AiAnswersRestricted
+                | ChangeKind::AiBlockNotApplied
+                | ChangeKind::AiIssueResolved
+                | ChangeKind::AiPreferencesChanged
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,5 +135,9 @@ mod tests {
         }
         let labels: std::collections::HashSet<_> = all.iter().map(|k| k.label()).collect();
         assert_eq!(labels.len(), all.len());
+        // The AI kinds are the `ai_` ones.
+        for kind in all {
+            assert_eq!(kind.is_ai(), kind.slug().starts_with("ai_"), "{kind:?}");
+        }
     }
 }

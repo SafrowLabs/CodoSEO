@@ -97,6 +97,8 @@ impl Backend for LocalBackend {
             let (status, summary) = match result {
                 Ok(mut out) => {
                     let report = run_checks(&mut out);
+                    // The same section `codoseo crawl` saves, under the default intent.
+                    let ai_access = codoseo_geo::assess_with_defaults(&out);
                     let audit = Audit {
                         format_version: AUDIT_FORMAT_VERSION,
                         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -105,7 +107,7 @@ impl Backend for LocalBackend {
                         start_url: cfg.start_url.clone(),
                         report,
                         snapshot: Snapshot::from_output_owned(out),
-                        ai_access: None,
+                        ai_access: Some(ai_access),
                     };
                     match cache.save(&task_id, &audit) {
                         Ok(()) => (AuditStatus::Done, Some(build_summary(&task_id, &audit))),
@@ -493,6 +495,36 @@ mod tests {
                 .iter()
                 .any(|f| f.check == CheckId::TitleMissing)
         );
+    }
+
+    /// `audit_site` saves the AI access section `codoseo crawl` saves: the same report and
+    /// findings, under the default intent.
+    #[tokio::test]
+    async fn a_cached_audit_keeps_the_ai_access_section_the_cli_writes() {
+        let site = SiteBuilder::new()
+            .robots(
+                200,
+                "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n",
+            )
+            .html("/", "Home", &["/about"])
+            .html("/about", "About", &[])
+            .start()
+            .await;
+        let (backend, _dir) = backend();
+        let id = audit_fast(&backend, site.url("/")).await;
+        let audit = backend.cache.load(&id).unwrap();
+        let section = audit.ai_access.expect("an ai_access section");
+        assert_eq!(
+            section["report"]["important"].as_array().map(Vec::len),
+            Some(2)
+        );
+        let kinds: Vec<&str> = section["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|f| f["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["bots_blocked"], "{section}");
     }
 
     /// A `Done` audit must stop being served from the in-memory map once it's cached:

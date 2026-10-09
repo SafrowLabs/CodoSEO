@@ -6,11 +6,14 @@ use codoseo_core::output::CrawlOutput;
 use codoseo_core::snapshot::Snapshot;
 use codoseo_core::url::url_hash;
 use codoseo_geo::eligibility::{DirectiveSlug, Effect, EngineId};
+use codoseo_geo::findings::{Finding, FindingKind, findings};
 use codoseo_geo::registry::registry;
 use codoseo_geo::report::{
     AccessReport, MAX_IMPORTANT, REPORT_VERSION, Reason, build_report, important_urls,
+    slug_from_str, slug_str,
 };
 use codoseo_geo::robots::{GroupMatch, RobotsAvailability};
+use codoseo_geo::{Intent, assess_with_defaults};
 use common::*;
 
 fn report_for(out: &CrawlOutput) -> AccessReport {
@@ -437,4 +440,43 @@ fn applebot_follows_googlebots_group_when_none_names_it() {
     let ext = r.bot("Applebot-Extended").expect("applebot-extended");
     assert_eq!(ext.group, GroupMatch::Wildcard);
     assert_eq!(ext.home_allowed, Some(false));
+}
+
+#[test]
+fn directive_slugs_read_back() {
+    for d in [
+        DirectiveSlug::Noindex,
+        DirectiveSlug::Nosnippet,
+        DirectiveSlug::MaxSnippet,
+        DirectiveSlug::Noarchive,
+        DirectiveSlug::Nocache,
+        DirectiveSlug::DataNosnippet,
+    ] {
+        assert_eq!(slug_from_str(slug_str(d)), Some(d));
+        // The same names serde writes.
+        assert_eq!(
+            serde_json::to_value(d).unwrap(),
+            serde_json::Value::String(slug_str(d).to_owned())
+        );
+    }
+    assert_eq!(slug_from_str("max-snippet"), None);
+    assert_eq!(slug_from_str(""), None);
+}
+
+#[test]
+fn the_audit_section_is_the_report_and_its_findings_under_the_default_intent() {
+    let out = with_robots(
+        site(3, |p| p),
+        200,
+        "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n",
+    );
+    let section = assess_with_defaults(&out);
+    let report: AccessReport = serde_json::from_value(section["report"].clone()).unwrap();
+    assert_eq!(report, report_for(&out));
+    let found: Vec<Finding> = serde_json::from_value(section["findings"].clone()).unwrap();
+    assert_eq!(found, findings(&report, &Intent::default()));
+    assert_eq!(
+        found.iter().map(|f| f.kind).collect::<Vec<_>>(),
+        [FindingKind::BotsBlocked]
+    );
 }

@@ -354,6 +354,20 @@ pub fn slug_str(slug: DirectiveSlug) -> &'static str {
     }
 }
 
+/// The directive a [`slug_str`] name stands for (an `AnswersRestricted` finding's subject).
+pub fn slug_from_str(s: &str) -> Option<DirectiveSlug> {
+    [
+        DirectiveSlug::Noindex,
+        DirectiveSlug::Nosnippet,
+        DirectiveSlug::MaxSnippet,
+        DirectiveSlug::Noarchive,
+        DirectiveSlug::Nocache,
+        DirectiveSlug::DataNosnippet,
+    ]
+    .into_iter()
+    .find(|d| slug_str(*d) == s)
+}
+
 /// Builds the report for one crawl over the `important` pages.
 pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessReport {
     let robots_file: Option<&RobotsFile> = out.robots.as_ref();

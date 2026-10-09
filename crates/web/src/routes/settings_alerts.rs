@@ -25,7 +25,6 @@ use crate::config::Mode;
 use crate::error::AppError;
 use crate::layout::{Screen, Shell};
 use crate::render::{Hx, ToastKind, html, toast};
-use crate::routes::changes::is_ai_kind;
 use crate::state::AppState;
 
 /// How long "Send test" waits for the channel.
@@ -225,7 +224,7 @@ fn note(kind: ChangeKind) -> &'static str {
 /// section heading on the first row of each.
 fn grid_kinds() -> Vec<(Option<&'static str>, ChangeKind)> {
     let (ai, site): (Vec<ChangeKind>, Vec<ChangeKind>) =
-        ALL_KINDS.iter().copied().partition(|k| is_ai_kind(*k));
+        ALL_KINDS.iter().copied().partition(|k| k.is_ai());
     let section = |name: &'static str, kinds: Vec<ChangeKind>| {
         kinds
             .into_iter()
