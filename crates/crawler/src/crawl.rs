@@ -22,7 +22,7 @@ use url::Url;
 use crate::fetch::{FetchError, FetchResult, Fetcher, FetcherConfig};
 use crate::frontier::{Frontier, Queued};
 use crate::politeness::{Limiter, retry_after_of};
-use crate::preflight::{BLOCKED_MSG, LOGIN_MSG, Preflight, origin_of, preflight};
+use crate::preflight::{BLOCKED_MSG, LOGIN_MSG, Preflight, fetch_tdmrep, origin_of, preflight};
 use crate::record::{self, Built};
 use crate::robots::RobotsRules;
 use crate::scope::SiteScope;
@@ -83,10 +83,17 @@ pub async fn crawl_shared(
         robots,
         sitemap_urls,
         sitemap,
-        signals,
+        mut signals,
         stop,
     } = pre?;
     limiter.set_crawl_delay(rules.crawl_delay());
+    // After the crawl delay, so even this one extra request keeps to it.
+    if stop.is_none() && cfg.site_signals {
+        signals.tdmrep = timeout_at(deadline, fetch_tdmrep(&fetcher, &limiter, &origin, &rules))
+            .await
+            .ok()
+            .flatten();
+    }
 
     let mut run = Run::new(&cfg, &origin, rules, &sitemap_urls, started);
     run.stop = stop;

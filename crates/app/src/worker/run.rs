@@ -278,6 +278,8 @@ async fn run_one_crawl(
         // The cloud refuses private and internal addresses; self-hosted behaves like the CLI.
         address_policy: policy,
         user_agent: USER_AGENT.to_owned(),
+        // A no-signup audit keeps no AI access report, so it asks for nothing beyond pages.
+        site_signals: claimed.trigger != CrawlTrigger::Quick,
     };
 
     let crawl_id = claimed.id;

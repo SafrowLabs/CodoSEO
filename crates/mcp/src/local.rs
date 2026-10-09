@@ -81,6 +81,7 @@ impl Backend for LocalBackend {
             politeness: Politeness::default(),
             address_policy: AddressPolicy::AllowPrivate,
             user_agent: USER_AGENT.to_owned(),
+            site_signals: true,
         };
         let progress_state = Arc::clone(&state);
         tokio::spawn(async move {
@@ -200,6 +201,7 @@ impl Backend for LocalBackend {
             politeness: Politeness::default(),
             address_policy: AddressPolicy::AllowPrivate,
             user_agent: USER_AGENT.to_owned(),
+            site_signals: true,
         };
         let mut page = inspect_page(&cfg)
             .await
@@ -252,6 +254,7 @@ impl Backend for LocalBackend {
             politeness: Politeness::default(),
             address_policy: AddressPolicy::AllowPrivate,
             user_agent: USER_AGENT.to_owned(),
+            site_signals: true,
         };
         let page = inspect_page(&cfg).await.ok();
         let engines: Vec<AiEngine> = page

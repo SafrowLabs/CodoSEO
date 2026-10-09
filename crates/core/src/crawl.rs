@@ -67,6 +67,14 @@ pub struct CrawlConfig {
     pub politeness: Politeness,
     pub address_policy: AddressPolicy,
     pub user_agent: String,
+    /// Also fetch what the site declares about AI use outside robots.txt and its pages
+    /// (`/.well-known/tdmrep.json`). Off for no-signup audits, which keep no AI access report.
+    #[serde(default = "yes")]
+    pub site_signals: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// robots.txt as fetched at the start of a crawl (kept for change detection).

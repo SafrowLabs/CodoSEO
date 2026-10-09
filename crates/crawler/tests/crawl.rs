@@ -26,6 +26,7 @@ fn cfg(start: Url) -> CrawlConfig {
         },
         address_policy: AddressPolicy::AllowPrivate,
         user_agent: USER_AGENT.to_owned(),
+        site_signals: true,
     }
 }
 
@@ -567,6 +568,24 @@ async fn tdmrep_is_not_fetched_when_robots_disallows_it() {
     let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
     assert_eq!(out.signals.tdmrep, None);
     assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 0);
+}
+
+#[tokio::test]
+async fn tdmrep_is_not_fetched_when_site_signals_are_off() {
+    // A no-signup audit keeps no AI access report, so it makes no request for one.
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page("/.well-known/tdmrep.json", Page::html("[]"))
+        .start()
+        .await;
+    let c = CrawlConfig {
+        site_signals: false,
+        ..cfg(site.url("/"))
+    };
+    let out = crawl(c, |_| {}).await.unwrap();
+    assert_eq!(out.signals.tdmrep, None);
+    assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 0);
+    assert_eq!(out.pages.len(), 1);
 }
 
 #[tokio::test]

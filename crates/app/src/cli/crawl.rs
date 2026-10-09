@@ -59,6 +59,7 @@ impl CrawlArgs {
             },
             address_policy: AddressPolicy::AllowPrivate,
             user_agent: USER_AGENT.to_owned(),
+            site_signals: true,
         }
     }
 }

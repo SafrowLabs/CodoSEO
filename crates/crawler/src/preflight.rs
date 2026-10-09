@@ -51,7 +51,8 @@ pub struct Preflight {
     pub robots: Option<RobotsFile>,
     pub sitemap_urls: Vec<Url>,
     pub sitemap: SitemapSummary,
-    /// What the site declares about AI use outside robots.txt.
+    /// What the site declares about AI use outside robots.txt: the start page's headers.
+    /// `tdmrep` is left to the crawl, which fetches it once the crawl delay applies.
     pub signals: SiteSignals,
     /// Set when the crawl should not go on.
     pub stop: Option<StopReason>,
@@ -128,7 +129,6 @@ pub(crate) async fn preflight(
         stop,
     };
     if pre.stop.is_none() {
-        pre.signals.tdmrep = fetch_tdmrep(fetcher, limiter, &pre.origin, &pre.rules).await;
         let seeds = sitemap_seeds(&pre.origin, &pre.rules);
         let deadline = deadline.min(Instant::now() + SITEMAP_BUDGET);
         let found = discover(
@@ -222,7 +222,7 @@ fn signal_headers(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)>
 
 /// Fetches `/.well-known/tdmrep.json` once, when robots.txt lets us. It is not a page:
 /// it goes into the signals, never the page list. Any failure gives `None`.
-async fn fetch_tdmrep(
+pub(crate) async fn fetch_tdmrep(
     fetcher: &Fetcher,
     limiter: &Limiter,
     origin: &Url,

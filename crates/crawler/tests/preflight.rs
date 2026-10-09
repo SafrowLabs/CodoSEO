@@ -21,6 +21,7 @@ fn config(start: Url, policy: AddressPolicy) -> CrawlConfig {
         },
         address_policy: policy,
         user_agent: USER_AGENT.to_owned(),
+        site_signals: true,
     }
 }
 

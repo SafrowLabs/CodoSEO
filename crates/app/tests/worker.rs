@@ -840,3 +840,21 @@ async fn a_quick_audit_has_no_ai_access_state() {
         .unwrap();
     assert_eq!((reports, incidents), (0, 0));
 }
+
+#[tokio::test]
+async fn a_quick_audit_does_not_fetch_tdmrep_and_a_full_crawl_does() {
+    let db = TestDb::new().await;
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/.well-known/tdmrep.json",
+            codoseo_testkit::Page::html("[]"),
+        )
+        .start()
+        .await;
+    let site_id = db.seed_site("example.test", site.url("/").as_str()).await;
+    run_crawl(&db, site_id, CrawlTrigger::Quick).await;
+    assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 0);
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 1);
+}
