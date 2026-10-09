@@ -716,6 +716,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codoseo-geo"
+version = "0.1.0-rc.1"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "codoseo-mcp"
 version = "0.1.0-rc.1"
 dependencies = [
