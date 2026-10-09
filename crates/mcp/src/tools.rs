@@ -405,7 +405,9 @@ mod tests {
         assert_eq!(body["status"], "running");
         let audit_id = body["audit_id"].as_str().unwrap().to_owned();
 
-        tokio::time::sleep(StdDuration::from_millis(700)).await;
+        // The crawl spends one more rate-limited request on /.well-known/tdmrep.json
+        // than it used to, so give it room beyond the slow start page.
+        tokio::time::sleep(StdDuration::from_millis(1500)).await;
         let result = client
             .peer()
             .call_tool(

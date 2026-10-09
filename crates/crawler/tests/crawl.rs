@@ -524,3 +524,55 @@ fn the_crawl_future_is_send() {
     let c = cfg(Url::parse("http://127.0.0.1:1/").unwrap());
     assert_send(crawl(c, |_| {}));
 }
+
+#[tokio::test]
+async fn captures_declared_ai_signals_from_the_start_page_and_tdmrep() {
+    let site = SiteBuilder::new()
+        .page(
+            "/",
+            Page::html(&html_page("Home", &[]))
+                .header("Content-Signal", "ai-train=no")
+                .header("TDM-Reservation", "1")
+                .header("X-Other", "ignored"),
+        )
+        .page(
+            "/.well-known/tdmrep.json",
+            Page::html(r#"[{"location":"/","tdm-reservation":1}]"#),
+        )
+        .start()
+        .await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+
+    assert_eq!(
+        out.signals.home_headers,
+        [
+            ("content-signal".to_owned(), "ai-train=no".to_owned()),
+            ("tdm-reservation".to_owned(), "1".to_owned()),
+        ]
+    );
+    let tdm = out.signals.tdmrep.expect("tdmrep.json was fetched");
+    assert_eq!(tdm.status, 200);
+    assert!(tdm.body.contains("tdm-reservation"));
+    assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 1);
+    assert_eq!(out.pages.len(), 1, "the well-known file is not a page");
+}
+
+#[tokio::test]
+async fn tdmrep_is_not_fetched_when_robots_disallows_it() {
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: *\nDisallow: /.well-known/\n")
+        .html("/", "Home", &[])
+        .start()
+        .await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+    assert_eq!(out.signals.tdmrep, None);
+    assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 0);
+}
+
+#[tokio::test]
+async fn a_missing_tdmrep_is_recorded_with_its_status() {
+    let site = SiteBuilder::new().html("/", "Home", &[]).start().await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+    let tdm = out.signals.tdmrep.expect("the request was answered");
+    assert_eq!((tdm.status, tdm.body.as_str()), (404, ""));
+}

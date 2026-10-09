@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
-use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, Progress, StopReason};
+use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, Progress, SiteSignals, StopReason};
 use codoseo_core::page::PageRecord;
 use codoseo_core::url::{normalize, url_hash};
 use futures_util::StreamExt;
@@ -73,6 +73,7 @@ pub async fn crawl_shared(
             sitemap: SitemapSummary::default(),
             stop: StopReason::TimeLimit,
             duration_ms: elapsed_ms(started),
+            signals: SiteSignals::default(),
         });
     };
     let Preflight {
@@ -82,6 +83,7 @@ pub async fn crawl_shared(
         robots,
         sitemap_urls,
         sitemap,
+        signals,
         stop,
     } = pre?;
     limiter.set_crawl_delay(rules.crawl_delay());
@@ -96,7 +98,7 @@ pub async fn crawl_shared(
         run.crawl(&fetcher, &limiter, sitemap_urls, deadline, &on_progress)
             .await;
     }
-    Ok(run.finish(origin, robots, sitemap))
+    Ok(run.finish(origin, robots, sitemap, signals))
 }
 
 /// Fetches `cfg.start_url` once, without reading robots.txt, and returns the record of
@@ -464,6 +466,7 @@ impl Run {
         origin: Url,
         robots: Option<RobotsFile>,
         sitemap: SitemapSummary,
+        signals: SiteSignals,
     ) -> CrawlOutput {
         let stop = match self.stop {
             Some(stop) => stop,
@@ -501,6 +504,7 @@ impl Run {
             sitemap,
             stop,
             duration_ms: elapsed_ms(self.started),
+            signals,
         }
     }
 }

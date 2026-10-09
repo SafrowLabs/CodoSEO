@@ -17,7 +17,7 @@ use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use codoseo_core::change::Change;
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::SitemapSummary;
-use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, StopReason};
+use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::plan::Plan;
 use codoseo_store::accounts::{Account, SignIn, SignupPolicy};
@@ -358,6 +358,7 @@ impl TestApp {
             sitemap: SitemapSummary::default(),
             stop,
             duration_ms: 95_000,
+            signals: SiteSignals::default(),
         };
         let report = codoseo_checks::run_checks(&mut out);
         codoseo_store::finalize::finalize(

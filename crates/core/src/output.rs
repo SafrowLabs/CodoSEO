@@ -97,6 +97,27 @@ pub struct Progress {
     pub elapsed_ms: u64,
 }
 
+/// A small file fetched from a well-known path, kept as served.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WellKnownFile {
+    pub status: u16,
+    /// Empty unless the status was 2xx.
+    pub body: String,
+}
+
+/// Site-wide signals the crawl read outside the page list: what the site declares
+/// about AI use in response headers and well-known files.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SiteSignals {
+    /// `content-signal`, `content-usage`, `tdm-reservation` and `tdm-policy` headers of
+    /// the settled start page: lower-cased names, values capped at 1 KiB.
+    #[serde(default)]
+    pub home_headers: Vec<(String, String)>,
+    /// `/.well-known/tdmrep.json`; `None` when it was not fetched or the fetch failed.
+    #[serde(default)]
+    pub tdmrep: Option<WellKnownFile>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrawlOutput {
     /// The settled start address: the origin pages are internal to.
@@ -107,4 +128,6 @@ pub struct CrawlOutput {
     pub sitemap: SitemapSummary,
     pub stop: StopReason,
     pub duration_ms: u64,
+    #[serde(default)]
+    pub signals: SiteSignals,
 }

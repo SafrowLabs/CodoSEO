@@ -184,3 +184,54 @@ fn an_oversized_rule_is_skipped_not_the_whole_file() {
     );
     assert!(!RobotsRules::parse(body.as_bytes(), AGENT).allowed("/private"));
 }
+
+mod cross_check {
+    use codoseo_geo::robots::RobotsTxt;
+    use proptest::prelude::*;
+
+    use super::{AGENT, RobotsRules};
+
+    fn line() -> impl Strategy<Value = String> {
+        let agent = prop_oneof![
+            Just("User-agent: *".to_owned()),
+            Just("User-agent: CodoSEObot".to_owned()),
+            Just("user-agent: codoseobot/0.1".to_owned()),
+            Just("User-agent: GPTBot".to_owned()),
+            Just("User-agent: Googlebot".to_owned()),
+        ];
+        let pattern = "(/|\\*)?([a-c]{1,2}|\\*){0,3}(/[a-c]{1,2}){0,2}\\$?";
+        let rule = (prop::bool::ANY, pattern)
+            .prop_map(|(allow, p)| format!("{}: {p}", if allow { "Allow" } else { "Disallow" }));
+        prop_oneof![
+            3 => agent,
+            6 => rule,
+            1 => Just("# a comment".to_owned()),
+            1 => Just("Crawl-delay: 2".to_owned()),
+            1 => Just("Content-Signal: ai-train=no".to_owned()),
+            1 => Just("Sitemap: https://e.test/s.xml".to_owned()),
+            1 => Just(String::new()),
+        ]
+    }
+
+    proptest! {
+        /// The crawler's wrapper and the shared parser must never disagree.
+        #[test]
+        fn wrapper_agrees_with_the_shared_parser(
+            lines in prop::collection::vec(line(), 0..14),
+            paths in prop::collection::vec("(/[a-c]{1,2}){0,3}/?(\\?[a-c]=[a-c])?", 1..8),
+        ) {
+            let body = lines.join("\n");
+            let rules = RobotsRules::parse(body.as_bytes(), AGENT);
+            let txt = RobotsTxt::parse(body.as_bytes());
+            for path in paths {
+                let path = if path.is_empty() { "/".to_owned() } else { path };
+                prop_assert_eq!(
+                    rules.allowed(&path),
+                    txt.verdict(AGENT, &path).allowed,
+                    "{} on {:?}", path, body
+                );
+            }
+            prop_assert_eq!(rules.sitemaps(), txt.sitemaps());
+        }
+    }
+}

@@ -7,7 +7,7 @@ mod support;
 use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::{IssueBits, Severity};
 use codoseo_core::crawl::SitemapSummary;
-use codoseo_core::output::{CrawlOutput, LinkGraph, StopReason};
+use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::report::{CrawlReport, CrawlSummary};
 use sqlx::Row;
@@ -95,6 +95,7 @@ fn empty_output(pages: Vec<PageRecord>, stop: StopReason) -> CrawlOutput {
         sitemap: SitemapSummary::default(),
         stop,
         duration_ms: 500,
+        signals: SiteSignals::default(),
     }
 }
 
