@@ -628,6 +628,7 @@ dependencies = [
  "codoseo-core",
  "codoseo-crawler",
  "codoseo-diff",
+ "codoseo-geo",
  "codoseo-mcp",
  "codoseo-notify",
  "codoseo-store",
@@ -785,6 +786,7 @@ name = "codoseo-store"
 version = "0.1.0-rc.1"
 dependencies = [
  "codoseo-core",
+ "codoseo-geo",
  "codoseo-notify",
  "futures-util",
  "proptest",

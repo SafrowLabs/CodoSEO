@@ -313,6 +313,9 @@ fn is_instant(kind: ChangeKind) -> bool {
             | ChangeKind::ErrorSpike
             | ChangeKind::RobotsTxtChanged
             | ChangeKind::SitemapShrank
+            | ChangeKind::AiBotBlocked
+            | ChangeKind::AiAnswersRestricted
+            | ChangeKind::AiIssueResolved
     )
 }
 
@@ -330,6 +333,11 @@ fn title(c: &ChangeRow) -> String {
         ChangeKind::SitemapShrank => "Sitemap lost URLs".to_owned(),
         ChangeKind::ErrorSpike => "4xx/5xx spike".to_owned(),
         ChangeKind::SiteMoved => "Site moved".to_owned(),
+        ChangeKind::AiBotBlocked => "AI bot blocked".to_owned(),
+        ChangeKind::AiAnswersRestricted => "AI answers restricted".to_owned(),
+        ChangeKind::AiBlockNotApplied => "AI block not applied".to_owned(),
+        ChangeKind::AiIssueResolved => "AI issue resolved".to_owned(),
+        ChangeKind::AiPreferencesChanged => "AI preferences changed".to_owned(),
     }
 }
 

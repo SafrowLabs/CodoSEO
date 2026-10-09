@@ -128,7 +128,7 @@ async fn finalize_writes_pages_and_marks_the_crawl_done() {
     }];
 
     finalize(
-        &db.pool, crawl_id, site_id, WORKER_ID, &out, &report, &changes,
+        &db.pool, crawl_id, site_id, WORKER_ID, &out, &report, &changes, None,
     )
     .await
     .expect("finalize");
@@ -186,6 +186,7 @@ async fn finalize_round_trips_the_stop_reason_for_previous_snapshot() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -228,6 +229,7 @@ async fn finalize_round_trips_ai_meta_and_stores_null_when_empty() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -275,6 +277,7 @@ async fn nul_in_a_bot_meta_does_not_fail_the_jsonb_copy() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -311,6 +314,7 @@ async fn finalize_is_atomic_when_a_change_fails_to_insert() {
         &out,
         &empty_report(),
         &changes,
+        None,
     )
     .await;
     assert!(result.is_err(), "the NUL byte must make finalize fail");
@@ -399,6 +403,7 @@ async fn finalize_keeps_only_the_latest_two_done_crawls_pages() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -432,6 +437,7 @@ async fn finalize_handles_a_synthetic_fifty_thousand_page_crawl() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize 50k pages");
@@ -468,6 +474,7 @@ async fn finalize_by_a_stale_worker_rolls_back_and_does_not_touch_the_new_owners
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await;
     assert!(
@@ -540,6 +547,7 @@ async fn finalize_records_the_funnel_events_for_quick_and_first_crawls_only() {
             &out,
             &empty_report(),
             &[],
+            None,
         )
         .await
         .expect("finalize");
@@ -578,6 +586,7 @@ async fn a_failed_finalize_leaves_no_funnel_event() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await;
     assert!(result.is_err());
@@ -611,6 +620,7 @@ async fn a_first_crawl_added_directly_is_not_a_funnel_step() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -637,6 +647,7 @@ async fn the_diff_baseline_skips_quick_audits() {
         &empty_output(vec![sample_page(1)], StopReason::PageLimit),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize quick");
@@ -652,6 +663,7 @@ async fn the_diff_baseline_skips_quick_audits() {
         &empty_output(vec![sample_page(1), sample_page(2)], StopReason::Completed),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize first");
@@ -697,6 +709,7 @@ async fn four_hundred_changes_queue_one_planning_job() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &changes,
+        None,
     )
     .await
     .expect("finalize");
@@ -729,6 +742,7 @@ async fn a_crawl_without_changes_queues_nothing() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -756,6 +770,7 @@ async fn a_quick_crawl_never_alerts() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &[change(ChangeKind::ErrorSpike, "x")],
+        None,
     )
     .await
     .expect("finalize");

@@ -10,6 +10,7 @@ homepage.workspace = true
 
 [dependencies]
 codoseo-core.workspace = true
+codoseo-geo.workspace = true
 codoseo-notify.workspace = true
 sqlx.workspace = true
 time.workspace = true

@@ -486,3 +486,318 @@ async fn a_panicking_crawl_counts_as_failed_and_releases_what_it_held() {
     );
     assert!(!body.contains("codoseo_crawls_running 1"), "{body}");
 }
+
+// ---- AI access (GEO) ---------------------------------------------------------------------
+
+/// What the changing fake site answers: robots.txt, and a `robots` meta on every page.
+#[derive(Clone)]
+struct Knobs {
+    robots_status: u16,
+    robots_body: String,
+    meta_robots: Option<String>,
+}
+
+/// A small site whose robots.txt and page markup the test can change between crawls.
+async fn changing_site() -> (
+    codoseo_testkit::TestServer,
+    std::sync::Arc<std::sync::Mutex<Knobs>>,
+) {
+    use axum::http::{StatusCode, Uri, header};
+    use axum::response::IntoResponse;
+
+    let knobs = std::sync::Arc::new(std::sync::Mutex::new(Knobs {
+        robots_status: 200,
+        robots_body: "User-agent: *\nAllow: /\n".to_owned(),
+        meta_robots: None,
+    }));
+    let state = knobs.clone();
+    let router = axum::Router::new().fallback(axum::routing::any(move |uri: Uri| {
+        let k = state.lock().unwrap().clone();
+        async move {
+            match uri.path() {
+                "/robots.txt" => (
+                    StatusCode::from_u16(k.robots_status).unwrap(),
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    k.robots_body,
+                )
+                    .into_response(),
+                "/" | "/a" => {
+                    let meta = k
+                        .meta_robots
+                        .map(|m| format!("<meta name=\"robots\" content=\"{m}\">"))
+                        .unwrap_or_default();
+                    let links = if uri.path() == "/" {
+                        "<a href=\"/a\">A</a>"
+                    } else {
+                        ""
+                    };
+                    (
+                        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                        format!(
+                            "<!doctype html><html lang=\"en\"><head><title>Page {}</title>\
+                             <meta name=\"description\" content=\"A page.\">{meta}</head>\
+                             <body><h1>Page</h1>{links}</body></html>",
+                            uri.path()
+                        ),
+                    )
+                        .into_response()
+                }
+                _ => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    }));
+    (codoseo_testkit::TestServer::start(router).await, knobs)
+}
+
+async fn run_crawl(db: &TestDb, site_id: uuid::Uuid, trigger: CrawlTrigger) -> uuid::Uuid {
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let job_queue = JobQueue::new(db.pool.clone());
+    let id = crawl_queue
+        .enqueue(site_id, "example.test", trigger, 2, None, None)
+        .await
+        .expect("enqueue crawl");
+    assert!(
+        worker_loop_once(
+            &db.pool,
+            &crawl_queue,
+            &job_queue,
+            "test-worker",
+            DEFAULT_MEMORY_BUDGET,
+            AddressPolicy::AllowPrivate,
+        )
+        .await
+        .expect("worker_loop_once")
+    );
+    id
+}
+
+async fn ai_changes(db: &TestDb, crawl: uuid::Uuid) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT kind::text, severity::text FROM changes \
+         WHERE crawl_id = $1 AND kind::text LIKE 'ai_%' ORDER BY id",
+    )
+    .bind(crawl)
+    .fetch_all(&db.pool)
+    .await
+    .unwrap()
+}
+
+async fn alert_planning_jobs(db: &TestDb, crawl: uuid::Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'send_alert' AND payload->>'crawl_id' = $1 \
+         AND payload->>'channel_id' IS NULL AND payload->>'unreachable' IS NULL",
+    )
+    .bind(crawl.to_string())
+    .fetch_one(&db.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn ai_access_incidents_open_and_resolve_across_real_crawls() {
+    let db = TestDb::new().await;
+    let (server, knobs) = changing_site().await;
+    let site_id = db.seed_site("example.test", server.url("/").as_str()).await;
+
+    // The first crawl is the baseline: a blocked search bot would open quietly.
+    knobs.lock().unwrap().robots_body =
+        "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n".to_owned();
+    let first = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
+        .await
+        .unwrap();
+    assert_eq!(open.len(), 1);
+    assert!(open[0].quiet);
+    assert!(ai_changes(&db, first).await.is_empty());
+    assert_eq!(alert_planning_jobs(&db, first).await, 0);
+
+    // (b) The rule goes: resolved, with a change and an alert job.
+    knobs.lock().unwrap().robots_body = "User-agent: *\nAllow: /\n".to_owned();
+    let second = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert!(
+        codoseo_store::geo::open_incidents(&db.pool, site_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        ai_changes(&db, second).await.is_empty(),
+        "a quiet incident resolves quietly"
+    );
+
+    // (a) The rule comes back: one critical incident, one change, one alert job.
+    knobs.lock().unwrap().robots_body =
+        "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n".to_owned();
+    let third = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
+        .await
+        .unwrap();
+    assert_eq!(open.len(), 1);
+    assert!(!open[0].quiet);
+    assert_eq!(
+        ai_changes(&db, third).await,
+        vec![("ai_bot_blocked".to_owned(), "critical".to_owned())]
+    );
+    assert_eq!(alert_planning_jobs(&db, third).await, 1);
+
+    // The rule is removed again: resolved with an `ai_issue_resolved` change.
+    knobs.lock().unwrap().robots_body = "User-agent: *\nAllow: /\n".to_owned();
+    let fourth = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert!(
+        codoseo_store::geo::open_incidents(&db.pool, site_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        ai_changes(&db, fourth).await,
+        vec![("ai_issue_resolved".to_owned(), "notice".to_owned())]
+    );
+    assert_eq!(alert_planning_jobs(&db, fourth).await, 1);
+
+    // (d) A site-wide nosnippet is one incident.
+    knobs.lock().unwrap().meta_robots = Some("nosnippet".to_owned());
+    let fifth = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
+        .await
+        .unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].subject, "nosnippet");
+    assert_eq!(
+        ai_changes(&db, fifth).await,
+        vec![("ai_answers_restricted".to_owned(), "critical".to_owned())]
+    );
+
+    // Only the newest two reports are kept.
+    let reports: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_reports WHERE site_id = $1")
+        .bind(site_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(reports, 2);
+}
+
+#[tokio::test]
+async fn a_failing_robots_txt_opens_an_incident_through_the_failed_crawl_path() {
+    let db = TestDb::new().await;
+    let (server, knobs) = changing_site().await;
+    let site_id = db.seed_site("example.test", server.url("/").as_str()).await;
+    // A site with an owner, so the unreachable alert has someone to go to.
+    let account: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (email, email_canonical) VALUES ('o@example.com', 'o@example.com') RETURNING id",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE sites SET account_id = $2 WHERE id = $1")
+        .bind(site_id)
+        .bind(account)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    let baseline = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert!(ai_changes(&db, baseline).await.is_empty());
+
+    // (c) robots.txt answers 503: the crawl fails as before, and the incident is recorded.
+    {
+        let mut k = knobs.lock().unwrap();
+        k.robots_status = 503;
+        k.robots_body = String::new();
+    }
+    let crawl = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let (status, reason): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, failure_reason FROM crawls WHERE id = $1")
+            .bind(crawl)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "queued", "the first failure waits for its retry");
+    assert!(reason.is_some());
+    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
+        .await
+        .unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(
+        open[0].kind,
+        codoseo_geo::findings::FindingKind::RobotsUnavailable
+    );
+    assert!(!open[0].quiet);
+    assert_eq!(
+        ai_changes(&db, crawl).await,
+        vec![("ai_bot_blocked".to_owned(), "critical".to_owned())]
+    );
+    assert_eq!(alert_planning_jobs(&db, crawl).await, 1);
+
+    // The retry fails too: the crawl ends failed, the unreachable alert is queued as ever, and
+    // the incident is neither duplicated nor announced twice.
+    sqlx::query("UPDATE crawls SET queued_at = now() WHERE id = $1")
+        .bind(crawl)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let job_queue = JobQueue::new(db.pool.clone());
+    assert!(
+        worker_loop_once(
+            &db.pool,
+            &crawl_queue,
+            &job_queue,
+            "test-worker",
+            DEFAULT_MEMORY_BUDGET,
+            AddressPolicy::AllowPrivate,
+        )
+        .await
+        .unwrap()
+    );
+    let status: String = sqlx::query_scalar("SELECT status::text FROM crawls WHERE id = $1")
+        .bind(crawl)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "failed");
+    assert_eq!(
+        codoseo_store::geo::open_incidents(&db.pool, site_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(ai_changes(&db, crawl).await.len(), 1);
+    assert_eq!(alert_planning_jobs(&db, crawl).await, 1);
+    let unreachable: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'send_alert' AND payload->>'unreachable' = 'true'",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        unreachable, 1,
+        "the existing unreachable alert still goes out"
+    );
+    let reports: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_reports WHERE site_id = $1")
+        .bind(site_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(reports, 2);
+}
+
+#[tokio::test]
+async fn a_quick_audit_has_no_ai_access_state() {
+    let db = TestDb::new().await;
+    let (server, knobs) = changing_site().await;
+    knobs.lock().unwrap().robots_body =
+        "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n".to_owned();
+    let site_id = db.seed_site("example.test", server.url("/").as_str()).await;
+    run_crawl(&db, site_id, CrawlTrigger::Quick).await;
+    let reports: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_reports")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    let incidents: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_incidents")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!((reports, incidents), (0, 0));
+}

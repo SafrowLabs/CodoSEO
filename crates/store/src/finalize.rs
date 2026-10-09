@@ -1,6 +1,7 @@
 //! Writing a finished crawl in one transaction: pages and inlinks via `COPY` (batched, so
 //! memory stays flat on a large crawl), one `site_files` row, `changes`, the crawl's own
-//! `done`/summary update, the 2-crawl retention cleanup, and the alert planning job. A
+//! `done`/summary update, the 2-crawl retention cleanup, the AI access report and its incidents
+//! (see [`crate::geo`]), and the alert planning job. A
 //! failure partway rolls the whole transaction back, so a crawl never ends up half-written.
 
 use std::collections::HashSet;
@@ -16,16 +17,19 @@ use uuid::Uuid;
 
 use crate::dbenum::enum_slug;
 use crate::events::{self, EventKind};
+use crate::geo::{self, GeoInput};
 use crate::hash;
 
 /// Rows per `COPY` chunk, per spec ("COPY in batches of 500").
 const COPY_BATCH: usize = 500;
 
-/// Writes a finished crawl. `worker_id` must match the row's current `worker_id` and the row
+/// Writes a finished crawl. `geo` is the crawl's AI access evaluation, `None` when it has none
+/// (a no-signup audit). `worker_id` must match the row's current `worker_id` and the row
 /// must still be `running`, or the whole transaction is rolled back instead of committing —
 /// this is the guard against a worker whose heartbeat went stale (and was reclaimed by
 /// `requeue_stale`, then claimed by another worker) finishing late and overwriting whatever the
 /// new owner has written or is about to write.
+#[allow(clippy::too_many_arguments)] // one flat call per finished crawl, as every caller reads it
 pub async fn finalize(
     pool: &PgPool,
     crawl_id: Uuid,
@@ -34,6 +38,7 @@ pub async fn finalize(
     out: &CrawlOutput,
     report: &CrawlReport,
     changes: &[Change],
+    geo: Option<&GeoInput>,
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
@@ -41,6 +46,13 @@ pub async fn finalize(
     copy_inlinks(&mut tx, crawl_id, out, report).await?;
     insert_site_files(&mut tx, crawl_id, site_id, out).await?;
     insert_changes(&mut tx, crawl_id, site_id, changes).await?;
+    // The AI access report and what it opens or resolves, in the same transaction, so a crawl
+    // never has its changes without its report or the other way round.
+    let geo_changes = match geo {
+        Some(input) => geo::apply_geo(&mut tx, site_id, crawl_id, input).await?,
+        None => Vec::new(),
+    };
+    insert_changes(&mut tx, crawl_id, site_id, &geo_changes).await?;
 
     let summary = build_summary(out, report);
     let result = sqlx::query(
@@ -72,7 +84,12 @@ pub async fn finalize(
         sqlx::query(&sql).bind(site_id).execute(&mut *tx).await?;
     }
 
-    enqueue_alert_job(&mut tx, crawl_id, changes).await?;
+    enqueue_alert_job(
+        &mut tx,
+        crawl_id,
+        !changes.is_empty() || !geo_changes.is_empty(),
+    )
+    .await?;
     record_funnel_event(&mut tx, crawl_id, site_id, report).await?;
 
     tx.commit().await?;
@@ -158,7 +175,7 @@ async fn insert_site_files(
     Ok(())
 }
 
-async fn insert_changes(
+pub(crate) async fn insert_changes(
     tx: &mut Transaction<'_, Postgres>,
     crawl_id: Uuid,
     site_id: Uuid,
@@ -185,12 +202,12 @@ async fn insert_changes(
 /// One `send_alert` planning job for the crawl when it recorded any change. The planner (the
 /// worker's `plan_alert`) matches the changes against the site's rules, so a crawl with 400
 /// changes is still one job. A no-signup audit never alerts: nobody has subscribed to it.
-async fn enqueue_alert_job(
+pub(crate) async fn enqueue_alert_job(
     tx: &mut Transaction<'_, Postgres>,
     crawl_id: Uuid,
-    changes: &[Change],
+    any_changes: bool,
 ) -> Result<(), sqlx::Error> {
-    if changes.is_empty() {
+    if !any_changes {
         return Ok(());
     }
     sqlx::query(

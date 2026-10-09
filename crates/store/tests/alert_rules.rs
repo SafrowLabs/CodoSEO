@@ -40,7 +40,7 @@ fn slack(token: &str) -> ChannelTarget {
 }
 
 #[tokio::test]
-async fn defaults_are_the_five_instant_kinds_and_creating_them_twice_changes_nothing() {
+async fn defaults_are_the_eight_instant_kinds_and_creating_them_twice_changes_nothing() {
     let db = TestDb::new().await;
     let key = ChannelKey::derive("k");
     let acct = account(&db.pool, "a@example.com").await;
@@ -57,13 +57,16 @@ async fn defaults_are_the_five_instant_kinds_and_creating_them_twice_changes_not
         .fetch_one(&db.pool)
         .await
         .unwrap();
-    assert_eq!(n, 5);
+    assert_eq!(n, 8);
     for kind in [
         ChangeKind::BecameNoindex,
         ChangeKind::ErrorSpike,
         ChangeKind::RobotsTxtChanged,
         ChangeKind::SitemapShrank,
         ChangeKind::SiteMoved,
+        ChangeKind::AiBotBlocked,
+        ChangeKind::AiAnswersRestricted,
+        ChangeKind::AiIssueResolved,
     ] {
         assert!(DEFAULT_INSTANT.contains(&kind));
         assert_eq!(

@@ -967,3 +967,43 @@ async fn the_default_email_channel_is_never_switched_off_by_failures() {
         .unwrap();
     assert_eq!(notices, 0, "no notice either");
 }
+
+#[tokio::test]
+async fn an_ai_access_change_on_a_failed_crawl_is_planned_to_the_instant_channel() {
+    let w = World::new("pro").await;
+    let email = w.email_channel().await;
+    // The crawl failed (robots.txt returned 503): its changes are still the owner's to hear about.
+    sqlx::query("UPDATE crawls SET status = 'failed', failure_reason = 'site blocked: robots' WHERE id = $1")
+        .bind(w.crawl)
+        .execute(w.pool())
+        .await
+        .unwrap();
+    let blocked = w.change(ChangeKind::AiBotBlocked, None).await;
+    let not_applied = w.change(ChangeKind::AiBlockNotApplied, None).await;
+
+    let crawl = alert_rules::alert_crawl(w.pool(), w.crawl)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!crawl.quick);
+    assert_eq!(
+        alert_rules::unalerted_changes(w.pool(), w.crawl)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    alerts::plan_alert(&w.ctx, w.crawl).await.unwrap();
+
+    let deliveries = w.deliveries().await;
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0]["channel_id"], json!(email));
+    assert_eq!(deliveries[0]["change_ids"], json!([blocked]));
+    assert!(w.alerted(blocked).await);
+    assert!(
+        !w.alerted(not_applied).await,
+        "ai_block_not_applied waits for the digest"
+    );
+    w.drain().await;
+    assert_eq!(w.mail_to("owner@example.com").len(), 1);
+}

@@ -20,6 +20,16 @@ pub enum ChangeKind {
     SitemapShrank,
     ErrorSpike,
     SiteMoved,
+    /// AI search or answer bots the owner wants are kept out (robots.txt), or robots.txt fails.
+    AiBotBlocked,
+    /// Page markup (nosnippet, noarchive, ...) takes pages out of an engine's AI answers.
+    AiAnswersRestricted,
+    /// A bot the owner wants blocked can still crawl the site.
+    AiBlockNotApplied,
+    /// An AI access incident is gone.
+    AiIssueResolved,
+    /// The site's declared AI preferences (Content-Signal, Content-Usage, TDM) changed.
+    AiPreferencesChanged,
 }
 
 impl ChangeKind {
@@ -38,6 +48,11 @@ impl ChangeKind {
             ChangeKind::SitemapShrank => "sitemap_shrank",
             ChangeKind::ErrorSpike => "error_spike",
             ChangeKind::SiteMoved => "site_moved",
+            ChangeKind::AiBotBlocked => "ai_bot_blocked",
+            ChangeKind::AiAnswersRestricted => "ai_answers_restricted",
+            ChangeKind::AiBlockNotApplied => "ai_block_not_applied",
+            ChangeKind::AiIssueResolved => "ai_issue_resolved",
+            ChangeKind::AiPreferencesChanged => "ai_preferences_changed",
         }
     }
 
@@ -56,6 +71,11 @@ impl ChangeKind {
             ChangeKind::SitemapShrank => "Sitemap shrank",
             ChangeKind::ErrorSpike => "Error spike (4xx/5xx)",
             ChangeKind::SiteMoved => "Site moved",
+            ChangeKind::AiBotBlocked => "AI bot blocked",
+            ChangeKind::AiAnswersRestricted => "AI answers restricted",
+            ChangeKind::AiBlockNotApplied => "AI block not applied",
+            ChangeKind::AiIssueResolved => "AI issue resolved",
+            ChangeKind::AiPreferencesChanged => "AI preferences changed",
         }
     }
 }
@@ -88,6 +108,11 @@ mod tests {
             ChangeKind::SitemapShrank,
             ChangeKind::ErrorSpike,
             ChangeKind::SiteMoved,
+            ChangeKind::AiBotBlocked,
+            ChangeKind::AiAnswersRestricted,
+            ChangeKind::AiBlockNotApplied,
+            ChangeKind::AiIssueResolved,
+            ChangeKind::AiPreferencesChanged,
         ];
         for kind in all {
             assert_eq!(

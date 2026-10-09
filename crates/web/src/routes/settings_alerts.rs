@@ -209,6 +209,11 @@ fn note(kind: ChangeKind) -> &'static str {
         ChangeKind::BecameNoindex => "key pages only",
         ChangeKind::ErrorSpike => "a burst of new 4xx and 5xx pages",
         ChangeKind::SitemapShrank => "lost 10% or more",
+        ChangeKind::AiBotBlocked => "AI search bots blocked, or robots.txt failing",
+        ChangeKind::AiAnswersRestricted => "page markup keeps pages out of AI answers",
+        ChangeKind::AiIssueResolved => "an AI access issue is fixed",
+        ChangeKind::AiBlockNotApplied => "a bot you block can still crawl",
+        ChangeKind::AiPreferencesChanged => "Content-Signal, Content-Usage or TDM changed",
         _ => "",
     }
 }

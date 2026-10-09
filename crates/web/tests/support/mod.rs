@@ -369,6 +369,7 @@ impl TestApp {
             &out,
             &report,
             &changes,
+            None,
         )
         .await
         .expect("finalize");

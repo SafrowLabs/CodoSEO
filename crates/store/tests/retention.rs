@@ -407,3 +407,69 @@ async fn the_week_long_pause_window_is_inside_the_14_days() {
         .unwrap();
     assert_eq!(paused, 1);
 }
+
+/// A resolved incident of `site`, resolved `resolved_seconds_ago` in the past (or open when `None`).
+async fn seed_incident(
+    pool: &PgPool,
+    site_id: Uuid,
+    subject: &str,
+    resolved_seconds_ago: Option<f64>,
+) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO ai_incidents (site_id, kind, subject, severity, title, summary, evidence, \
+           resolved_at, resolution) \
+         VALUES ($1, 'bots_blocked', $2, 'critical', 't', 's', '{}'::jsonb, \
+           CASE WHEN $3::text IS NULL THEN NULL ELSE now() - ($3 || ' seconds')::interval END, \
+           CASE WHEN $3::text IS NULL THEN NULL ELSE 'fixed' END) RETURNING id",
+    )
+    .bind(site_id)
+    .bind(subject)
+    .bind(resolved_seconds_ago.map(|s| s.to_string()))
+    .fetch_one(pool)
+    .await
+    .expect("insert incident")
+}
+
+async fn incident_exists(pool: &PgPool, id: i64) -> bool {
+    sqlx::query_scalar::<_, i64>("SELECT count(*) FROM ai_incidents WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .expect("count incident")
+        > 0
+}
+
+#[tokio::test]
+async fn resolved_ai_incidents_follow_the_plans_history_window() {
+    let db = TestDb::new().await;
+    let free = seed_account(&db.pool, "free").await;
+    let pro = seed_account(&db.pool, "pro").await;
+    let free_site = seed_site(&db.pool, Some(free), 0.0).await;
+    let pro_site = seed_site(&db.pool, Some(pro), 0.0).await;
+
+    let free_young = seed_incident(&db.pool, free_site, "a", Some(29.0 * DAY)).await;
+    let free_boundary = seed_incident(&db.pool, free_site, "b", Some(30.0 * DAY)).await;
+    let free_open = seed_incident(&db.pool, free_site, "c", None).await;
+    let pro_old_for_free = seed_incident(&db.pool, pro_site, "d", Some(100.0 * DAY)).await;
+    let pro_boundary = seed_incident(&db.pool, pro_site, "e", Some(365.0 * DAY)).await;
+
+    let report = retention::run(&db.pool, None).await.expect("run retention");
+    assert_eq!(report.ai_incidents_trimmed, 2);
+    assert!(incident_exists(&db.pool, free_young).await, "29 days: kept");
+    assert!(
+        !incident_exists(&db.pool, free_boundary).await,
+        "30 days: deleted"
+    );
+    assert!(
+        incident_exists(&db.pool, free_open).await,
+        "open incidents are never trimmed"
+    );
+    assert!(
+        incident_exists(&db.pool, pro_old_for_free).await,
+        "the pro window is 365 days"
+    );
+    assert!(
+        !incident_exists(&db.pool, pro_boundary).await,
+        "365 days: deleted"
+    );
+}

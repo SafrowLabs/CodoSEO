@@ -13,6 +13,7 @@ use crate::dbenum::enum_slug;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RetentionReport {
     pub crawls_trimmed: u64,
+    pub ai_incidents_trimmed: u64,
     pub unclaimed_sites_deleted: u64,
     pub tokens_deleted: u64,
     pub sessions_deleted: u64,
@@ -30,6 +31,7 @@ pub async fn run(
     self_hosted_history_days: Option<u32>,
 ) -> Result<RetentionReport, sqlx::Error> {
     let mut crawls_trimmed = 0;
+    let mut ai_incidents_trimmed = 0;
     for plan in [Plan::Free, Plan::Pro, Plan::Agency, Plan::SelfHosted] {
         let days = match plan {
             Plan::SelfHosted => self_hosted_history_days.unwrap_or_else(|| {
@@ -42,6 +44,7 @@ pub async fn run(
                 .expect("cloud plans always have a history_days limit"),
         };
         crawls_trimmed += trim_plan_history(pool, &enum_slug(&plan), i64::from(days)).await?;
+        ai_incidents_trimmed += trim_ai_incidents(pool, &enum_slug(&plan), i64::from(days)).await?;
     }
 
     let unclaimed_sites_deleted = sqlx::query(
@@ -92,6 +95,7 @@ pub async fn run(
 
     Ok(RetentionReport {
         crawls_trimmed,
+        ai_incidents_trimmed,
         unclaimed_sites_deleted,
         tokens_deleted,
         sessions_deleted,
@@ -134,4 +138,20 @@ async fn trim_plan_history(pool: &PgPool, plan_value: &str, days: i64) -> Result
         .execute(pool)
         .await?;
     Ok(ids.len() as u64)
+}
+
+/// Deletes AI access incidents resolved at least `days` ago on sites of accounts on `plan_value`,
+/// the same window the plan keeps its `changes` for. Open incidents are never trimmed.
+async fn trim_ai_incidents(pool: &PgPool, plan_value: &str, days: i64) -> Result<u64, sqlx::Error> {
+    Ok(sqlx::query(
+        "DELETE FROM ai_incidents i USING sites s, accounts a \
+         WHERE i.site_id = s.id AND a.id = s.account_id AND a.plan = $1::plan \
+           AND i.resolved_at IS NOT NULL \
+           AND i.resolved_at <= now() - ($2 || ' days')::interval",
+    )
+    .bind(plan_value)
+    .bind(days.to_string())
+    .execute(pool)
+    .await?
+    .rows_affected())
 }
