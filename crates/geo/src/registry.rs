@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 const REGISTRY_JSON: &str = include_str!("../data/ai-bots.json");
 
-/// What a bot is for. Drives the intent defaults (block training, allow search).
+/// What a bot is for. Drives the intent defaults: search and user fetches are allowed, while agents,
+/// training and ads have no default preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Purpose {
@@ -27,31 +28,42 @@ pub enum Honours {
     Unknown,
 }
 
+/// One documented AI crawler, fetcher or control token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bot {
     /// The robots.txt product token exactly as the operator writes it.
     pub token: String,
+    /// Who runs it (OpenAI, Google, ...).
     pub operator: String,
+    /// The product it feeds.
     pub product: String,
     pub purpose: Purpose,
+    /// Whether the operator says it honours robots.txt.
     pub honours_robots: Honours,
     /// False for control tokens (Google-Extended) that never make requests.
     pub crawls: bool,
+    /// A substring to look for in the User-Agent header.
     pub user_agent_contains: Option<String>,
     /// A JSON file of `prefixes`, when the operator publishes one.
     pub ip_ranges_url: Option<String>,
+    /// Host suffixes for reverse-DNS verification.
     pub reverse_dns: Vec<String>,
+    /// The Web Bot Auth `Signature-Agent` identity, when the operator publishes one.
     pub signature_agent: Option<String>,
+    /// The operator-owned page the entry was checked against.
     pub source_url: String,
-    /// `YYYY-MM-DD`.
+    /// When the entry was last checked against `source_url`, as `YYYY-MM-DD`.
     pub last_reviewed: String,
+    /// One sentence of context.
     pub notes: String,
 }
 
+/// The whole registry file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Registry {
+    /// The `$schema` pointer, kept so the file round-trips.
     #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
     pub name: String,

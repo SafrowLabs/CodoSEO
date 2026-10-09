@@ -207,7 +207,7 @@
       ],
       "signature_agent": null,
       "source_url": "https://support.apple.com/en-us/119829",
-      "last_reviewed": "2026-10-07",
+      "last_reviewed": "2026-10-09",
       "notes": "Crawls for Apple search features; its data may also be used to train Apple foundation models."
     },
     {
@@ -222,7 +222,7 @@
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://support.apple.com/en-us/119829",
-      "last_reviewed": "2026-10-07",
+      "last_reviewed": "2026-10-09",
       "notes": "Does not crawl; a usage-permission token for Apple model training only."
     },
     {
@@ -297,7 +297,7 @@
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developer.amazon.com/amazonbot",
-      "last_reviewed": "2026-10-07",
+      "last_reviewed": "2026-10-09",
       "notes": "Used to improve Amazon products and for AI model training; IP list is an HTML page, not JSON."
     },
     {
@@ -312,7 +312,7 @@
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developer.amazon.com/amazonbot",
-      "last_reviewed": "2026-10-07",
+      "last_reviewed": "2026-10-09",
       "notes": "Improves search in Alexa and other Amazon products; not used for generative AI training; IP list is an HTML page, not JSON."
     },
     {
@@ -327,7 +327,7 @@
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developer.amazon.com/amazonbot",
-      "last_reviewed": "2026-10-07",
+      "last_reviewed": "2026-10-09",
       "notes": "Fetches pages for live user queries and may not follow all robots.txt directives; IP list is an HTML page, not JSON."
     },
     {
@@ -359,7 +359,7 @@
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://duckduckgo.com/duckduckgo-help-pages/results/duckassistbot",
-      "last_reviewed": "2026-10-07",
+      "last_reviewed": "2026-10-09",
       "notes": "Crawls in real time for AI-assisted answers and is not used for training; a robots.txt opt-out takes about 72 hours."
     },
     {
@@ -421,7 +421,7 @@
       ],
       "signature_agent": null,
       "source_url": "https://commoncrawl.org/ccbot",
-      "last_reviewed": "2026-10-07",
+      "last_reviewed": "2026-10-09",
       "notes": "Builds the open Common Crawl corpus used to train many models; spoofing is common, so verify by IP."
     }
   ]

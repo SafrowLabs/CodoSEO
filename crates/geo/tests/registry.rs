@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use codoseo_geo::{Bot, Honours, Purpose, registry, registry_json};
+use codoseo_geo::{Honours, Purpose, Registry, registry, registry_json};
 use serde_json::Value;
 
 /// Parses `YYYY-MM-DD` into (y, m, d), rejecting impossible dates.
@@ -48,84 +48,142 @@ fn parses_and_is_large_enough() {
     let r = registry();
     assert_eq!(r.version, 1);
     assert_eq!(r.license, "CC0-1.0");
-    assert!(r.bots.len() >= 25, "only {} bots", r.bots.len());
     assert!(serde_json::from_str::<Value>(registry_json()).is_ok());
 }
 
-#[test]
-fn tokens_are_unique_and_clean() {
+const OPERATORS: [&str; 11] = [
+    "OpenAI",
+    "Anthropic",
+    "Perplexity",
+    "Google",
+    "Apple",
+    "Meta",
+    "Amazon",
+    "DuckDuckGo",
+    "Mistral",
+    "Common Crawl",
+    "Microsoft",
+];
+
+/// Every lint the registry must pass, as a list of problems (empty when clean). Taking the
+/// registry as an argument lets the tests below feed it deliberately broken copies.
+fn lint(r: &Registry) -> Vec<String> {
+    let mut problems = Vec::new();
     let mut seen = HashSet::new();
-    for b in &registry().bots {
-        assert!(
-            !b.token.is_empty()
-                && b.token
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
-            "bad token {:?}",
-            b.token
-        );
-        assert!(
-            seen.insert(b.token.to_ascii_lowercase()),
-            "duplicate {}",
-            b.token
-        );
+    let updated = parse_date(&r.updated);
+    match updated {
+        None => problems.push("updated is not a date".to_owned()),
+        Some(u) if u > today() => problems.push("updated is in the future".to_owned()),
+        Some(_) => {}
     }
-}
-
-#[test]
-fn every_operator_is_present() {
-    let ops: HashSet<&str> = registry()
-        .bots
-        .iter()
-        .map(|b| b.operator.as_str())
-        .collect();
-    for want in [
-        "OpenAI",
-        "Anthropic",
-        "Perplexity",
-        "Google",
-        "Apple",
-        "Meta",
-        "Amazon",
-        "DuckDuckGo",
-        "Mistral",
-        "Common Crawl",
-        "Microsoft",
-    ] {
-        assert!(ops.contains(want), "missing operator {want}");
+    if !r.homepage.starts_with("https://") {
+        problems.push("homepage is not https".to_owned());
     }
-}
-
-#[test]
-fn urls_and_dates_are_sane() {
-    let r = registry();
-    let updated = parse_date(&r.updated).expect("updated is not a date");
-    assert!(updated <= today(), "updated is in the future");
-    assert!(r.homepage.starts_with("https://"));
     for b in &r.bots {
-        assert!(
-            b.source_url.starts_with("https://"),
-            "{} source_url",
-            b.token
-        );
-        for u in b.ip_ranges_url.iter().chain(b.signature_agent.iter()) {
-            assert!(u.starts_with("https://"), "{} url {u}", b.token);
+        let t = &b.token;
+        if t.is_empty()
+            || !t
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            problems.push(format!("bad token {t:?}"));
         }
-        let reviewed = parse_date(&b.last_reviewed)
-            .unwrap_or_else(|| panic!("{} last_reviewed is not a date", b.token));
-        assert!(reviewed <= updated, "{} reviewed after updated", b.token);
-        assert!(!b.notes.is_empty(), "{} has no notes", b.token);
+        if !seen.insert(t.to_ascii_lowercase()) {
+            problems.push(format!("duplicate {t}"));
+        }
+        if !b.source_url.starts_with("https://") {
+            problems.push(format!("{t} source_url is not https"));
+        }
+        for u in b.ip_ranges_url.iter().chain(b.signature_agent.iter()) {
+            if !u.starts_with("https://") {
+                problems.push(format!("{t} url {u} is not https"));
+            }
+        }
+        match (parse_date(&b.last_reviewed), updated) {
+            (None, _) => problems.push(format!("{t} last_reviewed is not a date")),
+            (Some(rev), Some(upd)) if rev > upd => {
+                problems.push(format!("{t} reviewed after updated"));
+            }
+            _ => {}
+        }
+        if b.notes.is_empty() {
+            problems.push(format!("{t} has no notes"));
+        }
+        if !b.crawls && (b.user_agent_contains.is_some() || b.ip_ranges_url.is_some()) {
+            problems.push(format!("control token {t} has a network identity"));
+        }
     }
+    let ops: HashSet<&str> = r.bots.iter().map(|b| b.operator.as_str()).collect();
+    for want in OPERATORS {
+        if !ops.contains(want) {
+            problems.push(format!("missing operator {want}"));
+        }
+    }
+    problems
 }
 
 #[test]
-fn control_tokens_have_no_network_identity() {
-    let controls: Vec<&Bot> = registry().bots.iter().filter(|b| !b.crawls).collect();
-    assert!(!controls.is_empty());
-    for b in controls {
-        assert!(b.user_agent_contains.is_none(), "{}", b.token);
-        assert!(b.ip_ranges_url.is_none(), "{}", b.token);
-    }
+fn the_shipped_registry_passes_the_lint() {
+    assert_eq!(lint(registry()), Vec::<String>::new());
+    assert!(registry().bots.iter().any(|b| !b.crawls));
+}
+
+#[test]
+fn the_lint_catches_each_kind_of_mistake() {
+    let broken = |edit: &dyn Fn(&mut Registry)| {
+        let mut r = registry().clone();
+        edit(&mut r);
+        lint(&r)
+    };
+    let has = |p: Vec<String>, needle: &str| {
+        assert!(p.iter().any(|m| m.contains(needle)), "{needle}: {p:?}");
+    };
+    has(
+        broken(&|r| r.bots[1].token = r.bots[0].token.to_ascii_uppercase()),
+        "duplicate",
+    );
+    has(
+        broken(&|r| r.bots[0].token = "bad token".into()),
+        "bad token",
+    );
+    has(
+        broken(&|r| r.bots[0].last_reviewed = "2026-02-30".into()),
+        "not a date",
+    );
+    has(
+        broken(&|r| r.bots[0].last_reviewed = "2099-01-01".into()),
+        "after updated",
+    );
+    has(broken(&|r| r.updated = "2099-01-01".into()), "future");
+    has(
+        broken(&|r| r.bots[0].source_url = "http://example.com/".into()),
+        "source_url",
+    );
+    has(
+        broken(&|r| r.bots[0].ip_ranges_url = Some("http://example.com/x.json".into())),
+        "not https",
+    );
+    has(broken(&|r| r.bots[0].notes.clear()), "no notes");
+    has(
+        broken(&|r| {
+            let i = r.bots.iter().position(|b| !b.crawls).unwrap();
+            r.bots[i].user_agent_contains = Some("x".into());
+        }),
+        "network identity",
+    );
+    has(
+        broken(&|r| r.bots.retain(|b| b.operator != "Microsoft")),
+        "missing operator Microsoft",
+    );
+}
+
+#[test]
+fn registry_is_large_enough() {
+    assert!(
+        registry().bots.len() >= 25,
+        "only {}",
+        registry().bots.len()
+    );
 }
 
 #[test]
