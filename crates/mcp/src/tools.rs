@@ -405,19 +405,25 @@ mod tests {
         assert_eq!(body["status"], "running");
         let audit_id = body["audit_id"].as_str().unwrap().to_owned();
 
-        // The crawl spends one more rate-limited request on /.well-known/tdmrep.json
-        // than it used to, so give it room beyond the slow start page.
-        tokio::time::sleep(StdDuration::from_millis(1500)).await;
-        let result = client
-            .peer()
-            .call_tool(
-                CallToolRequestParams::new("get_audit").with_arguments(args(json!({
-                    "audit_id": audit_id,
-                }))),
-            )
-            .await
-            .unwrap();
-        let body: Value = serde_json::from_str(&text_of(&result)).unwrap();
+        // Poll rather than sleep: the crawl's pace (the slow start page plus the
+        // rate-limited robots, tdmrep and sitemap requests) is not what this tests.
+        let mut body = Value::Null;
+        for _ in 0..40 {
+            let result = client
+                .peer()
+                .call_tool(
+                    CallToolRequestParams::new("get_audit").with_arguments(args(json!({
+                        "audit_id": audit_id,
+                    }))),
+                )
+                .await
+                .unwrap();
+            body = serde_json::from_str(&text_of(&result)).unwrap();
+            if body["status"] != "running" {
+                break;
+            }
+            tokio::time::sleep(StdDuration::from_millis(250)).await;
+        }
         assert_eq!(body["status"], "done");
     }
 

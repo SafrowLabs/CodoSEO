@@ -154,3 +154,51 @@ fn availability_table() {
         assert_eq!(availability(status), want, "{status:?}");
     }
 }
+
+#[test]
+fn line_numbers_survive_crlf_bom_and_the_size_cut() {
+    let t = RobotsTxt::parse(
+        "\u{feff}User-agent: *\r\nDisallow: /a\r\n\r\nDisallow: /b\r\n".as_bytes(),
+    );
+    assert_eq!(t.verdict("x", "/b").rule.map(|r| r.line), Some(4));
+    assert!(
+        !t.verdict("x", "/a").allowed,
+        "the BOM does not hide the first line"
+    );
+
+    let mut body = b"User-agent: *\nDisallow: /early\n".to_vec();
+    body.resize(500 * 1024, b'\n');
+    body.extend_from_slice(b"Disallow: /late\n");
+    let t = RobotsTxt::parse(&body);
+    assert_eq!(t.verdict("x", "/early").rule.map(|r| r.line), Some(2));
+    assert!(
+        t.verdict("x", "/late").allowed,
+        "past the cut nothing is read"
+    );
+}
+
+#[test]
+fn a_hostile_file_stays_cheap() {
+    // Many stars, many groups with many content-signal lines: parsing and verdicts
+    // must neither blow up in time nor in memory.
+    let mut body = String::new();
+    for _ in 0..400 {
+        body.push_str("Disallow: ");
+        body.push_str(&"*".repeat(1_000));
+        body.push_str("x\n");
+    }
+    body = format!("User-agent: *\n{body}");
+    for _ in 0..5_000 {
+        body.push_str("User-agent: a\n");
+    }
+    for _ in 0..5_000 {
+        body.push_str("Content-Signal: search=yes\n");
+    }
+    let started = std::time::Instant::now();
+    let t = RobotsTxt::parse(body.as_bytes());
+    for _ in 0..2_000 {
+        assert!(t.verdict("GPTBot", "/some/path?q=1").allowed);
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert!(t.content_signals().len() <= 100);
+}

@@ -15,6 +15,9 @@ use crate::declared::{parse_content_signal, parse_content_usage};
 pub const MAX_ROBOTS_BYTES: usize = 500 * 1024;
 pub const MAX_RULES: usize = 2_000;
 pub const MAX_PATTERN_LEN: usize = 1_024;
+/// Most `Content-Signal` and `Content-Usage` lines kept, each: they copy the agents of
+/// their group, so an unbounded count would cost quadratic memory on a hostile file.
+const MAX_DECLARED_LINES: usize = 100;
 
 /// `CodoSEObot/0.1 (+https://…)` → `codoseobot`; `*` stays `*`.
 pub fn product_token(value: &str) -> String {
@@ -55,8 +58,18 @@ impl Rule {
             Some(body) => (body, true),
             None => (normalised.as_str(), false),
         };
+        let mut parts: Vec<String> = body.split('*').map(str::to_owned).collect();
+        // Runs of `*` match the same as one; dropping the empty pieces keeps a hostile
+        // `*****…` pattern from costing a step per star on every verdict.
+        let last = parts.len() - 1;
+        let mut index = 0;
+        parts.retain(|part| {
+            let keep = index == 0 || index == last || !part.is_empty();
+            index += 1;
+            keep
+        });
         Some(Rule {
-            parts: body.split('*').map(str::to_owned).collect(),
+            parts,
             anchored_end,
             len: normalised.len(),
             allow,
@@ -179,6 +192,8 @@ impl RobotsTxt {
     /// Parses a robots.txt body. Lines it doesn't understand are ignored.
     pub fn parse(body: &[u8]) -> RobotsTxt {
         let text = String::from_utf8_lossy(&body[..body.len().min(MAX_ROBOTS_BYTES)]);
+        // A byte order mark is not part of the first line's field name.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
         let mut groups: Vec<Group> = Vec::new();
         let mut sitemaps = Vec::new();
         let mut content_signals = Vec::new();
@@ -205,18 +220,20 @@ impl RobotsTxt {
                 "sitemap" => sitemaps.push(value.to_owned()),
                 key => {
                     reading_agents = false;
-                    let agents = groups.last().map(|g| g.agents.clone()).unwrap_or_default();
+                    let agents = || groups.last().map(|g| g.agents.clone()).unwrap_or_default();
                     match key {
-                        "content-signal" => content_signals.push(ContentSignal {
-                            line: number,
-                            agents,
-                            pairs: to_pairs(parse_content_signal(value), is_known_signal_key),
-                        }),
-                        "content-usage" => {
+                        "content-signal" if content_signals.len() < MAX_DECLARED_LINES => {
+                            content_signals.push(ContentSignal {
+                                line: number,
+                                agents: agents(),
+                                pairs: to_pairs(parse_content_signal(value), is_known_signal_key),
+                            });
+                        }
+                        "content-usage" if content_usage.len() < MAX_DECLARED_LINES => {
                             let (path, pairs) = parse_content_usage(value);
                             content_usage.push(ContentUsage {
                                 line: number,
-                                agents,
+                                agents: agents(),
                                 path,
                                 pairs: to_pairs(pairs, is_known_usage_key),
                             });
