@@ -6,7 +6,8 @@ use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
 
 use super::{
-    change_url, clean, count_text, findings, headline, one_line, severity_label, slug, summary,
+    ai_access_findings, change_url, clean, count_text, findings, headline, one_line,
+    severity_label, slug, summary,
 };
 
 fn md_cell(text: &str) -> String {
@@ -46,6 +47,15 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
                 count_text(&f),
                 examples
             )?;
+        }
+    }
+    if let Some(rows) = ai_access_findings(audit) {
+        writeln!(w, "\n## AI access\n")?;
+        if rows.is_empty() {
+            writeln!(w, "No AI access issues")?;
+        }
+        for (severity, title) in rows {
+            writeln!(w, "- **{}:** {}", severity_label(severity), md_cell(&title))?;
         }
     }
     writeln!(w, "\n## Summary\n")?;

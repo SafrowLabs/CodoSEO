@@ -126,6 +126,48 @@ pub struct RobotsReport {
     pub sitemaps: Vec<String>,
 }
 
+/// What `check_ai_access` returns: who robots.txt lets in for one path, what the site declares
+/// about use of its content, and whether the page itself can appear in each engine's AI answers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiAccessReport {
+    pub url: String,
+    pub path: String,
+    /// One line an agent can relay as it is.
+    pub summary: String,
+    pub robots: AiRobots,
+    /// Every registry bot's verdict for the path.
+    pub bots: Vec<codoseo_geo::report::BotVerdict>,
+    /// Stated preferences in robots.txt. Declared, not enforced.
+    pub declared: AiDeclared,
+    /// Empty when the page was not a successful HTML response.
+    pub engines: Vec<AiEngine>,
+    /// The page's HTTP status, `None` when it could not be fetched.
+    pub page_status: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiRobots {
+    pub status: u16,
+    pub availability: codoseo_geo::robots::RobotsAvailability,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiDeclared {
+    pub content_signals: Vec<codoseo_geo::robots::ContentSignal>,
+    pub content_usage: Vec<codoseo_geo::robots::ContentUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiEngine {
+    pub id: codoseo_geo::eligibility::EngineId,
+    pub name: String,
+    pub effect: codoseo_geo::eligibility::Effect,
+    pub causes: Vec<codoseo_geo::eligibility::Cause>,
+    /// Why `effect` is always eligible, for engines with no documented page-level control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RedirectReport {
     pub hops: Vec<(u16, Url)>,

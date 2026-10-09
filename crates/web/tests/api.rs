@@ -614,6 +614,88 @@ async fn changes_are_most_severe_first_and_can_be_filtered() {
     assert_eq!(one.total, 4, "the total counts past the limit");
 }
 
+#[tokio::test]
+async fn ai_access_is_empty_before_a_report_then_summarises_bots_engines_and_incidents() {
+    let f = setup(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
+    let before = get(&f.app, &path, &f.key).await;
+    assert_eq!(before.status, StatusCode::OK);
+    let v = json(&before);
+    assert_eq!(v["checked_at"], Value::Null);
+    assert_eq!(v["crawl_id"], Value::Null);
+    assert!(v["note"].as_str().unwrap().contains("next crawl"));
+    assert_eq!(v["bots"], serde_json::json!([]));
+    assert_eq!(v["open_incidents"], serde_json::json!([]));
+
+    let crawl = f
+        .app
+        .finished_crawl_with_robots(
+            &f.site,
+            fixture_pages(),
+            (
+                200,
+                "User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nContent-Signal: ai-train=no\n",
+            ),
+            Vec::new(),
+        )
+        .await;
+    let v = json(&get(&f.app, &path, &f.key).await);
+    assert_eq!(v["crawl_id"], crawl.to_string());
+    assert!(v["checked_at"].is_string());
+    assert_eq!(v["note"], Value::Null);
+    assert_eq!(v["robots"]["status"], 200);
+    assert_eq!(v["robots"]["availability"], "ok");
+    let bots = v["bots"].as_array().unwrap();
+    let oai = bots.iter().find(|b| b["token"] == "OAI-SearchBot").unwrap();
+    assert_eq!(oai["operator"], "OpenAI");
+    assert_eq!(oai["purpose"], "search");
+    assert_eq!(oai["intent"], "allow");
+    assert_eq!(oai["home_allowed"], false);
+    assert_eq!(oai["important_blocked"], oai["important_total"]);
+    assert_eq!(oai["conflicts"], true);
+    let gpt = bots.iter().find(|b| b["token"] == "GPTBot").unwrap();
+    assert_eq!(gpt["home_allowed"], true);
+    assert_eq!(gpt["conflicts"], false);
+    let engines = v["engines"].as_array().unwrap();
+    assert_eq!(engines.len(), 10);
+    assert!(engines.iter().all(|e| e["eligible"].is_u64()));
+    assert_eq!(
+        v["declared"]["content_signals"][0]["pairs"][0]["key"],
+        "ai-train"
+    );
+    let incidents = v["open_incidents"].as_array().unwrap();
+    assert!(
+        incidents.iter().any(|i| i["kind"] == "bots_blocked"),
+        "{incidents:?}"
+    );
+    for key in [
+        "id",
+        "kind",
+        "subject",
+        "severity",
+        "title",
+        "summary",
+        "opened_at",
+        "last_seen_at",
+    ] {
+        assert!(!incidents[0][key].is_null(), "{key}");
+    }
+    assert!(incidents[0].get("evidence").is_none());
+}
+
+#[tokio::test]
+async fn ai_access_is_metered_like_the_other_calls() {
+    let f = setup(Plan::Free).await;
+    let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("99"));
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("98"));
+    set_calls_today(&f.app, &f.account, 100).await;
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
 // ---- Review focus 1: another account's data ----
 
 #[tokio::test]
@@ -638,6 +720,7 @@ async fn another_accounts_site_is_indistinguishable_from_an_unknown_one() {
                 format!("/api/v1/sites/{site}/page?url=https%3A%2F%2Fother.example%2F"),
             ),
             (Method::GET, format!("/api/v1/sites/{site}/changes")),
+            (Method::GET, format!("/api/v1/sites/{site}/ai-access")),
             (Method::POST, format!("/api/v1/sites/{site}/crawls")),
         ]
     };

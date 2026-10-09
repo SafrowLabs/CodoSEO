@@ -66,7 +66,7 @@ impl Drop for McpChild {
 }
 
 #[test]
-fn tools_list_shows_all_8_tools_over_real_stdio() {
+fn tools_list_shows_all_9_tools_over_real_stdio() {
     let mut mcp = McpChild::start();
 
     mcp.send(&json!({
@@ -96,6 +96,7 @@ fn tools_list_shows_all_8_tools_over_real_stdio() {
         "get_page",
         "check_page",
         "check_robots",
+        "check_ai_access",
         "check_redirects",
         "compare_audits",
     ] {
@@ -104,5 +105,5 @@ fn tools_list_shows_all_8_tools_over_real_stdio() {
             "missing tool {expected} in {names:?}"
         );
     }
-    assert_eq!(tools.len(), 8);
+    assert_eq!(tools.len(), 9);
 }

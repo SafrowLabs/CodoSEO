@@ -19,13 +19,17 @@ use codoseo_crawler::crawl::{crawl, inspect_page};
 use codoseo_crawler::fetch::{FetchError, Fetcher, FetcherConfig, Hop};
 use codoseo_crawler::robots::fetch_robots;
 use codoseo_diff::{diff, key_pages};
+use codoseo_geo::eligibility::{Effect, engines, record_effect};
+use codoseo_geo::report::{BotVerdict, bot_verdicts};
+use codoseo_geo::robots::{RobotsTxt, availability};
 use url::Url;
 
 use crate::backend::{Backend, BackendError};
 use crate::cache::{AuditCache, CacheError};
 use crate::types::{
-    AuditHandle, AuditId, AuditState, AuditStatus, AuditSummary, FailingCheck, MAX_FAILING_CHECKS,
-    RedirectReport, RobotsReport, UrlRow, rank_failing,
+    AiAccessReport, AiDeclared, AiEngine, AiRobots, AuditHandle, AuditId, AuditState, AuditStatus,
+    AuditSummary, FailingCheck, MAX_FAILING_CHECKS, RedirectReport, RobotsReport, UrlRow,
+    rank_failing,
 };
 
 pub struct LocalBackend {
@@ -100,6 +104,7 @@ impl Backend for LocalBackend {
                         start_url: cfg.start_url.clone(),
                         report,
                         snapshot: Snapshot::from_output_owned(out),
+                        ai_access: None,
                     };
                     match cache.save(&task_id, &audit) {
                         Ok(()) => (AuditStatus::Done, Some(build_summary(&task_id, &audit))),
@@ -223,6 +228,69 @@ impl Backend for LocalBackend {
         })
     }
 
+    async fn check_ai_access(&self, url: Url) -> Result<AiAccessReport, BackendError> {
+        let fetcher = Fetcher::new(FetcherConfig::new(AddressPolicy::AllowPrivate))
+            .map_err(|e| BackendError::Fetch(e.to_string()))?;
+        let (_, file) = fetch_robots(&fetcher, &url)
+            .await
+            .map_err(|e| BackendError::Fetch(e.to_string()))?;
+        // The path the verdicts are for includes the query, as robots.txt patterns see it.
+        let path = match url.query() {
+            Some(q) => format!("{}?{q}", url.path()),
+            None => url.path().to_owned(),
+        };
+        let parsed = RobotsTxt::from_response(Some(file.status), file.body.as_bytes());
+        let (bots, declared) = match &parsed {
+            Some(txt) => (
+                bot_verdicts(txt, &path),
+                AiDeclared {
+                    content_signals: txt.content_signals().to_vec(),
+                    content_usage: txt.content_usage().to_vec(),
+                },
+            ),
+            None => (Vec::new(), AiDeclared::default()),
+        };
+
+        // A page that cannot be fetched still gets the robots answer; only the engines are empty.
+        let cfg = CrawlConfig {
+            start_url: url.clone(),
+            limits: CrawlLimits::default(),
+            politeness: Politeness::default(),
+            address_policy: AddressPolicy::AllowPrivate,
+            user_agent: USER_AGENT.to_owned(),
+        };
+        let page = inspect_page(&cfg).await.ok();
+        let engines: Vec<AiEngine> = page
+            .iter()
+            .flat_map(|p| {
+                engines().iter().filter_map(move |e| {
+                    record_effect(e, p).map(|(effect, causes)| AiEngine {
+                        id: e.id,
+                        name: e.name.to_owned(),
+                        effect,
+                        causes,
+                        note: e.note().map(str::to_owned),
+                    })
+                })
+            })
+            .collect();
+
+        let summary = ai_access_summary(&path, file.status, parsed.is_some(), &bots, &engines);
+        Ok(AiAccessReport {
+            url: url.to_string(),
+            path,
+            summary,
+            robots: AiRobots {
+                status: file.status,
+                availability: availability(Some(file.status)),
+            },
+            bots,
+            declared,
+            engines,
+            page_status: page.map(|p| p.status),
+        })
+    }
+
     async fn check_redirects(&self, url: Url) -> Result<RedirectReport, BackendError> {
         let fetcher = Fetcher::new(FetcherConfig::new(AddressPolicy::AllowPrivate))
             .map_err(|e| BackendError::Fetch(e.to_string()))?;
@@ -247,6 +315,52 @@ impl Backend for LocalBackend {
         let key = key_pages(&before.snapshot, &HashSet::new());
         Ok(diff(&before.snapshot, &after.snapshot, &key))
     }
+}
+
+/// A few lines an agent can relay: who is blocked and which engines the page is held back from.
+fn ai_access_summary(
+    path: &str,
+    robots_status: u16,
+    has_verdicts: bool,
+    bots: &[BotVerdict],
+    engines: &[AiEngine],
+) -> String {
+    if !has_verdicts {
+        return format!(
+            "robots.txt answered HTTP {robots_status}, so crawlers are told to stay away for now; \
+             no per-bot verdicts."
+        );
+    }
+    let blocked: Vec<&str> = bots
+        .iter()
+        .filter(|b| !b.allowed)
+        .map(|b| b.token.as_str())
+        .collect();
+    let mut text = if blocked.is_empty() {
+        format!(
+            "robots.txt allows all {} known AI bots on {path}.",
+            bots.len()
+        )
+    } else {
+        format!(
+            "robots.txt blocks {} of {} known AI bots on {path}: {}.",
+            blocked.len(),
+            bots.len(),
+            blocked.join(", ")
+        )
+    };
+    let held: Vec<&str> = engines
+        .iter()
+        .filter(|e| e.effect != Effect::Eligible)
+        .map(|e| e.name.as_str())
+        .collect();
+    if !held.is_empty() {
+        text.push_str(&format!(
+            " The page's own controls limit or exclude it in: {}.",
+            held.join(", ")
+        ));
+    }
+    text
 }
 
 fn hops(chain: Vec<Hop>) -> Vec<(u16, Url)> {
@@ -473,6 +587,43 @@ mod tests {
             .await
             .unwrap();
         assert!(!report.allowed);
+    }
+
+    #[tokio::test]
+    async fn check_ai_access_reports_bots_declared_and_engines() {
+        let site = SiteBuilder::new()
+            .robots(
+                200,
+                "User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nContent-Signal: ai-train=no\n",
+            )
+            .page(
+                "/",
+                codoseo_testkit::Page::html(
+                    "<html><head><title>Home</title><meta name=\"robots\" content=\"noindex\"></head><body>hello</body></html>",
+                ),
+            )
+            .start()
+            .await;
+        let (backend, _dir) = backend();
+        let report = backend.check_ai_access(site.url("/")).await.unwrap();
+        let gpt = report.bots.iter().find(|b| b.token == "GPTBot").unwrap();
+        assert!(!gpt.allowed);
+        assert_eq!(gpt.line, Some(2));
+        let search = report
+            .bots
+            .iter()
+            .find(|b| b.token == "OAI-SearchBot")
+            .unwrap();
+        assert!(search.allowed);
+        assert_eq!(report.declared.content_signals.len(), 1);
+        assert_eq!(report.page_status, Some(200));
+        assert!(
+            report
+                .engines
+                .iter()
+                .any(|e| e.effect == codoseo_geo::eligibility::Effect::Excluded)
+        );
+        assert!(report.summary.contains("GPTBot"), "{}", report.summary);
     }
 
     #[tokio::test]

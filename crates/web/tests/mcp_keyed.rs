@@ -1,5 +1,5 @@
 //! M8 T3: the cloud MCP server at `/mcp` with an API key, driven in-process over HTTP JSON-RPC
-//! (initialize, tools/list, tools/call) through the real app: the six keyed tools, their normal
+//! (initialize, tools/list, tools/call) through the real app: the seven keyed tools, their normal
 //! paths against fixture crawls (the same JSON as REST), the account boundary, the daily quota,
 //! and who counts as a keyed caller. One test also connects a real rmcp client over TCP.
 
@@ -251,7 +251,8 @@ async fn setup(plan: Plan) -> Fixture {
     }
 }
 
-const KEYED_TOOLS: [&str; 6] = [
+const KEYED_TOOLS: [&str; 7] = [
+    "get_ai_access",
     "get_changes",
     "get_issue_urls",
     "get_page",
@@ -263,7 +264,7 @@ const KEYED_TOOLS: [&str; 6] = [
 // ---- the tool list ----
 
 #[tokio::test]
-async fn with_a_key_the_tool_list_is_exactly_the_six_keyed_tools() {
+async fn with_a_key_the_tool_list_is_exactly_the_seven_keyed_tools() {
     let f = setup(Plan::Pro).await;
     let init = f.rpc().initialize().await;
     assert_eq!(init["protocolVersion"], PROTOCOL);
@@ -294,7 +295,7 @@ async fn with_a_key_the_tool_list_is_exactly_the_six_keyed_tools() {
         // What crawled sites wrote is data, and the tools that return it say so.
         let returns_crawled = matches!(
             name,
-            "get_issue_urls" | "get_page" | "get_changes" | "get_site_health"
+            "get_issue_urls" | "get_page" | "get_changes" | "get_site_health" | "get_ai_access"
         );
         assert_eq!(
             t["description"]
@@ -500,6 +501,52 @@ async fn a_free_accounts_second_manual_crawl_is_a_tool_error_about_the_plan() {
 }
 
 #[tokio::test]
+async fn get_ai_access_matches_rest_and_says_when_there_is_no_report() {
+    let f = setup(Plan::Pro).await;
+    let site = f.site.id;
+    let rest = |path: String| {
+        let (app, key) = (&f.app, &f.key);
+        async move {
+            let res = rest_get(app, &path, key).await;
+            assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+            serde_json::from_str::<Value>(&res.body).unwrap()
+        }
+    };
+    // The fixture crawl read no robots.txt, so there is no report yet.
+    let empty = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    assert_eq!(empty, rest(format!("/api/v1/sites/{site}/ai-access")).await);
+    assert_eq!(empty["checked_at"], Value::Null);
+    assert!(empty["note"].as_str().unwrap().contains("next crawl"));
+
+    f.app
+        .finished_crawl_with_robots(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: OAI-SearchBot\nDisallow: /\n"),
+            Vec::new(),
+        )
+        .await;
+    let full = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    assert_eq!(full, rest(format!("/api/v1/sites/{site}/ai-access")).await);
+    assert!(full["checked_at"].is_string());
+    let oai = full["bots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["token"] == "OAI-SearchBot")
+        .unwrap();
+    assert_eq!(oai["home_allowed"], false);
+    assert_eq!(oai["conflicts"], true);
+    assert_eq!(full["engines"].as_array().unwrap().len(), 10);
+}
+
+#[tokio::test]
 async fn bad_arguments_are_tool_errors_the_agent_can_read() {
     let f = setup(Plan::Pro).await;
     let rpc = f.rpc();
@@ -641,7 +688,7 @@ async fn over_quota_is_a_tool_error_with_rests_words_and_costs_nothing() {
     let (is_error, again) = rpc.call("get_site_health", json!({})).await;
     assert!(is_error);
     assert_eq!(again, text);
-    assert_eq!(rpc.tools().await.len(), 6);
+    assert_eq!(rpc.tools().await.len(), 7);
     assert_eq!(calls_today(&f.app, &f.account).await, 100);
 }
 
@@ -670,7 +717,7 @@ async fn self_hosted_serves_keyed_tools_without_a_limit() {
         ..Rpc::new(&app, Some(&key))
     };
     rpc.initialize().await;
-    assert_eq!(rpc.tools().await.len(), 6);
+    assert_eq!(rpc.tools().await.len(), 7);
     let sites = rpc.call_ok("list_sites", json!({})).await;
     assert_eq!(sites[0]["id"], site.id.to_string());
     assert_eq!(calls_today(&app, &account).await, 1_000_001);
@@ -876,10 +923,10 @@ async fn a_real_mcp_client_lists_and_calls_tools_with_a_key_over_tcp() {
 
 // ---- review fixes ----
 
-use codoseo_mcp::cloud::types::{AuditIssueUrls, MonitoringRequested, QuickAuditState};
 use codoseo_mcp::cloud::types::{
-    ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
+    AiAccessInfo, ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
 };
+use codoseo_mcp::cloud::types::{AuditIssueUrls, MonitoringRequested, QuickAuditState};
 use codoseo_mcp::cloud::{AnonBackend, CloudBackend, CloudMcp};
 use codoseo_web::agent::anon::AnonCaller;
 use codoseo_web::agent::auth::ApiCaller;
@@ -925,6 +972,9 @@ impl CloudBackend for Faulty {
         _: Option<u32>,
         _: Option<u32>,
     ) -> Result<ChangesPage, String> {
+        unimplemented!()
+    }
+    async fn ai_access(&self, _: &ApiCaller, _: &str) -> Result<AiAccessInfo, String> {
         unimplemented!()
     }
     async fn run_crawl(&self, _: &ApiCaller, _: &str) -> Result<CrawlQueued, String> {
@@ -984,7 +1034,7 @@ async fn a_panicking_tool_answers_with_a_generic_error_at_once() {
     assert!(body["error"].is_object(), "{}", res.body);
     assert!(!res.body.contains("secret internal detail"), "{}", res.body);
     // The server still answers afterwards.
-    assert_eq!(rpc.tools().await.len(), 6);
+    assert_eq!(rpc.tools().await.len(), 7);
 }
 
 #[tokio::test]
@@ -1017,7 +1067,7 @@ async fn self_hosted_accepts_any_host_with_a_valid_key() {
             host,
             ..Rpc::new(&app, Some(&key))
         };
-        assert_eq!(rpc.tools().await.len(), 6, "{host}");
+        assert_eq!(rpc.tools().await.len(), 7, "{host}");
     }
     // And without a key it is still a 401.
     let rpc = Rpc {

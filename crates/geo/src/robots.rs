@@ -189,6 +189,16 @@ pub struct Verdict {
 }
 
 impl RobotsTxt {
+    /// The rules a robots.txt response gives, or `None` when there are no verdicts to speak of
+    /// (a 5xx, 429 or a connection failure). A missing file (4xx) parses as an empty one.
+    pub fn from_response(status: Option<u16>, body: &[u8]) -> Option<RobotsTxt> {
+        match availability(status) {
+            RobotsAvailability::Ok => Some(RobotsTxt::parse(body)),
+            RobotsAvailability::Missing => Some(RobotsTxt::parse(b"")),
+            _ => None,
+        }
+    }
+
     /// Parses a robots.txt body. Lines it doesn't understand are ignored.
     pub fn parse(body: &[u8]) -> RobotsTxt {
         let text = String::from_utf8_lossy(&body[..body.len().min(MAX_ROBOTS_BYTES)]);

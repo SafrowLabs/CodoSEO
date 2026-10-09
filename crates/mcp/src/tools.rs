@@ -231,6 +231,22 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
         to_json(&report)
     }
 
+    #[tool(
+        description = "Check a URL's AI access right now: for every known AI crawler, whether robots.txt allows its path (with the rule line), the site's declared Content-Signal/Content-Usage preferences, and whether the page's own controls (robots meta, X-Robots-Tag, data-nosnippet) keep it out of each AI engine's answers."
+    )]
+    async fn check_ai_access(
+        &self,
+        Parameters(UrlRequest { url }): Parameters<UrlRequest>,
+    ) -> Result<String, String> {
+        let url = parse_url(&url)?;
+        let report = self
+            .backend
+            .check_ai_access(url)
+            .await
+            .map_err(|e| e.to_string())?;
+        to_json(&report)
+    }
+
     #[tool(description = "Follow a URL's redirects and show each hop.")]
     async fn check_redirects(
         &self,
@@ -313,7 +329,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_has_all_8_tools_with_descriptions() {
+    async fn tools_list_has_all_9_tools_with_descriptions() {
         let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
         let client = serve(CodoseoMcp::new(backend)).await;
         let tools = client.peer().list_tools(None).await.unwrap();
@@ -325,12 +341,13 @@ mod tests {
             "get_page",
             "check_page",
             "check_robots",
+            "check_ai_access",
             "check_redirects",
             "compare_audits",
         ] {
             assert!(names.contains(&expected), "missing tool {expected}");
         }
-        assert_eq!(tools.tools.len(), 8);
+        assert_eq!(tools.tools.len(), 9);
         for t in &tools.tools {
             assert!(
                 t.description.as_deref().is_some_and(|d| !d.is_empty()),
@@ -511,6 +528,13 @@ mod tests {
             _url: Url,
             _path: Option<String>,
         ) -> Result<crate::types::RobotsReport, crate::backend::BackendError> {
+            unimplemented!("not exercised by this test")
+        }
+
+        async fn check_ai_access(
+            &self,
+            _url: Url,
+        ) -> Result<crate::types::AiAccessReport, crate::backend::BackendError> {
             unimplemented!("not exercised by this test")
         }
 

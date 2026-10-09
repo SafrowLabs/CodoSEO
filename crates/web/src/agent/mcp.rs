@@ -7,8 +7,8 @@
 use std::convert::Infallible;
 
 use codoseo_mcp::cloud::types::{
-    AuditIssueUrls, ChangesPage, CrawlQueued, IssueUrlsPage, MonitoringRequested, PageInfo,
-    QuickAuditState, SiteHealth, SiteInfo,
+    AiAccessInfo, AuditIssueUrls, ChangesPage, CrawlQueued, IssueUrlsPage, MonitoringRequested,
+    PageInfo, QuickAuditState, SiteHealth, SiteInfo,
 };
 use codoseo_mcp::cloud::{AnonBackend, CloudBackend};
 
@@ -104,6 +104,10 @@ impl CloudBackend for AgentBackend {
                 .changes(who, site_id, severity, limit, offset)
                 .await,
         )
+    }
+
+    async fn ai_access(&self, who: &ApiCaller, site_id: &str) -> Result<AiAccessInfo, String> {
+        outcome(self.service().ai_access(who, site_id).await)
     }
 
     async fn run_crawl(&self, who: &ApiCaller, site_id: &str) -> Result<CrawlQueued, String> {

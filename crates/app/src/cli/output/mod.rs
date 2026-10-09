@@ -142,6 +142,24 @@ pub(super) fn findings(audit: &Audit) -> Vec<(Severity, Vec<Finding<'_>>)> {
         .collect()
 }
 
+/// The AI-access findings saved in the audit as `(severity, title)`, most severe first. `None`
+/// when the audit has no AI-access section at all (saved by an older version).
+pub(super) fn ai_access_findings(audit: &Audit) -> Option<Vec<(Severity, String)>> {
+    let section = audit.ai_access.as_ref()?;
+    let mut rows: Vec<(Severity, String)> = section
+        .get("findings")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|f| {
+            let severity = serde_json::from_value(f.get("severity")?.clone()).ok()?;
+            Some((severity, f.get("title")?.as_str()?.to_owned()))
+        })
+        .collect();
+    rows.sort_by_key(|(severity, _)| *severity);
+    Some(rows)
+}
+
 pub(super) fn count_text(f: &Finding) -> String {
     match (f.site_wide(), f.pages) {
         (true, _) => "site-wide".to_owned(),

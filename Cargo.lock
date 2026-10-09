@@ -738,6 +738,7 @@ dependencies = [
  "codoseo-core",
  "codoseo-crawler",
  "codoseo-diff",
+ "codoseo-geo",
  "codoseo-testkit",
  "dirs",
  "futures-util",

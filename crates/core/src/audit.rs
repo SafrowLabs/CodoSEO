@@ -27,6 +27,11 @@ pub struct Audit {
     pub start_url: Url,
     pub report: CrawlReport,
     pub snapshot: Snapshot,
+    /// The AI-access report and its findings (`{ report, findings }`), kept as plain JSON because
+    /// the types behind it live in `codoseo-geo`, which depends on this crate. Absent in audits
+    /// saved before it existed and in any other producer's; readers must not require it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_access: Option<serde_json::Value>,
 }
 
 impl Audit {

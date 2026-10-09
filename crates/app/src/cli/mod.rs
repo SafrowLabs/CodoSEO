@@ -1,6 +1,7 @@
 //! Argument definitions and dispatch.
 
 mod all;
+mod bots;
 mod check;
 mod crawl;
 mod diff;
@@ -80,8 +81,10 @@ enum Command {
     Crawl(crawl::CrawlArgs),
     /// Inspect one page: its fields, redirect chain and page issues
     Check(check::CheckArgs),
-    /// Show a site's robots.txt and whether CodoSEObot may fetch a path
+    /// Show a site's robots.txt, whether CodoSEObot may fetch a path and what it says to AI bots
     Robots(robots::RobotsArgs),
+    /// List the AI crawlers, fetchers and control tokens CodoSEO knows
+    Bots(bots::BotsArgs),
     /// Follow a URL's redirects and show each hop
     Redirects(redirects::RedirectsArgs),
     /// Compare two saved audits (`crawl --format json`)
@@ -105,6 +108,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Crawl(args) => crawl::run(args).await,
         Command::Check(args) => check::run(args).await,
         Command::Robots(args) => robots::run(args).await,
+        Command::Bots(args) => bots::run(args),
         Command::Redirects(args) => redirects::run(args).await,
         Command::Diff(args) => diff::run(args),
         Command::Mcp(args) => mcp::run(args).await,

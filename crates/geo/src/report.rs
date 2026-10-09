@@ -19,7 +19,7 @@ use crate::declared::{
     parse_content_usage, parse_tdmrep,
 };
 use crate::eligibility::{Cause, DirectiveSlug, Effect, EngineId, engines, record_effect};
-use crate::registry::registry;
+use crate::registry::{Honours, Purpose, registry};
 use crate::robots::{
     ContentSignal, ContentUsage, GroupMatch, MatchedRule, Pair, RobotsAvailability, RobotsTxt,
     availability,
@@ -589,4 +589,44 @@ fn tdmrep_file(f: &WellKnownFile) -> TdmRepFile {
             error: Some(clip(&error)),
         },
     }
+}
+
+/// What robots.txt says to one registry bot for one path, flattened for the CLI and MCP tools.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BotVerdict {
+    pub token: String,
+    pub operator: String,
+    pub purpose: Purpose,
+    pub honours_robots: Honours,
+    pub allowed: bool,
+    /// The robots.txt line of the rule that decided it; `None` when no rule matched.
+    pub line: Option<u32>,
+    /// The deciding rule as written, such as `Disallow: /private`.
+    pub rule: Option<String>,
+}
+
+/// Every registry bot's verdict for `path` (with its query, if any), in registry order.
+pub fn bot_verdicts(robots: &RobotsTxt, path: &str) -> Vec<BotVerdict> {
+    registry()
+        .bots
+        .iter()
+        .map(|bot| {
+            let v = robots.verdict(&bot.token, path);
+            BotVerdict {
+                token: bot.token.clone(),
+                operator: bot.operator.clone(),
+                purpose: bot.purpose,
+                honours_robots: bot.honours_robots,
+                allowed: v.allowed,
+                line: v.rule.as_ref().map(|r| r.line),
+                rule: v.rule.map(|r| {
+                    format!(
+                        "{}: {}",
+                        if r.allow { "Allow" } else { "Disallow" },
+                        r.pattern
+                    )
+                }),
+            }
+        })
+        .collect()
 }

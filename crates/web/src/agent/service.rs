@@ -13,15 +13,20 @@ use std::collections::HashMap;
 use codoseo_checks::def;
 use codoseo_core::check::{CheckId, IssueBits, Severity};
 use codoseo_core::plan::PlanLimits;
+use codoseo_geo::eligibility::{Effect, engines};
+use codoseo_geo::report::AccessReport;
+use codoseo_geo::{Honours, Intent, Stance, registry};
 use codoseo_mcp::cloud::types::{
-    ActiveCrawl, ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, PageInfo,
-    PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip_change_text,
+    ActiveCrawl, AiAccessInfo, AiBotInfo, AiEngineInfo, AiIncidentInfo, AiRobotsInfo, ChangeInfo,
+    ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, PageInfo, PageIssue, RedirectHop,
+    SiteHealth, SiteInfo, Usage, clip, clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
 use codoseo_store::api_keys::{self, Charge};
 use codoseo_store::crawls::{self, Crawl, CrawlStatus, ManualOutcome, ManualWindow};
 use codoseo_store::explorer::{self, PageFilter};
+use codoseo_store::geo;
 use codoseo_store::reports;
 use codoseo_store::sites::{self, Site};
 use sqlx::PgPool;
@@ -160,6 +165,11 @@ impl<'a> AgentService<'a> {
             self.changes_work(caller, site, severity, limit, offset),
         )
         .await
+    }
+
+    pub async fn ai_access(&self, caller: &ApiCaller, site: &str) -> Reply<AiAccessInfo> {
+        self.metered(caller, self.ai_access_work(caller, site))
+            .await
     }
 
     /// Queues a manual crawl exactly as the Run crawl button does: the plan's allowance and
@@ -425,6 +435,60 @@ impl<'a> AgentService<'a> {
         Ok(out)
     }
 
+    async fn ai_access_work(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+    ) -> Result<AiAccessInfo, AgentError> {
+        let pool = &self.state.pool;
+        let site = self.site(caller, site).await?;
+        let open = geo::open_incidents(pool, site.id).await?;
+        let open_incidents = open
+            .into_iter()
+            .map(|i| AiIncidentInfo {
+                id: i.id,
+                kind: i.kind.slug().to_owned(),
+                subject: i.subject,
+                severity: i.severity,
+                title: clip(&i.title, MAX_AI_TEXT),
+                summary: clip(&i.summary, MAX_AI_TEXT),
+                opened_at: i.opened_at,
+                last_seen_at: i.last_seen_at,
+            })
+            .collect();
+        let Some(latest) = geo::latest_report(pool, site.id).await? else {
+            return Ok(AiAccessInfo {
+                site_id: site.id,
+                checked_at: None,
+                crawl_id: None,
+                note: Some(
+                    "No AI access report yet: it appears after the site's next crawl.".to_owned(),
+                ),
+                robots: None,
+                open_incidents,
+                bots: Vec::new(),
+                engines: Vec::new(),
+                declared: Default::default(),
+            });
+        };
+        let intent = geo::get_intent(pool, site.id).await?;
+        let report = latest.report;
+        Ok(AiAccessInfo {
+            site_id: site.id,
+            checked_at: Some(latest.created_at),
+            crawl_id: Some(latest.crawl_id),
+            note: None,
+            robots: Some(AiRobotsInfo {
+                status: report.robots.status,
+                availability: report.robots.availability,
+            }),
+            open_incidents,
+            bots: ai_bots(&report, &intent),
+            engines: ai_engines(&report),
+            declared: report.declared,
+        })
+    }
+
     async fn run_crawl_work(
         &self,
         caller: &ApiCaller,
@@ -605,6 +669,70 @@ pub async fn issue_page(
         urls,
         next_offset: next_offset(offset, shown, total),
     })
+}
+
+/// Longest incident title or summary the AI access payload carries.
+const MAX_AI_TEXT: usize = 400;
+
+/// One entry per registry bot, with whether robots.txt does the opposite of the owner's intent:
+/// the bot is allowed but some important page is blocked, or it is blocked from the home page
+/// while the owner wants it out and it is not (only bots that honour robots.txt count).
+fn ai_bots(report: &AccessReport, intent: &Intent) -> Vec<AiBotInfo> {
+    let total = u32::try_from(report.important.len()).unwrap_or(u32::MAX);
+    registry()
+        .bots
+        .iter()
+        .filter_map(|bot| {
+            let access = report.bot(&bot.token)?;
+            let blocked = u32::try_from(access.blocked.len()).unwrap_or(u32::MAX);
+            let stance = intent.effective(bot);
+            let honoured = bot.honours_robots == Honours::Yes;
+            let conflicts = match stance {
+                Stance::Allow => blocked > 0,
+                Stance::Block => honoured && access.home_allowed == Some(true),
+                Stance::Any => false,
+            };
+            Some(AiBotInfo {
+                token: bot.token.clone(),
+                operator: bot.operator.clone(),
+                purpose: bot.purpose,
+                intent: stance,
+                home_allowed: access.home_allowed,
+                important_blocked: blocked,
+                important_total: total,
+                conflicts,
+            })
+        })
+        .collect()
+}
+
+fn ai_engines(report: &AccessReport) -> Vec<AiEngineInfo> {
+    engines()
+        .iter()
+        .map(|engine| {
+            let (mut limited, mut excluded) = (0u32, 0u32);
+            let mut html = 0u32;
+            if let Some(access) = report.engine(engine.id) {
+                html = u32::from(access.html_pages);
+                for g in &access.groups {
+                    let n = u32::try_from(g.urls.len()).unwrap_or(u32::MAX);
+                    if g.robots_blocked || g.effect == Effect::Excluded {
+                        excluded += n;
+                    } else if g.effect == Effect::Limited {
+                        limited += n;
+                    }
+                }
+            }
+            AiEngineInfo {
+                id: engine.id,
+                name: engine.name.to_owned(),
+                eligible: html.saturating_sub(limited + excluded),
+                limited,
+                excluded,
+                page_controls: engine.page_controls,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

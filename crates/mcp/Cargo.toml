@@ -13,6 +13,7 @@ codoseo-core.workspace = true
 codoseo-crawler.workspace = true
 codoseo-checks.workspace = true
 codoseo-diff.workspace = true
+codoseo-geo.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
 uuid.workspace = true

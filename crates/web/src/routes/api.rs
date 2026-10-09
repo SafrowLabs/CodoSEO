@@ -34,6 +34,7 @@ pub fn routes() -> Router<AppState> {
         .route("/sites/{site}/issues/{check}", get(issue_urls))
         .route("/sites/{site}/page", get(page))
         .route("/sites/{site}/changes", get(changes))
+        .route("/sites/{site}/ai-access", get(ai_access))
         .route("/sites/{site}/crawls", post(run_crawl))
         .route("/usage", get(usage))
         .fallback(unknown)
@@ -188,6 +189,17 @@ async fn changes(
             .await
     })
     .await
+}
+
+async fn ai_access(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+) -> Response {
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state).ai_access(&caller, &site).await,
+    )
 }
 
 async fn run_crawl(
