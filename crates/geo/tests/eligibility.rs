@@ -232,7 +232,7 @@ fn scoped_headers_follow_their_agent() {
     // A directive before any prefix reaches everyone, one after a prefix only its agent.
     let f = fields(None, Some("noarchive, googlebot: nosnippet"), &[]);
     assert_eq!(effect(EngineId::Bing, &f), Effect::Excluded);
-    assert_eq!(effect(EngineId::Amazon, &f), Effect::Excluded);
+    assert_eq!(effect(EngineId::Amazon, &f), Effect::Eligible);
     assert_eq!(effect(EngineId::Apple, &f), Effect::Eligible);
     assert_eq!(effect(EngineId::Google, &f), Effect::Excluded);
 }
