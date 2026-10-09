@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
-use codoseo_core::output::{SiteSignals, StopReason, WellKnownFile};
+use codoseo_core::output::{ROBOTS_FAILED_REASON, SiteSignals, StopReason, WellKnownFile};
 use codoseo_core::url::normalize;
 use tokio::time::Instant;
 use url::Url;
@@ -163,13 +163,16 @@ async fn robots_for(
     }
 }
 
-/// The stop reasons robots.txt decides on its own, in order: 429, 5xx, a full block.
+/// The stop reasons robots.txt decides on its own, in order: 429, 5xx, a full block. Both
+/// failures name the status, so a failed crawl's reason tells a robots.txt failure apart.
 fn robots_stop(rules: &RobotsRules, file: Option<&RobotsFile>) -> Option<StopReason> {
     match file.map(|f| f.status) {
-        Some(429) => return Some(StopReason::Blocked(BLOCKED_MSG.to_owned())),
+        Some(429) => {
+            return Some(StopReason::Blocked(format!("{ROBOTS_FAILED_REASON} 429")));
+        }
         Some(status) if status >= 500 => {
             return Some(StopReason::Unreachable(format!(
-                "robots.txt returned HTTP {status}"
+                "{ROBOTS_FAILED_REASON} {status}"
             )));
         }
         _ => {}

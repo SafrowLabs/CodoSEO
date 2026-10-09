@@ -342,8 +342,9 @@ async fn run_one_crawl(
         )
     {
         // A robots.txt that fails (5xx, 429) is itself an AI-access incident: record it before
-        // the crawl fails, so the owner hears about it even though there is nothing to finalize.
-        record_failed_robots(pool, &claimed, &out).await;
+        // the crawl fails for good, so the owner hears about it even though there is nothing
+        // to finalize.
+        record_failed_robots(pool, &claimed, worker_id, &out).await;
         return Err(stop_reason_message(&out.stop));
     }
 
@@ -366,18 +367,15 @@ async fn run_one_crawl(
     };
 
     // A no-signup audit has no site owner to tell: the AI access state starts with the first
-    // full crawl.
+    // full crawl. The findings are drawn in `finalize`, under the intent the site has then.
     let geo = if claimed.trigger == CrawlTrigger::Quick {
         None
     } else {
-        let intent = geo::get_intent(pool, claimed.site_id)
-            .await
-            .map_err(|e| format!("could not load AI intent: {e}"))?;
         let starred = codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
             .await
             .map_err(|e| format!("could not load starred pages: {e}"))?;
         let important = important_urls(&out.pages, &out.origin, &starred);
-        Some(GeoInput::new(build_report(&out, &important), &intent))
+        Some(GeoInput::new(build_report(&out, &important)))
     };
 
     finalize(
@@ -397,33 +395,33 @@ async fn run_one_crawl(
     Ok(())
 }
 
-/// For a crawl that is about to fail with no pages: when robots.txt answered 5xx or 429 (which
-/// crawlers must treat as "everything is off limits"), records the AI access report and the
-/// `RobotsUnavailable` incident it shows. Best effort: a failure here is logged and the crawl
-/// fails exactly as it would have.
+/// For a crawl that is about to fail for good with no pages: when robots.txt answered 5xx or
+/// 429 (which crawlers must treat as "everything is off limits"), records the AI access report
+/// and the `RobotsUnavailable` incident it shows. A first failure is retried in 15 minutes
+/// (`finish_failed`) and records nothing, so a short blip is not announced and then resolved.
+/// Best effort: a failure here is logged and the crawl fails exactly as it would have.
 async fn record_failed_robots(
     pool: &PgPool,
     claimed: &ClaimedCrawl,
+    worker_id: &str,
     out: &codoseo_core::output::CrawlOutput,
 ) {
-    if claimed.trigger == CrawlTrigger::Quick {
+    if claimed.trigger == CrawlTrigger::Quick || !claimed.is_final_attempt() {
         return;
     }
     let Some(robots) = &out.robots else { return };
-    // Only what crawlers must read as "everything is off limits": 5xx and 429. A redirect that
-    // led nowhere is not a robots.txt failure.
+    // Only what crawlers must read as "everything is off limits": 5xx and 429.
     if availability(Some(robots.status)) != RobotsAvailability::Unavailable
         || !(robots.status >= 500 || robots.status == 429)
     {
         return;
     }
     let result = async {
-        let intent = geo::get_intent(pool, claimed.site_id).await?;
         // No pages came back, so the only important URL is the origin itself.
         let important = important_urls(&out.pages, &out.origin, &Default::default());
         let report: AccessReport = build_report(out, &important);
-        let input = GeoInput::new(report, &intent);
-        geo::record_failed_crawl(pool, claimed.site_id, claimed.id, &input).await
+        let input = GeoInput::new(report);
+        geo::record_failed_crawl(pool, claimed.site_id, claimed.id, worker_id, &input).await
     }
     .await;
     if let Err(e) = result {

@@ -699,7 +699,8 @@ async fn a_failing_robots_txt_opens_an_incident_through_the_failed_crawl_path() 
     let baseline = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
     assert!(ai_changes(&db, baseline).await.is_empty());
 
-    // (c) robots.txt answers 503: the crawl fails as before, and the incident is recorded.
+    // (c) robots.txt answers 503: the crawl fails as before and waits for its retry, and
+    // nothing is recorded yet: a blip that the retry doesn't see is not worth an alert.
     {
         let mut k = knobs.lock().unwrap();
         k.robots_status = 503;
@@ -713,7 +714,31 @@ async fn a_failing_robots_txt_opens_an_incident_through_the_failed_crawl_path() 
             .await
             .unwrap();
     assert_eq!(status, "queued", "the first failure waits for its retry");
-    assert!(reason.is_some());
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|r| r.contains("robots.txt returned HTTP 503")),
+        "{reason:?}"
+    );
+    assert!(
+        codoseo_store::geo::open_incidents(&db.pool, site_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(ai_changes(&db, crawl).await.is_empty());
+    assert_eq!(alert_planning_jobs(&db, crawl).await, 0);
+    assert_eq!(ai_report_count(&db, site_id).await, 1);
+
+    // The retry fails too: the crawl ends failed, the incident is recorded and announced once,
+    // and the generic "couldn't reach your site" alert stays out of the way of the precise one.
+    retry(&db).await;
+    let status: String = sqlx::query_scalar("SELECT status::text FROM crawls WHERE id = $1")
+        .bind(crawl)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "failed");
     let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
         .await
         .unwrap();
@@ -728,11 +753,13 @@ async fn a_failing_robots_txt_opens_an_incident_through_the_failed_crawl_path() 
         vec![("ai_bot_blocked".to_owned(), "critical".to_owned())]
     );
     assert_eq!(alert_planning_jobs(&db, crawl).await, 1);
+    assert_eq!(unreachable_jobs(&db).await, 0);
+    assert_eq!(ai_report_count(&db, site_id).await, 2);
+}
 
-    // The retry fails too: the crawl ends failed, the unreachable alert is queued as ever, and
-    // the incident is neither duplicated nor announced twice.
-    sqlx::query("UPDATE crawls SET queued_at = now() WHERE id = $1")
-        .bind(crawl)
+/// Lets the crawl waiting for its retry go now, and runs it.
+async fn retry(db: &TestDb) {
+    sqlx::query("UPDATE crawls SET queued_at = now() WHERE status = 'queued'")
         .execute(&db.pool)
         .await
         .unwrap();
@@ -750,37 +777,49 @@ async fn a_failing_robots_txt_opens_an_incident_through_the_failed_crawl_path() 
         .await
         .unwrap()
     );
+}
+
+async fn unreachable_jobs(db: &TestDb) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'send_alert' AND payload->>'unreachable' = 'true'",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap()
+}
+
+async fn ai_report_count(db: &TestDb, site_id: uuid::Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM ai_reports WHERE site_id = $1")
+        .bind(site_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_robots_txt_blip_the_retry_does_not_see_says_nothing() {
+    let db = TestDb::new().await;
+    let (server, knobs) = changing_site().await;
+    let site_id = db.seed_site("example.test", server.url("/").as_str()).await;
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+
+    knobs.lock().unwrap().robots_status = 503;
+    let crawl = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    knobs.lock().unwrap().robots_status = 200;
+    retry(&db).await;
     let status: String = sqlx::query_scalar("SELECT status::text FROM crawls WHERE id = $1")
         .bind(crawl)
         .fetch_one(&db.pool)
         .await
         .unwrap();
-    assert_eq!(status, "failed");
-    assert_eq!(
-        codoseo_store::geo::open_incidents(&db.pool, site_id)
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(ai_changes(&db, crawl).await.len(), 1);
-    assert_eq!(alert_planning_jobs(&db, crawl).await, 1);
-    let unreachable: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE kind = 'send_alert' AND payload->>'unreachable' = 'true'",
-    )
-    .fetch_one(&db.pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        unreachable, 1,
-        "the existing unreachable alert still goes out"
-    );
-    let reports: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_reports WHERE site_id = $1")
+    assert_eq!(status, "done");
+    assert!(ai_changes(&db, crawl).await.is_empty());
+    let incidents: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_incidents WHERE site_id = $1")
         .bind(site_id)
         .fetch_one(&db.pool)
         .await
         .unwrap();
-    assert_eq!(reports, 2);
+    assert_eq!(incidents, 0, "never opened, so never resolved either");
 }
 
 #[tokio::test]

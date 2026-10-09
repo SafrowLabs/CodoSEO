@@ -4,21 +4,25 @@
 //! A crawl's report and findings are pure data ([`codoseo_geo`]); this module is where they meet
 //! what is already open. [`apply_geo`] is the one place that does it, in the caller's
 //! transaction: `finalize` calls it for a finished crawl and [`record_failed_crawl`] for one that
-//! failed with a failing robots.txt, so the two never disagree.
+//! failed for good with a failing robots.txt, so the two never disagree. Both, and
+//! [`reevaluate_quietly`], lock the site row first and draw the findings under the intent they
+//! read there, so a crawl and an intent change never undo each other.
 //!
-//! The first report a site ever gets is its *baseline*: the incidents it opens are `quiet` and
-//! write no change rows, so switching the feature on does not fire an alert storm. A change of
-//! intent ([`reevaluate_quietly`]) is quiet the same way.
+//! The first report that judges a kind of finding is that kind's *baseline*: the incidents it
+//! opens are `quiet` and write no change rows, so switching the feature on (or a site whose first
+//! crawls failed) does not fire an alert storm. A change of intent ([`reevaluate_quietly`]) is
+//! quiet the same way.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::Severity;
 use codoseo_geo::Intent;
-use codoseo_geo::findings::{Finding, FindingKind, evaluated_kinds, findings};
+use codoseo_geo::eligibility::DirectiveSlug;
+use codoseo_geo::findings::{Evidence, Finding, FindingKind, evaluated_kinds, findings};
 use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
 use codoseo_geo::report::{AccessReport, Declared};
-use codoseo_geo::robots::{Pair, RobotsAvailability};
+use codoseo_geo::robots::Pair;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
@@ -27,8 +31,16 @@ use uuid::Uuid;
 use crate::dbenum::enum_slug;
 use crate::finalize::{enqueue_alert_job, insert_changes};
 
-/// Reports kept per site: the latest two, like the per-URL data of a crawl.
-const KEEP_REPORTS: i64 = 2;
+/// Reports kept per site: the newest two, like the per-URL data of a crawl, plus older ones the
+/// newest two can't stand in for (see [`reports_to_keep`]).
+const KEEP_REPORTS: usize = 2;
+/// Every kind of finding, for the kinds a run opens quietly.
+const ALL_KINDS: [FindingKind; 4] = [
+    FindingKind::RobotsUnavailable,
+    FindingKind::BotsBlocked,
+    FindingKind::BotsNotBlocked,
+    FindingKind::AnswersRestricted,
+];
 /// Longest `before_value`/`after_value` a change row gets, in characters.
 const MAX_CHANGE_TEXT: usize = 300;
 /// Most per-bot overrides an intent may hold.
@@ -36,23 +48,16 @@ const MAX_BOT_OVERRIDES: usize = 200;
 /// Longest bot token an intent may hold.
 const MAX_TOKEN_LEN: usize = 100;
 
-/// Everything the store needs from one crawl's AI access evaluation.
+/// Everything the store needs from one crawl's AI access evaluation: its report. The findings
+/// are drawn from it when it is recorded, under the intent the site has then.
 #[derive(Debug, Clone)]
 pub struct GeoInput {
     pub report: AccessReport,
-    pub findings: Vec<Finding>,
-    /// The kinds the report could judge; open incidents of other kinds are left alone.
-    pub evaluated: Vec<FindingKind>,
 }
 
 impl GeoInput {
-    /// Draws the findings from `report` under the site's `intent`.
-    pub fn new(report: AccessReport, intent: &Intent) -> GeoInput {
-        GeoInput {
-            findings: findings(&report, intent),
-            evaluated: evaluated_kinds(&report),
-            report,
-        }
+    pub fn new(report: AccessReport) -> GeoInput {
+        GeoInput { report }
     }
 }
 
@@ -151,7 +156,8 @@ pub async fn get_intent(pool: &PgPool, site_id: Uuid) -> Result<Intent, sqlx::Er
         .unwrap_or_default())
 }
 
-/// Checks an intent before it is stored: sane sizes, and no `Any` override that says nothing.
+/// Checks an intent before it is stored: sane sizes, bot names that are names, and no accepted
+/// `noindex` (it never opens an AI answers incident: it is the SEO checks' business).
 pub fn validate_intent(intent: &Intent) -> Result<(), String> {
     if intent.bots.len() > MAX_BOT_OVERRIDES {
         return Err(format!("At most {MAX_BOT_OVERRIDES} bots can be set."));
@@ -161,6 +167,9 @@ pub fn validate_intent(intent: &Intent) -> Result<(), String> {
         if t.is_empty() || t.len() > MAX_TOKEN_LEN || t.chars().any(char::is_control) {
             return Err(format!("\"{token}\" is not a bot name."));
         }
+    }
+    if intent.accepted_directives.contains(&DirectiveSlug::Noindex) {
+        return Err("noindex can't be accepted here: the SEO checks report it.".to_owned());
     }
     Ok(())
 }
@@ -304,68 +313,90 @@ pub async fn open_counts(pool: &PgPool, site_id: Uuid) -> Result<(i64, i64), sql
     .await
 }
 
-/// After an intent change: the findings on the site's latest report under the new intent,
-/// reconciled with the open incidents. Newly wanted findings open `quiet`, findings the intent
-/// made moot resolve with `resolution = 'intent'`, and no change rows or alerts are written: the
-/// owner just made the choice. Incidents that stay open keep their `last_seen_*`: no crawl saw
-/// them again. Returns how many were (opened, resolved).
+/// After an intent change: the findings of the site's stored reports under the new intent,
+/// reconciled with the open incidents. Each kind of finding is judged by the newest report that
+/// could judge it (a failed crawl's report knows robots.txt failed, not which bots it blocks), so
+/// "Mark intended" works after a failed crawl too. Newly wanted findings open `quiet`, findings
+/// the intent made moot resolve with `resolution = 'intent'`, and no change rows or alerts are
+/// written: the owner just made the choice. Incidents that stay open keep their `last_seen_*`: no
+/// crawl saw them again. Returns how many were (opened, resolved).
 pub async fn reevaluate_quietly(
     pool: &PgPool,
     site_id: Uuid,
 ) -> Result<(usize, usize), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    let Some(latest) = latest_report_in(&mut *tx, site_id).await? else {
-        return Ok((0, 0));
-    };
-    let intent: Intent = {
-        let value: Option<Value> = sqlx::query_scalar("SELECT ai_intent FROM sites WHERE id = $1")
-            .bind(site_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-        value
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
-    };
-    let input = GeoInput::new(latest.report, &intent);
+    let intent = lock_site(&mut tx, site_id).await?;
+    let reports = stored_reports(&mut tx, site_id, None).await?;
     let open = lock_open(&mut tx, site_id).await?;
-    let transitions = reconcile(&as_open(&open), &input.findings, &input.evaluated);
-    let opened = transitions
-        .iter()
-        .filter(|t| matches!(t, Transition::Opened { .. }))
-        .count();
-    let resolved = transitions
-        .iter()
-        .filter(|t| matches!(t, Transition::Resolved { .. }))
-        .count();
-    write_transitions(
-        &mut tx,
-        site_id,
-        latest.crawl_id,
-        &transitions,
-        &open,
-        Mode {
-            quiet: true,
-            changes: false,
-            resolution: "intent",
-            seen: false,
-        },
-    )
-    .await?;
+    let (mut opened, mut resolved) = (0, 0);
+    let mut judged: HashSet<FindingKind> = HashSet::new();
+    for (crawl_id, report) in &reports {
+        let Some(report) = report else { continue };
+        let kinds: Vec<FindingKind> = evaluated_kinds(report)
+            .into_iter()
+            .filter(|k| judged.insert(*k))
+            .collect();
+        if kinds.is_empty() {
+            continue;
+        }
+        let found: Vec<Finding> = findings(report, &intent)
+            .into_iter()
+            .filter(|f| kinds.contains(&f.kind))
+            .collect();
+        let transitions = reconcile(&as_open(&open), &found, &kinds);
+        opened += transitions
+            .iter()
+            .filter(|t| matches!(t, Transition::Opened { .. }))
+            .count();
+        resolved += transitions
+            .iter()
+            .filter(|t| matches!(t, Transition::Resolved { .. }))
+            .count();
+        write_transitions(
+            &mut tx,
+            site_id,
+            *crawl_id,
+            &transitions,
+            &open,
+            Mode {
+                quiet: ALL_KINDS.into(),
+                changes: false,
+                resolution: "intent",
+                seen: false,
+            },
+        )
+        .await?;
+    }
     tx.commit().await?;
     Ok((opened, resolved))
 }
 
-/// A crawl that failed (its site gave no pages) but did read a failing robots.txt: records its
-/// report and reconciles in a transaction of its own. Only `RobotsUnavailable` can be judged
-/// from such a report, so only that incident opens, updates or resolves. Writes the change row
-/// and queues the `send_alert` job like a finished crawl would. Returns the number of changes.
+/// A crawl that failed for good (its site gave no pages) but did read a failing robots.txt:
+/// records its report and reconciles in a transaction of its own. Only `RobotsUnavailable` can be
+/// judged from such a report, so only that incident opens, updates or resolves. Writes the change
+/// row and queues the `send_alert` job like a finished crawl would. Returns the number of changes.
+///
+/// Guarded like `finalize`: the crawl must still be `running` under `worker_id`, or nothing is
+/// written and the error is `RowNotFound`, so a worker whose crawl was requeued and claimed by
+/// another can't record for it.
 pub async fn record_failed_crawl(
     pool: &PgPool,
     site_id: Uuid,
     crawl_id: Uuid,
+    worker_id: &str,
     input: &GeoInput,
 ) -> Result<usize, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    let owned: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM crawls WHERE id = $1 AND status = 'running' AND worker_id = $2 FOR UPDATE",
+    )
+    .bind(crawl_id)
+    .bind(worker_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if owned.is_none() {
+        return Err(sqlx::Error::RowNotFound);
+    }
     let changes = apply_geo(&mut tx, site_id, crawl_id, input).await?;
     insert_changes(&mut tx, crawl_id, site_id, &changes).await?;
     enqueue_alert_job(&mut tx, crawl_id, !changes.is_empty()).await?;
@@ -373,31 +404,30 @@ pub async fn record_failed_crawl(
     Ok(changes.len())
 }
 
-/// Stores the crawl's report, keeps the site's newest two, and opens, updates and resolves the
-/// site's incidents from the findings. Returns the changes to record (the caller inserts them
-/// with the crawl's other changes).
+/// Stores the crawl's report, trims the site's reports ([`reports_to_keep`]), and opens, updates
+/// and resolves the site's incidents from the report's findings. Returns the changes to record
+/// (the caller inserts them with the crawl's other changes).
 ///
-/// The site's open incidents are locked first (`FOR UPDATE`), so an intent change that lands
-/// mid-crawl waits for this transaction instead of interleaving with it. When the site has no
-/// earlier report (a different crawl's) this is the baseline: incidents open `quiet` and nothing
-/// is returned. A report can be written twice for one crawl (a failed crawl retries under the
-/// same id); the later one replaces the earlier and the "earlier report" is still another crawl's.
+/// The site row is locked first and the intent read under that lock, so the findings follow the
+/// intent stored now, not the one the worker saw when the crawl started: an intent change that
+/// lands meanwhile either commits first (and is read here) or waits for this transaction (and
+/// re-evaluates what it wrote). The lock also keeps two writers from opening the same incident
+/// twice. An incident opens `quiet`, without a change row, when no earlier stored report judged
+/// its kind (the kind's baseline). A report written again for the same crawl replaces the
+/// earlier one, and "earlier reports" are always other crawls'.
 pub(crate) async fn apply_geo(
     tx: &mut Transaction<'_, Postgres>,
     site_id: Uuid,
     crawl_id: Uuid,
     input: &GeoInput,
 ) -> Result<Vec<Change>, sqlx::Error> {
-    let previous: Option<Value> = sqlx::query_scalar(
-        "SELECT report FROM ai_reports WHERE site_id = $1 AND crawl_id <> $2 \
-         ORDER BY created_at DESC, crawl_id DESC LIMIT 1",
-    )
-    .bind(site_id)
-    .bind(crawl_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    let baseline = previous.is_none();
-    let previous: Option<AccessReport> = previous.and_then(|v| serde_json::from_value(v).ok());
+    let intent = lock_site(tx, site_id).await?;
+    let earlier = stored_reports(tx, site_id, Some(crawl_id)).await?;
+    let judged_before: HashSet<FindingKind> = earlier
+        .iter()
+        .filter_map(|(_, r)| r.as_ref())
+        .flat_map(evaluated_kinds)
+        .collect();
 
     let mut report = serde_json::to_value(&input.report).expect("a report always serializes");
     strip_nul(&mut report);
@@ -410,18 +440,20 @@ pub(crate) async fn apply_geo(
     .bind(report)
     .execute(&mut **tx)
     .await?;
-    sqlx::query(
-        "DELETE FROM ai_reports WHERE site_id = $1 AND crawl_id NOT IN (\
-           SELECT crawl_id FROM ai_reports WHERE site_id = $1 \
-           ORDER BY created_at DESC, crawl_id DESC LIMIT $2)",
-    )
-    .bind(site_id)
-    .bind(KEEP_REPORTS)
-    .execute(&mut **tx)
-    .await?;
+    let all: Vec<(Uuid, Option<&AccessReport>)> = std::iter::once((crawl_id, Some(&input.report)))
+        .chain(earlier.iter().map(|(id, r)| (*id, r.as_ref())))
+        .collect();
+    let keep: Vec<Uuid> = reports_to_keep(&all).into_iter().collect();
+    sqlx::query("DELETE FROM ai_reports WHERE site_id = $1 AND NOT (crawl_id = ANY($2))")
+        .bind(site_id)
+        .bind(&keep)
+        .execute(&mut **tx)
+        .await?;
 
+    let found = findings(&input.report, &intent);
+    let evaluated = evaluated_kinds(&input.report);
     let open = lock_open(tx, site_id).await?;
-    let transitions = reconcile(&as_open(&open), &input.findings, &input.evaluated);
+    let transitions = reconcile(&as_open(&open), &found, &evaluated);
     let mut changes = write_transitions(
         tx,
         site_id,
@@ -429,16 +461,24 @@ pub(crate) async fn apply_geo(
         &transitions,
         &open,
         Mode {
-            quiet: baseline,
-            changes: !baseline,
+            quiet: ALL_KINDS
+                .into_iter()
+                .filter(|k| !judged_before.contains(k))
+                .collect(),
+            changes: true,
             resolution: "fixed",
             seen: true,
         },
     )
     .await?;
 
-    if !baseline
-        && let Some(previous) = &previous
+    // Preferences are compared with the newest earlier report that knew them all.
+    let previous = earlier
+        .iter()
+        .filter_map(|(_, r)| r.as_ref())
+        .find(|r| r.preferences_known());
+    if let Some(previous) = previous
+        && input.report.preferences_known()
         && let Some(change) = preferences_change(previous, &input.report)
     {
         changes.push(change);
@@ -446,10 +486,76 @@ pub(crate) async fn apply_geo(
     Ok(changes)
 }
 
+/// Locks the site row and reads its intent. `FOR NO KEY UPDATE` conflicts with an intent save's
+/// `UPDATE` and with the other AI access writers, but not with rows that merely reference the
+/// site, so crawls can still be queued meanwhile.
+async fn lock_site(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+) -> Result<Intent, sqlx::Error> {
+    let value: Option<Value> =
+        sqlx::query_scalar("SELECT ai_intent FROM sites WHERE id = $1 FOR NO KEY UPDATE")
+            .bind(site_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    Ok(value
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default())
+}
+
+/// The site's stored reports, newest first, except `except`'s; `None` for one that no longer
+/// parses.
+async fn stored_reports(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+    except: Option<Uuid>,
+) -> Result<Vec<(Uuid, Option<AccessReport>)>, sqlx::Error> {
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        "SELECT crawl_id, report FROM ai_reports \
+         WHERE site_id = $1 AND crawl_id IS DISTINCT FROM $2 \
+         ORDER BY created_at DESC, crawl_id DESC",
+    )
+    .bind(site_id)
+    .bind(except)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, v)| (id, serde_json::from_value(v).ok()))
+        .collect())
+}
+
+/// Which of a site's reports (newest first) to keep: the newest two, plus the newest that judged
+/// each kind of finding and the newest that knew every declared preference. A run of failed
+/// crawls then loses neither what the last good crawl saw (for [`reevaluate_quietly`] and the
+/// preference comparison) nor each kind's baseline.
+fn reports_to_keep(reports: &[(Uuid, Option<&AccessReport>)]) -> BTreeSet<Uuid> {
+    let mut keep: BTreeSet<Uuid> = reports
+        .iter()
+        .take(KEEP_REPORTS)
+        .map(|(id, _)| *id)
+        .collect();
+    let mut judged: HashSet<FindingKind> = HashSet::new();
+    let mut preferences = false;
+    for (id, report) in reports {
+        let Some(report) = report else { continue };
+        for kind in evaluated_kinds(report) {
+            if judged.insert(kind) {
+                keep.insert(*id);
+            }
+        }
+        if !preferences && report.preferences_known() {
+            preferences = true;
+            keep.insert(*id);
+        }
+    }
+    keep
+}
+
 /// How [`write_transitions`] treats what it writes.
 struct Mode {
-    /// Incidents opened by this run are `quiet`.
-    quiet: bool,
+    /// Kinds whose incidents open `quiet`, without a change row.
+    quiet: HashSet<FindingKind>,
     /// Whether to return change rows for the transitions.
     changes: bool,
     /// The `resolution` recorded on resolved incidents.
@@ -467,14 +573,15 @@ struct OpenRow {
     severity: Severity,
     title: String,
     quiet: bool,
+    members: BTreeSet<String>,
 }
 
 async fn lock_open(
     tx: &mut Transaction<'_, Postgres>,
     site_id: Uuid,
 ) -> Result<Vec<OpenRow>, sqlx::Error> {
-    let rows: Vec<(i64, String, String, String, String, bool)> = sqlx::query_as(
-        "SELECT id, kind, subject, severity::text, title, quiet FROM ai_incidents \
+    let rows: Vec<(i64, String, String, String, String, bool, Value)> = sqlx::query_as(
+        "SELECT id, kind, subject, severity::text, title, quiet, evidence FROM ai_incidents \
          WHERE site_id = $1 AND resolved_at IS NULL ORDER BY id FOR UPDATE",
     )
     .bind(site_id)
@@ -482,7 +589,7 @@ async fn lock_open(
     .await?;
     Ok(rows
         .into_iter()
-        .filter_map(|(id, kind, subject, severity, title, quiet)| {
+        .filter_map(|(id, kind, subject, severity, title, quiet, evidence)| {
             Some(OpenRow {
                 id,
                 kind: FindingKind::from_slug(&kind)?,
@@ -490,6 +597,9 @@ async fn lock_open(
                 severity: parse_severity(&severity)?,
                 title,
                 quiet,
+                members: serde_json::from_value::<Evidence>(evidence)
+                    .unwrap_or_default()
+                    .members(),
             })
         })
         .collect())
@@ -502,6 +612,7 @@ fn as_open(rows: &[OpenRow]) -> Vec<OpenIncident> {
             kind: r.kind,
             subject: r.subject.clone(),
             severity: r.severity,
+            members: r.members.clone(),
         })
         .collect()
 }
@@ -519,6 +630,7 @@ async fn write_transitions(
     for transition in transitions {
         match transition {
             Transition::Opened { finding } => {
+                let quiet = mode.quiet.contains(&finding.kind);
                 let mut evidence =
                     serde_json::to_value(&finding.evidence).expect("evidence always serializes");
                 strip_nul(&mut evidence);
@@ -543,11 +655,11 @@ async fn write_transitions(
                 .bind(without_nul(&finding.summary))
                 .bind(evidence)
                 .bind(crawl_id)
-                .bind(mode.quiet)
+                .bind(quiet)
                 .bind(mode.seen)
                 .execute(&mut **tx)
                 .await?;
-                if mode.changes {
+                if mode.changes && !quiet {
                     changes.push(finding_change(finding));
                 }
             }
@@ -555,7 +667,11 @@ async fn write_transitions(
                 id,
                 finding,
                 escalated,
+                widened,
             } => {
+                // Worse, or about more bots or engines than before: announced like a new
+                // incident, and from then on no longer quiet, so its resolution is announced too.
+                let announce = mode.changes && (*escalated || *widened);
                 let mut evidence =
                     serde_json::to_value(&finding.evidence).expect("evidence always serializes");
                 strip_nul(&mut evidence);
@@ -563,7 +679,8 @@ async fn write_transitions(
                     "UPDATE ai_incidents SET severity = $2::severity, title = $3, summary = $4, \
                        evidence = $5, \
                        last_seen_crawl_id = CASE WHEN $7 THEN $6 ELSE last_seen_crawl_id END, \
-                       last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END \
+                       last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END, \
+                       quiet = quiet AND NOT $8 \
                      WHERE id = $1",
                 )
                 .bind(id)
@@ -573,9 +690,10 @@ async fn write_transitions(
                 .bind(evidence)
                 .bind(crawl_id)
                 .bind(mode.seen)
+                .bind(announce)
                 .execute(&mut **tx)
                 .await?;
-                if mode.changes && *escalated {
+                if announce {
                     changes.push(finding_change(finding));
                 }
             }
@@ -608,8 +726,8 @@ async fn write_transitions(
     Ok(changes)
 }
 
-/// The change row for an incident that opened or got worse. `before` is what was expected,
-/// `after` the finding's title; the summary and evidence live on the incident.
+/// The change row for an incident that opened, got worse or widened. `before` is what was
+/// expected, `after` the finding's title; the summary and evidence live on the incident.
 fn finding_change(finding: &Finding) -> Change {
     let (kind, before) = match finding.kind {
         FindingKind::RobotsUnavailable | FindingKind::BotsBlocked => {
@@ -627,19 +745,11 @@ fn finding_change(finding: &Finding) -> Change {
     }
 }
 
-/// `Some` when the declared AI preferences differ between two reports that both read robots.txt
-/// (a failing robots.txt says nothing about them). Lists only what was removed and what was
-/// added, not line numbers, so moving a line is no change.
+/// `Some` when the declared AI preferences differ between two reports that both knew them
+/// ([`AccessReport::preferences_known`]: a failing robots.txt or an error home page says nothing
+/// about them). Lists only what was removed and what was added, not line numbers, so moving a
+/// line is no change.
 fn preferences_change(previous: &AccessReport, current: &AccessReport) -> Option<Change> {
-    let readable = |r: &AccessReport| {
-        matches!(
-            r.robots.availability,
-            RobotsAvailability::Ok | RobotsAvailability::Missing
-        )
-    };
-    if !readable(previous) || !readable(current) {
-        return None;
-    }
     let before = declared_parts(&previous.declared);
     let after = declared_parts(&current.declared);
     if before == after {
@@ -669,25 +779,25 @@ fn declared_parts(d: &Declared) -> BTreeSet<String> {
             .collect::<Vec<_>>()
             .join(", ")
     }
-    fn agents(a: &[String]) -> String {
-        if a.is_empty() {
-            "*".to_owned()
-        } else {
-            a.join(",")
+    fn agents(a: &[String], more: u32) -> String {
+        match (a.is_empty(), more) {
+            (true, _) => "*".to_owned(),
+            (false, 0) => a.join(","),
+            (false, n) => format!("{} and {n} more", a.join(",")),
         }
     }
     let mut parts = BTreeSet::new();
     for s in &d.content_signals {
         parts.insert(format!(
             "robots.txt Content-Signal for {}: {}",
-            agents(&s.agents),
+            agents(&s.agents, s.more_agents),
             pairs(&s.pairs)
         ));
     }
     for u in &d.content_usage {
         parts.insert(format!(
             "robots.txt Content-Usage for {}{}: {}",
-            agents(&u.agents),
+            agents(&u.agents, u.more_agents),
             u.path
                 .as_deref()
                 .map(|p| format!(" {p}"))

@@ -107,18 +107,25 @@ pub async fn run(
 }
 
 /// Drops `changes` and nulls `summary` for `done` crawls of accounts on `plan_value` whose
-/// `finished_at` is at least `days` old. A crawl whose `summary` is already `NULL` (cleaned by
-/// an earlier run) is left out of the count. Two statements against the same id list rather
-/// than one combined query, since Postgres has no single-statement "delete from one table,
-/// update another" form.
+/// `finished_at` is at least `days` old, and drops the `changes` of `failed` crawls that old (a
+/// failed crawl can record an AI access change). A failed crawl has no `finished_at`; its last
+/// heartbeat, else its start, dates it. A crawl already cleaned by an earlier run (`summary`
+/// `NULL`, or a failed crawl with no changes left) is left out of the count. Two statements
+/// against the same id list rather than one combined query, since Postgres has no
+/// single-statement "delete from one table, update another" form.
 async fn trim_plan_history(pool: &PgPool, plan_value: &str, days: i64) -> Result<u64, sqlx::Error> {
     let ids: Vec<Uuid> = sqlx::query_scalar(
         "SELECT c.id FROM crawls c \
            JOIN sites s ON s.id = c.site_id \
            JOIN accounts a ON a.id = s.account_id \
-         WHERE a.plan = $1::plan AND c.status = 'done' \
-           AND c.finished_at <= now() - ($2 || ' days')::interval \
-           AND c.summary IS NOT NULL",
+         WHERE a.plan = $1::plan AND ( \
+             (c.status = 'done' \
+              AND c.finished_at <= now() - ($2 || ' days')::interval \
+              AND c.summary IS NOT NULL) \
+          OR (c.status = 'failed' \
+              AND COALESCE(c.finished_at, c.heartbeat_at, c.started_at, c.queued_at) \
+                  <= now() - ($2 || ' days')::interval \
+              AND EXISTS (SELECT 1 FROM changes ch WHERE ch.crawl_id = c.id)))",
     )
     .bind(plan_value)
     .bind(days.to_string())

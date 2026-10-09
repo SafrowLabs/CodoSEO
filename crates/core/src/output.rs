@@ -64,6 +64,16 @@ pub const UNREACHABLE_REASON_PREFIX: &str = "site unreachable";
 /// Start of a crawl's `failure_reason` when the site refused our crawler (`StopReason::Blocked`).
 pub const BLOCKED_REASON_PREFIX: &str = "site blocked our crawler";
 
+/// What the crawler's stop reason says when robots.txt itself failed (5xx or 429), followed by
+/// the status: `robots.txt returned HTTP 503`.
+pub const ROBOTS_FAILED_REASON: &str = "robots.txt returned HTTP";
+
+/// True when a crawl's `failure_reason` says the site was at fault because its robots.txt
+/// answered 5xx or 429: the AI access incident speaks for that failure.
+pub fn robots_failure(reason: &str) -> bool {
+    SiteFault::from_failure_reason(reason).is_some() && reason.contains(ROBOTS_FAILED_REASON)
+}
+
 /// Whose fault a failed crawl was, read back from its stored `failure_reason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiteFault {

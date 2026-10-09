@@ -413,9 +413,6 @@ impl TestApp {
         let report = codoseo_checks::run_checks(&mut out);
         let geo = match &out.robots {
             Some(_) => {
-                let intent = codoseo_store::geo::get_intent(self.pool(), site_id)
-                    .await
-                    .expect("intent");
                 let starred = codoseo_store::sites::starred_key_pages(self.pool(), site_id)
                     .await
                     .expect("starred pages");
@@ -423,7 +420,6 @@ impl TestApp {
                     codoseo_geo::report::important_urls(&out.pages, &out.origin, &starred);
                 Some(codoseo_store::geo::GeoInput::new(
                     codoseo_geo::report::build_report(&out, &important),
-                    &intent,
                 ))
             }
             None => None,

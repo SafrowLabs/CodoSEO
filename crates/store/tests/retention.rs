@@ -473,3 +473,50 @@ async fn resolved_ai_incidents_follow_the_plans_history_window() {
         "365 days: deleted"
     );
 }
+
+/// A `failed` crawl with one AI access change, last heard from `seconds_ago` (failed crawls have
+/// no `finished_at`).
+async fn seed_failed_crawl(pool: &PgPool, site_id: Uuid, seconds_ago: f64) -> Uuid {
+    let crawl_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO crawls (site_id, domain, status, trigger, priority, attempt, \
+           queued_at, started_at, heartbeat_at, failure_reason) \
+         VALUES ($1, 'f.example', 'failed', 'manual', 3, 1, \
+           now() - ($2 || ' seconds')::interval - interval '1 hour', \
+           now() - ($2 || ' seconds')::interval - interval '1 minute', \
+           now() - ($2 || ' seconds')::interval, \
+           'site unreachable: robots.txt returned HTTP 503') RETURNING id",
+    )
+    .bind(site_id)
+    .bind(seconds_ago.to_string())
+    .fetch_one(pool)
+    .await
+    .expect("insert failed crawl");
+    sqlx::query(
+        "INSERT INTO changes (crawl_id, site_id, kind, severity, before_value, after_value) \
+         VALUES ($1, $2, 'ai_bot_blocked', 'critical', 'allowed', 'robots.txt returns HTTP 503')",
+    )
+    .bind(crawl_id)
+    .bind(site_id)
+    .execute(pool)
+    .await
+    .expect("insert change");
+    crawl_id
+}
+
+#[tokio::test]
+async fn a_failed_crawls_changes_follow_the_plans_history_window() {
+    let db = TestDb::new().await;
+    let account = seed_account(&db.pool, "free").await;
+    let site = seed_site(&db.pool, Some(account), 0.0).await;
+    let young = seed_failed_crawl(&db.pool, site, 29.0 * DAY).await;
+    let at_boundary = seed_failed_crawl(&db.pool, site, 30.0 * DAY).await;
+
+    let report = retention::run(&db.pool, None).await.expect("run retention");
+    assert_eq!(report.crawls_trimmed, 1);
+    assert_eq!(crawl_summary_and_changes(&db.pool, young).await.1, 1);
+    assert_eq!(crawl_summary_and_changes(&db.pool, at_boundary).await.1, 0);
+    assert!(crawl_exists(&db.pool, at_boundary).await);
+    // Cleaned once: a second run has nothing left to count.
+    let again = retention::run(&db.pool, None).await.expect("run retention");
+    assert_eq!(again.crawls_trimmed, 0);
+}

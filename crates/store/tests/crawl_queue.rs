@@ -530,9 +530,29 @@ async fn the_second_failure_queues_an_unreachable_alert_and_the_first_does_not()
 
 /// Two scheduled failures with `reason`; the alert jobs queued by then.
 async fn alerts_after_two_failures(reason: &str) -> Vec<serde_json::Value> {
+    alerts_after_two_failures_with(reason, None).await
+}
+
+/// Like [`alerts_after_two_failures`], on a site with an open `robots_unavailable` incident
+/// (`Some(quiet)`) or none.
+async fn alerts_after_two_failures_with(
+    reason: &str,
+    robots_incident: Option<bool>,
+) -> Vec<serde_json::Value> {
     let db = TestDb::new().await;
     let queue = CrawlQueue::new(db.pool.clone());
     let site_id = make_site(&db.pool, "reasons.example").await;
+    if let Some(quiet) = robots_incident {
+        sqlx::query(
+            "INSERT INTO ai_incidents (site_id, kind, subject, severity, title, summary, evidence, quiet) \
+             VALUES ($1, 'robots_unavailable', '', 'critical', 't', 's', '{}'::jsonb, $2)",
+        )
+        .bind(site_id)
+        .bind(quiet)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
     let id = queue
         .enqueue(
             site_id,
@@ -578,6 +598,35 @@ async fn blocked_and_unreachable_sites_queue_the_alert() {
     ] {
         assert_eq!(alerts_after_two_failures(reason).await.len(), 1, "{reason}");
     }
+}
+
+#[tokio::test]
+async fn a_failing_robots_txt_the_owner_was_told_about_queues_no_unreachable_alert() {
+    let robots_503 = "site unreachable: robots.txt returned HTTP 503";
+    let robots_429 = "site blocked our crawler: robots.txt returned HTTP 429";
+    for reason in [robots_503, robots_429] {
+        assert!(
+            alerts_after_two_failures_with(reason, Some(false))
+                .await
+                .is_empty(),
+            "{reason}: the AI access alert said it"
+        );
+        // Never announced (the site's baseline) or not recorded: the generic alert goes.
+        assert_eq!(
+            alerts_after_two_failures_with(reason, Some(true))
+                .await
+                .len(),
+            1
+        );
+        assert_eq!(alerts_after_two_failures_with(reason, None).await.len(), 1);
+    }
+    // Any other failure alerts as ever.
+    assert_eq!(
+        alerts_after_two_failures_with("site unreachable: dns error", Some(false))
+            .await
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]

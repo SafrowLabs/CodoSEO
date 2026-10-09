@@ -137,7 +137,11 @@ async fn robots_429_means_blocked() {
         .start()
         .await;
     let p = preflight(site.url("/")).await;
-    assert_eq!(p.stop, Some(StopReason::Blocked(BLOCKED_MSG.into())));
+    // Named, so a failed crawl's reason tells it from a site that blocks every page.
+    assert_eq!(
+        p.stop,
+        Some(StopReason::Blocked("robots.txt returned HTTP 429".into()))
+    );
     assert!(p.start.is_none());
 }
 

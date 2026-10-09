@@ -1,7 +1,7 @@
 //! The life of an AI-access incident: opened when a finding first appears, updated while it
 //! persists, resolved when the next report that could see it no longer has it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use codoseo_core::check::Severity;
 
@@ -14,17 +14,23 @@ pub struct OpenIncident {
     pub kind: FindingKind,
     pub subject: String,
     pub severity: Severity,
+    /// The bots or engines its finding named when last written ([`Evidence::members`]).
+    ///
+    /// [`Evidence::members`]: crate::findings::Evidence::members
+    pub members: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transition {
     /// A finding with no open incident.
     Opened { finding: Finding },
-    /// The incident is still there; `escalated` when it got worse.
+    /// The incident is still there; `escalated` when it got worse, `widened` when it now names
+    /// a bot or engine it did not (another search bot blocked, another engine restricted).
     Updated {
         id: i64,
         finding: Finding,
         escalated: bool,
+        widened: bool,
     },
     /// The report evaluated this kind and the finding is gone.
     Resolved {
@@ -68,6 +74,7 @@ pub fn reconcile(
                     finding: finding.clone(),
                     // Critical sorts before Warning before Notice.
                     escalated: finding.severity < incident.severity,
+                    widened: !finding.evidence.members().is_subset(&incident.members),
                 },
             },
         );

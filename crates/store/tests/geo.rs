@@ -12,7 +12,8 @@ use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, PageFields, PageRecord};
 use codoseo_core::report::{CrawlReport, CrawlSummary};
 use codoseo_core::url::url_hash;
-use codoseo_geo::findings::FindingKind;
+use codoseo_geo::eligibility::DirectiveSlug;
+use codoseo_geo::findings::{FindingKind, evaluated_kinds};
 use codoseo_geo::report::{build_report, important_urls};
 use codoseo_geo::{Intent, Purpose, Stance};
 use codoseo_store::alert_rules::{self, ALL_KINDS, DEFAULT_INSTANT};
@@ -98,9 +99,9 @@ fn crawl_of(robots_status: u16, robots_body: &str, meta_robots: Option<&str>) ->
     }
 }
 
-fn input_for(out: &CrawlOutput, intent: &Intent) -> GeoInput {
+fn input_for(out: &CrawlOutput) -> GeoInput {
     let important = important_urls(&out.pages, &out.origin, &HashSet::new());
-    GeoInput::new(build_report(out, &important), intent)
+    GeoInput::new(build_report(out, &important))
 }
 
 fn check_report() -> CrawlReport {
@@ -124,8 +125,7 @@ async fn full_crawl(
 ) -> Uuid {
     let crawl = make_crawl(pool, site, "manual", "running").await;
     let out = crawl_of(robots_status, robots_body, meta_robots);
-    let intent = geo::get_intent(pool, site).await.unwrap();
-    let input = input_for(&out, &intent);
+    let input = input_for(&out);
     finalize(
         pool,
         crawl,
@@ -320,9 +320,12 @@ async fn the_failed_crawl_path_records_the_incident_once_across_a_retry() {
     let mut out = crawl_of(503, "", None);
     out.pages.clear();
     out.stop = StopReason::Blocked("robots.txt unavailable".to_owned());
-    let input = input_for(&out, &Intent::default());
-    assert_eq!(input.evaluated, vec![FindingKind::RobotsUnavailable]);
-    let n = geo::record_failed_crawl(&db.pool, site, crawl, &input)
+    let input = input_for(&out);
+    assert_eq!(
+        evaluated_kinds(&input.report),
+        vec![FindingKind::RobotsUnavailable]
+    );
+    let n = geo::record_failed_crawl(&db.pool, site, crawl, WORKER, &input)
         .await
         .unwrap();
     assert_eq!(n, 1);
@@ -343,8 +346,8 @@ async fn the_failed_crawl_path_records_the_incident_once_across_a_retry() {
         HashSet::from([FindingKind::BotsBlocked, FindingKind::RobotsUnavailable])
     );
 
-    // The retry fails the same way under the same crawl id: one report, no new change.
-    let n = geo::record_failed_crawl(&db.pool, site, crawl, &input)
+    // Recorded again under the same crawl id: one report, no new change.
+    let n = geo::record_failed_crawl(&db.pool, site, crawl, WORKER, &input)
         .await
         .unwrap();
     assert_eq!(n, 0);
@@ -464,32 +467,51 @@ async fn only_a_crawl_moves_last_seen_never_an_intent_change() {
     assert!(at > then);
 }
 
+/// Records a crawl that failed with a 503 robots.txt and nothing else.
+async fn failed_robots_crawl(pool: &PgPool, site: Uuid) -> Uuid {
+    let crawl = make_crawl(pool, site, "manual", "running").await;
+    let mut out = crawl_of(503, "", None);
+    out.pages.clear();
+    geo::record_failed_crawl(pool, site, crawl, WORKER, &input_for(&out))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE crawls SET status = 'failed' WHERE id = $1")
+        .bind(crawl)
+        .execute(pool)
+        .await
+        .unwrap();
+    crawl
+}
+
 #[tokio::test]
-async fn reevaluating_after_a_failed_crawl_keeps_what_that_report_could_not_judge() {
+async fn reevaluating_after_a_failed_crawl_judges_each_kind_by_the_newest_report_that_could() {
     let db = TestDb::new().await;
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    let failed = make_crawl(&db.pool, site, "manual", "failed").await;
-    let mut out = crawl_of(503, "", None);
-    out.pages.clear();
-    let input = input_for(&out, &Intent::default());
-    geo::record_failed_crawl(&db.pool, site, failed, &input)
-        .await
-        .unwrap();
-
-    // The newest report is the failed crawl's; it can't judge bots_blocked, so an intent change
-    // leaves that incident alone.
-    geo::set_intent(&db.pool, site, &Intent::default())
-        .await
-        .unwrap();
-    let (opened, resolved) = geo::reevaluate_quietly(&db.pool, site).await.unwrap();
-    assert_eq!((opened, resolved), (0, 0));
-    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 2);
+    let failed = failed_robots_crawl(&db.pool, site).await;
     let latest = geo::latest_report(&db.pool, site).await.unwrap().unwrap();
     assert_eq!(
         (latest.crawl_id, latest.crawl_status.as_str()),
         (failed, "failed")
+    );
+
+    // The newest report is the failed crawl's and can't judge bots_blocked; the crawl before it
+    // can, so "Mark intended" on the blocked bot still resolves the incident.
+    let intent = Intent {
+        bots: [("OAI-SearchBot".to_owned(), Stance::Any)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    let (opened, resolved) = geo::reevaluate_quietly(&db.pool, site).await.unwrap();
+    assert_eq!((opened, resolved), (0, 1));
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].kind, FindingKind::RobotsUnavailable);
+    let r = geo::recent_resolved(&db.pool, site, 5).await.unwrap();
+    assert_eq!(
+        (r[0].kind, r[0].resolution.as_deref()),
+        (FindingKind::BotsBlocked, Some("intent"))
     );
 }
 
@@ -725,7 +747,7 @@ async fn a_stale_workers_finalize_leaves_no_geo_rows() {
         .await
         .unwrap();
     let out = crawl_of(200, BLOCK_OAI, None);
-    let input = input_for(&out, &Intent::default());
+    let input = input_for(&out);
     let result = finalize(
         &db.pool,
         crawl,
@@ -748,4 +770,345 @@ async fn a_stale_workers_finalize_leaves_no_geo_rows() {
     );
     assert!(change_kinds(&db.pool, crawl).await.is_empty());
     assert_eq!(alert_jobs(&db.pool, crawl).await, 0);
+}
+
+/// Finalizes a new full crawl with this output.
+async fn finalize_out(pool: &PgPool, site: Uuid, out: &CrawlOutput) -> Uuid {
+    let crawl = make_crawl(pool, site, "manual", "running").await;
+    finalize(
+        pool,
+        crawl,
+        site,
+        WORKER,
+        out,
+        &check_report(),
+        &[],
+        Some(&input_for(out)),
+    )
+    .await
+    .expect("finalize");
+    crawl
+}
+
+async fn quiet_of(pool: &PgPool, site: Uuid, kind: &str) -> bool {
+    sqlx::query_scalar(
+        "SELECT quiet FROM ai_incidents WHERE site_id = $1 AND kind = $2 AND resolved_at IS NULL",
+    )
+    .bind(site)
+    .bind(kind)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_intent_saved_while_a_crawl_runs_is_the_one_its_findings_follow() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+
+    // A crawl that still sees the block has built its report...
+    let crawl = make_crawl(&db.pool, site, "manual", "running").await;
+    let out = crawl_of(200, BLOCK_OAI, None);
+    let input = input_for(&out);
+    // ...when the owner marks the block as intended.
+    let intent = Intent {
+        bots: [("OAI-SearchBot".to_owned(), Stance::Any)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    assert_eq!(
+        geo::reevaluate_quietly(&db.pool, site).await.unwrap(),
+        (0, 1)
+    );
+    finalize(
+        &db.pool,
+        crawl,
+        site,
+        WORKER,
+        &out,
+        &check_report(),
+        &[],
+        Some(&input),
+    )
+    .await
+    .expect("finalize");
+
+    // The crawl follows the intent stored when it finished: nothing reopens, nobody is told.
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(change_kinds(&db.pool, crawl).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, crawl).await, 0);
+}
+
+#[tokio::test]
+async fn a_kind_first_judged_after_failed_crawls_opens_quietly() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    // The site's first report is a failing robots.txt: it judges only that.
+    let failed = failed_robots_crawl(&db.pool, site).await;
+    assert!(change_kinds(&db.pool, failed).await.is_empty());
+    assert!(quiet_of(&db.pool, site, "robots_unavailable").await);
+
+    // The first good crawl is the baseline for the bots and the answers: no storm.
+    let good = full_crawl(&db.pool, site, 200, BLOCK_OAI, Some("nosnippet")).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open.len(), 2);
+    assert!(open.iter().all(|i| i.quiet), "{open:?}");
+    assert!(change_kinds(&db.pool, good).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, good).await, 0);
+}
+
+#[tokio::test]
+async fn a_run_of_failed_crawls_keeps_the_last_good_report_and_its_baselines() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let good = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    failed_robots_crawl(&db.pool, site).await;
+    failed_robots_crawl(&db.pool, site).await;
+    // The good report is three back, and still kept: it is the only one that judged the bots.
+    let kept: Vec<Uuid> = sqlx::query_scalar("SELECT crawl_id FROM ai_reports WHERE site_id = $1")
+        .bind(site)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(kept.len(), 3);
+    assert!(kept.contains(&good));
+
+    // So a block that appears next is news, not a baseline (and robots.txt is fixed).
+    let blocked = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        change_kinds(&db.pool, blocked).await,
+        vec![
+            ("ai_issue_resolved".to_owned(), "notice".to_owned()),
+            ("ai_bot_blocked".to_owned(), "critical".to_owned())
+        ]
+    );
+    // With a good report newest again, the older ones go.
+    assert_eq!(report_count(&db.pool, site).await, 2);
+}
+
+#[tokio::test]
+async fn preferences_are_compared_with_the_newest_report_that_knew_them() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(
+        &db.pool,
+        site,
+        200,
+        "User-agent: *\nContent-Signal: ai-train=no\n",
+        None,
+    )
+    .await;
+    failed_robots_crawl(&db.pool, site).await;
+    // Changed while robots.txt was failing: still noticed, against the crawl before.
+    let changed = full_crawl(
+        &db.pool,
+        site,
+        200,
+        "User-agent: *\nContent-Signal: ai-train=yes\n",
+        None,
+    )
+    .await;
+    let (before, after): (String, String) = sqlx::query_as(
+        "SELECT before_value, after_value FROM changes \
+         WHERE crawl_id = $1 AND kind = 'ai_preferences_changed'",
+    )
+    .bind(changed)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert!(before.contains("ai-train=no"), "{before}");
+    assert!(after.contains("ai-train=yes"), "{after}");
+}
+
+#[tokio::test]
+async fn an_error_home_page_says_nothing_about_header_preferences() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let with_header = |home_status: u16| {
+        let mut out = crawl_of(200, ALLOW_ALL, None);
+        out.pages[0].status = home_status;
+        if home_status == 200 {
+            out.signals.home_headers =
+                vec![("content-signal".to_owned(), "ai-train=no".to_owned())];
+        }
+        out
+    };
+    finalize_out(&db.pool, site, &with_header(200)).await;
+    // The home page answers 503 without the header: unknown, not removed.
+    let down = finalize_out(&db.pool, site, &with_header(503)).await;
+    // And back: compared with the last crawl that read it, nothing changed.
+    let back = finalize_out(&db.pool, site, &with_header(200)).await;
+    for crawl in [down, back] {
+        assert!(
+            !change_kinds(&db.pool, crawl)
+                .await
+                .iter()
+                .any(|(k, _)| k == "ai_preferences_changed"),
+            "{crawl}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_widening_incident_is_announced_and_its_resolution_too() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    // The baseline: OAI-SearchBot blocked, quietly.
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(quiet_of(&db.pool, site, "bots_blocked").await);
+
+    // PerplexityBot is blocked too: same incident, same severity, but news.
+    let both = format!("{BLOCK_OAI}\nUser-agent: PerplexityBot\nDisallow: /\n");
+    let widened = full_crawl(&db.pool, site, 200, &both, None).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    let (kind, after): (String, String) =
+        sqlx::query_as("SELECT kind::text, after_value FROM changes WHERE crawl_id = $1")
+            .bind(widened)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(kind, "ai_bot_blocked");
+    assert_eq!(after, open[0].title);
+    assert!(after.contains("OAI-SearchBot and PerplexityBot"), "{after}");
+    assert!(!open[0].quiet, "announced, so no longer quiet");
+    assert_eq!(alert_jobs(&db.pool, widened).await, 1);
+
+    // One bot unblocked is not news; both unblocked is a resolution the owner hears of.
+    let narrowed = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(change_kinds(&db.pool, narrowed).await.is_empty());
+    let fixed = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    assert_eq!(
+        change_kinds(&db.pool, fixed).await,
+        vec![("ai_issue_resolved".to_owned(), "notice".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn a_quiet_incident_that_escalates_is_loud_from_then_on() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open[0].severity, Severity::Warning);
+    assert!(open[0].quiet);
+
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        change_kinds(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), "critical".to_owned())]
+    );
+    assert!(!quiet_of(&db.pool, site, "bots_blocked").await);
+    let fixed = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    assert_eq!(
+        change_kinds(&db.pool, fixed).await,
+        vec![("ai_issue_resolved".to_owned(), "notice".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn an_accepted_directive_resolves_its_incident_and_noindex_cannot_be_accepted() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, Some("nosnippet")).await;
+    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+
+    let accept = Intent {
+        accepted_directives: [DirectiveSlug::Nosnippet].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &accept).await.unwrap();
+    assert_eq!(geo::get_intent(&db.pool, site).await.unwrap(), accept);
+    assert_eq!(
+        geo::reevaluate_quietly(&db.pool, site).await.unwrap(),
+        (0, 1)
+    );
+    // The next crawl that still finds it opens nothing.
+    let again = full_crawl(&db.pool, site, 200, ALLOW_ALL, Some("nosnippet")).await;
+    assert!(change_kinds(&db.pool, again).await.is_empty());
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let noindex = Intent {
+        accepted_directives: [DirectiveSlug::Noindex].into(),
+        ..Intent::default()
+    };
+    assert!(matches!(
+        geo::set_intent(&db.pool, site, &noindex).await,
+        Err(geo::IntentError::Invalid(_))
+    ));
+    assert_eq!(geo::get_intent(&db.pool, site).await.unwrap(), accept);
+}
+
+#[tokio::test]
+async fn a_site_wide_noarchive_is_one_incident_naming_bing() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let second = full_crawl(&db.pool, site, 200, ALLOW_ALL, Some("noarchive")).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(
+        (open[0].kind, open[0].subject.as_str()),
+        (FindingKind::AnswersRestricted, "noarchive")
+    );
+    let engines: Vec<&str> = open[0].evidence["engines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["engine"].as_str().unwrap())
+        .collect();
+    assert_eq!(engines, ["bing"]);
+    assert_eq!(
+        change_kinds(&db.pool, second).await,
+        vec![("ai_answers_restricted".to_owned(), "critical".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn a_stale_worker_cannot_record_a_failed_crawl() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let mut out = crawl_of(503, "", None);
+    out.pages.clear();
+    let input = input_for(&out);
+
+    // Requeued and claimed by another worker, or already requeued.
+    let crawl = make_crawl(&db.pool, site, "manual", "running").await;
+    sqlx::query("UPDATE crawls SET worker_id = 'worker-b' WHERE id = $1")
+        .bind(crawl)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let queued = make_crawl(&db.pool, site, "manual", "queued").await;
+    for id in [crawl, queued] {
+        let result = geo::record_failed_crawl(&db.pool, site, id, WORKER, &input).await;
+        assert!(
+            matches!(result, Err(sqlx::Error::RowNotFound)),
+            "{result:?}"
+        );
+        assert!(change_kinds(&db.pool, id).await.is_empty());
+        assert_eq!(alert_jobs(&db.pool, id).await, 0);
+    }
+    assert_eq!(report_count(&db.pool, site).await, 1);
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

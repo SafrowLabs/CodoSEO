@@ -6,7 +6,7 @@ AI access monitoring answers one question: can the AI crawlers and answer engine
 
 ## What is checked
 
-**robots.txt, per bot.** For each bot in the [registry](#the-public-registry) (OpenAI, Anthropic, Perplexity, Google, Apple, Meta, Amazon, Microsoft, DuckDuckGo, Mistral, Common Crawl and more) CodoSEO reads the group of your robots.txt that applies to its product token, applies the longest-match rule the way the operators describe, and records whether the home page and the other important pages are allowed, with the winning rule and its line. Important pages are the home page, the 20 most linked pages and any you star, up to 60. Control tokens such as `Google-Extended` never make requests but still decide what the operator may do, so they are listed too. A robots.txt that answers 5xx or 429 is its own finding: crawlers are told to stay away until it recovers.
+**robots.txt, per bot.** For each bot in the [registry](#the-public-registry) (OpenAI, Anthropic, Perplexity, Google, Apple, Meta, Amazon, Microsoft, DuckDuckGo, Mistral, Common Crawl and more) CodoSEO reads the group of your robots.txt that applies to its product token, applies the longest-match rule the way the operators describe, and records whether the home page and the other important pages are allowed, with the winning rule and its line. Important pages are the home page, the 20 most linked pages and any you star, up to 60. Control tokens such as `Google-Extended` never make requests but still decide what the operator may do, so they are listed too. Applebot, which Apple says follows Googlebot's rules when no group names it, is read that way. A robots.txt that answers 5xx or 429 is its own finding: crawlers are told to stay away until it recovers. One whose redirects never reach a file counts as missing, as RFC 9309 allows.
 
 **Page-level controls, per engine.** For each of ten engines (Google Search, AI Overviews and AI Mode, Bing and Copilot, Apple, Amazon, ChatGPT, Claude, Perplexity, Meta AI, DuckDuckGo, Mistral) CodoSEO reads the controls that engine documents on each important page: the robots meta tag, `X-Robots-Tag` and `data-nosnippet`. Only controls the operator documents count, and only for the engines that honour them: `noarchive` removes a page from Copilot's answers, does nothing to Google's, and for Amazon means only "do not use for model training", so it is not counted there. A page is *eligible*, *limited* (a snippet cap, or a large share of its text under `data-nosnippet`) or *excluded*.
 
@@ -50,7 +50,9 @@ The web app turns findings into incidents that open when a crawl first sees a pr
 
 They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them.
 
-**The first check is quiet.** The incidents the first report opens are your baseline: they are listed but write no changes and send no alerts, so turning the feature on does not fire a storm. Changing your intent re-evaluates quietly the same way.
+**The first check is quiet.** The incidents opened by the first report that could judge them are your baseline: they are listed but write no changes and send no alerts, so turning the feature on (or a site whose first crawls failed) does not fire a storm. Changing your intent re-evaluates quietly the same way. An open incident that gets worse, or names another bot or engine, writes a change again.
+
+**A failing robots.txt is checked twice.** A crawl stopped by a robots.txt that answers 5xx or 429 is retried 15 minutes later, like any failed crawl; the incident is recorded only when the retry fails too, so a short blip says nothing. Its alert then stands in for the generic "couldn't reach your site" one.
 
 **Mark intended** on an incident says "this is what I want": it sets the matching intent (for example, block this bot), re-evaluates quietly, and the incident resolves as a choice instead of a fix.
 
@@ -121,7 +123,7 @@ curl -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/
   "declared": {
     "content_signals": [], "content_usage": [],
     "headers": { "content_signal": [], "content_usage": [], "tdm_reservation": null, "tdm_policy": null },
-    "tdm_meta": { "reservation": null, "policy": null }, "tdmrep": null
+    "tdm_meta": { "reservation": null, "policy": null }, "tdmrep": null, "home_read": true
   }
 }
 ```
