@@ -505,3 +505,34 @@ fn evaluated_kinds_follow_what_the_report_can_see() {
         ]
     );
 }
+
+#[test]
+fn home_page_severity_counts_only_excluding_engines() {
+    // Google excludes one inner page; only Bing (which limits) is affected on the home page.
+    let mut out = site(10, |p| p);
+    out.pages[0]
+        .fields
+        .ai
+        .bot_meta
+        .push(("bingbot".to_owned(), "nosnippet".to_owned()));
+    out.pages[5]
+        .fields
+        .ai
+        .bot_meta
+        .push(("googlebot".to_owned(), "nosnippet".to_owned()));
+    let f = run(&out, &Intent::default());
+    assert_eq!(f.len(), 1);
+    assert_eq!(f[0].subject, "nosnippet");
+    assert_eq!(f[0].severity, Severity::Warning);
+
+    // The home page excluded in Google is Critical.
+    let mut out = site(10, |p| p);
+    out.pages[0]
+        .fields
+        .ai
+        .bot_meta
+        .push(("googlebot".to_owned(), "nosnippet".to_owned()));
+    let f = run(&out, &Intent::default());
+    assert_eq!(f.len(), 1);
+    assert_eq!(f[0].severity, Severity::Critical);
+}
