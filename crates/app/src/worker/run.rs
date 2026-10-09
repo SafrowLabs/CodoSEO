@@ -410,7 +410,11 @@ async fn record_failed_robots(
         return;
     }
     let Some(robots) = &out.robots else { return };
-    if availability(Some(robots.status)) != RobotsAvailability::Unavailable {
+    // Only what crawlers must read as "everything is off limits": 5xx and 429. A redirect that
+    // led nowhere is not a robots.txt failure.
+    if availability(Some(robots.status)) != RobotsAvailability::Unavailable
+        || !(robots.status >= 500 || robots.status == 429)
+    {
         return;
     }
     let result = async {

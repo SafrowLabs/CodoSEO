@@ -657,3 +657,41 @@ async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_stale_workers_finalize_leaves_no_geo_rows() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+
+    let crawl = make_crawl(&db.pool, site, "manual", "running").await;
+    sqlx::query("UPDATE crawls SET worker_id = 'worker-b' WHERE id = $1")
+        .bind(crawl)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let out = crawl_of(200, BLOCK_OAI, None);
+    let input = input_for(&out, &Intent::default());
+    let result = finalize(
+        &db.pool,
+        crawl,
+        site,
+        WORKER,
+        &out,
+        &check_report(),
+        &[],
+        Some(&input),
+    )
+    .await;
+    assert!(result.is_err());
+
+    assert_eq!(report_count(&db.pool, site).await, 1);
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(change_kinds(&db.pool, crawl).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, crawl).await, 0);
+}
