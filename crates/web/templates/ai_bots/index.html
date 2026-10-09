@@ -1,0 +1,64 @@
+{% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/seo.html" as seo -%}
+{% block title %}AI bot registry — CodoSEO{% endblock %}
+{% block robots %}{% if cloud %}<meta name="robots" content="index, follow, max-image-preview:large">{% else %}<meta name="robots" content="noindex, nofollow">{% endif %}{% endblock %}
+{% block head %}
+<meta name="description" content="Every documented AI crawler, fetcher and control token: who runs it, what it is for, whether it follows robots.txt, and where the operator says so. Free to reuse under CC0.">
+{% if cloud %}{% call seo::social(base, "/ai-bots", "AI bot registry — CodoSEO", "Every documented AI crawler, fetcher and control token, with sources. Free to reuse under CC0.") %}{% endcall %}{% endif %}
+<link rel="alternate" type="application/json" href="/ai-bots.json" title="AI bot registry (JSON)">
+<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% include "partials/analytics.html" %}
+{% endblock %}
+{% block body %}
+<header class="l-top l-wrap">
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
+  <nav class="l-nav"><a href="/ai-bots.json">JSON</a><a class="btn btn-sm" href="/">{% if cloud %}Audit your site{% else %}Open CodoSEO{% endif %}</a></nav>
+</header>
+<main class="l-wrap reg-page">
+  <p class="l-eyebrow">Open data · {{ license }}</p>
+  <h1 class="q-title">AI bot registry</h1>
+  <p class="reg-intro">The robots.txt tokens AI companies document for their crawlers, fetchers and control tokens: who runs each one, what it feeds, and whether the operator says it follows robots.txt. Every entry links to the operator's own page and says when it was last checked. CodoSEO uses this list to tell site owners which AI bots can reach their pages.</p>
+
+  <div class="reg-tools">
+    <div class="reg-search">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input class="input" type="search" placeholder="Filter by bot, company or purpose" aria-label="Filter bots" autocomplete="off" spellcheck="false" data-search-input data-filter="#reg-table" data-filter-empty="#reg-empty" data-filter-count="#reg-count">
+    </div>
+    <span class="reg-count" id="reg-count" aria-live="polite" data-total="{{ total }} bots from {{ operators }} operators">{{ total }} bots from {{ operators }} operators</span>
+    <span class="grow"></span>
+    <a class="btn btn-sm" href="/ai-bots.json"><svg class="icon"><use href="#i-download"/></svg>ai-bots.json</a>
+  </div>
+
+  <div class="reg-card">
+    <table class="reg-table" id="reg-table">
+      <colgroup><col class="reg-c-token"><col><col class="reg-c-purpose"><col class="reg-c-honours"><col class="reg-c-ip"><col class="reg-c-source"><col class="reg-c-date"></colgroup>
+      <thead>
+        <tr><th scope="col">Token</th><th scope="col">Product</th><th scope="col">Purpose</th><th scope="col">Follows robots.txt</th><th scope="col">IP list</th><th scope="col">Source</th><th scope="col">Reviewed</th></tr>
+      </thead>
+      {% for g in groups %}
+      <tbody>
+        <tr class="reg-op"><th colspan="7" scope="colgroup">{{ g.operator }}<span>{{ g.bots.len() }}</span></th></tr>
+        {% for b in g.bots %}
+        <tr data-search="{{ b.haystack }}">
+          <th scope="row" class="reg-token-cell"><code class="reg-token">{{ b.token }}</code>{% if b.control %}<span class="tag" title="Never fetches pages: a robots.txt token that controls how content is used">control token</span>{% endif %}</th>
+          <td data-label="Product" class="reg-product"><span>{{ b.product }}</span><span class="reg-notes">{{ b.notes }}</span></td>
+          <td data-label="Purpose"><span class="badge {{ b.purpose_class }}">{{ b.purpose }}</span></td>
+          <td data-label="Follows robots.txt"><span class="{{ b.honours_class }}">{{ b.honours }}</span></td>
+          <td data-label="IP list">{% if let Some(ip) = b.ip_ranges_url %}<a href="{{ ip }}" rel="noopener">JSON</a>{% else %}<span class="c-ghost">—</span>{% endif %}</td>
+          <td data-label="Source"><a href="{{ b.source_url }}" rel="noopener" title="{{ b.source_url }}">{{ b.source_host }}</a></td>
+          <td data-label="Reviewed" class="mono reg-date">{{ b.last_reviewed }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endfor %}
+    </table>
+    <p class="reg-empty" id="reg-empty" hidden>No bots match. Try a company name, or a purpose such as “training”.</p>
+  </div>
+
+  <footer class="reg-foot">
+    <p>Version {{ version }}, updated {{ updated }}. The data is dedicated to the public domain under <a href="https://creativecommons.org/publicdomain/zero/1.0/" rel="license noopener">{{ license }}</a>: copy it, change it and use it for anything, no attribution needed. Get it as <a href="/ai-bots.json">/ai-bots.json</a>, served with open CORS and cached for an hour.</p>
+    <p>Something missing or out of date? Open an issue on <a href="https://github.com/SafrowLabs/CodoSEO/issues" rel="noopener">GitHub</a> with a link to the operator's page.</p>
+  </footer>
+</main>
+{% endblock %}

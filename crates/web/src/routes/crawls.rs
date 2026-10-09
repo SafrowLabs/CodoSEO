@@ -2,8 +2,6 @@
 //! manual allowance and the one-crawl-at-a-time rule; and `/s/{site}/status`, the sidebar
 //! crawler card's poll, which announces a crawl that just finished.
 
-use std::fmt::Write as _;
-
 use askama::Template;
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -25,7 +23,7 @@ use crate::crawl_policy::{allowance_phrase, limit_message, manual_priority, plan
 use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{CrawlerView, Screen, Shell, crawler_for};
-use crate::render::{Hx, html};
+use crate::render::{Hx, ascii_json, html};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -231,24 +229,6 @@ fn hx_trigger(events: &serde_json::Value) -> (HeaderName, HeaderValue) {
         HeaderValue::from_str(&ascii_json(events))
             .unwrap_or_else(|_| HeaderValue::from_static("{}")),
     )
-}
-
-/// JSON with every non-ASCII character written as a JSON escape (`·` as U+00B7's). Browsers
-/// read header values as Latin-1, so raw UTF-8 in a toast would arrive garbled.
-fn ascii_json(v: &serde_json::Value) -> String {
-    let raw = v.to_string();
-    let mut out = String::with_capacity(raw.len());
-    for c in raw.chars() {
-        if c.is_ascii() {
-            out.push(c);
-        } else {
-            let mut units = [0u16; 2];
-            for unit in c.encode_utf16(&mut units) {
-                let _ = write!(out, "\\u{unit:04x}");
-            }
-        }
-    }
-    out
 }
 
 /// The toast for a crawl that just ended: `Crawl #49 finished · health 86/100`, or

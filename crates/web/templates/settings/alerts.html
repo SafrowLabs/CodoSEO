@@ -52,6 +52,7 @@
           <thead><tr><th scope="col">Change</th>{% for col in columns %}<th scope="col" class="{% if col.off %}is-off{% endif %}">{{ col.label }}</th>{% endfor %}</tr></thead>
           <tbody>
             {% for row in site.rows %}
+            {% if let Some(name) = row.section %}<tr class="rules-section"><th scope="colgroup" colspan="{{ columns.len() + 1 }}">{{ name }}</th></tr>{% endif %}
             <tr>
               <th scope="row">{{ row.label }}{% if !row.note.is_empty() %}<span class="hint"> {{ row.note }}</span>{% endif %}</th>
               {% for cell in row.cells %}

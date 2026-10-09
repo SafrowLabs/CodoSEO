@@ -823,6 +823,7 @@ dependencies = [
  "codoseo-checks",
  "codoseo-core",
  "codoseo-crawler",
+ "codoseo-geo",
  "codoseo-mcp",
  "codoseo-notify",
  "codoseo-store",

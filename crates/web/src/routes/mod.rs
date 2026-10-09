@@ -2,6 +2,8 @@
 
 pub mod account;
 pub mod admin;
+pub mod ai_access;
+pub mod ai_bots;
 pub mod api;
 pub mod audit;
 pub mod billing;
@@ -40,6 +42,8 @@ pub fn router() -> Router<AppState> {
         .merge(explorer::routes())
         .merge(audit::routes())
         .merge(changes::routes())
+        .merge(ai_access::routes())
+        .merge(ai_bots::routes())
         .merge(export::routes())
         .merge(search::routes())
         .merge(quick::routes())

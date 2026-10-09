@@ -1,0 +1,56 @@
+{#- One open incident on the AI access screen. Expects `i: IncidentView` and `base`. -#}
+<article class="card aia-issue is-{{ i.severity }}" id="issue-{{ i.id }}" aria-labelledby="issue-{{ i.id }}-title">
+  <div class="aia-issue-head">
+    <span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span>
+    <h3 class="aia-issue-title" id="issue-{{ i.id }}-title">{{ i.title }}</h3>
+    {% if let Some(confirm) = i.intend %}
+    <form class="aia-intend" method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/intended" hx-confirm="{{ confirm }}">
+      <button class="btn btn-ghost btn-sm" type="submit" title="Change your intent so this is expected"><svg class="icon"><use href="#i-check"/></svg>Mark intended</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="aia-summary">{% for s in i.summary %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</p>
+
+  <div class="aia-evidence">
+    {% if let Some(st) = i.status_line %}<div class="aia-rule">{{ st }}</div>{% endif %}
+    {% for g in i.bots %}
+    <div class="aia-ev">
+      <div class="aia-ev-line">
+        {% for b in g.bots %}<span class="aia-bot">{{ b.token }}<span> · {{ b.operator }}</span>{% if b.control %}<span class="aia-bot-tag" title="Never fetches pages: a robots.txt token that controls how content is used">control token</span>{% endif %}</span>{% endfor %}
+        <span class="aia-ev-detail">{{ g.detail }}</span>
+      </div>
+      {% if let Some(rule) = g.rule %}<div class="aia-rule">{{ rule }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% if !i.engines.is_empty() %}
+    <div class="aia-ev-engines">
+      {% for e in i.engines %}
+      <span class="aia-engine">{{ e.name }}</span>
+      <span><span class="badge {{ e.effect_class }}">{{ e.effect }}</span></span>
+      <span class="aia-ev-detail">{{ e.detail }}{% if !e.site.is_empty() %} · {{ e.site }}{% endif %}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if let Some(fix) = i.fix %}
+    <div class="aia-fix">
+      <div class="aia-fix-head"><span>Add to robots.txt</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ fix }}" aria-label="Copy the robots.txt lines"><svg class="icon"><use href="#i-copy"/></svg>Copy</button></div>
+      <pre class="aia-snippet">{{ fix }}</pre>
+    </div>
+    {% endif %}
+    {% if !i.urls.is_empty() %}
+    <div class="aia-urls">
+      <span class="aia-urls-label">Pages</span>
+      {% for u in i.urls %}{% if let Some(h) = u.href %}<a class="url" href="{{ h }}">{{ u.path }}</a>{% else %}<span class="mono aia-path">{{ u.path }}</span>{% endif %}{% endfor %}
+      {% if i.urls_more > 0 %}<span class="faint">+{{ i.urls_more }} more</span>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="aia-meta">
+    <span title="{{ i.opened_full }}">Opened {{ i.opened }}</span>
+    <span title="{{ i.last_seen_full }}">Last seen {{ i.last_seen }}</span>
+    {% if let Some((label, tip)) = i.quiet %}<span class="chip" title="{{ tip }}">{{ label }}</span>{% endif %}
+    <span class="aia-grade" title="Evidence grade A: documented by the operator" aria-label="Evidence grade A: documented by the operator">A</span>
+    {% if !i.sources.is_empty() %}<span class="aia-sources">Sources: {% for s in i.sources %}<a href="{{ s.href }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+  </div>
+</article>

@@ -219,6 +219,21 @@ where
     )
 }
 
+/// When each of the site's stored reports was written, by crawl. An incident opened in the same
+/// transaction as its crawl's report (the same instant) was opened by that crawl; a quiet one
+/// opened later came from an intent change.
+pub async fn report_times(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<HashMap<Uuid, OffsetDateTime>, sqlx::Error> {
+    let rows: Vec<(Uuid, OffsetDateTime)> =
+        sqlx::query_as("SELECT crawl_id, created_at FROM ai_reports WHERE site_id = $1")
+            .bind(site_id)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().collect())
+}
+
 /// The site's unresolved incidents, most severe first.
 pub async fn open_incidents(pool: &PgPool, site_id: Uuid) -> Result<Vec<Incident>, sqlx::Error> {
     let rows: Vec<IncidentRow> = sqlx::query_as(&format!(

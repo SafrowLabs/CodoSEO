@@ -975,3 +975,236 @@ body.solo { overflow: auto; }
   .site-pick { flex-wrap: wrap; }
   .site-pick .faint { margin-left: 30px; flex-basis: 100%; }
 }
+
+/* ── AI access ──────────────────────────────────────── */
+
+.aia-head .aia-checked { font-size: 12.5px; color: var(--muted-2); white-space: nowrap; }
+.aia-head .aia-checked a { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--ghost-2); text-underline-offset: 2px; }
+.aia-head .aia-checked a:hover { text-decoration-color: currentColor; }
+.aia-banner { margin-bottom: 16px; }
+.aia-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+
+/* Tiles: value with its "/N", and a line of context under it. */
+.aia-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.aia-tiles .tile:last-child { border-right: 0; }
+.aia-of { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; color: var(--faint-2); margin-left: 3px; }
+.aia-tile-sub { font-size: 12px; color: var(--faint-2); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.aia-section { margin-top: 20px; }
+.aia-section-head { display: flex; align-items: center; gap: 8px; margin: 0 2px 10px; }
+.aia-section-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.aia-clear { padding: 40px 24px; }
+.aia-clear p { max-width: 480px; }
+
+/* Open issues: one card each, the left edge in the severity's colour. */
+.aia-issues { gap: 12px; }
+.aia-issue { position: relative; overflow: hidden; padding: 16px 18px 14px 21px; }
+.aia-issue::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--ghost); }
+.aia-issue.is-critical::before { background: var(--err); }
+.aia-issue.is-warning::before { background: var(--warn-bar); }
+.aia-issue-head { display: flex; align-items: flex-start; gap: 10px; }
+.aia-issue-head .badge { margin-top: 1px; }
+.aia-issue-title { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
+.aia-intend { flex: none; margin: -4px -6px 0 0; }
+.aia-summary { margin-top: 6px; color: var(--muted); line-height: 1.55; max-width: 84ch; text-wrap: pretty; }
+.aia-summary code, .aia-rule, .aia-snippet { font-family: var(--mono); font-feature-settings: "zero"; }
+.aia-summary code { font-size: 12px; color: var(--ink-2); background: var(--surface-sunk); border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere; }
+.aia-evidence { display: grid; gap: 8px; margin-top: 12px; }
+.aia-evidence:empty { display: none; }
+.aia-ev { display: grid; gap: 5px; }
+.aia-ev-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; min-width: 0; }
+.aia-ev-detail { color: var(--muted-2); font-size: 12.5px; }
+.aia-bot { font: 500 12px var(--mono); color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+.aia-bot span { font: 400 12px var(--font); color: var(--faint-2); }
+.aia-engine { font-weight: 500; }
+.aia-bot .aia-bot-tag { margin-left: 6px; font: 500 9px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+.aia-rule { justify-self: start; max-width: 100%; font-size: 12px; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 6px; padding: 5px 10px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
+.aia-ev-engines { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 7px 12px; align-items: center; font-size: 13px; }
+.aia-fix { border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+.aia-fix-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 10px; background: var(--surface-2); border-bottom: 1px solid var(--line-soft); font-size: 12px; color: var(--muted-2); }
+.aia-fix-head .btn { height: 24px; padding: 0 8px; font-size: 12px; gap: 5px; }
+.aia-fix-head .icon { width: 13px; height: 13px; }
+.aia-snippet { margin: 0; padding: 9px 12px; font-size: 12.5px; line-height: 1.6; color: var(--ink); background: var(--panel); white-space: pre; overflow-x: auto; }
+.aia-urls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12.5px; min-width: 0; }
+.aia-urls .url { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aia-urls-label { color: var(--faint-2); font-size: 12px; }
+.aia-path { font-size: 12.5px; color: var(--muted-2); }
+.aia-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-faint); font-size: 12px; color: var(--faint-2); }
+.aia-meta .chip { font-size: 11px; padding: 2px 7px; }
+.aia-grade { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; font: 600 10.5px var(--mono); color: var(--ok); background: var(--ok-bg); cursor: help; }
+.aia-sources a { color: var(--link); }
+.aia-sources a:hover { text-decoration: underline; }
+
+/* Stances: allow is green, block is solid ink, no preference is a dashed outline. */
+.aia-allow { color: var(--ok); background: var(--ok-bg); }
+.aia-block { color: var(--ink-2); background: var(--surface-sunk); box-shadow: inset 0 0 0 1px var(--line); }
+.aia-any { color: var(--muted-2); background: transparent; border: 1px dashed var(--ghost-2); padding: 1px 6px; }
+
+/* Tables: the bots and the engines. */
+.aia-scroll { overflow-x: auto; scrollbar-width: thin; }
+.aia-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.aia-table th, .aia-table td { padding: 9px 12px; border-bottom: 1px solid var(--line-faint); text-align: left; vertical-align: middle; }
+.aia-table thead th { font-size: 11px; font-weight: 500; color: var(--faint-2); text-transform: uppercase; letter-spacing: 0.05em; background: var(--surface-2); white-space: nowrap; border-bottom-color: var(--line-soft); }
+.aia-table thead th.aia-span { text-align: center; border-bottom: 1px solid var(--line-soft); padding-bottom: 5px; }
+.aia-table thead tr + tr th { padding-top: 5px; }
+.aia-table th:first-child, .aia-table td:first-child { padding-left: 18px; }
+.aia-table th:last-child, .aia-table td:last-child { padding-right: 18px; }
+.aia-table tbody tr:last-child > * { border-bottom: 0; }
+.aia-table tbody + tbody .aia-group th { border-top: 1px solid var(--line-soft); }
+.aia-table .r { text-align: right; }
+.aia-table .num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }
+.aia-table tbody tr:not(.aia-group):hover { background: var(--surface-hover); }
+.aia-group th { padding-top: 14px; padding-bottom: 7px; background: var(--surface); font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--line-soft); }
+.aia-group-name { margin-right: 10px; }
+.aia-group-meta { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; color: var(--muted-2); }
+.aia-dot { color: var(--ghost); }
+.aia-bot-cell { font-weight: 400; min-width: 200px; }
+.aia-token { font: 500 12.5px var(--mono); color: var(--ink); }
+.aia-bot-cell .tag { margin-left: 6px; vertical-align: 1px; }
+.aia-sub { display: block; font-size: 12px; color: var(--faint-2); margin-top: 1px; }
+.aia-bots-table td:nth-child(3), .aia-bots-table td:nth-child(5) { white-space: nowrap; }
+.aia-inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.aia-chips { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; }
+.aia-lines { display: grid; gap: 2px; font-size: 12.5px; color: var(--muted); }
+.aia-note { color: var(--faint-2); font-size: 12.5px; font-style: italic; }
+.aia-engines-table .aia-bot-cell { min-width: 230px; }
+
+.aia-callout { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid color-mix(in oklab, var(--warn-bar) 55%, var(--line)); border-radius: var(--r); background: var(--warn-bg); color: var(--ink-2); }
+.aia-callout .icon { color: var(--warn); margin-top: 2px; }
+.aia-callout b { display: block; font-weight: 600; color: var(--ink); }
+.aia-callout p { margin-top: 2px; font-size: 13px; color: var(--ink-3); }
+
+/* Declared preferences, important pages, recently resolved. */
+.aia-cols { margin-top: 20px; }
+.aia-declared-note { display: flex; align-items: center; gap: 8px; padding: 9px 18px; font-size: 12.5px; color: var(--muted-2); background: var(--surface-2); border-bottom: 1px solid var(--line-soft); }
+.aia-declared-note .icon { width: 14px; height: 14px; color: var(--faint); }
+.aia-none { padding: 18px; }
+.aia-none b { font-weight: 600; }
+.aia-none p { margin-top: 4px; font-size: 13px; color: var(--muted-2); max-width: 60ch; }
+.aia-decl { display: grid; gap: 7px; padding: 12px 18px; border-bottom: 1px solid var(--line-faint); }
+.aia-decl:last-child { border-bottom: 0; }
+.aia-decl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.aia-decl-head b { font: 500 12.5px var(--mono); }
+.aia-decl-head span { font-size: 12px; color: var(--faint-2); }
+.aia-kv { font: 12px var(--mono); padding: 2px 8px; border-radius: 5px; color: var(--ink-2); background: var(--surface-sunk); white-space: nowrap; }
+.aia-kv-yes { color: var(--ok); background: var(--ok-bg); }
+.aia-kv-no { color: var(--ink-2); background: var(--surface-sunk); box-shadow: inset 0 0 0 1px var(--line); }
+.aia-kv-unknown { color: var(--muted-2); background: transparent; border: 1px dashed var(--ghost-2); padding: 1px 7px; cursor: help; }
+.aia-details > summary { list-style: none; cursor: pointer; border-bottom: 0; }
+.aia-details > summary::-webkit-details-marker { display: none; }
+.aia-details > summary:hover { background: var(--surface-hover); border-radius: var(--r-lg); }
+.aia-details[open] > summary { border-bottom: 1px solid var(--line-soft); border-radius: var(--r-lg) var(--r-lg) 0 0; }
+.aia-details[open] > summary .chev { transform: rotate(180deg); }
+.aia-details .card-aside { margin-right: 2px; }
+.aia-details-note { padding: 10px 18px 4px; font-size: 12px; color: var(--faint-2); }
+.aia-imp { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line-faint); }
+.aia-imp:last-child { border-bottom: 0; }
+.aia-reason { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.aia-reason .icon { width: 12px; height: 12px; }
+.aia-pad { padding: 18px; }
+.aia-res { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line-faint); font-size: 13px; }
+.aia-res:last-child { border-bottom: 0; }
+.aia-res-title { min-width: 0; color: var(--ink-2); }
+.aia-res-meta { display: inline-flex; align-items: center; gap: 8px; flex: none; font-size: 12px; }
+
+/* The intent form: one card per purpose, a segmented control of three radios. */
+.aia-back .icon { transform: rotate(180deg); }
+.aia-back { margin-left: -6px; }
+.aia-intent .stack { gap: 12px; }
+.aia-purpose-main { display: flex; align-items: center; justify-content: space-between; gap: 16px 24px; padding: 16px 18px; flex-wrap: wrap; }
+.aia-purpose-text { flex: 1 1 260px; min-width: 0; }
+.aia-purpose-text p { margin-top: 3px; font-size: 13px; color: var(--muted-2); }
+.aia-seg { display: inline-flex; flex: none; gap: 2px; margin: 0; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-sunk); min-width: 0; }
+.aia-seg input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.aia-seg label { padding: 5px 13px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; white-space: nowrap; text-align: center; transition: background 0.12s, color 0.12s, box-shadow 0.12s; }
+.aia-seg label:hover { color: var(--ink); }
+.aia-seg input:checked + label { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
+.aia-seg input:checked + label[data-stance="allow"] { color: var(--ok); }
+.aia-seg input:focus-visible + label { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.aia-overrides { border-top: 1px solid var(--line-soft); }
+.aia-overrides > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 18px; font-size: 13px; color: var(--ink-2); cursor: pointer; border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.aia-overrides > summary::-webkit-details-marker { display: none; }
+.aia-overrides > summary:hover { background: var(--surface-hover); }
+.aia-overrides > summary .chev { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform 0.2s var(--ease); }
+.aia-overrides[open] > summary .chev { transform: none; }
+.aia-overrides[open] > summary { border-radius: 0; }
+.aia-default { font-size: 12px; }
+.aia-picks { border-top: 1px solid var(--line-faint); }
+.aia-pick { display: grid; grid-template-columns: minmax(0, 1fr) 168px; gap: 14px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line-faint); }
+.aia-pick:last-child { border-bottom: 0; }
+.aia-pick label { min-width: 0; cursor: pointer; }
+.aia-pick .tag { margin-left: 6px; vertical-align: 1px; }
+.aia-pick.is-set { box-shadow: inset 3px 0 0 var(--accent); }
+.aia-pick .tag.is-set { color: var(--warn); background: var(--warn-bg); border-color: color-mix(in oklab, var(--warn-bar) 45%, var(--line)); }
+.aia-pick .select { height: 32px; font-size: 13px; }
+.aia-savebar {
+  position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 10px 12px;
+  background: color-mix(in oklab, var(--surface) 92%, transparent); backdrop-filter: blur(8px);
+  border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-md);
+}
+
+/* Hover tooltips mean nothing on a touch screen, and one at the edge would widen the page. */
+@media (max-width: 767px) {
+  [data-tip]::after { display: none; }
+}
+
+/* The changes screen: AI access rows link there, and their values wrap. */
+.change-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--link); white-space: nowrap; }
+.change-link .icon { width: 13px; height: 13px; }
+.change-link:hover { text-decoration: underline; }
+.diff.diff-wrap > div { white-space: normal; overflow-wrap: anywhere; font-family: var(--font); font-size: 12.5px; }
+.diff .after.resolved { background: var(--ok-bg); color: var(--ok); }
+.rules .rules-section th { text-align: left; padding: 14px 0 6px; font: 500 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+.rules tbody tr.rules-section:first-child th { padding-top: 6px; }
+
+@media (max-width: 1080px) {
+  .aia-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aia-tiles .tile:nth-child(2n) { border-right: 0; }
+  .aia-tiles .tile:nth-child(-n + 2) { border-bottom: 1px solid var(--line-faint); }
+}
+@media (max-width: 640px) {
+  .aia-head .aia-checked { order: 3; flex-basis: 100%; }
+  .aia .card-head { flex-wrap: wrap; row-gap: 2px; }
+  .aia .card-title { white-space: nowrap; }
+  .aia-head .grow { display: none; }
+  .aia-head .btn { margin-left: auto; }
+  .aia-tile-sub { white-space: normal; }
+  .aia-tiles .tile { padding: 14px; }
+  .aia-tiles .tile-value { font-size: 22px; }
+  .aia-issue { padding: 14px 14px 12px 17px; }
+  .aia-issue-head { flex-wrap: wrap; }
+  .aia-issue-title { flex-basis: calc(100% - 90px); }
+  .aia-intend { order: 3; margin: 2px 0 0 -10px; flex-basis: 100%; }
+  /* Tables become compact rows: the first cell is the row's title (with the status on its
+     right), the other cells follow inline, each with its short label. */
+  .aia-scroll { overflow: visible; }
+  .aia-table, .aia-table tbody { display: block; width: 100%; }
+  .aia-table thead { display: none; }
+  .aia-table tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 14px; padding: 10px 16px; border-bottom: 1px solid var(--line-faint); }
+  .aia-table tbody tr:last-child { border-bottom: 0; }
+  .aia-table th, .aia-table td, .aia-table th:first-child, .aia-table td:first-child, .aia-table th:last-child, .aia-table td:last-child { display: block; padding: 0; border: 0; text-align: left; }
+  .aia-table td { font-size: 12.5px; }
+  .aia-table td[data-label]::before { content: attr(data-label); margin-right: 5px; font: 12px var(--font); color: var(--faint-2); }
+  .aia-table .aia-bot-cell { flex: 1 1 calc(100% - 110px); min-width: 0; margin-bottom: 3px; }
+  .aia-table .aia-status { order: -1; flex: none; margin-left: auto; }
+  .aia-table .aia-bot-cell { order: -2; }
+  .aia-table .aia-wide, .aia-engines-table .aia-bot-cell { flex-basis: 100%; }
+  .aia-table td.aia-note { margin-top: 2px; }
+  .aia-table tr.aia-group { display: block; padding: 10px 16px 8px; background: var(--surface-2); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+  .aia-table .aia-group th, .aia-table tbody + tbody .aia-group th { padding: 0; background: transparent; border: 0; }
+  .aia-table tbody:first-of-type tr.aia-group { border-top: 0; }
+  .aia-group-meta { display: flex; margin-top: 4px; }
+  .aia-table td .aia-lines { display: inline-grid; justify-items: start; vertical-align: top; }
+  .aia-ev-engines { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .aia-ev-engines .aia-ev-detail { grid-column: 1 / -1; margin-bottom: 4px; }
+  .aia-purpose-main { padding: 14px 16px; }
+  .aia-seg { display: flex; width: 100%; }
+  .aia-seg label { flex: 1; padding: 6px 8px; }
+  .aia-pick { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 16px; }
+  .aia-overrides > summary { padding: 10px 16px; }
+  .aia-savebar { flex-wrap: wrap; }
+  .aia-imp { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 16px; }
+  .aia-imp .aia-reason { display: none; }
+  .aia-res { flex-direction: column; gap: 4px; padding: 10px 16px; }
+  .aia-decl { padding: 12px 16px; }
+}

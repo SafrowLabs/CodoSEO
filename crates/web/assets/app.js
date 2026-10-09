@@ -217,6 +217,8 @@
         { label: "URL explorer", href: `${base}/explorer`, keys: "G E", icon: "i-explorer" },
         { label: "Site audit", href: `${base}/audit`, keys: "G A", icon: "i-audit" },
         { label: "Changes", href: `${base}/changes`, keys: "G C", icon: "i-changes" },
+        { label: "AI access", href: `${base}/ai-access`, keys: "G I", icon: "i-ai" },
+        { label: "AI access intent", href: `${base}/ai-access/intent`, icon: "i-settings" },
         { label: "Crawl history", href: `${base}/crawls`, keys: "G H", icon: "i-crawls" },
         { label: "Run crawl", run: () => $("#run-crawl") && $("#run-crawl").click(), icon: "i-play" },
         { label: "Export CSV", href: `${base}/export.csv`, download: true, icon: "i-download" },
@@ -229,6 +231,7 @@
       { label: "Toggle sidebar", run: toggleRail, keys: "[", icon: "i-sidebar" },
       { label: "Keyboard shortcuts", run: () => openSheet(), keys: "?", icon: "i-keyboard" },
       { label: "Account settings", href: "/account", keys: "G S", icon: "i-settings" },
+      { label: "AI bot registry", href: "/ai-bots", icon: "i-ai" },
     );
     return list;
   }
@@ -321,7 +324,7 @@
     el = document.createElement("div");
     el.id = "keyhint";
     el.className = "keyhint";
-    el.innerHTML = "<kbd>G</kbd> then <kbd>E</kbd> explorer · <kbd>A</kbd> audit · <kbd>C</kbd> changes · <kbd>H</kbd> crawls";
+    el.innerHTML = "<kbd>G</kbd> then <kbd>E</kbd> explorer · <kbd>A</kbd> audit · <kbd>C</kbd> changes · <kbd>I</kbd> AI access · <kbd>H</kbd> crawls";
     document.body.appendChild(el);
   }
   const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -348,7 +351,7 @@
       pendingG = false;
       keyHint(false);
       const base = siteBase();
-      const map = { e: "explorer", a: "audit", c: "changes", h: "crawls" };
+      const map = { e: "explorer", a: "audit", c: "changes", i: "ai-access", h: "crawls" };
       const k = e.key.toLowerCase();
       if (map[k] && base) { e.preventDefault(); go(`${base}/${map[k]}`); }
       else if (k === "s") { e.preventDefault(); go("/account"); }
@@ -356,7 +359,7 @@
     }
     switch (e.key) {
       case "g": pendingG = true; clearTimeout(gTimer); gTimer = setTimeout(() => { pendingG = false; keyHint(false); }, 1200); setTimeout(() => pendingG && keyHint(true), 350); break;
-      case "/": { const s = $("#main [data-search-input]"); if (s) { e.preventDefault(); s.focus(); s.select(); } else { e.preventDefault(); openPalette(); } break; }
+      case "/": { const s = $("#main [data-search-input]") || $("[data-search-input]"); if (s) { e.preventDefault(); s.focus(); s.select(); } else { e.preventDefault(); openPalette(); } break; }
       case "?": e.preventDefault(); openSheet(); break;
       case "[": e.preventDefault(); toggleRail(); break;
       case "j": case "ArrowDown": if ($("#main [data-row]")) { e.preventDefault(); moveRow(1); } break;
@@ -384,6 +387,35 @@
       navigator.clipboard && navigator.clipboard.writeText(copy.dataset.copy).then(() => toast("Copied to clipboard", "info"));
     }
     $$("details[open].switcher, details[open].user, details[open][data-menu]").forEach((d) => { if (!d.contains(e.target)) d.removeAttribute("open"); });
+  });
+
+  // ── Filter a table as you type ──────────────────────
+  // <input data-filter="#table" data-filter-empty="#msg" data-filter-count="#count"> hides the
+  // rows (tr[data-search], lower-cased text) that don't contain the query, and any <tbody>
+  // left with none. No request: the whole table is on the page.
+  function filterRows(input) {
+    const table = $(input.dataset.filter);
+    if (!table) return;
+    const q = input.value.trim().toLowerCase();
+    let shown = 0;
+    $$("tbody", table).forEach((body) => {
+      let here = 0;
+      $$("tr[data-search]", body).forEach((tr) => {
+        const hit = !q || tr.dataset.search.includes(q);
+        tr.hidden = !hit;
+        if (hit) here++;
+      });
+      body.hidden = here === 0;
+      shown += here;
+    });
+    const empty = input.dataset.filterEmpty && $(input.dataset.filterEmpty);
+    if (empty) empty.hidden = shown > 0;
+    const count = input.dataset.filterCount && $(input.dataset.filterCount);
+    if (count) count.textContent = q ? `${shown} matching` : count.dataset.total || "";
+  }
+  document.addEventListener("input", (e) => {
+    const el = e.target.closest && e.target.closest("input[data-filter]");
+    if (el) filterRows(el);
   });
 
   // ── One-shot forms: a second submit (double click, Enter again) is swallowed ─

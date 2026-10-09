@@ -21,7 +21,7 @@ const SAMPLE_URLS: usize = 10;
 /// Past this many names a list of bots is counted instead of spelled out.
 const MAX_NAMES: usize = 3;
 /// Google's account of what a failing robots.txt does, cited by `RobotsUnavailable`.
-const ROBOTS_DOC: &str =
+pub const ROBOTS_DOC: &str =
     "https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -717,11 +717,11 @@ fn answers_restricted(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
                 .max()
                 .unwrap_or(0);
             if site_pages > 0 {
-                summary.push_str(&format!(
-                    " {} crawled {} carry it.",
-                    site_pages,
-                    if site_pages == 1 { "page" } else { "pages" }
-                ));
+                summary.push_str(&if site_pages == 1 {
+                    " 1 crawled page carries it.".to_owned()
+                } else {
+                    format!(" {site_pages} crawled pages carry it.")
+                });
             }
 
             let mut sources = Vec::new();

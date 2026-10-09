@@ -23,6 +23,7 @@ pub enum Screen {
     Explorer,
     Audit,
     Changes,
+    AiAccess,
     Crawls,
     Sites,
     Account,
@@ -38,6 +39,7 @@ impl Screen {
             Screen::Explorer => "URL explorer",
             Screen::Audit => "Site audit",
             Screen::Changes => "Changes",
+            Screen::AiAccess => "AI access",
             Screen::Crawls => "Crawls",
             Screen::Sites => "Sites",
             Screen::Account => "Account",
@@ -154,6 +156,7 @@ impl Shell {
                 Some(c) => change_counts(state, c.id).await?,
                 None => (0, false),
             };
+            let ai_issues = codoseo_store::geo::open_counts(pool, site.id).await?;
             let summary = latest.as_ref().and_then(Crawl::summary);
             let base = format!("/s/{}", site.id);
             site_view = Some(SiteView {
@@ -173,7 +176,14 @@ impl Shell {
                     format!("crawl #{} · {when}", c.number)
                 }),
             });
-            nav = nav_groups(&base, screen, latest.as_ref(), summary.as_ref(), changes);
+            nav = nav_groups(
+                &base,
+                screen,
+                latest.as_ref(),
+                summary.as_ref(),
+                changes,
+                ai_issues,
+            );
             crawler = Some(crawler_view(
                 &base,
                 latest.as_ref(),
@@ -360,6 +370,7 @@ fn nav_groups(
     latest: Option<&Crawl>,
     summary: Option<&codoseo_store::crawls::StoredSummary>,
     (changes, critical_change): (i64, bool),
+    (ai_open, ai_critical): (i64, i64),
 ) -> Vec<NavGroup> {
     let n = |v: u32| {
         if summary.is_some() {
@@ -444,6 +455,19 @@ fn nav_groups(
                     screen == Screen::Changes,
                     "G C",
                     "i-changes",
+                ),
+                item(
+                    "AI access",
+                    format!("{base}/ai-access"),
+                    if ai_open > 0 {
+                        fmt::thousands(ai_open)
+                    } else {
+                        String::new()
+                    },
+                    ai_critical > 0,
+                    screen == Screen::AiAccess,
+                    "G I",
+                    "i-ai",
                 ),
                 item(
                     "Crawls",

@@ -25,6 +25,7 @@ use crate::config::Mode;
 use crate::error::AppError;
 use crate::layout::{Screen, Shell};
 use crate::render::{Hx, ToastKind, html, toast};
+use crate::routes::changes::is_ai_kind;
 use crate::state::AppState;
 
 /// How long "Send test" waits for the channel.
@@ -102,6 +103,8 @@ pub struct RuleCell {
 }
 
 pub struct RuleRow {
+    /// Set on the first row of a section: the heading drawn above it.
+    pub section: Option<&'static str>,
     pub slug: &'static str,
     pub label: &'static str,
     pub note: &'static str,
@@ -209,13 +212,29 @@ fn note(kind: ChangeKind) -> &'static str {
         ChangeKind::BecameNoindex => "key pages only",
         ChangeKind::ErrorSpike => "a burst of new 4xx and 5xx pages",
         ChangeKind::SitemapShrank => "lost 10% or more",
-        ChangeKind::AiBotBlocked => "AI search bots blocked, or robots.txt failing",
+        ChangeKind::AiBotBlocked => "bots you want are blocked, or robots.txt is failing",
         ChangeKind::AiAnswersRestricted => "page markup keeps pages out of AI answers",
-        ChangeKind::AiIssueResolved => "an AI access issue is fixed",
+        ChangeKind::AiIssueResolved => "an AI access issue went away",
         ChangeKind::AiBlockNotApplied => "a bot you block can still crawl",
         ChangeKind::AiPreferencesChanged => "Content-Signal, Content-Usage or TDM changed",
         _ => "",
     }
+}
+
+/// The grid's rows: site changes first, then AI access, each in `ALL_KINDS` order, with the
+/// section heading on the first row of each.
+fn grid_kinds() -> Vec<(Option<&'static str>, ChangeKind)> {
+    let (ai, site): (Vec<ChangeKind>, Vec<ChangeKind>) =
+        ALL_KINDS.iter().copied().partition(|k| is_ai_kind(*k));
+    let section = |name: &'static str, kinds: Vec<ChangeKind>| {
+        kinds
+            .into_iter()
+            .enumerate()
+            .map(move |(i, k)| ((i == 0).then_some(name), k))
+    };
+    section("Site changes", site)
+        .chain(section("AI access", ai))
+        .collect()
 }
 
 async fn render_page(
@@ -253,9 +272,10 @@ async fn render_page(
         .map(|site| SiteRules {
             id: site.id,
             domain: site.domain.clone(),
-            rows: ALL_KINDS
-                .iter()
-                .map(|&kind| RuleRow {
+            rows: grid_kinds()
+                .into_iter()
+                .map(|(section, kind)| RuleRow {
+                    section,
                     slug: kind.slug(),
                     label: kind.label(),
                     note: note(kind),
