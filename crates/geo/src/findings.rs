@@ -201,6 +201,16 @@ fn join_and(items: &[String]) -> String {
     }
 }
 
+/// Like [`join_and`], but past [`MAX_NAMES`] items the rest are counted: `A, B, C and 2 more`.
+fn join_capped(items: &[String]) -> String {
+    if items.len() <= MAX_NAMES {
+        join_and(items)
+    } else {
+        let shown = &items[..MAX_NAMES];
+        format!("{} and {} more", shown.join(", "), items.len() - MAX_NAMES)
+    }
+}
+
 /// The tokens spelled out, or counted past [`MAX_NAMES`]; and whether the phrase is plural.
 fn bots_phrase(purpose: Purpose, tokens: &[String]) -> (String, bool) {
     if tokens.len() <= MAX_NAMES {
@@ -268,9 +278,9 @@ fn robots_unavailable(report: &AccessReport, intent: &Intent) -> Option<Finding>
         }
     }
     let why = if status == 429 {
-        "robots.txt answers HTTP 429 (too many requests)"
+        "answers HTTP 429 (too many requests)"
     } else {
-        "robots.txt answers with a server error"
+        "answers with a server error"
     };
     Some(Finding {
         kind: FindingKind::RobotsUnavailable,
@@ -285,7 +295,7 @@ fn robots_unavailable(report: &AccessReport, intent: &Intent) -> Option<Finding>
             "robots.txt returns HTTP {status}, so bots treat the whole site as off limits"
         ),
         summary: format!(
-            "Google and the AI bots that follow its rules stop crawling a site while {why}, so your pages can drop out of AI answers and search until it is fixed. Make /robots.txt answer 200, or 404 if you have none."
+            "Google treats a site as off limits while its robots.txt {why}, and bots that follow the same rules do too, so new and changed pages may not be picked up until it is fixed. Make /robots.txt answer 200, or 404 if you have none."
         ),
         evidence: Evidence {
             robots_status: Some(status),
@@ -392,7 +402,7 @@ fn bots_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
                 summary.push_str(&format!(
                     " Also blocked by {} {}.",
                     if rest.len() == 1 { "line" } else { "lines" },
-                    join_and(&rest)
+                    join_capped(&rest)
                 ));
             }
             if !any_home {
@@ -410,7 +420,7 @@ fn bots_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
             if !doubtful.is_empty() {
                 summary.push_str(&format!(
                     " The operator doesn't promise that {} follow{} robots.txt, so the rule may not hold.",
-                    join_and(&doubtful),
+                    join_capped(&doubtful),
                     if doubtful.len() == 1 { "s" } else { "" }
                 ));
             }
@@ -454,10 +464,11 @@ fn consequence(purpose: Purpose, rows: &[BotRow]) -> String {
                 .map(|e| e.name.to_owned())
                 .collect();
             if names.is_empty() {
-                "Blocking AI search bots removes your pages from their results.".to_owned()
+                "Blocked AI search bots can't fetch your pages, so they may leave them out of answers."
+                    .to_owned()
             } else {
                 format!(
-                    "Blocking AI search bots removes your pages from {}.",
+                    "Blocked AI search bots can't fetch your pages, so {} may leave them out of answers.",
                     join_and(&names)
                 )
             }
@@ -470,7 +481,8 @@ fn consequence(purpose: Purpose, rows: &[BotRow]) -> String {
             "Blocked agents can't visit your site on behalf of their users.".to_owned()
         }
         Purpose::Training => {
-            "These bots can't read your pages for AI training, although you allowed it.".to_owned()
+            "These bots are told not to use your pages for AI training, although you allowed it."
+                .to_owned()
         }
         Purpose::Ads => "Blocked ad bots can't check your pages.".to_owned(),
     }
@@ -497,7 +509,14 @@ fn bots_not_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
         .map(|(purpose, rows)| {
             let tokens: Vec<String> = rows.iter().map(|r| r.bot.token.clone()).collect();
             let (phrase, plural_subject) = bots_phrase(purpose, &tokens);
+            // Control tokens never crawl: they only say what a crawler may do with the content.
+            let controls = rows.iter().filter(|r| !r.bot.crawls).count();
             let tail = match (purpose, tokens.len() > MAX_NAMES) {
+                _ if controls > 0 && tokens.len() > MAX_NAMES => "use your content",
+                _ if controls > 0 && purpose == Purpose::Training => {
+                    "use your content for AI training"
+                }
+                _ if controls > 0 => "use your content",
                 (_, true) => "crawl your site",
                 (Purpose::Search, _) => "crawl for AI search",
                 (Purpose::UserFetch, _) => "fetch your pages for users",
@@ -619,13 +638,14 @@ fn answers_restricted(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
                 urls.extend(&p.limited);
             }
             let home_affected = urls.contains(&0);
+            let home_excluded = per_engine.values().any(|p| p.excluded.contains(&0));
             let any_exclusion = per_engine.values().any(|p| !p.excluded.is_empty());
             let half = per_engine
                 .values()
                 .any(|p| p.excluded.len() * 2 >= total.max(1));
             let severity = if !any_exclusion {
                 Severity::Notice
-            } else if home_affected || half {
+            } else if home_excluded || half {
                 Severity::Critical
             } else {
                 Severity::Warning

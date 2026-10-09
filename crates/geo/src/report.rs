@@ -30,6 +30,10 @@ pub const REPORT_VERSION: u32 = 1;
 
 /// At most this many important URLs go into a report.
 pub const MAX_IMPORTANT: usize = 60;
+/// Declared preferences kept per list (header values, tdmrep entries).
+const MAX_DECLARED: usize = 100;
+/// Longest declared string kept, in characters.
+const MAX_DECLARED_TEXT: usize = 512;
 /// Pages from the top of the inlink ranking that count as important (as in `codoseo_diff::key_pages`).
 const TOP_PAGES: usize = 20;
 
@@ -503,19 +507,22 @@ fn declared(
         d.content_usage = robots.content_usage().to_vec();
     }
     for (name, value) in &out.signals.home_headers {
+        let value = &clip(value);
         match name.to_ascii_lowercase().as_str() {
             "content-signal" => d.headers.content_signal.extend(
                 parse_content_signal(value)
                     .into_iter()
-                    .map(|(key, value)| pair(key, value, is_known_signal_key)),
+                    .map(|(key, value)| pair(key, value, is_known_signal_key))
+                    .take(MAX_DECLARED.saturating_sub(d.headers.content_signal.len())),
             ),
-            "content-usage" => {
+            "content-usage" if d.headers.content_usage.len() < MAX_DECLARED => {
                 let (path, pairs) = parse_content_usage(value);
                 d.headers.content_usage.push(HeaderUsage {
                     path,
                     pairs: pairs
                         .into_iter()
                         .map(|(key, value)| pair(key, value, is_known_usage_key))
+                        .take(MAX_DECLARED)
                         .collect(),
                 });
             }
@@ -534,12 +541,17 @@ fn declared(
     }
     if let Some(page) = home {
         d.tdm_meta = TdmMeta {
-            reservation: page.fields.ai.tdm_reservation.clone(),
-            policy: page.fields.ai.tdm_policy.clone(),
+            reservation: page.fields.ai.tdm_reservation.as_deref().map(clip),
+            policy: page.fields.ai.tdm_policy.as_deref().map(clip),
         };
     }
     d.tdmrep = out.signals.tdmrep.as_ref().map(tdmrep_file);
     d
+}
+
+/// A declared string cut to [`MAX_DECLARED_TEXT`] characters.
+fn clip(s: &str) -> String {
+    s.trim().chars().take(MAX_DECLARED_TEXT).collect()
 }
 
 fn pair(key: String, value: String, known: fn(&str) -> bool) -> Pair {
@@ -559,15 +571,22 @@ fn tdmrep_file(f: &WellKnownFile) -> TdmRepFile {
         };
     }
     match parse_tdmrep(&f.body) {
-        Ok(entries) => TdmRepFile {
+        Ok(mut entries) => TdmRepFile {
             status: f.status,
-            entries,
+            entries: {
+                entries.truncate(MAX_DECLARED);
+                for e in &mut entries {
+                    e.location = clip(&e.location);
+                    e.policy = e.policy.as_deref().map(clip);
+                }
+                entries
+            },
             error: None,
         },
         Err(error) => TdmRepFile {
             status: f.status,
             entries: Vec::new(),
-            error: Some(error),
+            error: Some(clip(&error)),
         },
     }
 }

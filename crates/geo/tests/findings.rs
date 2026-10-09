@@ -155,7 +155,7 @@ fn a_training_bot_that_gets_in_against_the_owners_wishes() {
         (FindingKind::BotsNotBlocked, "training")
     );
     assert_eq!(f[0].severity, Severity::Warning);
-    assert_eq!(f[0].title, "8 AI training bots can still crawl your site");
+    assert_eq!(f[0].title, "8 AI training bots can still use your content");
     assert!(
         f[0].summary
             .starts_with("You set AI training to Block, but robots.txt doesn't stop them.")
@@ -170,6 +170,14 @@ fn a_training_bot_that_gets_in_against_the_owners_wishes() {
         "GPTBot, ClaudeBot and CCBot can still crawl for AI training"
     );
     assert!(f[0].summary.contains("Add `User-agent: GPTBot`"));
+
+    // Control tokens never crawl, so the title must not say they can.
+    let robots = "User-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Amazonbot\nUser-agent: MistralAI-Training\nDisallow: /\n";
+    let f = run(&with_robots(site(3, |p| p), 200, robots), &block_training);
+    assert_eq!(
+        f[0].title,
+        "Google-Extended and Applebot-Extended can still use your content for AI training"
+    );
 
     // The same bots blocked: nothing to report.
     let all = "User-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: CCBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: meta-externalagent\nUser-agent: Amazonbot\nUser-agent: MistralAI-Training\nDisallow: /\n";
