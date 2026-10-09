@@ -174,13 +174,18 @@ fn apple_and_amazon_directives() {
         Effect::Eligible
     );
     let z = EngineId::Amazon;
-    for d in ["noindex", "none", "noarchive"] {
+    for d in ["noindex", "none"] {
         assert_eq!(
             effect(z, &fields(Some(d), None, &[])),
             Effect::Excluded,
             "{d}"
         );
     }
+    // Amazon documents noarchive as "do not use for model training", not as a search control.
+    assert_eq!(
+        effect(z, &fields(Some("noarchive"), None, &[])),
+        Effect::Eligible
+    );
     assert_eq!(
         effect(z, &fields(Some("nosnippet"), None, &[])),
         Effect::Eligible

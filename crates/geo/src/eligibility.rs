@@ -193,32 +193,45 @@ struct Rules {
 
 fn rules(id: EngineId) -> Rules {
     match id {
-        // https://developers.google.com/search/docs/appearance/ai-features: AI features follow the
-        // snippet controls, and a page that can't be indexed can't be a source.
+        // https://developers.google.com/search/docs/appearance/ai-features names `nosnippet`,
+        // `data-nosnippet`, `max-snippet` and `noindex` as the controls over what Search shows
+        // from a page, AI features included; it doesn't spell out the effect per feature. The
+        // directive meanings are from
+        // https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag:
+        // `none` = `noindex, nofollow`, `max-snippet:0` = no snippet, `noarchive` is ignored
+        // (so it isn't listed), and `data-nosnippet` is valid on `span`, `div` and `section`.
+        // Treating no-snippet as Excluded is our reading: with no text allowed there is nothing
+        // to quote.
         EngineId::Google => Rules {
             excluded: &["noindex", "none", "nosnippet"],
             limited: &[],
             max_snippet: true,
             data_nosnippet: true,
         },
-        // Bing's Copilot controls: `noarchive` keeps the page out of answers, `nocache` and
-        // `nosnippet` limit them to titles and links.
+        // Bing's announcement (the engine's source_url): NOARCHIVE keeps the page out of Bing
+        // Chat answers (it stays in search results), NOCACHE allows only URL, title and snippet,
+        // both together count as NOCACHE. It says nothing about Copilot by name, nor about
+        // `nosnippet` / `data-nosnippet`, which come from Bing's robots meta tag documentation;
+        // those are our reading of "snippet only".
         EngineId::Bing => Rules {
             excluded: &["noindex", "none", "noarchive"],
             limited: &["nocache", "nosnippet"],
             max_snippet: false,
             data_nosnippet: true,
         },
-        // https://support.apple.com/en-us/119829
+        // https://support.apple.com/en-us/119829 documents noindex, nosnippet, nofollow, none and
+        // all, under `robots` or `applebot`; it doesn't mention noarchive.
         EngineId::Apple => Rules {
             excluded: &["noindex", "none"],
             limited: &["nosnippet"],
             max_snippet: false,
             data_nosnippet: false,
         },
-        // https://developer.amazon.com/amazonbot
+        // https://developer.amazon.com/amazonbot: noindex and none mean "do not index"; noarchive
+        // means "do not use the page for model training", which says nothing about search
+        // answers, so it isn't a control here. The page doesn't name the meta `name`.
         EngineId::Amazon => Rules {
-            excluded: &["noindex", "none", "noarchive"],
+            excluded: &["noindex", "none"],
             limited: &[],
             max_snippet: false,
             data_nosnippet: false,

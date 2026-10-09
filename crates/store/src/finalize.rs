@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use codoseo_core::change::Change;
 use codoseo_core::output::CrawlOutput;
-use codoseo_core::page::{Indexability, PageRecord};
+use codoseo_core::page::{AiMeta, Indexability, PageRecord};
 use codoseo_core::report::CrawlReport;
 use serde::Serialize;
 use serde_json::json;
@@ -360,7 +360,7 @@ fn write_page_row(buf: &mut String, crawl_id: Uuid, site_id: Uuid, p: &PageRecor
         if fields.ai.is_empty() {
             "\\N".to_string()
         } else {
-            escape_json(&fields.ai)
+            escape_json(&without_nul(&fields.ai))
         },
     ];
     buf.push_str(&cols.join("\t"));
@@ -404,6 +404,21 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+/// jsonb rejects `\u0000`, which serde writes for a NUL byte in a meta value.
+fn without_nul(ai: &AiMeta) -> AiMeta {
+    let clean = |s: &str| s.replace('\0', "");
+    AiMeta {
+        bot_meta: ai
+            .bot_meta
+            .iter()
+            .map(|(n, c)| (clean(n), clean(c)))
+            .collect(),
+        nosnippet_words: ai.nosnippet_words,
+        tdm_reservation: ai.tdm_reservation.as_deref().map(clean),
+        tdm_policy: ai.tdm_policy.as_deref().map(clean),
+    }
 }
 
 fn escape_json<T: Serialize>(v: &T) -> String {

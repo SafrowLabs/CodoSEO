@@ -240,15 +240,23 @@ fn build_rewriter(
             }
             Ok(())
         }))
-        .append_element_content_handler(element!("[data-nosnippet]", move |el| {
-            s_nosnippet.borrow_mut().nosnippet_depth += 1;
-            let st = Rc::clone(&s_nosnippet);
-            on_end(el, move || {
-                let mut st = st.borrow_mut();
-                st.nosnippet_depth = st.nosnippet_depth.saturating_sub(1);
-                st.nosnippet.in_word = false;
-            })
-        }))
+        .append_element_content_handler(
+            // Only the elements Google documents (`span`, `div`, `section`): they need an end tag, so an
+            // unclosed `<p data-nosnippet>` (lol_html never fires its end) can't leave the counter open
+            // for the rest of the page, and void elements have no text to count.
+            element!(
+                "span[data-nosnippet], div[data-nosnippet], section[data-nosnippet]",
+                move |el| {
+                    s_nosnippet.borrow_mut().nosnippet_depth += 1;
+                    let st = Rc::clone(&s_nosnippet);
+                    on_end(el, move || {
+                        let mut st = st.borrow_mut();
+                        st.nosnippet_depth = st.nosnippet_depth.saturating_sub(1);
+                        st.nosnippet.in_word = false;
+                    })
+                }
+            ),
+        )
         .append_element_content_handler(element!("svg", move |el| {
             s_svg.borrow_mut().svg_depth += 1;
             let st = Rc::clone(&s_svg);

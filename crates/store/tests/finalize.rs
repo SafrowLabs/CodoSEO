@@ -211,7 +211,10 @@ async fn finalize_round_trips_ai_meta_and_stores_null_when_empty() {
     let plain = sample_page(1);
     let mut marked = sample_page(2);
     marked.fields.ai = AiMeta {
-        bot_meta: vec![("bingbot".into(), "noarchive, \"tab\\\there\"".into())],
+        bot_meta: vec![(
+            "bingbot".into(),
+            "noarchive, \"tab\\\there\"\nline\r\n".into(),
+        )],
         nosnippet_words: 17,
         tdm_reservation: Some("1".into()),
         tdm_policy: Some("https://example.com/tdm.json".into()),
@@ -254,6 +257,33 @@ async fn finalize_round_trips_ai_meta_and_stores_null_when_empty() {
     };
     assert!(read(1).is_empty());
     assert_eq!(read(2), marked.fields.ai);
+}
+
+#[tokio::test]
+async fn nul_in_a_bot_meta_does_not_fail_the_jsonb_copy() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "nul.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "nul.example").await;
+    let mut page = sample_page(1);
+    page.fields.ai.bot_meta = vec![("bingbot".into(), "no\u{0}archive".into())];
+    let out = empty_output(vec![page], StopReason::Completed);
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+    )
+    .await
+    .expect("finalize");
+    let snapshot = CrawlQueue::new(db.pool.clone())
+        .previous_snapshot(site_id)
+        .await
+        .unwrap()
+        .expect("a done crawl exists");
+    assert_eq!(snapshot.pages[0].fields.ai.bot_meta[0].1, "noarchive");
 }
 
 #[tokio::test]

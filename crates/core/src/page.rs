@@ -256,7 +256,16 @@ pub fn directives_for(value: Option<&str>, scopes: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     for token in value.to_ascii_lowercase().split(',') {
         let directive = match token.split_once(':') {
-            Some((name, rest)) if !VALUE_DIRECTIVES.contains(&name.trim()) => {
+            // A prefix is a bare agent token; anything else (the date in `unavailable_after:
+            // Fri, 25-Aug-2010 15:00:00 PST` after its comma) is not one and must not rescope.
+            Some((name, rest))
+                if !VALUE_DIRECTIVES.contains(&name.trim())
+                    && !name.trim().is_empty()
+                    && name
+                        .trim()
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') =>
+            {
                 applies = scopes.contains(&name.trim());
                 rest
             }

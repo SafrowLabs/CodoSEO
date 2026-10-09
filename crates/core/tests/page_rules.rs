@@ -236,3 +236,12 @@ fn directives_for_scopes_and_keeps_value_directives() {
     assert!(directives_for(None, &["googlebot"]).is_empty());
     assert!(d(" , ,", &["googlebot"]).is_empty());
 }
+
+#[test]
+fn a_date_after_unavailable_after_is_not_an_agent_prefix() {
+    let d = directives_for(
+        Some("unavailable_after: Friday, 25-Aug-2010 15:00:00 PST, noindex"),
+        &["robots"],
+    );
+    assert!(d.contains(&"noindex".to_owned()), "{d:?}");
+}

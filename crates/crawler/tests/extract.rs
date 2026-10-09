@@ -344,17 +344,16 @@ fn data_nosnippet_edge_cases_never_stick() {
     // Words glued across the boundary stay separate counts.
     assert_eq!(n(r#"x<span data-nosnippet>y</span>z"#), 1);
     // Style and script inside are ignored.
-    assert_eq!(n(r#"<p data-nosnippet>a<style>b c d</style> e</p>"#), 2);
+    assert_eq!(n(r#"<div data-nosnippet>a<style>b c d</style> e</div>"#), 2);
     // Broken markup: missing end tags, stray end tags and unclosed elements must not panic.
     // An unclosed element runs to the end of the document, like the browser's tree would.
     assert_eq!(n(r#"<div data-nosnippet>a b"#), 2);
     assert_eq!(n(r#"</div></div><div data-nosnippet>a</div></div> b c"#), 1);
-    // An implied end tag (`<li>` closed by the next `<li>`) is only seen when an ancestor's
-    // end tag arrives, so the sibling's text is over-counted but " c d" is not.
-    assert_eq!(n("<ul><li data-nosnippet>a<li>b</ul> c d"), 2);
+    // Only span, div and section count (Google's list): they need end tags, so an unclosed
+    // `<p>` or `<li>` can't mark the rest of the page.
+    assert_eq!(n("<ul><li data-nosnippet>a<li>b</ul> c d"), 0);
+    assert_eq!(n("<p data-nosnippet>a<p>b c<div>d</div> e"), 0);
+    assert_eq!(n(r#"<p>Open again <b data-nosnippet>hidden</b></p>"#), 0);
     // Never past the element's parent.
-    assert_eq!(n("<div><p data-nosnippet>a</div> b c"), 1);
-    // With no closing tag at all it runs to the end of the document, and no further.
-    let e = extract_html("<p data-nosnippet>a<p>b c<div>d</div> e");
-    assert_eq!(e.fields.ai.nosnippet_words, e.fields.word_count);
+    assert_eq!(n("<div><div data-nosnippet>a</div></div> b c"), 1);
 }
