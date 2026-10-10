@@ -22,9 +22,11 @@
       <a class="site-card" href="{{ c.href }}"><span class="avatar">{{ c.initial }}</span><span style="flex:1;min-width:0"><b class="trunc" style="display:block;font-weight:500">{{ c.domain }}</b><span class="faint mono" style="font-size:11.5px">added {{ c.added }}</span></span><svg class="icon go" style="opacity:1;transform:none"><use href="#i-arrow"/></svg></a>
     {% endfor %}
   </div>
-  <div class="card card-pad" id="add" style="margin-top:20px;max-width:640px">
-    <div class="card-title" style="margin-bottom:4px">Add a site</div>
-    <p class="muted" style="font-size:13px;margin-bottom:14px">{% if form.can_add %}The first crawl starts right away.{% else %}You've reached your plan's site limit.{% endif %}</p>
+  <div class="card card-pad add-site-card" id="add">
+    <div class="add-site-text">
+      <div class="card-title">Add a site</div>
+      <p class="muted">{% if form.can_add %}The first crawl starts right away.{% else %}You've reached your plan's site limit.{% endif %}</p>
+    </div>
     {{ form|safe }}
   </div>
 </div>

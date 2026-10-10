@@ -1,31 +1,36 @@
 {% extends "base.html" %}
 {% block main %}
-<div class="page page-narrow">
-  <div class="page-head"><h1>Account</h1></div>
-  <div class="card">
-    <div class="card-head"><span class="card-title">Profile</span></div>
-    <div class="card-pad" style="display:grid;gap:14px">
-      <div class="field-row" style="border:0;padding:0"><span class="k">Email</span><span class="v">{{ email }}</span></div>
-      <div class="field-row" style="border:0;padding:0"><span class="k">Plan</span><span class="v">{{ plan }}{% if billing %} <a href="/billing" style="margin-left:8px;text-decoration:underline">Manage plan</a>{% endif %}</span></div>
-      <div class="field-row" style="border:0;padding:0"><span class="k">Theme</span><span class="v"><button class="btn btn-sm" data-action="theme"><svg class="icon"><use href="#i-moon"/></svg><span data-theme-label>Light</span></button></span></div>
+<div class="page">
+  <div class="page-head">
+    <h1>Account</h1>
+    <span class="grow"></span>
+    <form method="post" action="/logout" hx-boost="false"><button class="btn" type="submit"><svg class="icon"><use href="#i-logout"/></svg>Sign out</button></form>
+  </div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Profile</span></div>
+      <div class="card-pad" style="display:grid;gap:14px">
+        <div class="field-row" style="border:0;padding:0"><span class="k">Email</span><span class="v">{{ email }}</span></div>
+        <div class="field-row" style="border:0;padding:0"><span class="k">Plan</span><span class="v">{{ plan }}{% if billing %} <a href="/billing" style="margin-left:8px;text-decoration:underline">Manage plan</a>{% endif %}</span></div>
+        <div class="field-row" style="border:0;padding:0"><span class="k">Theme</span><span class="v"><button class="btn btn-sm" data-action="theme"><svg class="icon"><use href="#i-moon"/></svg><span data-theme-label>Light</span></button></span></div>
+      </div>
     </div>
+    {% if is_admin %}
+    <div class="card">
+      <div class="card-head"><span class="card-title">Admin</span></div>
+      <div class="card-pad" style="display:grid;gap:10px;justify-items:start"><a class="btn" href="/admin">Open the admin page</a><span class="hint">Funnel, audit queue and failed jobs</span></div>
+    </div>
+    {% endif %}
+    {% if self_hosted && is_owner %}
+    <div class="card">
+      <div class="card-head"><span class="card-title">Instance</span><span class="card-aside">You're the owner of this CodoSEO</span></div>
+      <form class="card-pad" method="post" action="/account/signups" style="display:flex;align-items:center;gap:14px">
+        <input type="hidden" name="open" value="{% if signups_open %}false{% else %}true{% endif %}">
+        <div style="flex:1"><b style="font-weight:500">Allow new signups</b><div class="hint">{% if signups_open %}Anyone who can reach this instance can create an account.{% else %}Only existing accounts can sign in.{% endif %}</div></div>
+        <button class="switch" type="submit" role="switch" aria-checked="{{ signups_open }}" aria-label="Allow new signups"></button>
+      </form>
+    </div>
+    {% endif %}
   </div>
-  {% if is_admin %}
-  <div class="card" style="margin-top:16px">
-    <div class="card-head"><span class="card-title">Admin</span></div>
-    <div class="card-pad"><a class="btn" href="/admin">Open the admin page</a> <span class="hint" style="margin-left:8px">Funnel, audit queue and failed jobs</span></div>
-  </div>
-  {% endif %}
-  {% if self_hosted && is_owner %}
-  <div class="card" style="margin-top:16px">
-    <div class="card-head"><span class="card-title">Instance</span><span class="card-aside">You're the owner of this CodoSEO</span></div>
-    <form class="card-pad" method="post" action="/account/signups" style="display:flex;align-items:center;gap:14px">
-      <input type="hidden" name="open" value="{% if signups_open %}false{% else %}true{% endif %}">
-      <div style="flex:1"><b style="font-weight:500">Allow new signups</b><div class="hint">{% if signups_open %}Anyone who can reach this instance can create an account.{% else %}Only existing accounts can sign in.{% endif %}</div></div>
-      <button class="switch" type="submit" role="switch" aria-checked="{{ signups_open }}" aria-label="Allow new signups"></button>
-    </form>
-  </div>
-  {% endif %}
-  <form method="post" action="/logout" hx-boost="false" style="margin-top:16px"><button class="btn" type="submit"><svg class="icon"><use href="#i-logout"/></svg>Sign out</button></form>
 </div>
 {% endblock %}
