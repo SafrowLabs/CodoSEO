@@ -16,7 +16,7 @@ CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in R
 
 It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. See [docs/ai-access.md](docs/ai-access.md).
 
-![The AI access screen](docs/images/ai-access/ai-access-light.png)
+![The AI access screen](docs/images/ai-access/ai-access-hero.png)
 
 It respects `robots.txt` and `Crawl-delay`, backs off on `429` and `503`, and ships as one static binary. AGPL-3.0.
 
