@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block main %}
-<div class="page page-narrow page-billing">
+<div class="page">
   <div class="page-head"><h1>Monitored sites</h1>{% if let Some(m) = max %}<span class="chip">{{ active_count }} of {{ m }} on {{ plan_name }}</span>{% endif %}</div>
   <div class="card">
     <div class="card-head"><span class="card-title">Choose which sites stay monitored</span></div>

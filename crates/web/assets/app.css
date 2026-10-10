@@ -570,11 +570,11 @@ kbd {
 
 /* ── Content building blocks ────────────────────────── */
 
-.page { max-width: 1240px; padding: 24px 28px 56px; animation: rise 0.28s var(--ease) both; }
-.page-narrow { max-width: 760px; }
+/* A page fills the panel; only an ultra-wide screen centres it, so it never hugs the left. */
+.page { max-width: 1760px; margin-inline: auto; padding: 24px 28px 56px; animation: rise 0.28s var(--ease) both; }
 .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .page-head h1, h1.title { font-size: 22px; font-weight: 600; letter-spacing: -0.025em; }
-.page-sub { color: var(--muted-2); font-size: 13.5px; margin-top: -8px; margin-bottom: 18px; }
+.page-sub { color: var(--muted-2); font-size: 13.5px; margin-top: -8px; margin-bottom: 18px; max-width: 90ch; }
 .chip { font: 11.5px var(--mono); color: var(--muted); background: var(--chrome); border-radius: 5px; padding: 3px 8px; white-space: nowrap; }
 .chip-outline { font: 12.5px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; }
@@ -584,6 +584,9 @@ kbd {
 .card-aside { margin-left: auto; font-size: 12.5px; color: var(--muted-2); }
 .cols { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* Settings-style pages: cards side by side as the width allows (three on a wide screen, one
+   below about 1180px). */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 16px; }
 @media (max-width: 1080px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 767px) { .page { padding: 18px 16px 48px; } }
 
@@ -879,6 +882,10 @@ body.solo { overflow: auto; }
 .site-card { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s var(--ease); }
 .site-card:hover { border-color: var(--ghost-2); box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .site-card .avatar { width: 32px; height: 32px; font-size: 14px; border-radius: 8px; }
+.add-site-card { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 32px; margin-top: 20px; }
+.add-site-text { flex: 0 1 260px; }
+.add-site-text p { font-size: 13px; margin-top: 4px; }
+.add-site-card .add-site { flex: 1 1 420px; }
 @media (max-width: 640px) { .steps { grid-template-columns: 1fr; } .add-site { flex-direction: column; } }
 
 /* ── Motion ─────────────────────────────────────────── */
@@ -919,7 +926,16 @@ body.solo { overflow: auto; }
 
 /* ── Alerts settings ────────────────────────────────── */
 
-.page-alerts, .page-keys { max-width: 1040px; }
+/* Wide screens: API keys beside how to use them (from 1280px, a main area of about 1000px), and
+   channels beside what is sent at once (from 1360px, where three channels' columns still fit). */
+.alerts-layout, .keys-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 1280px) {
+  .keys-layout { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+}
+@media (min-width: 1360px) {
+  .alerts-layout { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+  .alerts-layout > :first-child { position: sticky; top: 16px; }
+}
 .callout { border-color: color-mix(in oklab, var(--accent-strong) 55%, var(--line)); background: var(--accent-soft); margin-bottom: 16px; }
 .secret { display: block; font: 500 13px var(--mono); padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow-wrap: anywhere; user-select: all; }
 .channel { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 18px; border-bottom: 1px solid var(--line-faint); }
@@ -939,26 +955,42 @@ body.solo { overflow: auto; }
 .upgrade-hint { color: var(--warn); }
 .key-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .key-actions .btn { gap: 6px; }
-.snippet { margin: 0; padding: 10px 12px; font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); white-space: pre; overflow-x: auto; user-select: all; }
+.snippet { margin: 0; padding: 10px 12px; font-size: 12.5px; line-height: 1.6; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
 .rules-site { padding: 14px 18px 6px; border-bottom: 1px solid var(--line-faint); }
 .rules-site-name { margin-bottom: 8px; font-size: 13.5px; }
 .rules-site-name b { font-weight: 500; }
 .rules-scroll { overflow-x: auto; margin: 0 -18px; padding: 0 18px 8px; }
 .rules { border-collapse: collapse; width: 100%; font-size: 13px; }
 .rules th, .rules td { padding: 7px 10px; border-bottom: 1px solid var(--line-faint); text-align: center; vertical-align: middle; }
-.rules thead th { font-weight: 500; font-size: 12px; color: var(--muted-2); white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
-.rules th[scope="row"] { text-align: left; font-weight: 400; padding-left: 0; white-space: nowrap; }
+.rules thead th { font-weight: 500; font-size: 12px; color: var(--muted-2); min-width: 96px; max-width: 200px; overflow-wrap: break-word; }
+.rules th[scope="row"] { text-align: left; font-weight: 400; padding-left: 0; min-width: 220px; }
 .rules thead th:first-child { text-align: left; padding-left: 0; }
 .rules th.is-off { text-decoration: line-through; color: var(--ghost); }
+/* A hovered row is shaded edge to edge, so a label finds its boxes across a wide card. */
+.rules tbody tr:not(.rules-section):hover > * { background: var(--surface-hover); }
+.rules tbody tr:not(.rules-section):hover > :first-child { box-shadow: -18px 0 0 var(--surface-hover); }
+.rules tbody tr:not(.rules-section):hover > :last-child { box-shadow: 18px 0 0 var(--surface-hover); }
 .check { width: 16px; height: 16px; accent-color: var(--ok); cursor: pointer; }
 @media (max-width: 767px) {
   .channel-actions { width: 100%; }
   .channel-kind { flex: 1 1 100%; }
+  .rules th[scope="row"] { min-width: 180px; }
 }
 
 /* ── Billing ────────────────────────────────────────── */
 
-.plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+/* The current plan and the plans: three columns from 1280px, the plans in a pair under it on a
+   medium screen, one column on a phone. */
+.billing-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 768px) {
+  .billing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .billing-current, .billing-off { grid-column: 1 / -1; }
+}
+@media (min-width: 1280px) {
+  .billing-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .billing-current { grid-column: auto; }
+  .billing-off { grid-column: span 2; }
+}
 .plan-card.is-current { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
 .plan-features { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .plan-features li { display: flex; align-items: flex-start; gap: 8px; }
@@ -969,13 +1001,12 @@ body.solo { overflow: auto; }
 .billing-manage { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .plan-banner a { text-decoration: underline; }
 .page > .plan-banner { margin-bottom: 16px; }
-.site-picks { display: grid; }
+.site-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); }
 .site-pick { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-top: 1px solid var(--line-faint); cursor: pointer; font-size: 13.5px; }
 .site-pick b { font-weight: 500; }
 .site-pick .faint { margin-left: auto; white-space: nowrap; }
 .site-pick:hover { background: var(--surface-hover); }
 @media (max-width: 767px) {
-  .plans { grid-template-columns: 1fr; }
   .site-pick { flex-wrap: wrap; }
   .site-pick .faint { margin-left: 30px; flex-basis: 100%; }
 }
@@ -1131,6 +1162,9 @@ body.solo { overflow: auto; }
 .aia-back .icon { transform: rotate(180deg); }
 .aia-back { margin-left: -6px; }
 .aia-intent .stack { gap: 12px; }
+/* On a phone the side column dissolves into the form, so the save bar floats over every card. */
+.aia-intent-form { display: flex; flex-direction: column; gap: 12px; }
+.aia-intent-side { display: contents; }
 .aia-purpose-main { display: flex; align-items: center; justify-content: space-between; gap: 16px 24px; padding: 16px 18px; flex-wrap: wrap; }
 .aia-purpose-text { flex: 1 1 260px; min-width: 0; }
 .aia-purpose-text p { margin-top: 3px; font-size: 13px; color: var(--muted-2); }
@@ -1153,6 +1187,7 @@ body.solo { overflow: auto; }
 .aia-pick { display: grid; grid-template-columns: minmax(0, 1fr) 168px; gap: 14px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line-faint); }
 .aia-pick:last-child { border-bottom: 0; }
 .aia-pick label { min-width: 0; cursor: pointer; }
+.aia-pick .aia-token { white-space: nowrap; }
 .aia-pick .tag { margin-left: 6px; vertical-align: 1px; }
 .aia-pick.is-set { box-shadow: inset 3px 0 0 var(--accent); }
 .aia-pick .tag.is-set { color: var(--warn); background: var(--warn-bg); border-color: color-mix(in oklab, var(--warn-bar) 45%, var(--line)); }
@@ -1169,6 +1204,23 @@ body.solo { overflow: auto; }
   position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 10px 12px;
   background: color-mix(in oklab, var(--surface) 92%, transparent); backdrop-filter: blur(8px);
   border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-md);
+}
+.aia-howto { padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-lg); font-size: 12.5px; color: var(--muted-2); }
+.aia-howto h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 10px; }
+.aia-howto ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.aia-howto li { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.aia-howto li .badge { justify-self: start; }
+.aia-howto p { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); line-height: 1.5; }
+/* A wide screen: the purposes fill the main column (their per-bot picks in columns), and the
+   directives, the save buttons and the note stay in view beside them. */
+@media (min-width: 1280px) {
+  .aia-intent-form { display: grid; grid-template-columns: minmax(0, 1fr) clamp(360px, 30%, 440px); gap: 16px; align-items: start; }
+  .aia-intent-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; }
+  /* Save fills the first row, Cancel and Reset share the second. */
+  .aia-intent-side .aia-savebar { position: static; flex-wrap: wrap; margin-top: 0; background: var(--surface); backdrop-filter: none; box-shadow: var(--shadow-sm); }
+  .aia-intent-side .aia-savebar .btn-primary { flex: 1 0 100%; }
+  .aia-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); overflow: hidden; }
+  .aia-pick { margin-bottom: -1px; }
 }
 
 .aia-narrow-only { display: none; }

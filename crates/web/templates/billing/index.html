@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block main %}
-<div class="page page-narrow page-billing">
+<div class="page">
   <div class="page-head"><h1>Billing</h1>{% if paid %}<span class="chip">{{ plan_name }}</span>{% endif %}</div>
 
   {% if success %}
@@ -10,31 +10,31 @@
   <div class="card callout callout-error" role="alert"><div class="card-pad error-text" style="animation:none"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</div></div>
   {% endif %}
 
-  <div class="card">
-    <div class="card-head"><span class="card-title">Current plan</span></div>
-    <div class="card-pad" style="display:grid;gap:14px">
-      <div class="field-row" style="border:0;padding:0"><span class="k">Plan</span><span class="v">{{ plan_name }}</span></div>
-      {% if let Some(end) = period_end %}
-      {% if cancelled %}
-      <div class="field-row" style="border:0;padding:0"><span class="k">Cancelled</span><span class="v">Your plan ends on {{ end }}</span></div>
-      <p class="hint">You keep everything until then. Manage billing to resume it.</p>
-      {% else %}
-      <div class="field-row" style="border:0;padding:0"><span class="k">Next billing</span><span class="v">Renews on {{ end }}</span></div>
-      {% endif %}
-      {% endif %}
-      {% if has_customer && configured %}
-      <form class="billing-manage" method="post" action="/billing/portal" hx-boost="false"><button class="btn" type="submit"><svg class="icon"><use href="#i-external"/></svg>Manage billing</button><span class="hint">Change plan, update your card, see invoices or cancel</span></form>
-      {% endif %}
-      {% if stopped_sites %}
-      <p class="plan-banner"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg><span>Some of your sites aren't being monitored because of your plan. <a href="/billing/sites">Choose which sites stay monitored</a>.</span></p>
-      {% endif %}
+  <div class="billing-grid">
+    <div class="card billing-current">
+      <div class="card-head"><span class="card-title">Current plan</span></div>
+      <div class="card-pad" style="display:grid;gap:14px">
+        <div class="field-row" style="border:0;padding:0"><span class="k">Plan</span><span class="v">{{ plan_name }}</span></div>
+        {% if let Some(end) = period_end %}
+        {% if cancelled %}
+        <div class="field-row" style="border:0;padding:0"><span class="k">Cancelled</span><span class="v">Your plan ends on {{ end }}</span></div>
+        <p class="hint">You keep everything until then. Manage billing to resume it.</p>
+        {% else %}
+        <div class="field-row" style="border:0;padding:0"><span class="k">Next billing</span><span class="v">Renews on {{ end }}</span></div>
+        {% endif %}
+        {% endif %}
+        {% if has_customer && configured %}
+        <form class="billing-manage" method="post" action="/billing/portal" hx-boost="false"><button class="btn" type="submit"><svg class="icon"><use href="#i-external"/></svg>Manage billing</button><span class="hint">Change plan, update your card, see invoices or cancel</span></form>
+        {% endif %}
+        {% if stopped_sites %}
+        <p class="plan-banner"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg><span>Some of your sites aren't being monitored because of your plan. <a href="/billing/sites">Choose which sites stay monitored</a>.</span></p>
+        {% endif %}
+      </div>
     </div>
-  </div>
 
-  {% if !configured %}
-  <div class="card" style="margin-top:16px"><div class="card-pad"><b style="font-weight:500">Billing isn't configured</b><p class="hint" style="margin-top:4px">This server has no payment keys set, so checkout is off.</p></div></div>
-  {% else %}
-  <div class="plans" style="margin-top:16px">
+    {% if !configured %}
+    <div class="card billing-off"><div class="card-pad"><b style="font-weight:500">Billing isn't configured</b><p class="hint" style="margin-top:4px">This server has no payment keys set, so checkout is off.</p></div></div>
+    {% else %}
     {% for c in cards %}
     <div class="card plan-card{% if c.action == "current" %} is-current{% endif %}">
       <div class="card-head"><span class="card-title">{{ c.name }}</span>{% if c.action == "current" %}<span class="badge t-ok">Current plan</span>{% endif %}</div>
@@ -50,7 +50,7 @@
       </div>
     </div>
     {% endfor %}
+    {% endif %}
   </div>
-  {% endif %}
 </div>
 {% endblock %}
