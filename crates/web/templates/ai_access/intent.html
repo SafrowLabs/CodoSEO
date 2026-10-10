@@ -1,62 +1,76 @@
 {% extends "base.html" %}
 {% block main %}
-<div class="page page-narrow aia-intent">
+<div class="page aia-intent">
   <div class="page-head">
     <a class="icon-btn aia-back" href="{{ base }}/ai-access" aria-label="Back to AI access"><svg class="icon"><use href="#i-arrow"/></svg></a>
     <h1>AI access intent</h1>
   </div>
   <p class="page-sub">What you want from each kind of AI bot. CodoSEO raises an issue only where robots.txt disagrees with this; “No preference” is never reported either way.</p>
 
-  <form id="intent-form" class="stack" method="post" action="{{ base }}/ai-access/intent">
-    {% for c in cards %}
-    <section class="card aia-purpose" aria-labelledby="h-{{ c.slug }}">
-      <div class="aia-purpose-main">
-        <div class="aia-purpose-text">
-          <h2 class="card-title" id="h-{{ c.slug }}">{{ c.label }}</h2>
-          <p>{{ c.blurb }}</p>
-        </div>
-        <fieldset class="aia-seg">
-          <legend class="sr-only">{{ c.label }}: your intent ({{ c.default_label }})</legend>
-          {% for o in c.choices %}<input type="radio" id="{{ o.id }}" name="p.{{ c.slug }}" value="{{ o.value }}"{% if o.checked %} checked{% endif %}><label for="{{ o.id }}" data-stance="{{ o.value }}">{{ o.label }}</label>{% endfor %}
-        </fieldset>
-      </div>
-      <details class="aia-overrides"{% if c.overrides > 0 %} open{% endif %}>
-        <summary><svg class="icon chev"><use href="#i-chev"/></svg>Per-bot overrides <span class="faint">({{ c.overrides }} set)</span><span class="grow"></span><span class="faint aia-default">{{ c.default_label }}</span></summary>
-        <div class="aia-picks">
-          {% for b in c.bots %}
-          <div class="aia-pick{% if b.overridden %} is-set{% endif %}">
-            <label for="{{ b.id }}"><span class="aia-token">{{ b.token }}</span>{% if b.control %}<span class="tag">control token</span>{% endif %}{% if b.overridden %}<span class="tag is-set">override</span>{% endif %}<span class="aia-sub">{{ b.operator }} · {{ b.product }}</span></label>
-            <select class="select" id="{{ b.id }}" name="{{ b.name }}">{% for o in b.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+  <form id="intent-form" class="aia-intent-form" method="post" action="{{ base }}/ai-access/intent">
+    <div class="stack aia-purposes">
+      {% for c in cards %}
+      <section class="card aia-purpose" aria-labelledby="h-{{ c.slug }}">
+        <div class="aia-purpose-main">
+          <div class="aia-purpose-text">
+            <h2 class="card-title" id="h-{{ c.slug }}">{{ c.label }}</h2>
+            <p>{{ c.blurb }}</p>
           </div>
+          <fieldset class="aia-seg">
+            <legend class="sr-only">{{ c.label }}: your intent ({{ c.default_label }})</legend>
+            {% for o in c.choices %}<input type="radio" id="{{ o.id }}" name="p.{{ c.slug }}" value="{{ o.value }}"{% if o.checked %} checked{% endif %}><label for="{{ o.id }}" data-stance="{{ o.value }}">{{ o.label }}</label>{% endfor %}
+          </fieldset>
+        </div>
+        <details class="aia-overrides"{% if c.overrides > 0 %} open{% endif %}>
+          <summary><svg class="icon chev"><use href="#i-chev"/></svg>Per-bot overrides <span class="faint">({{ c.overrides }} set)</span><span class="grow"></span><span class="faint aia-default">{{ c.default_label }}</span></summary>
+          <div class="aia-picks">
+            {% for b in c.bots %}
+            <div class="aia-pick{% if b.overridden %} is-set{% endif %}">
+              <label for="{{ b.id }}"><span class="aia-token">{{ b.token }}</span>{% if b.control %}<span class="tag">control token</span>{% endif %}{% if b.overridden %}<span class="tag is-set">override</span>{% endif %}<span class="aia-sub">{{ b.operator }} · {{ b.product }}</span></label>
+              <select class="select" id="{{ b.id }}" name="{{ b.name }}">{% for o in b.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+      </section>
+      {% endfor %}
+    </div>
+
+    <div class="aia-intent-side">
+      <section class="card aia-directives" aria-labelledby="h-directives">
+        <div class="aia-purpose-main">
+          <div class="aia-purpose-text">
+            <h2 class="card-title" id="h-directives">Page directives you use on purpose</h2>
+            <p>Markup that limits what AI answers can quote. Tick the ones you set on purpose: pages that carry them still show under AI answers, but raise no issue. <code>noindex</code> isn't listed: the SEO checks report it.</p>
+          </div>
+        </div>
+        <fieldset class="aia-dirs">
+          <legend class="sr-only">Page directives you use on purpose</legend>
+          {% for d in directives %}
+          <label class="aia-dir" for="{{ d.id }}">
+            <input class="check" type="checkbox" id="{{ d.id }}" name="d" value="{{ d.value }}"{% if d.checked %} checked{% endif %}>
+            <span class="aia-dir-text"><code class="aia-token">{{ d.label }}</code><span class="aia-sub">{{ d.note }}</span></span>
+          </label>
           {% endfor %}
-        </div>
-      </details>
-    </section>
-    {% endfor %}
+        </fieldset>
+      </section>
 
-    <section class="card aia-directives" aria-labelledby="h-directives">
-      <div class="aia-purpose-main">
-        <div class="aia-purpose-text">
-          <h2 class="card-title" id="h-directives">Page directives you use on purpose</h2>
-          <p>Markup that limits what AI answers can quote. Tick the ones you set on purpose: pages that carry them still show under AI answers, but raise no issue. <code>noindex</code> isn't listed: the SEO checks report it.</p>
-        </div>
+      <div class="aia-savebar">
+        <button class="btn btn-primary" type="submit"><svg class="icon"><use href="#i-check"/></svg>Save intent</button>
+        <a class="btn btn-ghost" href="{{ base }}/ai-access">Cancel</a>
+        <span class="grow"></span>
+        <button class="btn btn-ghost" type="submit" form="intent-reset" aria-label="Reset to defaults"{% if !custom %} disabled title="Already the defaults"{% endif %}><span class="aia-wide-only">Reset to defaults</span><span class="aia-narrow-only">Reset</span></button>
       </div>
-      <fieldset class="aia-dirs">
-        <legend class="sr-only">Page directives you use on purpose</legend>
-        {% for d in directives %}
-        <label class="aia-dir" for="{{ d.id }}">
-          <input class="check" type="checkbox" id="{{ d.id }}" name="d" value="{{ d.value }}"{% if d.checked %} checked{% endif %}>
-          <span class="aia-dir-text"><code class="aia-token">{{ d.label }}</code><span class="aia-sub">{{ d.note }}</span></span>
-        </label>
-        {% endfor %}
-      </fieldset>
-    </section>
 
-    <div class="aia-savebar">
-      <button class="btn btn-primary" type="submit"><svg class="icon"><use href="#i-check"/></svg>Save intent</button>
-      <a class="btn btn-ghost" href="{{ base }}/ai-access">Cancel</a>
-      <span class="grow"></span>
-      <button class="btn btn-ghost" type="submit" form="intent-reset" aria-label="Reset to defaults"{% if !custom %} disabled title="Already the defaults"{% endif %}><span class="aia-wide-only">Reset to defaults</span><span class="aia-narrow-only">Reset</span></button>
+      <div class="aia-howto">
+        <h2>How intent works</h2>
+        <ul>
+          <li><span class="badge aia-allow">Allow</span><span>An issue opens when robots.txt keeps a bot of that kind out.</span></li>
+          <li><span class="badge aia-block">Block</span><span>An issue opens when a bot of that kind can still crawl.</span></li>
+          <li><span class="badge aia-any">No preference</span><span>Never reported either way.</span></li>
+        </ul>
+        <p>A per-bot override wins over its purpose. Saving re-checks the latest crawl at once, and the issues that opens or resolves send no alerts.</p>
+      </div>
     </div>
   </form>
   <form id="intent-reset" method="post" action="{{ base }}/ai-access/intent/reset" hx-confirm="Reset every purpose and bot to the defaults?"></form>

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block main %}
-<div class="page page-keys">
+<div class="page">
   <div class="page-head"><h1>API keys</h1><span class="chip">{{ usage }}</span></div>
 
   {% if let Some(k) = new_key %}
@@ -17,34 +17,36 @@
   </div>
   {% endif %}
 
-  <div class="card">
-    <div class="card-head"><span class="card-title">Keys</span><span class="card-aside">{{ keys.len() }} of {{ max_keys }}</span></div>
-    <div class="channels">
-      {% for k in keys %}
-      <div class="channel">
-        <div class="channel-main">
-          <div class="channel-title"><b>{{ k.name }}</b></div>
-          <div class="faint mono trunc">{{ k.prefix }}… · created {{ k.created }} · {{ k.last_used }}</div>
+  <div class="keys-layout">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Keys</span><span class="card-aside">{{ keys.len() }} of {{ max_keys }}</span></div>
+      <div class="channels">
+        {% for k in keys %}
+        <div class="channel">
+          <div class="channel-main">
+            <div class="channel-title"><b>{{ k.name }}</b></div>
+            <div class="faint mono trunc">{{ k.prefix }}… · created {{ k.created }} · {{ k.last_used }}</div>
+          </div>
+          <div class="channel-actions">
+            <form method="post" action="/settings/api-keys/{{ k.id }}/revoke" hx-confirm="Revoke this key? Anything using it stops working."><button class="btn btn-sm btn-ghost" type="submit" aria-label="Revoke {{ k.name }}">Revoke</button></form>
+          </div>
         </div>
-        <div class="channel-actions">
-          <form method="post" action="/settings/api-keys/{{ k.id }}/revoke" hx-confirm="Revoke this key? Anything using it stops working."><button class="btn btn-sm btn-ghost" type="submit" aria-label="Revoke {{ k.name }}">Revoke</button></form>
-        </div>
+        {% endfor %}
+        {% if keys.is_empty() %}<div class="empty-sm">No keys yet. Create one to let an agent read your sites.</div>{% endif %}
       </div>
-      {% endfor %}
-      {% if keys.is_empty() %}<div class="empty-sm">No keys yet. Create one to let an agent read your sites.</div>{% endif %}
+      <div class="card-pad channels-add">
+        <div class="card-title" style="margin-bottom:10px">Create a key</div>
+        {{ form|safe }}
+      </div>
     </div>
-    <div class="card-pad channels-add">
-      <div class="card-title" style="margin-bottom:10px">Create a key</div>
-      {{ form|safe }}
-    </div>
-  </div>
 
-  <div class="card" style="margin-top:16px">
-    <div class="card-head"><span class="card-title">Connect an agent</span><span class="card-aside">MCP over HTTP</span></div>
-    <div class="card-pad" style="display:grid;gap:10px">
-      <p class="hint" style="font-size:13px">Add CodoSEO to Claude Code with a key from above. The agent can then list your sites, read their health, issues, pages and changes, and start a crawl.</p>
-      <pre class="snippet mono">claude mcp add --transport http codoseo {{ mcp_url }} --header "Authorization: Bearer &lt;your key&gt;"</pre>
-      <p class="hint">The same key works for the REST API under <span class="mono">/api/v1</span>. Each call counts toward the daily total above, which resets at 00:00 UTC.</p>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Connect an agent</span><span class="card-aside">MCP over HTTP</span></div>
+      <div class="card-pad" style="display:grid;gap:10px">
+        <p class="hint" style="font-size:13px">Add CodoSEO to Claude Code with one of your keys. The agent can then list your sites, read their health, issues, pages and changes, and start a crawl.</p>
+        <pre class="snippet mono">claude mcp add --transport http codoseo {{ mcp_url }} --header "Authorization: Bearer &lt;your key&gt;"</pre>
+        <p class="hint">The same key works for the REST API under <span class="mono">/api/v1</span>. Each call counts toward the daily total above, which resets at 00:00 UTC.</p>
+      </div>
     </div>
   </div>
 </div>
