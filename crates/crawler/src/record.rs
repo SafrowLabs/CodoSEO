@@ -3,9 +3,7 @@
 use std::collections::HashSet;
 
 use codoseo_core::check::IssueBits;
-use codoseo_core::page::{
-    FetchFailure, Indexability, PageFields, PageRecord, indexability, is_nofollow,
-};
+use codoseo_core::page::{FetchFailure, Indexability, PageFields, PageRecord, indexability};
 use codoseo_core::url::{normalize, url_hash};
 use url::Url;
 
@@ -113,11 +111,7 @@ fn page(
     record.outlinks_external = count(&external);
     record.outlinks_nofollow = count(&nofollow);
 
-    let follow_links = record.is_html_ok()
-        && !is_nofollow(
-            record.fields.meta_robots.as_deref(),
-            record.fields.x_robots_tag.as_deref(),
-        );
+    let follow_links = record.is_html_ok() && !record.fields.is_nofollow();
     record.key_hash = record.compute_key_hash();
     Built {
         record,

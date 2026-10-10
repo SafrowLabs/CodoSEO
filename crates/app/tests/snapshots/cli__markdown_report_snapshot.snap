@@ -30,6 +30,10 @@ expression: out
 | Page has under 200 words | `thin_content` | 3 pages | http://[host]/<br>http://[host]/a<br>http://[host]/b |
 | Open Graph title or image is missing | `og_missing` | 3 pages | http://[host]/<br>http://[host]/a<br>http://[host]/b |
 
+## AI access
+
+No AI access issues
+
 ## Summary
 
 - **Pages:** 4 (3 indexable)

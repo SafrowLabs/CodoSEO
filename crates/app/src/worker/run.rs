@@ -14,8 +14,11 @@ use codoseo_core::output::{
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_crawler::crawl::crawl;
 use codoseo_diff::{diff, key_pages};
-use codoseo_store::crawl_queue::{ClaimedCrawl, CrawlQueue};
+use codoseo_geo::report::{AccessReport, build_report, important_urls};
+use codoseo_geo::robots::{RobotsAvailability, availability};
+use codoseo_store::crawl_queue::{ClaimedCrawl, CrawlQueue, CrawlTrigger};
 use codoseo_store::finalize::finalize;
+use codoseo_store::geo::{self, GeoInput};
 use codoseo_store::jobs::JobQueue;
 use codoseo_web::metrics;
 use sqlx::PgPool;
@@ -275,6 +278,8 @@ async fn run_one_crawl(
         // The cloud refuses private and internal addresses; self-hosted behaves like the CLI.
         address_policy: policy,
         user_agent: USER_AGENT.to_owned(),
+        // A no-signup audit keeps no AI access report, so it asks for nothing beyond pages.
+        site_signals: claimed.trigger != CrawlTrigger::Quick,
     };
 
     let crawl_id = claimed.id;
@@ -338,6 +343,10 @@ async fn run_one_crawl(
             StopReason::Unreachable(_) | StopReason::Blocked(_)
         )
     {
+        // A robots.txt that fails (5xx, 429) is itself an AI-access incident: record it before
+        // the crawl fails for good, so the owner hears about it even though there is nothing
+        // to finalize.
+        record_failed_robots(pool, &claimed, worker_id, &out).await;
         return Err(stop_reason_message(&out.stop));
     }
 
@@ -346,18 +355,31 @@ async fn run_one_crawl(
         .previous_snapshot(claimed.site_id)
         .await
         .map_err(|e| format!("could not load previous snapshot: {e}"))?;
+    // A no-signup audit has no site owner to tell: the AI access state starts with the first
+    // full crawl. The findings are drawn in `finalize`, under the intent the site has then.
+    let with_geo = claimed.trigger != CrawlTrigger::Quick;
+    // The pages the user starred: key pages for the diff, important pages for AI access. Loaded
+    // once, and only when either needs them.
+    let starred = if previous.is_some() || with_geo {
+        codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
+            .await
+            .map_err(|e| format!("could not load starred pages: {e}"))?
+    } else {
+        Default::default()
+    };
     let changes = match previous {
         Some(prev) => {
             let curr = codoseo_core::snapshot::Snapshot::from_output(&out);
             // Key pages: the origin, the top 20 by inlinks and the pages the user starred.
-            let starred = codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
-                .await
-                .map_err(|e| format!("could not load starred pages: {e}"))?;
             let key = key_pages(&curr, &starred);
             diff(&prev, &curr, &key)
         }
         None => Vec::new(),
     };
+    let geo = with_geo.then(|| {
+        let important = important_urls(&out.pages, &out.origin, &starred);
+        GeoInput::new(build_report(&out, &important))
+    });
 
     finalize(
         pool,
@@ -367,12 +389,47 @@ async fn run_one_crawl(
         &out,
         &report,
         &changes,
+        geo.as_ref(),
     )
     .await
     .map_err(|e| format!("finalize failed: {e}"))?;
 
     tracing::info!(pages = out.pages.len(), "crawl finished");
     Ok(())
+}
+
+/// For a crawl that is about to fail for good with no pages: when robots.txt answered 5xx or
+/// 429 (which crawlers must treat as "everything is off limits"), records the AI access report
+/// and the `RobotsUnavailable` incident it shows. A first failure is retried in 15 minutes
+/// (`finish_failed`) and records nothing, so a short blip is not announced and then resolved.
+/// Best effort: a failure here is logged and the crawl fails exactly as it would have.
+async fn record_failed_robots(
+    pool: &PgPool,
+    claimed: &ClaimedCrawl,
+    worker_id: &str,
+    out: &codoseo_core::output::CrawlOutput,
+) {
+    if claimed.trigger == CrawlTrigger::Quick || !claimed.is_final_attempt() {
+        return;
+    }
+    let Some(robots) = &out.robots else { return };
+    // Only what crawlers must read as "everything is off limits": 5xx and 429.
+    if availability(Some(robots.status)) != RobotsAvailability::Unavailable
+        || !(robots.status >= 500 || robots.status == 429)
+    {
+        return;
+    }
+    let result = async {
+        // No pages came back, so the only important URL is the origin itself.
+        let important = important_urls(&out.pages, &out.origin, &Default::default());
+        let report: AccessReport = build_report(out, &important);
+        let input = GeoInput::new(report);
+        geo::record_failed_crawl(pool, claimed.site_id, claimed.id, worker_id, &input).await
+    }
+    .await;
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "could not record the AI access report of a failed crawl");
+    }
 }
 
 fn stop_reason_message(stop: &StopReason) -> String {

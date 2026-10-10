@@ -7,8 +7,8 @@ mod support;
 use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::{IssueBits, Severity};
 use codoseo_core::crawl::SitemapSummary;
-use codoseo_core::output::{CrawlOutput, LinkGraph, StopReason};
-use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
+use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
+use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::report::{CrawlReport, CrawlSummary};
 use sqlx::Row;
 use support::TestDb;
@@ -74,6 +74,7 @@ fn sample_page(idx: u64) -> PageRecord {
             og: OgTags::default(),
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
+            ai: AiMeta::default(),
         },
         inlinks: 0,
         outlinks_internal: 0,
@@ -95,6 +96,7 @@ fn empty_output(pages: Vec<PageRecord>, stop: StopReason) -> CrawlOutput {
         sitemap: SitemapSummary::default(),
         stop,
         duration_ms: 500,
+        signals: SiteSignals::default(),
     }
 }
 
@@ -126,7 +128,7 @@ async fn finalize_writes_pages_and_marks_the_crawl_done() {
     }];
 
     finalize(
-        &db.pool, crawl_id, site_id, WORKER_ID, &out, &report, &changes,
+        &db.pool, crawl_id, site_id, WORKER_ID, &out, &report, &changes, None,
     )
     .await
     .expect("finalize");
@@ -184,6 +186,7 @@ async fn finalize_round_trips_the_stop_reason_for_previous_snapshot() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -198,6 +201,92 @@ async fn finalize_round_trips_the_stop_reason_for_previous_snapshot() {
         snapshot.stop,
         StopReason::Blocked("site blocked our crawler".to_string())
     );
+}
+
+#[tokio::test]
+async fn finalize_round_trips_ai_meta_and_stores_null_when_empty() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "aimeta.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "aimeta.example").await;
+
+    let plain = sample_page(1);
+    let mut marked = sample_page(2);
+    marked.fields.ai = AiMeta {
+        bot_meta: vec![(
+            "bingbot".into(),
+            "noarchive, \"tab\\\there\"\nline\r\n".into(),
+        )],
+        nosnippet_words: 17,
+        tdm_reservation: Some("1".into()),
+        tdm_policy: Some("https://example.com/tdm.json".into()),
+    };
+    let out = empty_output(vec![plain, marked.clone()], StopReason::Completed);
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+        None,
+    )
+    .await
+    .expect("finalize");
+
+    let nulls: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pages WHERE crawl_id = $1 AND ai_meta IS NULL")
+            .bind(crawl_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(nulls, 1, "only the page without AI markup is NULL");
+
+    let snapshot = CrawlQueue::new(db.pool.clone())
+        .previous_snapshot(site_id)
+        .await
+        .unwrap()
+        .expect("a done crawl exists");
+    let read = |hash: u64| {
+        snapshot
+            .pages
+            .iter()
+            .find(|p| p.url_hash == hash)
+            .expect("page")
+            .fields
+            .ai
+            .clone()
+    };
+    assert!(read(1).is_empty());
+    assert_eq!(read(2), marked.fields.ai);
+}
+
+#[tokio::test]
+async fn nul_in_a_bot_meta_does_not_fail_the_jsonb_copy() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "nul.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "nul.example").await;
+    let mut page = sample_page(1);
+    page.fields.ai.bot_meta = vec![("bingbot".into(), "no\u{0}archive".into())];
+    let out = empty_output(vec![page], StopReason::Completed);
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+        None,
+    )
+    .await
+    .expect("finalize");
+    let snapshot = CrawlQueue::new(db.pool.clone())
+        .previous_snapshot(site_id)
+        .await
+        .unwrap()
+        .expect("a done crawl exists");
+    assert_eq!(snapshot.pages[0].fields.ai.bot_meta[0].1, "noarchive");
 }
 
 #[tokio::test]
@@ -225,6 +314,7 @@ async fn finalize_is_atomic_when_a_change_fails_to_insert() {
         &out,
         &empty_report(),
         &changes,
+        None,
     )
     .await;
     assert!(result.is_err(), "the NUL byte must make finalize fail");
@@ -313,6 +403,7 @@ async fn finalize_keeps_only_the_latest_two_done_crawls_pages() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -346,6 +437,7 @@ async fn finalize_handles_a_synthetic_fifty_thousand_page_crawl() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize 50k pages");
@@ -382,6 +474,7 @@ async fn finalize_by_a_stale_worker_rolls_back_and_does_not_touch_the_new_owners
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await;
     assert!(
@@ -454,6 +547,7 @@ async fn finalize_records_the_funnel_events_for_quick_and_first_crawls_only() {
             &out,
             &empty_report(),
             &[],
+            None,
         )
         .await
         .expect("finalize");
@@ -492,6 +586,7 @@ async fn a_failed_finalize_leaves_no_funnel_event() {
         &out,
         &empty_report(),
         &[],
+        None,
     )
     .await;
     assert!(result.is_err());
@@ -525,6 +620,7 @@ async fn a_first_crawl_added_directly_is_not_a_funnel_step() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -551,6 +647,7 @@ async fn the_diff_baseline_skips_quick_audits() {
         &empty_output(vec![sample_page(1)], StopReason::PageLimit),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize quick");
@@ -566,6 +663,7 @@ async fn the_diff_baseline_skips_quick_audits() {
         &empty_output(vec![sample_page(1), sample_page(2)], StopReason::Completed),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize first");
@@ -611,6 +709,7 @@ async fn four_hundred_changes_queue_one_planning_job() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &changes,
+        None,
     )
     .await
     .expect("finalize");
@@ -643,6 +742,7 @@ async fn a_crawl_without_changes_queues_nothing() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &[],
+        None,
     )
     .await
     .expect("finalize");
@@ -670,6 +770,7 @@ async fn a_quick_crawl_never_alerts() {
         &empty_output(vec![sample_page(1)], StopReason::Completed),
         &empty_report(),
         &[change(ChangeKind::ErrorSpike, "x")],
+        None,
     )
     .await
     .expect("finalize");

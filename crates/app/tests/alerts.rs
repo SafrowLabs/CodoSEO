@@ -482,6 +482,7 @@ fn record(path: &str, status: u16) -> PageRecord {
             og: OgTags::default(),
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
+            ai: Default::default(),
         },
         inlinks: 1,
         outlinks_internal: 0,
@@ -965,4 +966,79 @@ async fn the_default_email_channel_is_never_switched_off_by_failures() {
         .await
         .unwrap();
     assert_eq!(notices, 0, "no notice either");
+}
+
+#[tokio::test]
+async fn an_ai_access_change_on_a_failed_crawl_is_planned_to_the_instant_channel() {
+    let w = World::new("pro").await;
+    let email = w.email_channel().await;
+    // The crawl failed (robots.txt returned 503): its changes are still the owner's to hear about.
+    sqlx::query("UPDATE crawls SET status = 'failed', failure_reason = 'site blocked: robots' WHERE id = $1")
+        .bind(w.crawl)
+        .execute(w.pool())
+        .await
+        .unwrap();
+    let blocked = w.change(ChangeKind::AiBotBlocked, None).await;
+    let not_applied = w.change(ChangeKind::AiBlockNotApplied, None).await;
+
+    let crawl = alert_rules::alert_crawl(w.pool(), w.crawl)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!crawl.quick);
+    assert_eq!(
+        alert_rules::unalerted_changes(w.pool(), w.crawl)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    alerts::plan_alert(&w.ctx, w.crawl).await.unwrap();
+
+    let deliveries = w.deliveries().await;
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0]["channel_id"], json!(email));
+    assert_eq!(deliveries[0]["change_ids"], json!([blocked]));
+    assert!(w.alerted(blocked).await);
+    assert!(
+        !w.alerted(not_applied).await,
+        "ai_block_not_applied waits for the digest"
+    );
+    w.drain().await;
+    let mails = w.mail_to("owner@example.com");
+    assert_eq!(mails.len(), 1);
+    // The changes screen shows the latest finished crawl's changes: this one links to AI access.
+    assert!(
+        mails[0]
+            .text
+            .contains(&format!("https://codoseo.test/s/{}/ai-access", w.site)),
+        "{}",
+        mails[0].text
+    );
+}
+
+#[tokio::test]
+async fn alerts_link_to_ai_access_when_every_change_is_an_ai_one() {
+    let w = World::new("pro").await;
+    w.email_channel().await;
+    w.change(ChangeKind::AiBotBlocked, None).await;
+    w.change(ChangeKind::AiIssueResolved, None).await;
+    alerts::plan_alert(&w.ctx, w.crawl).await.unwrap();
+    w.drain().await;
+    let mails = w.mail_to("owner@example.com");
+    assert_eq!(mails.len(), 1);
+    let ai = format!("https://codoseo.test/s/{}/ai-access", w.site);
+    let changes = format!("https://codoseo.test/s/{}/changes", w.site);
+    assert!(mails[0].text.contains(&ai), "{}", mails[0].text);
+    assert!(!mails[0].text.contains(&changes));
+
+    // A crawl that also changed pages links to the changes screen.
+    let crawl = new_crawl(w.pool(), w.site, "schedule").await;
+    insert_change(w.pool(), crawl, w.site, ChangeKind::AiBotBlocked, None).await;
+    insert_change(w.pool(), crawl, w.site, ChangeKind::ErrorSpike, None).await;
+    alerts::plan_alert(&w.ctx, crawl).await.unwrap();
+    w.drain().await;
+    let mails = w.mail_to("owner@example.com");
+    assert_eq!(mails.len(), 2);
+    assert!(mails[1].text.contains(&changes), "{}", mails[1].text);
 }

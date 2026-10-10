@@ -11,6 +11,7 @@ use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, U
 use codoseo_core::output::{Progress, StopReason};
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::crawl;
+use codoseo_geo::assess_with_defaults;
 use url::Url;
 
 use super::output::write_crawl;
@@ -56,6 +57,7 @@ impl CrawlArgs {
             },
             address_policy: AddressPolicy::AllowPrivate,
             user_agent: USER_AGENT.to_owned(),
+            site_signals: true,
         }
     }
 }
@@ -103,6 +105,9 @@ pub async fn run(args: CrawlArgs) -> Outcome {
 
     let report = run_checks(&mut out);
     let duration_ms = out.duration_ms;
+    // GEO stays out of the health score and `--fail-on`: it is a section of its own, judged under
+    // the default intent because the CLI has nowhere to keep an owner's.
+    let ai_access = assess_with_defaults(&out);
     let audit = Audit {
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -113,6 +118,7 @@ pub async fn run(args: CrawlArgs) -> Outcome {
         start_url: cfg.start_url,
         report,
         snapshot: Snapshot::from_output_owned(out),
+        ai_access: Some(ai_access),
     };
 
     write_crawl(&mut w, args.format, &audit)?;

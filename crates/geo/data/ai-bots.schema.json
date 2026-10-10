@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codoseo.com/ai-bots.schema.json",
+  "title": "CodoSEO AI bot registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "updated", "license", "homepage", "bots"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "updated": { "$ref": "#/$defs/date" },
+    "license": { "type": "string" },
+    "homepage": { "$ref": "#/$defs/httpsUri" },
+    "bots": { "type": "array", "items": { "$ref": "#/$defs/bot" } }
+  },
+  "$defs": {
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "httpsUri": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "bot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "token", "operator", "product", "purpose", "honours_robots", "crawls",
+        "user_agent_contains", "ip_ranges_url", "reverse_dns", "signature_agent",
+        "source_url", "last_reviewed", "notes"
+      ],
+      "properties": {
+        "token": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$", "description": "The robots.txt product token exactly as the operator writes it." },
+        "operator": { "type": "string" },
+        "product": { "type": "string" },
+        "purpose": { "enum": ["search", "user_fetch", "agent", "training", "ads"] },
+        "honours_robots": { "enum": ["yes", "partial", "no", "unknown"] },
+        "crawls": { "type": "boolean", "description": "False for control tokens that never make requests." },
+        "user_agent_contains": { "type": ["string", "null"] },
+        "ip_ranges_url": { "anyOf": [{ "$ref": "#/$defs/httpsUri" }, { "type": "null" }], "description": "A JSON file of prefixes, or null." },
+        "reverse_dns": { "type": "array", "items": { "type": "string" } },
+        "signature_agent": { "anyOf": [{ "$ref": "#/$defs/httpsUri" }, { "type": "null" }] },
+        "source_url": { "$ref": "#/$defs/httpsUri" },
+        "last_reviewed": { "$ref": "#/$defs/date" },
+        "notes": { "type": "string" },
+        "robots_fallback": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$", "description": "Optional. The token of another bot in this file whose robots.txt groups this bot follows when no group names it, as its operator documents." }
+      }
+    }
+  }
+}

@@ -10,6 +10,7 @@ homepage.workspace = true
 
 [dependencies]
 codoseo-core.workspace = true
+codoseo-geo.workspace = true
 url.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -29,6 +30,7 @@ futures-util.workspace = true
 [dev-dependencies]
 codoseo-testkit.workspace = true
 insta.workspace = true
+proptest.workspace = true
 peak_alloc.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 axum.workspace = true

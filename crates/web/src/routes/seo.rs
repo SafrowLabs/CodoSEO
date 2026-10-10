@@ -57,7 +57,7 @@ pub async fn llms(State(state): State<AppState>) -> Result<Response, AppError> {
         .into_response())
 }
 
-/// The public pages: the landing page and the bot page. Audits and accounts are private.
+/// The public pages: the landing page, the bot page and the AI bot registry. Audits and accounts are private.
 pub async fn sitemap(State(state): State<AppState>) -> Result<Response, AppError> {
     require_cloud(&state)?;
     let origin = state.config.origin();
@@ -66,6 +66,7 @@ pub async fn sitemap(State(state): State<AppState>) -> Result<Response, AppError
          <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
          \x20 <url><loc>{origin}/</loc></url>\n\
          \x20 <url><loc>{origin}/bot</loc></url>\n\
+         \x20 <url><loc>{origin}/ai-bots</loc></url>\n\
          </urlset>\n"
     );
     Ok((

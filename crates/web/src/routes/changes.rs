@@ -97,8 +97,12 @@ pub struct ChangeView {
     pub mode_icon: &'static str,
     pub before: String,
     pub after: String,
-    /// ` critical`, ` warning` or empty, appended to the `.after` class.
+    /// ` critical`, ` warning`, ` resolved` or empty, appended to the `.after` class.
     pub after_class: &'static str,
+    /// AI access changes link to that screen instead of the explorer.
+    pub ai_href: Option<String>,
+    /// The values are sentences (AI access findings) and wrap instead of scrolling.
+    pub wrap: bool,
 }
 
 pub struct SparkBar {
@@ -248,7 +252,11 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
     let removed = c.kind(ChangeKind::RemovedUrl);
     let noindex = c.kind(ChangeKind::BecameNoindex);
     let titles = c.kind(ChangeKind::TitleChanged) + c.kind(ChangeKind::TitleRemoved);
-    vec![
+    let ai: i64 = AI_KINDS.iter().map(|k| c.kind(*k)).sum();
+    let ai_bad = c.kind(ChangeKind::AiBotBlocked)
+        + c.kind(ChangeKind::AiAnswersRestricted)
+        + c.kind(ChangeKind::AiBlockNotApplied);
+    let mut tiles = vec![
         Tile {
             label: "New URLs",
             value: signed('+', new),
@@ -274,8 +282,26 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
             value: fmt::thousands(titles),
             class: "",
         },
-    ]
+    ];
+    // Only when the crawl has any: most crawls change nothing about AI access.
+    if ai > 0 {
+        tiles.push(Tile {
+            label: "AI access",
+            value: fmt::thousands(ai),
+            class: tone(ai_bad, "c-err"),
+        });
+    }
+    tiles
 }
+
+/// The AI access change kinds (`codoseo_geo` findings and declared preferences).
+const AI_KINDS: [ChangeKind; 5] = [
+    ChangeKind::AiBotBlocked,
+    ChangeKind::AiAnswersRestricted,
+    ChangeKind::AiIssueResolved,
+    ChangeKind::AiBlockNotApplied,
+    ChangeKind::AiPreferencesChanged,
+];
 
 fn tabs(base: &str, c: &ChangeCounts, current: Option<Severity>) -> Vec<Tab> {
     let mut tabs = vec![Tab {
@@ -313,6 +339,9 @@ fn is_instant(kind: ChangeKind) -> bool {
             | ChangeKind::ErrorSpike
             | ChangeKind::RobotsTxtChanged
             | ChangeKind::SitemapShrank
+            | ChangeKind::AiBotBlocked
+            | ChangeKind::AiAnswersRestricted
+            | ChangeKind::AiIssueResolved
     )
 }
 
@@ -330,6 +359,11 @@ fn title(c: &ChangeRow) -> String {
         ChangeKind::SitemapShrank => "Sitemap lost URLs".to_owned(),
         ChangeKind::ErrorSpike => "4xx/5xx spike".to_owned(),
         ChangeKind::SiteMoved => "Site moved".to_owned(),
+        ChangeKind::AiBotBlocked => "AI bot blocked".to_owned(),
+        ChangeKind::AiAnswersRestricted => "AI answers restricted".to_owned(),
+        ChangeKind::AiBlockNotApplied => "AI block not applied".to_owned(),
+        ChangeKind::AiIssueResolved => "AI issue resolved".to_owned(),
+        ChangeKind::AiPreferencesChanged => "AI preferences changed".to_owned(),
     }
 }
 
@@ -360,6 +394,16 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
         ChangeKind::ErrorSpike => count("error page", "error pages"),
         ChangeKind::SitemapShrank => count("URL", "URLs"),
         ChangeKind::RedirectChainGrew => count("hop", "hops"),
+        // The expectation an AI access finding broke, in words.
+        ChangeKind::AiBotBlocked if value == "allowed" => "AI bots can crawl".to_owned(),
+        ChangeKind::AiBlockNotApplied if value == "intent: block" => {
+            "Your intent: Block".to_owned()
+        }
+        ChangeKind::AiAnswersRestricted if value == "eligible" => {
+            "Eligible for AI answers".to_owned()
+        }
+        ChangeKind::AiIssueResolved if value == "resolved" => "Resolved".to_owned(),
+        ChangeKind::AiPreferencesChanged if value == "none" => "none declared".to_owned(),
         _ => value.to_owned(),
     }
 }
@@ -395,6 +439,7 @@ fn change_view(
             )
         });
     let instant = is_instant(c.kind);
+    let ai = c.kind.is_ai();
     ChangeView {
         severity,
         severity_label,
@@ -410,10 +455,13 @@ fn change_view(
         before: diff_value(c, &c.before, previous),
         after: diff_value(c, &c.after, latest),
         after_class: match c.severity {
+            _ if c.kind == ChangeKind::AiIssueResolved => " resolved",
             Severity::Critical => " critical",
             Severity::Warning => " warning",
             Severity::Notice => "",
         },
+        ai_href: ai.then(|| format!("{base}/ai-access")),
+        wrap: ai,
     }
 }
 
@@ -473,6 +521,8 @@ fn rules() -> Vec<Rule> {
         instant("Any 5xx or new 4xx spike"),
         instant("robots.txt changes"),
         instant("Sitemap loses 10%+ URLs"),
+        instant("AI bots blocked or answers restricted"),
+        instant("AI issue resolved"),
         Rule {
             label: "Everything else",
             mode: "Monday digest",

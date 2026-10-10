@@ -191,6 +191,83 @@ pub struct ChangesPage {
     pub next_offset: Option<u32>,
 }
 
+/// `get_ai_access`: the latest AI access report of a site, summarised, with its open incidents.
+/// Before the first crawl after AI access shipped there is no report: `checked_at` is none and
+/// `note` says when it will appear.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiAccessInfo {
+    pub site_id: Uuid,
+    /// When the report was written (the crawl that made it); none without a report.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub checked_at: Option<OffsetDateTime>,
+    pub crawl_id: Option<Uuid>,
+    /// Said only when there is no report to show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub robots: Option<AiRobotsInfo>,
+    /// Unresolved incidents, most severe first.
+    pub open_incidents: Vec<AiIncidentInfo>,
+    /// One entry per known AI bot; empty when robots.txt could not be read.
+    pub bots: Vec<AiBotInfo>,
+    /// One entry per AI engine, counting the HTML pages among the important ones.
+    pub engines: Vec<AiEngineInfo>,
+    /// What the site declares about AI use. Declared, not enforced.
+    pub declared: codoseo_geo::report::Declared,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiRobotsInfo {
+    /// The HTTP status of /robots.txt; none when it could not be fetched.
+    pub status: Option<u16>,
+    pub availability: codoseo_geo::robots::RobotsAvailability,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiIncidentInfo {
+    pub id: i64,
+    /// `bots_blocked`, `bots_not_blocked`, `robots_unavailable` or `answers_restricted`.
+    pub kind: String,
+    /// The purpose or directive the incident is about; empty for the robots.txt one.
+    pub subject: String,
+    pub severity: Severity,
+    pub title: String,
+    pub summary: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub opened_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub last_seen_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiBotInfo {
+    pub token: String,
+    pub operator: String,
+    pub purpose: codoseo_geo::Purpose,
+    /// What the owner wants from this bot (`allow`, `block` or `any`).
+    pub intent: codoseo_geo::Stance,
+    /// Whether robots.txt lets it fetch the home page.
+    pub home_allowed: Option<bool>,
+    /// Important pages robots.txt keeps it from.
+    pub important_blocked: u32,
+    pub important_total: u32,
+    /// robots.txt does the opposite of the owner's intent for this bot.
+    pub conflicts: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiEngineInfo {
+    pub id: codoseo_geo::eligibility::EngineId,
+    pub name: String,
+    /// Important HTML pages that can appear in the engine's answers.
+    pub eligible: u32,
+    /// Pages whose own controls (a snippet limit, `data-nosnippet`) shrink what is quoted.
+    pub limited: u32,
+    /// Pages kept out: `noindex`-like controls, or the engine's crawler is blocked.
+    pub excluded: u32,
+    /// The engine documents page-level controls; without them only robots.txt matters.
+    pub page_controls: bool,
+}
+
 /// `run_crawl`: the crawl that was queued.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrawlQueued {

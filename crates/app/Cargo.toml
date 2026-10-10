@@ -20,6 +20,7 @@ codoseo-core.workspace = true
 codoseo-crawler.workspace = true
 codoseo-checks.workspace = true
 codoseo-diff.workspace = true
+codoseo-geo.workspace = true
 codoseo-mcp.workspace = true
 codoseo-notify.workspace = true
 codoseo-store.workspace = true

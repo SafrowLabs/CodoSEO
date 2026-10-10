@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{% block main %}
+<div class="page aia">
+{% if let Some(e) = empty %}
+  <div class="page-head"><h1>AI access</h1></div>
+  <p class="page-sub">Can AI assistants and search engines reach, read and quote your site?</p>
+  <div class="card">
+    <div class="empty">
+      {% call m::eyes("idle", "mascot-empty") %}{% endcall %}
+      <h2>AI access appears after the next crawl</h2>
+      <p>{{ e.text }}</p>
+      <div class="aia-empty-actions">
+        {% if e.can_run %}<button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>{% endif %}
+        <a class="btn" href="{{ base }}/ai-access/intent"><svg class="icon"><use href="#i-settings"/></svg>Set your intent</a>
+      </div>
+    </div>
+  </div>
+{% else if let Some(v) = view %}
+  <div class="page-head aia-head">
+    <h1>AI access</h1>
+    <span class="grow"></span>
+    <span class="aia-checked" title="{{ v.checked_full }}">Last checked {{ v.checked }} · <a href="{{ base }}/crawls">{{ v.crawl_label }}</a></span>
+    <a class="btn btn-sm" href="{{ base }}/ai-access/intent"><svg class="icon"><use href="#i-settings"/></svg>Edit intent</a>
+  </div>
+  <p class="page-sub">Can AI assistants and search engines reach, read and quote your site?</p>
+  {% if let Some(f) = v.failed %}<div class="plan-banner aia-banner" role="status"><svg class="icon"><use href="#i-alert"/></svg><span>{{ f }}</span></div>{% endif %}
+
+  <div class="tiles aia-tiles">
+    {% for t in v.tiles %}
+    <div class="tile">
+      <div class="tile-label">{{ t.label }}</div>
+      <div class="tile-value{% if !t.class.is_empty() %} {{ t.class }}{% endif %}">{{ t.value }}{% if !t.of.is_empty() %}<span class="aia-of">{{ t.of }}</span>{% endif %}</div>
+      <div class="aia-tile-sub{% if !t.sub_class.is_empty() %} {{ t.sub_class }}{% endif %}">{{ t.sub }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <section class="aia-section" aria-labelledby="aia-issues">
+    <div class="aia-section-head"><h2 id="aia-issues">Open issues</h2><span class="chip">{{ v.incidents.len() }}</span></div>
+    {% if v.incidents.is_empty() %}
+    <div class="card">
+      <div class="empty aia-clear">
+        {% call m::eyes(v.clear.2, "mascot-empty") %}{% endcall %}
+        <h2>{{ v.clear.0 }}</h2>
+        <p>{{ v.clear.1 }}</p>
+      </div>
+    </div>
+    {% else %}
+    <div class="stack aia-issues">
+      {% for i in v.incidents %}{% include "ai_access/_incident.html" %}{% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card aia-section aia-botcard" aria-labelledby="aia-bots">
+    <div class="card-head aia-bots-head">
+      <h2 class="card-title" id="aia-bots">AI bots</h2>
+      {% if v.robots_callout.is_none() %}
+      <fieldset class="tabs aia-filter">
+        <legend class="sr-only">Show</legend>
+        <input class="sr-only" type="radio" name="aia-filter" id="aia-f-attn" value="attention" aria-controls="aia-bots-table"{% if v.bot_attention > 0 %} checked{% else %} disabled{% endif %}><label class="tab" for="aia-f-attn">Needs attention<span class="n">{{ v.bot_attention }}</span></label>
+        <input class="sr-only" type="radio" name="aia-filter" id="aia-f-all" value="all" aria-controls="aia-bots-table"{% if v.bot_attention == 0 %} checked{% endif %}><label class="tab" for="aia-f-all">All bots<span class="n">{{ v.bot_total }}</span></label>
+      </fieldset>
+      {% endif %}
+      <span class="card-aside">{{ v.robots_aside }}</span>
+    </div>
+    {% if let Some(c) = v.robots_callout %}
+    <div class="card-pad">
+      <div class="aia-callout" role="note"><svg class="icon"><use href="#i-alert"/></svg><div><b>{{ c.title }}</b><p>{{ c.text }}</p></div></div>
+    </div>
+    {% else %}
+    <div class="aia-scroll">
+      <table class="aia-table aia-bots-table" id="aia-bots-table">
+        <thead>
+          <tr><th scope="col">Bot</th><th scope="col">Your intent</th><th scope="col">Home page</th><th scope="col" class="r">Important pages blocked</th><th scope="col">Follows robots.txt</th><th scope="col">Status</th></tr>
+        </thead>
+        {% for g in v.bot_groups %}
+        <tbody{% if g.conflicts.is_empty() %} class="is-clear"{% endif %}>
+          <tr class="aia-group"><th colspan="6" scope="colgroup"><span class="aia-group-name">{{ g.label }}</span><span class="aia-group-meta">intent <span class="badge {{ g.stance_class }}">{{ g.stance }}</span><span class="aia-dot">·</span>{{ g.count }}{% if g.conflicts.is_empty() %}<span class="aia-group-none"><span class="aia-dot">·</span>no conflicts</span>{% else %}<span class="aia-dot">·</span><span class="aia-group-flag">{{ g.conflicts }}</span>{% endif %}</span></th></tr>
+          {% for r in g.rows %}
+          <tr class="{% if r.attention %}is-attn{% if r.last_attention %} is-attn-last{% endif %}{% else %}is-ok{% endif %}">
+            <th scope="row" class="aia-bot-cell"><span class="aia-token">{{ r.token }}</span>{% if r.control %}<span class="tag" title="{{ r.notes }}">control token</span>{% endif %}<span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></th>
+            <td data-label="Intent"><span class="aia-inline"><span class="badge {{ r.stance_class }}">{{ r.stance }}</span>{% if r.overridden %}<span class="tag" title="Set for this bot, not by its purpose">override</span>{% endif %}</span></td>
+            <td data-label="Home"><span class="{{ r.home_class }}"{% if !r.home_tip.is_empty() %} title="{{ r.home_tip }}"{% endif %}>{{ r.home }}</span></td>
+            <td data-label="Blocked" class="r num"><span class="{{ r.blocked_class }}">{{ r.blocked }}</span></td>
+            <td data-label="Follows robots.txt"><span class="{{ r.honours_class }}">{{ r.honours }}</span></td>
+            <td class="aia-status">{% if r.status == "—" %}<span class="c-ghost" title="{{ r.status_tip }}">—</span>{% else %}<span class="badge {{ r.status_class }}" title="{{ r.status_tip }}">{{ r.status }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card aia-section" aria-labelledby="aia-answers">
+    <div class="card-head"><h2 class="card-title" id="aia-answers">AI answers</h2><span class="card-aside">the markup each engine documents</span></div>
+    <div class="aia-scroll">
+      <table class="aia-table aia-engines-table">
+        <thead>
+          <tr><th scope="col" rowspan="2">Engine</th><th scope="col" rowspan="2">Reach</th><th scope="colgroup" colspan="3" class="aia-span">Important pages</th><th scope="col" rowspan="2">What we found</th><th scope="col" rowspan="2">Site-wide</th></tr>
+          <tr><th scope="col" class="r">Eligible</th><th scope="col" class="r">Limited</th><th scope="col" class="r">Excluded</th></tr>
+        </thead>
+        <tbody>
+          {% for e in v.engines %}
+          <tr>
+            <th scope="row" class="aia-bot-cell"><span class="aia-engine">{{ e.name }}</span><span class="aia-sub"><span class="mono">{{ e.crawler }}</span> · intent {{ e.stance }}</span></th>
+            <td data-label="Reach"><span class="{{ e.reach_class }}">{{ e.reach }}</span></td>
+            {% if e.page_controls %}
+            <td data-label="Eligible" class="r num"><span class="{{ e.eligible_class }}">{{ e.eligible }}</span></td>
+            <td data-label="Limited" class="r num"><span class="{{ e.limited_class }}">{{ e.limited }}</span></td>
+            <td data-label="Excluded" class="r num"><span class="{{ e.excluded_class }}">{{ e.excluded }}</span></td>
+            <td data-label="Found" class="aia-wide">{% if e.causes.is_empty() %}<span class="c-ghost">nothing</span>{% else %}<span class="aia-chips">{% for c in e.causes %}<span class="chip" title="{{ c.tip }}">{{ c.label }}</span>{% endfor %}</span>{% endif %}</td>
+            <td data-label="Site-wide" class="aia-wide">{% if e.site.is_empty() %}<span class="c-ghost">—</span>{% else %}<span class="aia-lines">{% for s in e.site %}<span>{{ s }}</span>{% endfor %}</span>{% endif %}</td>
+            {% else %}
+            <td colspan="5" class="aia-note aia-wide">No page-level controls documented — robots.txt only</td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="cols aia-cols">
+    <section class="card" aria-labelledby="aia-declared">
+      <div class="card-head"><h2 class="card-title" id="aia-declared">Declared preferences</h2><span class="card-aside">{{ v.declared.len() }}</span></div>
+      <p class="aia-declared-note"><svg class="icon"><use href="#i-alert"/></svg>Declared preference — not enforced by major engines</p>
+      {% if v.declared.is_empty() %}
+      <div class="aia-none"><b>None declared</b><p>We look for Content-Signal and Content-Usage in robots.txt, the same headers and TDM meta tags on the home page, and /.well-known/tdmrep.json.</p></div>
+      {% else %}
+      <div class="rows">
+        {% for d in v.declared %}
+        <div class="aia-decl">
+          <div class="aia-decl-head"><b>{{ d.name }}</b><span>{{ d.place }}</span></div>
+          {% if !d.pairs.is_empty() %}<div class="aia-chips">{% for p in d.pairs %}<span class="aia-kv{% if !p.class.is_empty() %} {{ p.class }}{% endif %}"{% if !p.tip.is_empty() %} title="{{ p.tip }}"{% endif %}>{{ p.text }}</span>{% endfor %}</div>{% endif %}
+          {% if let Some(n) = d.note %}<p class="hint">{{ n }}</p>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+    <div class="stack">
+      <section class="card" aria-labelledby="aia-important">
+        <details class="aia-details">
+          <summary class="card-head"><h2 class="card-title" id="aia-important">Important pages</h2><span class="card-aside">{{ v.important.len() }} checked one by one</span><svg class="icon chev"><use href="#i-chev"/></svg></summary>
+          <p class="aia-details-note">The home page, the 20 most linked pages and your starred pages.</p>
+          <div class="rows">
+            {% for p in v.important %}
+            <div class="aia-imp">
+              {% if let Some(h) = p.href %}<a class="url trunc" href="{{ h }}">{{ p.path }}</a>{% else %}<span class="mono trunc aia-path">{{ p.path }}</span>{% endif %}
+              <span class="chip aia-reason"><svg class="icon"><use href="#{{ p.reason_icon }}"/></svg>{{ p.reason }}</span>
+              <span class="code {{ p.status_class }}">{{ p.status }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+      </section>
+      <section class="card" aria-labelledby="aia-resolved">
+        <div class="card-head"><h2 class="card-title" id="aia-resolved">Recently resolved</h2><span class="card-aside">last 10</span></div>
+        {% if v.resolved.is_empty() %}
+        <div class="empty-sm aia-pad">Nothing resolved yet. Fixed issues and choices you mark as intended show up here.</div>
+        {% else %}
+        <div class="rows">
+          {% for r in v.resolved %}
+          <div class="aia-res">
+            <span class="aia-res-title">{{ r.title }}</span>
+            <span class="aia-res-meta"><span class="faint" title="{{ r.when_full }}">{{ r.when }}</span><span class="badge {{ r.resolution_class }}" title="{{ r.resolution_tip }}">{{ r.resolution }}</span></span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+    </div>
+  </div>
+{% endif %}
+</div>
+{% endblock %}

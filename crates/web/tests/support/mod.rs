@@ -16,8 +16,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use codoseo_core::change::Change;
 use codoseo_core::check::IssueBits;
-use codoseo_core::crawl::SitemapSummary;
-use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, StopReason};
+use codoseo_core::crawl::{RobotsFile, SitemapSummary};
+use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::plan::Plan;
 use codoseo_store::accounts::{Account, SignIn, SignupPolicy};
@@ -312,6 +312,42 @@ impl TestApp {
         crawl_id
     }
 
+    /// Like [`finished_crawl`](Self::finished_crawl), with the robots.txt the crawl read
+    /// (`status`, `body`) and the AI access report the worker builds from it under the site's
+    /// intent and starred pages, so `finalize` opens and resolves incidents as in production.
+    pub async fn finished_crawl_with_robots(
+        &self,
+        site: &Site,
+        pages: Vec<PageRecord>,
+        robots: (u16, &str),
+        changes: Vec<Change>,
+    ) -> Uuid {
+        let crawl_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id, started_at, heartbeat_at) \
+             VALUES ($1, $2, 'manual', 2, 'running', 'test-worker', now() - interval '95 seconds', now()) \
+             RETURNING id",
+        )
+        .bind(site.id)
+        .bind(&site.domain)
+        .fetch_one(self.pool())
+        .await
+        .expect("insert crawl");
+        let robots = RobotsFile {
+            status: robots.0,
+            body: robots.1.to_owned(),
+            hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
+        };
+        self.finalize_with(
+            crawl_id,
+            pages,
+            changes,
+            StopReason::Completed,
+            Some(robots),
+        )
+        .await;
+        crawl_id
+    }
+
     /// Finishes a crawl that already exists (queued or running) as the worker would: claims it
     /// for `test-worker`, runs the checks over `pages` and `finalize`s. For no-signup audits
     /// and first crawls the test queued itself.
@@ -321,6 +357,20 @@ impl TestApp {
         pages: Vec<PageRecord>,
         changes: Vec<Change>,
         stop: StopReason,
+    ) {
+        self.finalize_with(crawl_id, pages, changes, stop, None)
+            .await;
+    }
+
+    /// [`finalize_crawl`](Self::finalize_crawl), plus the AI access report when the crawl read
+    /// a robots.txt.
+    async fn finalize_with(
+        &self,
+        crawl_id: Uuid,
+        pages: Vec<PageRecord>,
+        changes: Vec<Change>,
+        stop: StopReason,
+        robots: Option<RobotsFile>,
     ) {
         let (site_id, start_url): (Uuid, String) = sqlx::query_as(
             "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
@@ -354,12 +404,26 @@ impl TestApp {
                 edges,
                 anchors: vec!["Main navigation".to_owned()],
             },
-            robots: None,
+            robots,
             sitemap: SitemapSummary::default(),
             stop,
             duration_ms: 95_000,
+            signals: SiteSignals::default(),
         };
         let report = codoseo_checks::run_checks(&mut out);
+        let geo = match &out.robots {
+            Some(_) => {
+                let starred = codoseo_store::sites::starred_key_pages(self.pool(), site_id)
+                    .await
+                    .expect("starred pages");
+                let important =
+                    codoseo_geo::report::important_urls(&out.pages, &out.origin, &starred);
+                Some(codoseo_store::geo::GeoInput::new(
+                    codoseo_geo::report::build_report(&out, &important),
+                ))
+            }
+            None => None,
+        };
         codoseo_store::finalize::finalize(
             self.pool(),
             crawl_id,
@@ -368,6 +432,7 @@ impl TestApp {
             &out,
             &report,
             &changes,
+            geo.as_ref(),
         )
         .await
         .expect("finalize");
@@ -467,6 +532,7 @@ pub fn page(domain: &str, path: &str) -> PageRecord {
             og: OgTags::default(),
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
+            ai: Default::default(),
         },
         inlinks: 0,
         outlinks_internal: 0,

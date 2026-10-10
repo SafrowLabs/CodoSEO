@@ -3,7 +3,7 @@
 
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::SitemapSummary;
-use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, StopReason};
+use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use url::Url;
 
@@ -105,6 +105,7 @@ pub fn out(pages: Vec<PageRecord>, edges: &[(u32, u32)]) -> CrawlOutput {
         },
         stop: StopReason::Completed,
         duration_ms: 1_000,
+        signals: SiteSignals::default(),
     }
 }
 

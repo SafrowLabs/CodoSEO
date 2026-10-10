@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
-use codoseo_core::output::StopReason;
+use codoseo_core::output::{ROBOTS_FAILED_REASON, SiteSignals, StopReason, WellKnownFile};
 use codoseo_core::url::normalize;
 use tokio::time::Instant;
 use url::Url;
@@ -22,6 +22,18 @@ use crate::sitemap::discover;
 
 pub const BLOCKED_MSG: &str = "site blocked our crawler";
 pub const LOGIN_MSG: &str = "site requires a login";
+
+/// Response headers worth keeping from the start page: AI-use declarations.
+const SIGNAL_HEADERS: [&str; 4] = [
+    "content-signal",
+    "content-usage",
+    "tdm-reservation",
+    "tdm-policy",
+];
+/// Longest header value kept.
+const MAX_SIGNAL_VALUE: usize = 1024;
+/// Body cap for `/.well-known/tdmrep.json`.
+const TDMREP_MAX_BYTES: usize = 64 * 1024;
 
 /// How long sitemap discovery may take, whatever the crawl's own deadline.
 const SITEMAP_BUDGET: Duration = Duration::from_secs(60);
@@ -39,6 +51,9 @@ pub struct Preflight {
     pub robots: Option<RobotsFile>,
     pub sitemap_urls: Vec<Url>,
     pub sitemap: SitemapSummary,
+    /// What the site declares about AI use outside robots.txt: the start page's headers.
+    /// `tdmrep` is left to the crawl, which fetches it once the crawl delay applies.
+    pub signals: SiteSignals,
     /// Set when the crawl should not go on.
     pub stop: Option<StopReason>,
 }
@@ -67,6 +82,7 @@ pub(crate) async fn preflight(
             robots,
             sitemap_urls: Vec::new(),
             sitemap: SitemapSummary::default(),
+            signals: SiteSignals::default(),
             stop,
         });
     }
@@ -87,6 +103,13 @@ pub(crate) async fn preflight(
         robots_for(fetcher, limiter, &final_url).await?
     };
 
+    let signals = SiteSignals {
+        home_headers: result
+            .as_ref()
+            .map(|res| signal_headers(&res.headers))
+            .unwrap_or_default(),
+        tdmrep: None,
+    };
     let stop = match &result {
         Err(e) => Some(StopReason::Unreachable(e.to_string())),
         Ok(res) => robots_stop(&rules, robots.as_ref()).or(match res.status {
@@ -102,6 +125,7 @@ pub(crate) async fn preflight(
         robots,
         sitemap_urls: Vec::new(),
         sitemap: SitemapSummary::default(),
+        signals,
         stop,
     };
     if pre.stop.is_none() {
@@ -139,13 +163,16 @@ async fn robots_for(
     }
 }
 
-/// The stop reasons robots.txt decides on its own, in order: 429, 5xx, a full block.
+/// The stop reasons robots.txt decides on its own, in order: 429, 5xx, a full block. Both
+/// failures name the status, so a failed crawl's reason tells a robots.txt failure apart.
 fn robots_stop(rules: &RobotsRules, file: Option<&RobotsFile>) -> Option<StopReason> {
     match file.map(|f| f.status) {
-        Some(429) => return Some(StopReason::Blocked(BLOCKED_MSG.to_owned())),
+        Some(429) => {
+            return Some(StopReason::Blocked(format!("{ROBOTS_FAILED_REASON} 429")));
+        }
         Some(status) if status >= 500 => {
             return Some(StopReason::Unreachable(format!(
-                "robots.txt returned HTTP {status}"
+                "{ROBOTS_FAILED_REASON} {status}"
             )));
         }
         _ => {}
@@ -172,6 +199,53 @@ async fn fetch_start(
     limiter.on_response(res.status, retry_after_of(&res.headers));
     let _permit = limiter.acquire().await;
     fetcher.fetch(url).await
+}
+
+/// The AI-use headers of a response, names lower-cased, values capped.
+fn signal_headers(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for name in SIGNAL_HEADERS {
+        for value in headers.get_all(name) {
+            let mut value = String::from_utf8_lossy(value.as_bytes()).into_owned();
+            if value.len() > MAX_SIGNAL_VALUE {
+                let mut end = MAX_SIGNAL_VALUE;
+                while !value.is_char_boundary(end) {
+                    end -= 1;
+                }
+                value.truncate(end);
+            }
+            out.push((name.to_owned(), value));
+        }
+    }
+    out
+}
+
+/// Fetches `/.well-known/tdmrep.json` once, when robots.txt lets us. It is not a page:
+/// it goes into the signals, never the page list. Any failure gives `None`.
+pub(crate) async fn fetch_tdmrep(
+    fetcher: &Fetcher,
+    limiter: &Limiter,
+    origin: &Url,
+    rules: &RobotsRules,
+) -> Option<WellKnownFile> {
+    const PATH: &str = "/.well-known/tdmrep.json";
+    if !rules.allowed(PATH) {
+        return None;
+    }
+    let url = origin.join(PATH).ok()?;
+    let res = {
+        let _permit = limiter.acquire().await;
+        fetcher.fetch_raw(&url, TDMREP_MAX_BYTES).await.ok()?
+    };
+    let ok = (200..300).contains(&res.status);
+    let body = match res.body {
+        Some(body) if ok => String::from_utf8_lossy(&body).into_owned(),
+        _ => String::new(),
+    };
+    Some(WellKnownFile {
+        status: res.status,
+        body,
+    })
 }
 
 /// The `Sitemap:` lines of robots.txt plus `/sitemap.xml`.

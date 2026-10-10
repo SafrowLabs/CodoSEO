@@ -796,3 +796,91 @@ fn a_robots_txt_that_starts_blocking_the_crawl_is_a_critical_change() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn bots_lists_the_registry_and_json_is_the_raw_file() {
+    let table = run(["bots"]);
+    assert!(table.contains("OAI-SearchBot"), "{table}");
+    assert!(table.contains("OpenAI"), "{table}");
+    let json = run(["bots", "--format", "json"]);
+    assert_eq!(json.trim_end(), codoseo_geo::registry_json().trim_end());
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("json");
+    assert_eq!(parsed["license"], "CC0-1.0");
+}
+
+#[test]
+fn robots_shows_what_it_says_to_ai_bots() {
+    let url = serve(
+        SiteBuilder::new()
+            .html("/", "Home page title for tests here", &[])
+            .robots(
+                200,
+                "User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nContent-Signal: ai-train=no, search=yes\n",
+            ),
+    );
+    let table = run(["robots", url.as_str()]);
+    let gpt = table
+        .lines()
+        .find(|l| l.trim_start().starts_with("GPTBot"))
+        .expect("a GPTBot row");
+    assert!(gpt.contains("Blocked") && gpt.contains("line 2"), "{gpt}");
+    let search = table
+        .lines()
+        .find(|l| l.trim_start().starts_with("OAI-SearchBot"))
+        .expect("an OAI-SearchBot row");
+    assert!(search.contains("Allowed"), "{search}");
+    assert!(table.contains("Content-Signal (line 6)"), "{table}");
+    assert!(table.contains("ai-train=no"), "{table}");
+
+    let json: serde_json::Value =
+        serde_json::from_str(&run(["robots", url.as_str(), "--format", "json"])).expect("json");
+    assert_eq!(json["allowed"], true);
+    let bots = json["bots"].as_array().expect("bots");
+    let gptbot = bots
+        .iter()
+        .find(|b| b["token"] == "GPTBot")
+        .expect("GPTBot");
+    assert_eq!(gptbot["allowed"], false);
+    assert_eq!(gptbot["line"], 2);
+    assert_eq!(json["declared"]["content_signals"][0]["line"], 6);
+}
+
+#[test]
+fn crawl_reports_ai_access_in_every_format_and_old_audits_still_diff() {
+    let url = serve(clean_site().robots(200, "User-agent: OAI-SearchBot\nDisallow: /\n"));
+    let table = run(["crawl", url.as_str(), "--rps", "50"]);
+    assert!(table.contains("\nAI access\n"), "{table}");
+    assert!(table.contains("OAI-SearchBot"), "{table}");
+    let md = run(["crawl", url.as_str(), "--rps", "50", "--format", "md"]);
+    assert!(md.contains("## AI access"), "{md}");
+
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let new = dir.path().join("new.json");
+    crawl(&url)
+        .args(["--format", "json", "-o"])
+        .arg(&new)
+        .assert()
+        .success();
+    let text = fs::read_to_string(&new).expect("file");
+    let mut value: serde_json::Value = serde_json::from_str(&text).expect("json");
+    assert!(value["ai_access"]["report"]["bots"].is_array());
+    assert!(
+        value["ai_access"]["findings"]
+            .as_array()
+            .is_some_and(|f| !f.is_empty())
+    );
+    assert_eq!(value["format_version"], 1);
+
+    // An audit saved before the field existed loads, and diffs against one that has it.
+    value.as_object_mut().expect("object").remove("ai_access");
+    let old = dir.path().join("old.json");
+    fs::write(&old, serde_json::to_vec(&value).expect("json")).expect("write");
+    assert!(
+        Audit::from_json(&fs::read(&old).expect("read"))
+            .expect("loads")
+            .ai_access
+            .is_none()
+    );
+    run([OsStr::new("diff"), old.as_os_str(), new.as_os_str()]);
+    run([OsStr::new("diff"), new.as_os_str(), old.as_os_str()]);
+}

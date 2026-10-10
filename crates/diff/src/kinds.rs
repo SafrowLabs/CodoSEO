@@ -49,6 +49,11 @@ pub(crate) fn ordinal(kind: ChangeKind) -> u8 {
         ChangeKind::SitemapShrank => 9,
         ChangeKind::ErrorSpike => 10,
         ChangeKind::SiteMoved => 11,
+        ChangeKind::AiBotBlocked => 12,
+        ChangeKind::AiAnswersRestricted => 13,
+        ChangeKind::AiBlockNotApplied => 14,
+        ChangeKind::AiIssueResolved => 15,
+        ChangeKind::AiPreferencesChanged => 16,
     }
 }
 

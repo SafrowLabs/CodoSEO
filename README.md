@@ -14,6 +14,10 @@ CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in R
 - **A web app** with scheduled crawls, a URL explorer, change tracking and email, Slack, Discord and webhook alerts. Self-host it with Docker, or use the hosted version at [codoseo.com](https://codoseo.com).
 - **A REST API and a hosted MCP server** at codoseo.com for your monitored sites.
 
+It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. See [docs/ai-access.md](docs/ai-access.md).
+
+![The AI access screen](docs/images/ai-access/ai-access-light.png)
+
 It respects `robots.txt` and `Crawl-delay`, backs off on `429` and `503`, and ships as one static binary. AGPL-3.0.
 
 CodoSEO is built by SafrowLabs, the team behind RankOrg.
@@ -95,7 +99,8 @@ codoseo diff baseline.json audit.json
 |---|---|
 | `codoseo crawl <URL>` | Crawl a site, run all 44 checks, print a report |
 | `codoseo check <URL>` | Inspect one page: fields, redirect chain, page-level issues |
-| `codoseo robots <URL>` | Show the site's `robots.txt` and test whether CodoSEObot may fetch a path |
+| `codoseo robots <URL>` | Show the site's `robots.txt`, test whether CodoSEObot may fetch a path and what it says to each AI bot |
+| `codoseo bots` | List the AI crawlers, fetchers and control tokens CodoSEO knows (`--format json` prints the public registry file) |
 | `codoseo redirects <URL>` | Follow a URL's redirect chain hop by hop |
 | `codoseo diff <BEFORE> <AFTER>` | Compare two saved JSON audits; surface new issues and regressions |
 | `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [MCP for AI agents](#mcp-for-ai-agents)) |
@@ -130,6 +135,12 @@ codoseo diff baseline.json audit.json
 |---|---|---|
 | `--path PATH` | — | Test whether this path is allowed |
 | `--format table\|json` | table | Output format |
+
+**`bots`**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--format table\|json` | table | `json` is the registry file exactly as published at `/ai-bots.json` |
 
 **`redirects`**
 
@@ -278,6 +289,7 @@ codoseo diff before.json after.json --fail-on critical
 
 - `format_version`: `1` — `diff` rejects any other version
 - Audits written by a later `0.0.x` release that adds new checks still load; counts for unknown checks are skipped
+- `ai_access` (optional): `{ report, findings }` for [AI access](docs/ai-access.md), judged under the default intent. Audits without it still load and diff
 - `url_hash` and similar fields are unsigned 64-bit integers — treat them as opaque IDs; JavaScript and `jq` can lose precision on them
 
 ### Health score
@@ -319,7 +331,7 @@ Any other client that takes a stdio command (Cursor, Claude Desktop, ...) needs 
 { "mcpServers": { "codoseo": { "command": "codoseo", "args": ["mcp"] } } }
 ```
 
-Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_redirects`, `compare_audits`. Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
+Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_ai_access`, `check_redirects`, `compare_audits`. Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
 
 ### Hosted server (codoseo.com)
 
@@ -364,9 +376,10 @@ DATABASE_URL=postgres://localhost/codoseo codoseo all
 - [docs/deploy-coolify.md](docs/deploy-coolify.md): Coolify template and the two-container layout
 - [docs/operations.md](docs/operations.md): logs, metrics, health checks, upgrades
 - [docs/mcp.md](docs/mcp.md) and [docs/api.md](docs/api.md): agent access
+- [docs/ai-access.md](docs/ai-access.md): AI access monitoring, the intent model and the public AI bot registry
 - [RELEASING.md](RELEASING.md): how releases are cut
 
-Keyboard: <kbd>⌘K</kbd> command palette and URL search, <kbd>G</kbd> then <kbd>E</kbd>/<kbd>A</kbd>/<kbd>C</kbd>/<kbd>H</kbd> to switch screens, <kbd>J</kbd>/<kbd>K</kbd> to move through rows, <kbd>/</kbd> to filter, <kbd>[</kbd> to collapse the sidebar, <kbd>?</kbd> for the full list.
+Keyboard: <kbd>⌘K</kbd> command palette and URL search, <kbd>G</kbd> then <kbd>E</kbd>/<kbd>A</kbd>/<kbd>C</kbd>/<kbd>H</kbd>/<kbd>I</kbd> to switch screens, <kbd>J</kbd>/<kbd>K</kbd> to move through rows, <kbd>/</kbd> to filter, <kbd>[</kbd> to collapse the sidebar, <kbd>?</kbd> for the full list.
 
 ---
 
@@ -380,7 +393,8 @@ crates/
   crawler/    — fetcher, robots.txt, sitemaps, politeness, crawl loop
   checks/     — the 44 check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
-  mcp/        — MCP server: the 8 local tools and the hosted tools, over rmcp
+  geo/        — AI bot registry (CC0 data), robots.txt verdicts, AI access report and findings
+  mcp/        — MCP server: the 9 local tools and the hosted tools, over rmcp
   store/      — Postgres: migrations, crawl and jobs queues, queries for the web app
   web/        — the web app: axum routes, askama templates, htmx, bundled assets
   app/        — CLI (the `codoseo` binary)

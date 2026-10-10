@@ -6,8 +6,8 @@ use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
 
 use super::{
-    change_url, clean, count_text, findings, headline, one_line, severity_label, slug, summary,
-    write_pairs,
+    ai_access_findings, change_url, clean, count_text, findings, headline, one_line,
+    severity_label, slug, summary, write_pairs,
 };
 
 pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
@@ -48,6 +48,15 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
     }
     if groups.is_empty() {
         writeln!(w, "\nNo issues found.")?;
+    }
+    if let Some(rows) = ai_access_findings(audit) {
+        writeln!(w, "\nAI access")?;
+        if rows.is_empty() {
+            writeln!(w, "  No AI access issues")?;
+        }
+        for (severity, title) in rows {
+            writeln!(w, "  {:<8}  {}", severity_label(severity), clean(&title))?;
+        }
     }
     writeln!(w, "\nSummary")?;
     write_pairs(w, "  ", &summary(audit))

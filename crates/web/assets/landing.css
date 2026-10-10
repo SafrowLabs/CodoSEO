@@ -70,3 +70,67 @@
 .q-rankorg { margin-top: 18px; font-size: 13.5px; }
 .q-rankorg a { text-decoration: underline; text-underline-offset: 2px; }
 .q-start { margin: -14px 0 20px; font: 12.5px var(--mono); overflow-wrap: anywhere; }
+
+/* ── The AI bot registry (/ai-bots) ───────────────── */
+
+.reg-page { padding-top: 32px; padding-bottom: 64px; }
+.reg-intro { max-width: 700px; color: var(--muted); font-size: 14.5px; line-height: 1.6; }
+.reg-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 26px 0 12px; }
+.reg-search { position: relative; flex: 1 1 260px; max-width: 380px; }
+.reg-search .icon { position: absolute; left: 11px; top: 9px; color: var(--faint); pointer-events: none; }
+.reg-search .input { padding-left: 34px; }
+.reg-count { font-size: 12.5px; color: var(--faint-2); }
+.reg-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow-x: auto; box-shadow: var(--shadow-sm); scrollbar-width: thin; }
+.reg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.reg-c-token { width: 180px; }
+.reg-c-purpose { width: 120px; }
+.reg-c-honours { width: 124px; }
+.reg-c-ip { width: 58px; }
+.reg-c-source { width: 116px; }
+.reg-c-date { width: 96px; }
+.reg-table th, .reg-table td { padding: 9px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line-faint); }
+.reg-table th:first-child, .reg-table td:first-child { padding-left: 18px; }
+.reg-table th:last-child, .reg-table td:last-child { padding-right: 18px; }
+.reg-table thead th { font-size: 11px; font-weight: 500; color: var(--faint-2); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; background: var(--surface-2); border-bottom-color: var(--line-soft); }
+.reg-table [hidden] { display: none !important; }
+.reg-op th { padding-top: 16px; padding-bottom: 7px; font-size: 13.5px; font-weight: 600; border-bottom: 1px solid var(--line-soft); }
+.reg-op th span { margin-left: 8px; font: 11px var(--mono); color: var(--faint); font-weight: 400; }
+.reg-table tbody:first-of-type .reg-op th { padding-top: 12px; }
+.reg-table tbody tr:last-child > * { border-bottom: 0; }
+.reg-table tbody + tbody .reg-op th { border-top: 1px solid var(--line-soft); }
+.reg-token-cell { font-weight: 400; }
+.reg-token { font: 500 12.5px var(--mono); color: var(--ink); }
+.reg-token-cell .tag { display: block; width: fit-content; margin-top: 4px; }
+.reg-product > span { display: block; }
+.reg-product > .reg-notes { margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--faint-2); }
+.reg-table td a { color: var(--link); }
+.reg-table td a:hover { text-decoration: underline; }
+.reg-date { font-size: 12px; color: var(--muted-2); white-space: nowrap; }
+.reg-table td:nth-child(4), .reg-table td:nth-child(6) { white-space: nowrap; }
+/* Purposes, as in the app's intent: search green, fetchers blue, agents purple, training amber. */
+.reg-p-search { color: var(--ok); background: var(--ok-bg); }
+.reg-p-fetch { color: var(--link); background: color-mix(in oklab, var(--blue) 14%, transparent); }
+.reg-p-agent { color: var(--purple); background: var(--purple-bg); }
+.reg-p-training { color: var(--warn); background: var(--warn-bg); }
+.reg-p-ads { color: var(--notice); background: var(--notice-bg); }
+.reg-empty { padding: 28px 18px; text-align: center; color: var(--muted-2); font-size: 13.5px; }
+.reg-foot { margin-top: 22px; font-size: 13px; line-height: 1.6; color: var(--muted-2); max-width: 760px; }
+.reg-foot p + p { margin-top: 8px; }
+.reg-foot a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 760px) {
+  /* Each bot becomes a compact block: token, product and notes, then the facts inline. */
+  .reg-table, .reg-table tbody { display: block; width: 100%; }
+  .reg-table thead, .reg-table colgroup { display: none; }
+  .reg-table tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 12px 16px; border-bottom: 1px solid var(--line-faint); }
+  .reg-table th, .reg-table td, .reg-table th:first-child, .reg-table td:first-child, .reg-table th:last-child, .reg-table td:last-child { display: block; padding: 0; border: 0; }
+  .reg-table td { font-size: 12.5px; }
+  .reg-table td[data-label]::before { content: attr(data-label); margin-right: 5px; font: 12px var(--font); color: var(--faint-2); }
+  .reg-table .reg-token-cell, .reg-table td.reg-product { flex-basis: 100%; }
+  .reg-table td.reg-product { margin-bottom: 2px; }
+  .reg-table td.reg-product::before { display: none; }
+  .reg-token-cell { display: flex !important; align-items: center; gap: 8px; }
+  .reg-token-cell .tag { margin: 0; }
+  .reg-table tr.reg-op { display: block; padding: 14px 16px 6px; background: var(--surface-2); border-top: 1px solid var(--line-soft); }
+  .reg-table .reg-op th, .reg-table tbody + tbody .reg-op th { padding: 0; border: 0; }
+  .reg-table tbody:first-of-type tr.reg-op { border-top: 0; }
+}

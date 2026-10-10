@@ -12,22 +12,29 @@ use uuid::Uuid;
 use crate::dbenum::enum_slug;
 
 /// What is instant by default: a key page going noindex, a 4xx/5xx spike, robots.txt changing,
-/// the sitemap losing 10% or more, and the site moving.
-pub const DEFAULT_INSTANT: [ChangeKind; 5] = [
+/// the sitemap losing 10% or more, the site moving, and the AI access incidents that cost
+/// visibility: AI bots blocked, AI answers restricted, and one of those resolving.
+pub const DEFAULT_INSTANT: [ChangeKind; 8] = [
     ChangeKind::BecameNoindex,
     ChangeKind::ErrorSpike,
     ChangeKind::RobotsTxtChanged,
     ChangeKind::SitemapShrank,
     ChangeKind::SiteMoved,
+    ChangeKind::AiBotBlocked,
+    ChangeKind::AiAnswersRestricted,
+    ChangeKind::AiIssueResolved,
 ];
 
 /// Every change kind, in the order the settings grid lists them.
-pub const ALL_KINDS: [ChangeKind; 12] = [
+pub const ALL_KINDS: [ChangeKind; 17] = [
     ChangeKind::BecameNoindex,
     ChangeKind::ErrorSpike,
     ChangeKind::RobotsTxtChanged,
     ChangeKind::SitemapShrank,
     ChangeKind::SiteMoved,
+    ChangeKind::AiBotBlocked,
+    ChangeKind::AiAnswersRestricted,
+    ChangeKind::AiIssueResolved,
     ChangeKind::StatusChanged,
     ChangeKind::RemovedUrl,
     ChangeKind::NewUrl,
@@ -35,6 +42,8 @@ pub const ALL_KINDS: [ChangeKind; 12] = [
     ChangeKind::TitleRemoved,
     ChangeKind::CanonicalChanged,
     ChangeKind::RedirectChainGrew,
+    ChangeKind::AiBlockNotApplied,
+    ChangeKind::AiPreferencesChanged,
 ];
 
 /// One rule as the grid shows it.
@@ -196,28 +205,41 @@ pub struct AlertCrawl {
     /// A no-signup audit: never alerts.
     pub quick: bool,
     pub failure_reason: Option<String>,
+    /// The crawl finished (`done`). A failed crawl can still have changes (a failing robots.txt),
+    /// but the changes screen, which shows the latest finished crawl's, doesn't list them.
+    pub done: bool,
     /// Starred key pages (URL hashes).
     pub starred: Vec<u64>,
 }
 
-type CrawlRow = (Uuid, String, Option<Uuid>, bool, Option<String>, Vec<i64>);
+type CrawlRow = (
+    Uuid,
+    String,
+    Option<Uuid>,
+    bool,
+    Option<String>,
+    bool,
+    Vec<i64>,
+);
 
 pub async fn alert_crawl(pool: &PgPool, crawl_id: Uuid) -> Result<Option<AlertCrawl>, sqlx::Error> {
     let row: Option<CrawlRow> = sqlx::query_as(
-        "SELECT s.id, s.domain, s.account_id, c.trigger = 'quick', c.failure_reason, s.key_pages \
+        "SELECT s.id, s.domain, s.account_id, c.trigger = 'quick', c.failure_reason, \
+           c.status = 'done', s.key_pages \
          FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
     )
     .bind(crawl_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(
-        |(site_id, domain, account_id, quick, failure_reason, key_pages)| AlertCrawl {
+        |(site_id, domain, account_id, quick, failure_reason, done, key_pages)| AlertCrawl {
             crawl_id,
             site_id,
             domain,
             account_id,
             quick,
             failure_reason,
+            done,
             starred: key_pages.into_iter().map(crate::hash::from_db).collect(),
         },
     ))

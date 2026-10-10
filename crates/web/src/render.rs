@@ -2,6 +2,7 @@
 //! the `HX-Trigger` toast header.
 
 use std::convert::Infallible;
+use std::fmt::Write as _;
 
 use askama::Template;
 use axum::extract::FromRequestParts;
@@ -76,9 +77,28 @@ pub fn toast(kind: ToastKind, message: &str) -> (HeaderName, HeaderValue) {
     let payload = serde_json::json!({ "toast": { "kind": kind.as_str(), "message": message } });
     (
         HeaderName::from_static("hx-trigger"),
-        HeaderValue::from_str(&payload.to_string())
+        HeaderValue::from_str(&ascii_json(&payload))
             .unwrap_or_else(|_| HeaderValue::from_static("{}")),
     )
+}
+
+/// JSON with every non-ASCII character (and DEL, which serde_json leaves raw) written as a
+/// JSON escape (`·` as U+00B7's). Header values must be visible ASCII, and browsers read them
+/// as Latin-1, so raw UTF-8 in a toast would be refused or arrive garbled.
+pub(crate) fn ascii_json(v: &serde_json::Value) -> String {
+    let raw = v.to_string();
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        if c.is_ascii() && c != '\x7f' {
+            out.push(c);
+        } else {
+            let mut units = [0u16; 2];
+            for unit in c.encode_utf16(&mut units) {
+                let _ = write!(out, "\\u{unit:04x}");
+            }
+        }
+    }
+    out
 }
 
 /// `HX-Redirect`: htmx does a full navigation to `to`.
@@ -100,5 +120,22 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(value.to_str().unwrap()).unwrap();
         assert_eq!(v["toast"]["kind"], "ok");
         assert_eq!(v["toast"]["message"], "Crawl \"queued\"");
+
+        // Non-ASCII survives as JSON escapes.
+        let (_, value) = toast(ToastKind::Ok, "Intent saved · 1 opened");
+        let raw = value.to_str().unwrap();
+        assert!(raw.contains("\\u00b7"), "{raw}");
+        let v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(v["toast"]["message"], "Intent saved · 1 opened");
+
+        // Astral characters become surrogate pairs; DEL and control characters are escaped
+        // too, so the header is always valid and never falls back to `{}`.
+        let message = "Done 🚀 \u{7f}\u{1}\n";
+        let (_, value) = toast(ToastKind::Ok, message);
+        let raw = value.to_str().unwrap();
+        assert!(raw.contains("\\ud83d\\ude80"), "{raw}");
+        assert!(raw.bytes().all(|b| (0x20..0x7f).contains(&b)), "{raw}");
+        let v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(v["toast"]["message"], message);
     }
 }

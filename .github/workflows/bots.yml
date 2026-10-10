@@ -1,0 +1,30 @@
+name: bots
+
+# Re-checks the public AI bot registry (crates/geo/data/ai-bots.json) against the network: every
+# IP-range file must still be a JSON prefix list and every source page must still answer.
+
+# Paused: runs only by hand (Actions, "Run workflow") while features land. Restore the
+# trigger below the `on:` key to run it automatically again.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "43 4 * * *"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  registry-live:
+    name: AI bot registry URLs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install 1.99.0 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Check registry URLs
+        run: cargo test -p codoseo-geo --test registry_live -- --ignored --nocapture

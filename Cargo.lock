@@ -628,6 +628,7 @@ dependencies = [
  "codoseo-core",
  "codoseo-crawler",
  "codoseo-diff",
+ "codoseo-geo",
  "codoseo-mcp",
  "codoseo-notify",
  "codoseo-store",
@@ -687,6 +688,7 @@ dependencies = [
  "axum",
  "bytes",
  "codoseo-core",
+ "codoseo-geo",
  "codoseo-testkit",
  "encoding_rs",
  "flate2",
@@ -696,6 +698,7 @@ dependencies = [
  "insta",
  "lol_html",
  "peak_alloc",
+ "proptest",
  "quick-xml",
  "reqwest",
  "serde",
@@ -716,6 +719,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "codoseo-geo"
+version = "0.1.0-rc.1"
+dependencies = [
+ "codoseo-core",
+ "codoseo-diff",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "codoseo-mcp"
 version = "0.1.0-rc.1"
 dependencies = [
@@ -723,6 +738,7 @@ dependencies = [
  "codoseo-core",
  "codoseo-crawler",
  "codoseo-diff",
+ "codoseo-geo",
  "codoseo-testkit",
  "dirs",
  "futures-util",
@@ -771,6 +787,7 @@ name = "codoseo-store"
 version = "0.1.0-rc.1"
 dependencies = [
  "codoseo-core",
+ "codoseo-geo",
  "codoseo-notify",
  "futures-util",
  "proptest",
@@ -807,6 +824,7 @@ dependencies = [
  "codoseo-checks",
  "codoseo-core",
  "codoseo-crawler",
+ "codoseo-geo",
  "codoseo-mcp",
  "codoseo-notify",
  "codoseo-store",

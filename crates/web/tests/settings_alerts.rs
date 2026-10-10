@@ -113,7 +113,7 @@ async fn the_page_lists_the_default_email_channel_and_the_default_rules() {
     assert!(res.body.contains("ana@example.com"), "{}", res.body);
     assert!(res.body.contains("Active"));
     assert!(res.body.contains("example.com"));
-    // The default channel exists now, with the five default rules on this site.
+    // The default channel exists now, with the eight default rules on this site.
     let email = channel_of_kind(&app, &account, "email").await;
     for kind in alert_rules::DEFAULT_INSTANT {
         assert_eq!(
@@ -123,7 +123,7 @@ async fn the_page_lists_the_default_email_channel_and_the_default_rules() {
             vec![email]
         );
     }
-    assert_eq!(res.body.matches(" checked").count(), 5, "{}", res.body);
+    assert_eq!(res.body.matches(" checked").count(), 8, "{}", res.body);
     // The sidebar links here.
     assert!(res.body.contains("href=\"/settings/alerts\""));
 }
@@ -637,9 +637,9 @@ async fn grid_toggles_persist() {
     assert!(instant(ChangeKind::TitleChanged).await);
     assert!(instant(ChangeKind::SiteMoved).await);
 
-    // And the page shows it: 5 defaults - 1 + 1 = 5 boxes checked.
+    // And the page shows it: 8 defaults - 1 + 1 = 8 boxes checked.
     let page = app.get("/settings/alerts", Some(&cookie)).await;
-    assert_eq!(page.body.matches(" checked").count(), 5);
+    assert_eq!(page.body.matches(" checked").count(), 8);
     // Back on.
     app.post_hx(
         "/settings/alerts/rules",

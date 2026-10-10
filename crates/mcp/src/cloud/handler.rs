@@ -33,7 +33,9 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::anon::AnonBackend;
-use super::types::{ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo};
+use super::types::{
+    AiAccessInfo, ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
+};
 
 /// Who is calling, as the HTTP layer resolved it for one request. The web crate inserts one into
 /// the request extensions before the MCP service sees the request.
@@ -93,6 +95,12 @@ pub trait CloudBackend: Send + Sync + 'static {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> impl Future<Output = Result<ChangesPage, String>> + Send;
+
+    fn ai_access(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+    ) -> impl Future<Output = Result<AiAccessInfo, String>> + Send;
 
     fn run_crawl(
         &self,
@@ -222,7 +230,7 @@ impl<B: AnonBackend> ServerHandler for CloudMcp<B> {
                 "CodoSEO monitors websites and checks them for SEO problems. With an API key \
                  (header \"Authorization: Bearer <key>\", created under Settings > API keys) \
                  these tools read your monitored sites: list_sites, then get_site_health, \
-                 get_issue_urls, get_page, get_changes and run_crawl. Each tool call counts \
+                 get_issue_urls, get_page, get_changes, get_ai_access and run_crawl. Each tool call counts \
                  against your daily API allowance. When connected without a key, the tools are \
                  instead a free quick audit of any public site (quick_audit, get_audit, \
                  get_issue_urls) and start_monitoring. The same data is available as a REST API \

@@ -1,13 +1,14 @@
 //! Writing a finished crawl in one transaction: pages and inlinks via `COPY` (batched, so
 //! memory stays flat on a large crawl), one `site_files` row, `changes`, the crawl's own
-//! `done`/summary update, the 2-crawl retention cleanup, and the alert planning job. A
+//! `done`/summary update, the 2-crawl retention cleanup, the AI access report and its incidents
+//! (see [`crate::geo`]), and the alert planning job. A
 //! failure partway rolls the whole transaction back, so a crawl never ends up half-written.
 
 use std::collections::HashSet;
 
 use codoseo_core::change::Change;
 use codoseo_core::output::CrawlOutput;
-use codoseo_core::page::{Indexability, PageRecord};
+use codoseo_core::page::{AiMeta, Indexability, PageRecord};
 use codoseo_core::report::CrawlReport;
 use serde::Serialize;
 use serde_json::json;
@@ -16,16 +17,19 @@ use uuid::Uuid;
 
 use crate::dbenum::enum_slug;
 use crate::events::{self, EventKind};
+use crate::geo::{self, GeoInput};
 use crate::hash;
 
 /// Rows per `COPY` chunk, per spec ("COPY in batches of 500").
 const COPY_BATCH: usize = 500;
 
-/// Writes a finished crawl. `worker_id` must match the row's current `worker_id` and the row
+/// Writes a finished crawl. `geo` is the crawl's AI access evaluation, `None` when it has none
+/// (a no-signup audit). `worker_id` must match the row's current `worker_id` and the row
 /// must still be `running`, or the whole transaction is rolled back instead of committing —
 /// this is the guard against a worker whose heartbeat went stale (and was reclaimed by
 /// `requeue_stale`, then claimed by another worker) finishing late and overwriting whatever the
 /// new owner has written or is about to write.
+#[allow(clippy::too_many_arguments)] // one flat call per finished crawl, as every caller reads it
 pub async fn finalize(
     pool: &PgPool,
     crawl_id: Uuid,
@@ -34,6 +38,7 @@ pub async fn finalize(
     out: &CrawlOutput,
     report: &CrawlReport,
     changes: &[Change],
+    geo: Option<&GeoInput>,
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
@@ -41,6 +46,13 @@ pub async fn finalize(
     copy_inlinks(&mut tx, crawl_id, out, report).await?;
     insert_site_files(&mut tx, crawl_id, site_id, out).await?;
     insert_changes(&mut tx, crawl_id, site_id, changes).await?;
+    // The AI access report and what it opens or resolves, in the same transaction, so a crawl
+    // never has its changes without its report or the other way round.
+    let geo_changes = match geo {
+        Some(input) => geo::apply_geo(&mut tx, site_id, crawl_id, input).await?,
+        None => Vec::new(),
+    };
+    insert_changes(&mut tx, crawl_id, site_id, &geo_changes).await?;
 
     let summary = build_summary(out, report);
     let result = sqlx::query(
@@ -72,7 +84,12 @@ pub async fn finalize(
         sqlx::query(&sql).bind(site_id).execute(&mut *tx).await?;
     }
 
-    enqueue_alert_job(&mut tx, crawl_id, changes).await?;
+    enqueue_alert_job(
+        &mut tx,
+        crawl_id,
+        !changes.is_empty() || !geo_changes.is_empty(),
+    )
+    .await?;
     record_funnel_event(&mut tx, crawl_id, site_id, report).await?;
 
     tx.commit().await?;
@@ -158,7 +175,7 @@ async fn insert_site_files(
     Ok(())
 }
 
-async fn insert_changes(
+pub(crate) async fn insert_changes(
     tx: &mut Transaction<'_, Postgres>,
     crawl_id: Uuid,
     site_id: Uuid,
@@ -185,12 +202,12 @@ async fn insert_changes(
 /// One `send_alert` planning job for the crawl when it recorded any change. The planner (the
 /// worker's `plan_alert`) matches the changes against the site's rules, so a crawl with 400
 /// changes is still one job. A no-signup audit never alerts: nobody has subscribed to it.
-async fn enqueue_alert_job(
+pub(crate) async fn enqueue_alert_job(
     tx: &mut Transaction<'_, Postgres>,
     crawl_id: Uuid,
-    changes: &[Change],
+    any_changes: bool,
 ) -> Result<(), sqlx::Error> {
-    if changes.is_empty() {
+    if !any_changes {
         return Ok(());
     }
     sqlx::query(
@@ -219,8 +236,8 @@ async fn copy_pages(
              size_bytes, content_type, depth, in_sitemap, indexability, title, \
              meta_description, meta_robots, x_robots_tag, canonical, hreflang, h1, h2, \
              word_count, content_hash, images_missing_alt, og, jsonld_status, mixed_content, \
-             inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target) \
-             FROM STDIN WITH (FORMAT text)",
+             inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target, \
+             ai_meta) FROM STDIN WITH (FORMAT text)",
         )
         .await?;
 
@@ -323,7 +340,7 @@ async fn copy_inlinks(
 
 fn write_page_row(buf: &mut String, crawl_id: Uuid, site_id: Uuid, p: &PageRecord) {
     let fields = &p.fields;
-    let cols: [String; 32] = [
+    let cols: [String; 33] = [
         crawl_id.to_string(),
         site_id.to_string(),
         escape(p.url.as_str()),
@@ -356,6 +373,12 @@ fn write_page_row(buf: &mut String, crawl_id: Uuid, site_id: Uuid, p: &PageRecor
         hash::to_db(p.issues.0).to_string(),
         hash::to_db(p.key_hash).to_string(),
         field_opt(p.redirect_target.as_ref().map(|u| u.as_str())),
+        // NULL for the many pages with no AI markup, so the column costs nothing there.
+        if fields.ai.is_empty() {
+            "\\N".to_string()
+        } else {
+            escape_json(&without_nul(&fields.ai))
+        },
     ];
     buf.push_str(&cols.join("\t"));
     buf.push('\n');
@@ -398,6 +421,21 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+/// jsonb rejects `\u0000`, which serde writes for a NUL byte in a meta value.
+fn without_nul(ai: &AiMeta) -> AiMeta {
+    let clean = |s: &str| s.replace('\0', "");
+    AiMeta {
+        bot_meta: ai
+            .bot_meta
+            .iter()
+            .map(|(n, c)| (clean(n), clean(c)))
+            .collect(),
+        nosnippet_words: ai.nosnippet_words,
+        tdm_reservation: ai.tdm_reservation.as_deref().map(clean),
+        tdm_policy: ai.tdm_policy.as_deref().map(clean),
+    }
 }
 
 fn escape_json<T: Serialize>(v: &T) -> String {

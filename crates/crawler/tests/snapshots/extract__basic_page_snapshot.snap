@@ -26,6 +26,11 @@ fields:
     image: ~
   jsonld: absent
   mixed_content: 0
+  ai:
+    bot_meta: []
+    nosnippet_words: 0
+    tdm_reservation: ~
+    tdm_policy: ~
 links:
   - url: "https://northwind.test/tents/ridgeline-2p"
     anchor: Ridgeline 2P

@@ -110,6 +110,7 @@ mod tests {
                 robots: None,
                 sitemap: Default::default(),
             },
+            ai_access: None,
         }
     }
 

@@ -41,14 +41,15 @@
       <div class="rows">
         {% for r in c.rows %}
         <div class="row-item change" style="grid-template-columns:minmax(0,1fr);gap:0">
-          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <div{% if r.wrap %} class="change-head-wrap"{% endif %} style="display:flex;align-items:center;gap:10px;min-width:0">
             <span class="badge sev-{{ r.severity }}">{{ r.severity_label }}</span>
             <span style="font-weight:500;white-space:nowrap">{{ r.title }}</span>
             {% if let Some(path) = r.path %}{% if let Some(href) = r.href %}<a class="url trunc" href="{{ href }}">{{ path }}</a>{% else %}<span class="mono c-muted trunc" style="font-size:12.5px">{{ path }}</span>{% endif %}{% else %}<span class="tag">site-wide</span>{% endif %}
+            {% if let Some(h) = r.ai_href %}<a class="change-link" href="{{ h }}">AI access<svg class="icon"><use href="#i-arrow"/></svg></a>{% endif %}
             <span class="grow"></span>
             <span class="c-muted" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap"><svg class="icon" style="width:13px;height:13px"><use href="#{{ r.mode_icon }}"/></svg>{{ r.mode }}</span>
           </div>
-          <div class="diff"><div class="before">{{ r.before }}</div><div class="after{{ r.after_class }}">{{ r.after }}</div></div>
+          <div class="diff{% if r.wrap %} diff-wrap{% endif %}"><div class="before">{{ r.before }}</div><div class="after{{ r.after_class }}">{{ r.after }}</div></div>
         </div>
         {% endfor %}
       </div>

@@ -4,7 +4,7 @@ use codoseo_core::Url;
 use codoseo_core::audit::{AUDIT_FORMAT_VERSION, Audit, AuditError};
 use codoseo_core::check::CheckId;
 use codoseo_core::crawl::SitemapSummary;
-use codoseo_core::output::{CrawlOutput, LinkGraph, StopReason};
+use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::PageRecord;
 use codoseo_core::report::{CrawlReport, CrawlSummary, StatusCounts};
 use codoseo_core::snapshot::Snapshot;
@@ -19,6 +19,7 @@ fn output() -> CrawlOutput {
         sitemap: SitemapSummary::default(),
         stop: StopReason::Completed,
         duration_ms: 1500,
+        signals: SiteSignals::default(),
     }
 }
 
@@ -53,6 +54,7 @@ fn audit() -> Audit {
             },
         },
         snapshot: Snapshot::from_output(&out),
+        ai_access: None,
     }
 }
 

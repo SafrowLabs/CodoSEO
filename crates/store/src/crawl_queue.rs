@@ -4,8 +4,8 @@
 
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
-use codoseo_core::output::{Progress, SiteFault, StopReason};
-use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
+use codoseo_core::output::{Progress, SiteFault, StopReason, robots_failure};
+use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::snapshot::Snapshot;
 use serde::Deserialize;
 use sqlx::{FromRow, PgPool, Row};
@@ -38,6 +38,14 @@ pub struct ClaimedCrawl {
     pub crawl_settings: serde_json::Value,
     /// Seconds the crawl sat in the queue (`started_at - queued_at`), for the wait metric.
     pub queue_wait_secs: f64,
+}
+
+impl ClaimedCrawl {
+    /// Whether a failure now fails the crawl for good: [`CrawlQueue::finish_failed`] retries a
+    /// first failure once, except for a no-signup audit, which is never retried.
+    pub fn is_final_attempt(&self) -> bool {
+        self.attempt > 0 || self.trigger == CrawlTrigger::Quick
+    }
 }
 
 /// No-signup audits running at once, across all workers.
@@ -169,7 +177,9 @@ impl CrawlQueue {
     /// queue a "couldn't reach your site" alert (`send_alert {crawl_id, unreachable: true}`) when
     /// the site was at fault (`reason` is one of the crawler's unreachable / blocked stop
     /// messages); an internal failure of ours (database, memory budget, ...) says nothing to the
-    /// user.
+    /// user. Nor does a failing robots.txt (5xx, 429) once the owner has been told about it by
+    /// the site's open, announced `robots_unavailable` incident: that alert is the more precise
+    /// one. [`ClaimedCrawl::is_final_attempt`] says which attempt this is.
     /// A quick (no-signup) audit is never retried and never alerts: the visitor is watching it,
     /// and a retry 15 minutes later would leave them on a spinner. One transaction, so the
     /// alert exists exactly when the crawl ended `failed`, and there's no read-then-write race
@@ -206,13 +216,26 @@ impl CrawlQueue {
             && trigger != "quick"
             && SiteFault::from_failure_reason(reason).is_some()
         {
-            sqlx::query(
-                "INSERT INTO jobs (kind, payload) \
-                 VALUES ('send_alert', jsonb_build_object('crawl_id', $1::uuid, 'unreachable', true))",
-            )
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+            // A quiet incident (the site's first AI access report) was never announced, so the
+            // owner still gets this one.
+            let robots_told = robots_failure(reason)
+                && sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (SELECT 1 FROM ai_incidents i JOIN crawls c ON c.site_id = i.site_id \
+                     WHERE c.id = $1 AND i.kind = 'robots_unavailable' \
+                       AND i.resolved_at IS NULL AND NOT i.quiet)",
+                )
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?;
+            if !robots_told {
+                sqlx::query(
+                    "INSERT INTO jobs (kind, payload) \
+                     VALUES ('send_alert', jsonb_build_object('crawl_id', $1::uuid, 'unreachable', true))",
+                )
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
         tx.commit().await?;
         Ok(())
@@ -250,7 +273,7 @@ impl CrawlQueue {
                     size_bytes, content_type, depth, in_sitemap, indexability::text AS indexability, \
                     title, meta_description, meta_robots, x_robots_tag, canonical, hreflang, h1, h2, \
                     word_count, content_hash, images_missing_alt, og, jsonld_status, mixed_content, \
-                    inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target \
+                    inlinks, outlinks_internal, outlinks_external, issues, key_hash, redirect_target, ai_meta \
              FROM pages WHERE crawl_id = $1",
         )
         .bind(crawl_id)
@@ -316,6 +339,10 @@ fn page_record_from_row(row: sqlx::postgres::PgRow) -> PageRecord {
     let og: OgTags = og
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
+    let ai_meta: Option<serde_json::Value> = row.get("ai_meta");
+    let ai: AiMeta = ai_meta
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
     let jsonld_status: Option<String> = row.get("jsonld_status");
     let jsonld: JsonLdStatus = jsonld_status
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -356,6 +383,7 @@ fn page_record_from_row(row: sqlx::postgres::PgRow) -> PageRecord {
             og,
             jsonld,
             mixed_content: row.get::<Option<i32>, _>("mixed_content").unwrap_or(0) as u32,
+            ai,
         },
         inlinks: row.get::<i32, _>("inlinks") as u32,
         outlinks_internal: row.get::<i32, _>("outlinks_internal") as u32,

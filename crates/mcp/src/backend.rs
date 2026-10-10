@@ -8,7 +8,9 @@ use codoseo_core::check::CheckId;
 use codoseo_core::page::PageRecord;
 use url::Url;
 
-use crate::types::{AuditHandle, AuditId, AuditState, RedirectReport, RobotsReport, UrlRow};
+use crate::types::{
+    AiAccessReport, AuditHandle, AuditId, AuditState, RedirectReport, RobotsReport, UrlRow,
+};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum BackendError {
@@ -59,6 +61,13 @@ pub trait Backend: Send + Sync {
         url: Url,
         path: Option<String>,
     ) -> impl Future<Output = Result<RobotsReport, BackendError>> + Send;
+
+    /// robots.txt per AI bot for the URL's path, the declared preferences, and the page's
+    /// per-engine eligibility.
+    fn check_ai_access(
+        &self,
+        url: Url,
+    ) -> impl Future<Output = Result<AiAccessReport, BackendError>> + Send;
 
     fn check_redirects(
         &self,
