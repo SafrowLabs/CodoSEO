@@ -5,4 +5,4 @@ mod server;
 mod site;
 
 pub use server::{TestServer, gzip};
-pub use site::{Page, SiteBuilder, TestSite, html_page};
+pub use site::{Page, SeenRequest, SiteBuilder, TestSite, html_page};

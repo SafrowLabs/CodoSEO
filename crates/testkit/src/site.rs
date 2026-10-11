@@ -8,8 +8,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::header::{HeaderName, HeaderValue};
-use axum::http::{StatusCode, Uri};
+use axum::http::header::{FROM, HeaderName, HeaderValue, USER_AGENT};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::Response;
 use codoseo_core::Url;
 
@@ -22,8 +22,21 @@ pub struct Page {
     pub body: String,
     pub headers: Vec<(String, String)>,
     pub delay: Option<Duration>,
-    /// When not empty, the page is a sequence and the fields above are unused.
-    sequence: Vec<Page>,
+    /// Anything but [`Kind::Plain`] leaves the fields above unused, except `delay` for
+    /// [`Kind::Drop`].
+    kind: Kind,
+}
+
+#[derive(Debug, Clone)]
+enum Kind {
+    Plain,
+    /// Closes the connection without answering.
+    Drop,
+    Sequence(Vec<Page>),
+    ByUserAgent {
+        rules: Vec<(String, Page)>,
+        default: Box<Page>,
+    },
 }
 
 impl Page {
@@ -42,7 +55,7 @@ impl Page {
                 "text/html; charset=utf-8".to_owned(),
             )],
             delay: None,
-            sequence: Vec::new(),
+            kind: Kind::Plain,
         }
     }
 
@@ -52,7 +65,7 @@ impl Page {
             body: String::new(),
             headers: vec![("location".to_owned(), location.to_owned())],
             delay: None,
-            sequence: Vec::new(),
+            kind: Kind::Plain,
         }
     }
 
@@ -79,11 +92,85 @@ impl Page {
             body: String::new(),
             headers: Vec::new(),
             delay: None,
-            sequence: pages,
+            kind: Kind::Sequence(pages),
+        }
+    }
+
+    /// Answers with the page of the first rule whose substring the request's
+    /// `User-Agent` contains (case-sensitive), or with `default`. A rule may be a
+    /// [`Page::sequence`]; each (path, rule) pair, and the default, keeps its own count.
+    pub fn by_user_agent(rules: Vec<(&str, Page)>, default: Page) -> Page {
+        Page {
+            status: 200,
+            body: String::new(),
+            headers: Vec::new(),
+            delay: None,
+            kind: Kind::ByUserAgent {
+                rules: rules
+                    .into_iter()
+                    .map(|(ua, page)| (ua.to_owned(), page))
+                    .collect(),
+                default: Box::new(default),
+            },
+        }
+    }
+
+    /// Closes the connection without sending a response (after `delay`, if set), like
+    /// a firewall resetting it. The request is still counted and logged.
+    pub fn drop_connection() -> Page {
+        Page {
+            kind: Kind::Drop,
+            ..Page::status(200, "")
+        }
+    }
+
+    /// Answers after `delay`; with a long delay, the client times out.
+    pub fn delayed(mut self, delay: Duration) -> Page {
+        self.delay = Some(delay);
+        self
+    }
+
+    /// The plain page (or connection drop) this page gives for one request. `key`
+    /// names the sequence counter; it grows as rules and sequences nest.
+    fn pick(
+        &self,
+        key: String,
+        user_agent: Option<&str>,
+        sequences: &mut HashMap<String, usize>,
+    ) -> Page {
+        match &self.kind {
+            Kind::Plain | Kind::Drop => self.clone(),
+            Kind::Sequence(pages) => {
+                let n = sequences.entry(key.clone()).or_default();
+                let i = (*n).min(pages.len() - 1);
+                *n += 1;
+                pages[i].pick(format!("{key}\0{i}"), user_agent, sequences)
+            }
+            Kind::ByUserAgent { rules, default } => {
+                let matched = user_agent.and_then(|ua| {
+                    rules
+                        .iter()
+                        .position(|(needle, _)| ua.contains(needle.as_str()))
+                });
+                match matched {
+                    Some(i) => rules[i]
+                        .1
+                        .pick(format!("{key}\0ua{i}"), user_agent, sequences),
+                    None => default.pick(format!("{key}\0ua-"), user_agent, sequences),
+                }
+            }
         }
     }
 
     fn into_response(self) -> Response {
+        if matches!(self.kind, Kind::Drop) {
+            // A body that fails before its first byte makes the server close the
+            // connection without writing the response head.
+            let failing = futures_util::stream::once(async {
+                Err::<Vec<u8>, _>(std::io::Error::other("connection dropped by the test site"))
+            });
+            return Response::new(Body::from_stream(failing));
+        }
         let status = StatusCode::from_u16(self.status).expect("a valid HTTP status");
         let mut res = Response::new(Body::from(self.body));
         *res.status_mut() = status;
@@ -185,6 +272,15 @@ impl SiteBuilder {
     }
 }
 
+/// One request as the site received it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenRequest {
+    /// The path and query, as written in the request line.
+    pub path: String,
+    pub user_agent: Option<String>,
+    pub from: Option<String>,
+}
+
 /// A running fake site.
 pub struct TestSite {
     pub server: TestServer,
@@ -210,12 +306,32 @@ impl TestSite {
             .copied()
             .unwrap_or(0)
     }
+
+    /// Every request received so far, in order.
+    pub fn requests(&self) -> Vec<SeenRequest> {
+        self.state.counters().requests.clone()
+    }
+
+    /// Requests whose `User-Agent` contains `ua_substring` (case-sensitive).
+    pub fn hits_from(&self, ua_substring: &str) -> usize {
+        self.state
+            .counters()
+            .requests
+            .iter()
+            .filter(|r| {
+                r.user_agent
+                    .as_deref()
+                    .is_some_and(|ua| ua.contains(ua_substring))
+            })
+            .count()
+    }
 }
 
 #[derive(Default)]
 struct Counters {
     by_path: HashMap<String, usize>,
     sequence: HashMap<String, usize>,
+    requests: Vec<SeenRequest>,
 }
 
 struct SiteState {
@@ -234,27 +350,30 @@ impl SiteState {
     }
 
     /// Picks the page for a request and counts it. Holds no lock afterwards.
-    fn resolve(&self, uri: &Uri) -> Page {
+    fn resolve(&self, uri: &Uri, headers: &HeaderMap) -> Page {
         let path = uri.path();
         let key = uri.path_and_query().map_or(path, |pq| pq.as_str());
+        let header = |name: HeaderName| {
+            headers
+                .get(name)
+                .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+        };
+        let user_agent = header(USER_AGENT);
         self.hits.fetch_add(1, Ordering::SeqCst);
         let mut counters = self.counters();
         *counters.by_path.entry(key.to_owned()).or_default() += 1;
+        counters.requests.push(SeenRequest {
+            path: key.to_owned(),
+            user_agent: user_agent.clone(),
+            from: header(FROM),
+        });
 
         let registered = [key, path]
             .into_iter()
             .find(|k| self.pages.contains_key(*k));
         if let Some(k) = registered {
-            let page = &self.pages[k];
-            if page.sequence.is_empty() {
-                return page.clone();
-            }
-            let n = counters.sequence.entry(k.to_owned()).or_default();
-            let page = page.sequence[(*n).min(page.sequence.len() - 1)].clone();
-            *n += 1;
-            return page;
+            return self.pages[k].pick(k.to_owned(), user_agent.as_deref(), &mut counters.sequence);
         }
-        drop(counters);
 
         let not_found = || Page::status(404, "<title>not found</title>");
         match path {
@@ -264,7 +383,14 @@ impl SiteState {
                 .map_or_else(not_found, |paths| self.sitemap_page(paths)),
             "/robots.txt" => not_found(),
             "/list" if self.endless.is_some() => self.endless_page(uri.query().unwrap_or("")),
-            _ => self.fallback.clone().unwrap_or_else(not_found),
+            _ => match &self.fallback {
+                Some(page) => page.pick(
+                    key.to_owned(),
+                    user_agent.as_deref(),
+                    &mut counters.sequence,
+                ),
+                None => not_found(),
+            },
         }
     }
 
@@ -313,8 +439,8 @@ impl SiteState {
     }
 }
 
-async fn handle(State(state): State<Arc<SiteState>>, uri: Uri) -> Response {
-    let page = state.resolve(&uri);
+async fn handle(State(state): State<Arc<SiteState>>, uri: Uri, headers: HeaderMap) -> Response {
+    let page = state.resolve(&uri, &headers);
     if let Some(delay) = page.delay {
         tokio::time::sleep(delay).await;
     }

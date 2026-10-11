@@ -809,6 +809,8 @@ dependencies = [
  "axum",
  "codoseo-core",
  "flate2",
+ "futures-util",
+ "reqwest",
  "tokio",
 ]
 
