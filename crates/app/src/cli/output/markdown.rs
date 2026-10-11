@@ -12,8 +12,10 @@ use super::{
     probe_summary_line, severity_label, slug, summary,
 };
 
+/// Text for a table cell or list item: control characters dropped, and backslashes and pipes
+/// escaped, so a crawled title such as `a\|b` cannot end its cell early.
 fn md_cell(text: &str) -> String {
-    clean(text).replace('|', "\\|")
+    clean(text).replace('\\', "\\\\").replace('|', "\\|")
 }
 
 pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
@@ -140,4 +142,18 @@ pub(super) fn changes(w: &mut impl Write, changes: &[Change]) -> std::io::Result
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::md_cell;
+
+    #[test]
+    fn a_cell_cannot_end_itself_with_a_backslash_before_a_pipe() {
+        // A probed page's title is the site's: `a\|b` must stay one cell, so the backslash is
+        // escaped too and the pipe stays escaped (`a\\` then `\|`).
+        assert_eq!(md_cell(r"a\|b"), r"a\\\|b");
+        assert_eq!(md_cell("a|b"), r"a\|b");
+        assert_eq!(md_cell(r"C:\path"), r"C:\\path");
+    }
 }
