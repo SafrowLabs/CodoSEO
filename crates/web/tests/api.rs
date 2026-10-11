@@ -683,6 +683,155 @@ async fn ai_access_is_empty_before_a_report_then_summarises_bots_engines_and_inc
     assert!(incidents[0].get("evidence").is_none());
 }
 
+/// What the worker would store after a crawl with synthetic fetch probes on two pages: OAI-SearchBot
+/// challenged by Cloudflare on both, PerplexityBot refused with a 403 on the second, ChatGPT-User
+/// kept out of the first by robots.txt and the same as CodoSEObot on the second.
+fn probe_report() -> Value {
+    let baseline = serde_json::json!({"status": 200, "html": true, "bytes": 5000, "title": "Home"});
+    let same = serde_json::json!({"status": 200, "html": true, "bytes": 5000, "title": "Home"});
+    let challenge = serde_json::json!({
+        "status": 403, "html": true, "bytes": 900, "title": "Just a moment...",
+        "challenge": {"vendor": "cloudflare", "signal": "cf-mitigated: challenge"}
+    });
+    let cf = serde_json::json!({"kind": "challenged", "vendor": "cloudflare"});
+    serde_json::json!({
+        "version": 1,
+        "synthetic": true,
+        "from": "hello@codoseo.com",
+        "bots": ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot"],
+        "skipped_bots": [
+            {"token": "Claude-SearchBot", "reason": "no_user_agent"},
+            {"token": "Googlebot", "reason": "verified_search_engine"}
+        ],
+        "urls": [
+            {"url": 0, "baseline": baseline, "results": [
+                {"token": "OAI-SearchBot", "fetch": challenge, "verdict": cf},
+                {"token": "ChatGPT-User", "verdict": {"kind": "skipped_robots"}},
+                {"token": "PerplexityBot", "fetch": same, "verdict": {"kind": "same"}}
+            ]},
+            {"url": 1, "baseline": baseline, "results": [
+                {"token": "OAI-SearchBot", "fetch": challenge, "verdict": cf},
+                {"token": "ChatGPT-User", "fetch": same, "verdict": {"kind": "same"}},
+                {"token": "PerplexityBot", "fetch": {"status": 403, "bytes": 120},
+                 "verdict": {"kind": "blocked", "status": 403}}
+            ]}
+        ],
+        "requests": 8
+    })
+}
+
+/// Puts [`probe_report`] into the site's stored reports and reconciles, so the `fetch_blocked`
+/// incidents open (quietly, as on the first crawl with probes).
+async fn store_probes(app: &TestApp, site: &Site) {
+    sqlx::query(
+        "UPDATE ai_reports SET report = jsonb_set(report, '{probes}', $2) WHERE site_id = $1",
+    )
+    .bind(site.id)
+    .bind(probe_report())
+    .execute(app.pool())
+    .await
+    .unwrap();
+    codoseo_store::geo::reevaluate_quietly(app.pool(), site.id)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn ai_access_shows_the_synthetic_fetch_check_and_its_incidents() {
+    let f = setup(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
+    let before = json(&get(&f.app, &path, &f.key).await);
+    assert_eq!(before["probes_enabled"], true);
+    assert!(before.get("probes").is_none(), "{before}");
+
+    f.app
+        .finished_crawl_with_robots(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: *\nAllow: /\n"),
+            Vec::new(),
+        )
+        .await;
+    // A report written before probes existed (or without them) has none to show.
+    let old = json(&get(&f.app, &path, &f.key).await);
+    assert_eq!(old["probes_enabled"], true);
+    assert!(old.get("probes").is_none(), "{old}");
+
+    store_probes(&f.app, &f.site).await;
+    let v = json(&get(&f.app, &path, &f.key).await);
+    let probes = &v["probes"];
+    assert_eq!(probes["synthetic"], true);
+    assert_eq!(probes["grade"], "B");
+    assert_eq!(probes["urls_probed"], 2);
+    assert_eq!(probes["from"], "hello@codoseo.com");
+    let bots = probes["bots"].as_array().unwrap();
+    let tokens: Vec<&str> = bots.iter().map(|b| b["token"].as_str().unwrap()).collect();
+    assert_eq!(tokens, ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot"]);
+    assert_eq!(
+        bots[0],
+        serde_json::json!({
+            "token": "OAI-SearchBot",
+            "purpose": "search",
+            "intent": "allow",
+            "result": "challenged",
+            "cause": "challenge_cloudflare",
+            "vendor": "cloudflare",
+            "urls_affected": 2,
+            "urls_probed": 2
+        })
+    );
+    assert_eq!(bots[1]["result"], "same");
+    assert_eq!(bots[1]["purpose"], "user_fetch");
+    assert_eq!(bots[1]["urls_affected"], 0);
+    assert_eq!(
+        bots[1]["urls_probed"], 1,
+        "robots.txt kept it from one page"
+    );
+    assert!(bots[1].get("vendor").is_none());
+    assert_eq!(bots[2]["result"], "blocked");
+    assert_eq!(bots[2]["status"], 403);
+    assert_eq!(bots[2]["cause"], "blocked_403");
+    assert_eq!(bots[2]["urls_affected"], 1);
+    assert_eq!(bots[2]["urls_probed"], 2);
+    assert_eq!(
+        probes["not_probed"],
+        serde_json::json!([
+            {"token": "Claude-SearchBot", "reason": "no_user_agent"},
+            {"token": "Googlebot", "reason": "verified_search_engine"}
+        ])
+    );
+
+    let incidents = v["open_incidents"].as_array().unwrap();
+    let fetch: Vec<&Value> = incidents
+        .iter()
+        .filter(|i| i["kind"] == "fetch_blocked")
+        .collect();
+    let mut subjects: Vec<&str> = fetch
+        .iter()
+        .map(|i| i["subject"].as_str().unwrap())
+        .collect();
+    subjects.sort();
+    assert_eq!(
+        subjects,
+        ["blocked_403", "challenge_cloudflare"],
+        "{incidents:?}"
+    );
+    assert!(
+        fetch
+            .iter()
+            .all(|i| i["title"].as_str().unwrap().contains("synthetic")),
+        "{fetch:?}"
+    );
+
+    // Switched off: the stored probes are no longer shown, and the switch says why.
+    codoseo_store::geo::set_ai_probes(f.app.pool(), f.site.id, false)
+        .await
+        .unwrap();
+    let off = json(&get(&f.app, &path, &f.key).await);
+    assert_eq!(off["probes_enabled"], false);
+    assert!(off.get("probes").is_none(), "{off}");
+}
+
 #[tokio::test]
 async fn ai_access_is_metered_like_the_other_calls() {
     let f = setup(Plan::Free).await;

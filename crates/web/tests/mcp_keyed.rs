@@ -547,6 +547,79 @@ async fn get_ai_access_matches_rest_and_says_when_there_is_no_report() {
 }
 
 #[tokio::test]
+async fn get_ai_access_carries_the_synthetic_fetch_check_like_rest() {
+    let f = setup(Plan::Pro).await;
+    let site = f.site.id;
+    let tools = f.rpc().tools().await;
+    let tool = tools.iter().find(|t| t["name"] == "get_ai_access").unwrap();
+    let description = tool["description"].as_str().unwrap();
+    assert!(
+        description.contains("synthetic fetch check"),
+        "{description}"
+    );
+    assert!(description.contains("fetch_blocked"), "{description}");
+
+    f.app
+        .finished_crawl_with_robots(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: *\nAllow: /\n"),
+            Vec::new(),
+        )
+        .await;
+    // OAI-SearchBot got a Cloudflare challenge on the home page; ChatGPT-User the same page.
+    let probes = json!({
+        "version": 1, "synthetic": true, "from": "hello@codoseo.com",
+        "bots": ["OAI-SearchBot", "ChatGPT-User"],
+        "skipped_bots": [{"token": "Claude-User", "reason": "no_user_agent"}],
+        "urls": [{"url": 0, "baseline": {"status": 200, "html": true, "bytes": 5000, "title": "Home"},
+            "results": [
+                {"token": "OAI-SearchBot",
+                 "fetch": {"status": 403, "html": true, "bytes": 900, "title": "Just a moment...",
+                           "challenge": {"vendor": "cloudflare", "signal": "cf-mitigated: challenge"}},
+                 "verdict": {"kind": "challenged", "vendor": "cloudflare"}},
+                {"token": "ChatGPT-User",
+                 "fetch": {"status": 200, "html": true, "bytes": 5000, "title": "Home"},
+                 "verdict": {"kind": "same"}}
+            ]}],
+        "requests": 3
+    });
+    sqlx::query(
+        "UPDATE ai_reports SET report = jsonb_set(report, '{probes}', $2) WHERE site_id = $1",
+    )
+    .bind(site)
+    .bind(probes)
+    .execute(f.app.pool())
+    .await
+    .unwrap();
+    codoseo_store::geo::reevaluate_quietly(f.app.pool(), site)
+        .await
+        .unwrap();
+
+    let out = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    let res = rest_get(&f.app, &format!("/api/v1/sites/{site}/ai-access"), &f.key).await;
+    assert_eq!(out, serde_json::from_str::<Value>(&res.body).unwrap());
+    assert_eq!(out["probes_enabled"], true);
+    assert_eq!(out["probes"]["synthetic"], true);
+    assert_eq!(out["probes"]["grade"], "B");
+    assert_eq!(out["probes"]["urls_probed"], 1);
+    assert_eq!(out["probes"]["bots"][0]["result"], "challenged");
+    assert_eq!(out["probes"]["bots"][0]["vendor"], "cloudflare");
+    assert_eq!(out["probes"]["bots"][1]["result"], "same");
+    assert_eq!(out["probes"]["not_probed"][0]["reason"], "no_user_agent");
+    let incident = out["open_incidents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "fetch_blocked")
+        .unwrap_or_else(|| panic!("{out}"));
+    assert_eq!(incident["subject"], "challenge_cloudflare");
+}
+
+#[tokio::test]
 async fn bad_arguments_are_tool_errors_the_agent_can_read() {
     let f = setup(Plan::Pro).await;
     let rpc = f.rpc();
