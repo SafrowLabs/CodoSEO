@@ -8,16 +8,26 @@ use clap::Args;
 use codoseo_checks::{def, run_checks};
 use codoseo_core::audit::{AUDIT_FORMAT_VERSION, Audit};
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
+use codoseo_core::output::CrawlOutput;
 use codoseo_core::output::{Progress, StopReason};
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::crawl;
-use codoseo_geo::assess_with_defaults;
+use codoseo_crawler::probe::{ProbeConfig, probe_from_env, run_probes};
+use codoseo_geo::findings::findings;
+use codoseo_geo::probe::plan_probes;
+use codoseo_geo::report::{build_report, important_urls};
+use codoseo_geo::robots::RobotsTxt;
+use codoseo_geo::{Intent, assess_with_defaults};
 use url::Url;
 
 use super::output::write_crawl;
 use super::{CrawlFormat, EXIT_FAIL_ON, EXIT_OK, EXIT_RUNTIME, FailOn, Outcome, open_output};
 const MIN_RPS: u32 = 1;
 const MAX_RPS: u32 = 50;
+/// Pages `--probes` checks, and its budget and request cap: the self-hosted defaults.
+const PROBE_URLS: usize = 5;
+const PROBE_BUDGET: Duration = Duration::from_secs(180);
+const PROBE_MAX_REQUESTS: u16 = 160;
 
 #[derive(Debug, Args)]
 pub struct CrawlArgs {
@@ -40,6 +50,10 @@ pub struct CrawlArgs {
     /// Exit with 1 when a check at this severity or worse fails
     #[arg(long, value_enum)]
     fail_on: Option<FailOn>,
+    /// After the crawl, fetch up to 5 important pages as each AI search and user-triggered bot
+    /// and compare with CodoSEObot (a synthetic check; off by default)
+    #[arg(long)]
+    probes: bool,
 }
 
 impl CrawlArgs {
@@ -107,7 +121,11 @@ pub async fn run(args: CrawlArgs) -> Outcome {
     let duration_ms = out.duration_ms;
     // GEO stays out of the health score and `--fail-on`: it is a section of its own, judged under
     // the default intent because the CLI has nowhere to keep an owner's.
-    let ai_access = assess_with_defaults(&out);
+    let ai_access = if args.probes && stop_message(&out.stop).is_none() {
+        assess_with_probes(&out).await
+    } else {
+        assess_with_defaults(&out)
+    };
     let audit = Audit {
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -137,6 +155,32 @@ pub async fn run(args: CrawlArgs) -> Outcome {
             .any(|(id, _)| threshold.reached_by(def(*id).severity))
     });
     Ok(if failed { EXIT_FAIL_ON } else { EXIT_OK })
+}
+
+/// [`assess_with_defaults`] plus the synthetic fetch probes of up to [`PROBE_URLS`] important
+/// pages, kept in `report.probes` and judged in the findings. A site robots.txt gives no verdicts
+/// for, or with no HTML 200 page to probe, gets the section without probes.
+async fn assess_with_probes(out: &CrawlOutput) -> serde_json::Value {
+    let important = important_urls(&out.pages, &out.origin, &Default::default());
+    let mut access = build_report(out, &important);
+    let robots = out
+        .robots
+        .as_ref()
+        .and_then(|r| RobotsTxt::from_response(Some(r.status), r.body.as_bytes()));
+    if let Some(plan) = plan_probes(&access, robots.as_ref(), PROBE_URLS) {
+        // Like the crawl, a self-run command may probe private and internal addresses.
+        let mut cfg = ProbeConfig::new(
+            &access,
+            plan,
+            AddressPolicy::AllowPrivate,
+            PROBE_BUDGET,
+            PROBE_MAX_REQUESTS,
+        );
+        cfg.from = probe_from_env();
+        access.probes = Some(run_probes(cfg).await);
+    }
+    let found = findings(&access, &Intent::default());
+    serde_json::json!({ "report": access, "findings": found })
 }
 
 /// Why the crawl never got going, for the stop reasons that mean it could not run.

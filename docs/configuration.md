@@ -53,6 +53,15 @@ In self-host mode the plan limits do not apply (no caps on sites, no API quota; 
 | `SCHEDULER_HEARTBEAT_URL` | none | web, all | A URL that gets a GET after every successful scheduler tick, for a dead-man's-switch monitor. An invalid URL is logged and ignored. |
 | `RETENTION_DAYS_SELFHOST` | `365` | worker, all | Days of crawl history a self-hosted install keeps; the daily cleanup deletes older crawls. A whole number. |
 
+## AI access probes
+
+After each monitored crawl the worker fetches a few important pages as the AI search and user-fetch bots (the synthetic fetch probes; see [ai-access.md](ai-access.md)).
+
+| Variable | Default | Roles | Meaning |
+|---|---|---|---|
+| `CODOSEO_PROBE_FROM` | `hello@codoseo.com` | worker, all | The `From` header on every probe request and its baseline. An empty value is ignored, and an invalid one (anything but visible ASCII and spaces) is logged and ignored. The CLI (`codoseo probe`, `crawl --probes`) and the local MCP server's `probe_ai_fetch` read it too, with the same warning, and report the `from` actually sent. |
+| `CODOSEO_PROBE_URLS` | `5` | web, worker, all | Pages probed per crawl on a self-hosted install (plan `self_hosted`), at most `10`. `0` turns the probes off for the whole install: the worker sends none, and the web app shows the switch in **Edit intent** disabled and says on the AI access screen that fetch checks are turned off on this install. Set it to the same value for the web and worker roles. Cloud plans keep their own caps (Free 1, Pro 3, Agency 5). An invalid value is ignored (the worker logs it). |
+
 ## Logging, metrics and error reporting
 
 | Variable | Default | Roles | Meaning |

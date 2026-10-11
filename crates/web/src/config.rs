@@ -143,7 +143,14 @@ pub struct Config {
     pub billing: Option<DodoConfig>,
     /// The no-key MCP tier (cloud only; self-hosted refuses it).
     pub mcp: McpAnonConfig,
+    /// `CODOSEO_PROBE_URLS`, as the worker reads it: the pages probed per crawl on the
+    /// `self_hosted` plan, at most [`MAX_PROBE_URLS`]; `None` when unset or not a whole number.
+    /// The web role reads it to show the probe switch and say when the checks are off.
+    pub probe_urls: Option<u8>,
 }
+
+/// The most pages `CODOSEO_PROBE_URLS` may ask for (the worker clamps to it too).
+pub const MAX_PROBE_URLS: u8 = 10;
 
 /// The `User-Agent`s of the hosted connectors that call from shared servers.
 pub const DEFAULT_SHARED_CLIENTS: &str = "claude-user,chatgpt,openai-mcp";
@@ -192,6 +199,7 @@ impl std::fmt::Debug for Config {
             .field("rankorg_url", &self.rankorg_url.as_str())
             .field("billing", &self.billing)
             .field("mcp", &self.mcp)
+            .field("probe_urls", &self.probe_urls)
             .finish()
     }
 }
@@ -346,7 +354,19 @@ impl Config {
             rankorg_url,
             billing,
             mcp,
+            probe_urls: get("CODOSEO_PROBE_URLS")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+                .map(|n| n.min(u32::from(MAX_PROBE_URLS)) as u8),
         })
+    }
+
+    /// The pages a crawl on `plan` probes: the plan's own number, or `CODOSEO_PROBE_URLS` on the
+    /// `self_hosted` plan. 0 means the fetch checks are off on this install.
+    pub fn probe_urls_for(&self, plan: Plan) -> u8 {
+        match (plan, self.probe_urls) {
+            (Plan::SelfHosted, Some(n)) => n,
+            _ => codoseo_core::plan::PlanLimits::for_plan(plan).probe_urls,
+        }
     }
 
     /// Cookies get `Secure` whenever the app is served over https.
@@ -542,6 +562,24 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         Config::from_lookup(|k| map.get(k).cloned())
+    }
+
+    #[test]
+    fn probe_urls_are_read_like_the_worker_reads_them() {
+        let urls = |v: &str| cfg(&[("CODOSEO_PROBE_URLS", v)]).unwrap().probe_urls;
+        assert_eq!(urls("0"), Some(0));
+        assert_eq!(urls(" 3 "), Some(3));
+        assert_eq!(urls("50"), Some(10));
+        assert_eq!(urls("many"), None);
+        assert_eq!(urls(""), None);
+        let off = cfg(&[("CODOSEO_PROBE_URLS", "0")]).unwrap();
+        assert_eq!(off.probe_urls_for(Plan::SelfHosted), 0);
+        assert_eq!(
+            off.probe_urls_for(Plan::Pro),
+            3,
+            "cloud plans keep their caps"
+        );
+        assert_eq!(cfg(&[]).unwrap().probe_urls_for(Plan::SelfHosted), 5);
     }
 
     #[test]

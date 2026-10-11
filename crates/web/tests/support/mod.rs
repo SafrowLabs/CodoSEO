@@ -20,6 +20,8 @@ use codoseo_core::crawl::{RobotsFile, SitemapSummary};
 use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::plan::Plan;
+use codoseo_geo::probe::ProbeReport;
+use codoseo_geo::report::AccessReport;
 use codoseo_store::accounts::{Account, SignIn, SignupPolicy};
 use codoseo_store::sites::Site;
 use codoseo_web::auth::mailer::{Email, Mailer};
@@ -343,6 +345,44 @@ impl TestApp {
             changes,
             StopReason::Completed,
             Some(robots),
+            None,
+        )
+        .await;
+        crawl_id
+    }
+
+    /// Like [`finished_crawl_with_robots`](Self::finished_crawl_with_robots), with synthetic
+    /// fetch probes: `probes` gets the report the crawl built and returns what the probes found,
+    /// stored in `report.probes` before `finalize` as the worker does.
+    pub async fn finished_crawl_with_probes(
+        &self,
+        site: &Site,
+        pages: Vec<PageRecord>,
+        robots: (u16, &str),
+        probes: &dyn Fn(&AccessReport) -> ProbeReport,
+    ) -> Uuid {
+        let crawl_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id, started_at, heartbeat_at) \
+             VALUES ($1, $2, 'manual', 2, 'running', 'test-worker', now() - interval '95 seconds', now()) \
+             RETURNING id",
+        )
+        .bind(site.id)
+        .bind(&site.domain)
+        .fetch_one(self.pool())
+        .await
+        .expect("insert crawl");
+        let robots = RobotsFile {
+            status: robots.0,
+            body: robots.1.to_owned(),
+            hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
+        };
+        self.finalize_with(
+            crawl_id,
+            pages,
+            Vec::new(),
+            StopReason::Completed,
+            Some(robots),
+            Some(probes),
         )
         .await;
         crawl_id
@@ -358,7 +398,7 @@ impl TestApp {
         changes: Vec<Change>,
         stop: StopReason,
     ) {
-        self.finalize_with(crawl_id, pages, changes, stop, None)
+        self.finalize_with(crawl_id, pages, changes, stop, None, None)
             .await;
     }
 
@@ -371,6 +411,7 @@ impl TestApp {
         changes: Vec<Change>,
         stop: StopReason,
         robots: Option<RobotsFile>,
+        probes: Option<&dyn Fn(&AccessReport) -> ProbeReport>,
     ) {
         let (site_id, start_url): (Uuid, String) = sqlx::query_as(
             "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
@@ -418,9 +459,11 @@ impl TestApp {
                     .expect("starred pages");
                 let important =
                     codoseo_geo::report::important_urls(&out.pages, &out.origin, &starred);
-                Some(codoseo_store::geo::GeoInput::new(
-                    codoseo_geo::report::build_report(&out, &important),
-                ))
+                let mut report = codoseo_geo::report::build_report(&out, &important);
+                if let Some(probes) = probes {
+                    report.probes = Some(probes(&report));
+                }
+                Some(codoseo_store::geo::GeoInput::new(report))
             }
             None => None,
         };

@@ -42,7 +42,7 @@
         {% for b in g.bots %}
         <tr data-search="{{ b.haystack }}">
           <th scope="row" class="reg-token-cell"><code class="reg-token">{{ b.token }}</code>{% if b.control %}<span class="tag" title="Never fetches pages: a robots.txt token that controls how content is used">control token</span>{% endif %}</th>
-          <td data-label="Product" class="reg-product"><span>{{ b.product }}</span><span class="reg-notes">{{ b.notes }}</span></td>
+          <td data-label="Product" class="reg-product"><span>{{ b.product }}</span><span class="reg-notes">{{ b.notes }}</span>{% if let Some(ua) = b.user_agent %}<span class="reg-ua"><span>User agent</span><code>{{ ua }}</code></span>{% endif %}</td>
           <td data-label="Purpose"><span class="badge {{ b.purpose_class }}">{{ b.purpose }}</span></td>
           <td data-label="Follows robots.txt"><span class="{{ b.honours_class }}">{{ b.honours }}</span></td>
           <td data-label="IP list">{% if let Some(ip) = b.ip_ranges_url %}<a href="{{ ip }}" rel="noopener">JSON</a>{% else %}<span class="c-ghost">—</span>{% endif %}</td>

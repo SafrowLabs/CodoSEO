@@ -11,7 +11,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
-use codoseo_testkit::{Page, SiteBuilder, html_page};
+use codoseo_testkit::{Page, SeenRequest, SiteBuilder, html_page};
 use predicates::prelude::*;
 use url::Url;
 
@@ -883,4 +883,196 @@ fn crawl_reports_ai_access_in_every_format_and_old_audits_still_diff() {
     );
     run([OsStr::new("diff"), old.as_os_str(), new.as_os_str()]);
     run([OsStr::new("diff"), new.as_os_str(), old.as_os_str()]);
+}
+
+/// Starts `site` and returns the address of its home page and a way to read every request it
+/// has logged so far.
+fn serve_logged(site: SiteBuilder) -> (Url, impl Fn() -> Vec<SeenRequest>) {
+    let (tx, rx) = mpsc::channel();
+    let (ask_tx, ask_rx) = mpsc::channel::<mpsc::Sender<Vec<SeenRequest>>>();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let started = rt.block_on(site.start());
+        tx.send(started.url("/")).expect("the test is waiting");
+        while let Ok(reply) = ask_rx.recv() {
+            let _ = reply.send(started.requests());
+        }
+        loop {
+            std::thread::park();
+        }
+    });
+    let url = rx.recv().expect("the site started");
+    let requests = move || {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        ask_tx.send(reply_tx).expect("the site is running");
+        reply_rx.recv().expect("the request log")
+    };
+    (url, requests)
+}
+
+/// A page behind a fake WAF that serves PerplexityBot a Cloudflare challenge and everyone else
+/// the page.
+fn behind_waf(title: &str, links: &[&str]) -> Page {
+    Page::by_user_agent(
+        vec![(
+            "PerplexityBot",
+            Page::status(
+                403,
+                "<html><head><title>Just a moment...</title></head></html>",
+            )
+            .header("cf-mitigated", "challenge"),
+        )],
+        Page::html(&html_page(title, links)),
+    )
+}
+
+fn waf_site() -> SiteBuilder {
+    SiteBuilder::new()
+        .robots(200, "User-agent: *\nAllow: /\n")
+        .page("/", behind_waf("Home page title for tests here", &[]))
+}
+
+const TWO_BOTS: &str = "OAI-SearchBot,PerplexityBot";
+
+#[test]
+fn probe_table_shows_the_synthetic_banner_and_each_bots_result() {
+    let url = serve(waf_site());
+    let table = run(["probe", url.as_str(), "--bots", TWO_BOTS]);
+    assert!(table.starts_with("SYNTHETIC CHECK"), "{table}");
+    let row = |token: &str| {
+        table
+            .lines()
+            .find(|l| l.trim_start().starts_with(token))
+            .unwrap_or_else(|| panic!("a {token} row in {table}"))
+            .to_owned()
+    };
+    assert!(
+        row("OAI-SearchBot").contains("Same as CodoSEObot"),
+        "{table}"
+    );
+    let pplx = row("PerplexityBot");
+    assert!(pplx.contains("Challenged (Cloudflare)"), "{pplx}");
+    assert!(pplx.contains("403"), "{pplx}");
+    assert!(table.contains("Findings"), "{table}");
+    assert!(table.contains("(synthetic check)"), "{table}");
+    assert!(table.contains("hello@codoseo.com"), "{table}");
+}
+
+#[test]
+fn probe_json_is_the_probe_report_plus_findings() {
+    let url = serve(waf_site());
+    let out = run([
+        "probe",
+        url.as_str(),
+        "--bots",
+        TWO_BOTS,
+        "--format",
+        "json",
+    ]);
+    let json: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(json["synthetic"], true);
+    assert_eq!(json["url"], url.as_str());
+    assert_eq!(json["from"], "hello@codoseo.com");
+    assert_eq!(
+        json["bots"],
+        serde_json::json!(["OAI-SearchBot", "PerplexityBot"])
+    );
+    let results = json["urls"][0]["results"].as_array().expect("results");
+    assert_eq!(results[0]["verdict"]["kind"], "same");
+    assert_eq!(results[1]["verdict"]["kind"], "challenged");
+    assert_eq!(results[1]["verdict"]["vendor"], "cloudflare");
+    let findings = json["findings"].as_array().expect("findings");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0]["kind"], "fetch_blocked");
+    assert_eq!(findings[0]["grade"], "B");
+    assert!(
+        findings[0]["title"]
+            .as_str()
+            .is_some_and(|t| t.ends_with("(synthetic check)"))
+    );
+}
+
+#[test]
+fn probe_markdown_carries_the_banner() {
+    let url = serve(waf_site());
+    let md = run([
+        "probe",
+        url.as_str(),
+        "--bots",
+        TWO_BOTS,
+        "--format",
+        "markdown",
+    ]);
+    assert!(md.contains("**Synthetic check.**"), "{md}");
+    assert!(
+        md.contains("| PerplexityBot | Challenged (Cloudflare) |"),
+        "{md}"
+    );
+}
+
+#[test]
+fn probe_rejects_an_unknown_or_unprobeable_bot_listing_the_valid_ones() {
+    let (url, requests) = serve_logged(waf_site());
+    for bad in ["NoSuchBot", "Googlebot"] {
+        codoseo()
+            .args(["probe", url.as_str(), "--bots", bad])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(bad).and(predicate::str::contains("OAI-SearchBot")));
+    }
+    assert!(requests().is_empty(), "nothing is fetched for a bad --bots");
+}
+
+#[test]
+fn crawl_probes_only_when_asked() {
+    let (url, requests) = serve_logged(waf_site());
+    let plain = run(["crawl", url.as_str(), "--rps", "50", "--format", "json"]);
+    let plain: serde_json::Value = serde_json::from_str(&plain).expect("json");
+    assert!(plain["ai_access"]["report"].get("probes").is_none());
+    let seen = requests();
+    assert!(
+        seen.iter().all(|r| r
+            .user_agent
+            .as_deref()
+            .is_some_and(|ua| ua.contains("CodoSEObot"))),
+        "a plain crawl sends only CodoSEObot: {seen:?}"
+    );
+
+    let probed = run([
+        "crawl",
+        url.as_str(),
+        "--rps",
+        "50",
+        "--format",
+        "json",
+        "--probes",
+    ]);
+    let probed: serde_json::Value = serde_json::from_str(&probed).expect("json");
+    let probes = &probed["ai_access"]["report"]["probes"];
+    assert_eq!(probes["synthetic"], true);
+    assert_eq!(probes["urls"].as_array().map(Vec::len), Some(1));
+    let kinds: Vec<&str> = probed["ai_access"]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter_map(|f| f["kind"].as_str())
+        .collect();
+    assert!(kinds.contains(&"fetch_blocked"), "{kinds:?}");
+    assert!(requests().iter().any(|r| {
+        r.user_agent
+            .as_deref()
+            .is_some_and(|ua| ua.contains("PerplexityBot"))
+    }));
+}
+
+#[test]
+fn crawl_table_with_probes_says_synthetic() {
+    let url = serve(waf_site());
+    let table = run(["crawl", url.as_str(), "--rps", "50", "--probes"]);
+    assert!(table.contains("Synthetic fetch check"), "{table}");
+    assert!(table.contains("(synthetic check)"), "{table}");
 }

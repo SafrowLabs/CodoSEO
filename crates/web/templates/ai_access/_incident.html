@@ -1,7 +1,7 @@
 {#- One open incident on the AI access screen. Expects `i: IncidentView` and `base`. -#}
 <article class="card aia-issue is-{{ i.severity }}" id="issue-{{ i.id }}" aria-labelledby="issue-{{ i.id }}-title">
   <div class="aia-issue-head">
-    <span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span>
+    <span class="aia-issue-badges"><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span>{% if i.synthetic %}<span class="badge aia-synthetic">Synthetic</span>{% endif %}</span>
     <h3 class="aia-issue-title" id="issue-{{ i.id }}-title">{{ i.title }}</h3>
     {% if let Some(confirm) = i.intend %}
     <form class="aia-intend" method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/intended" hx-confirm="{{ confirm }}">
@@ -50,7 +50,7 @@
     <span title="{{ i.opened_full }}">Opened {{ i.opened }}</span>
     <span title="{{ i.last_seen_full }}">Last seen {{ i.last_seen }}</span>
     {% if let Some((label, tip)) = i.quiet %}<span class="chip" title="{{ tip }}">{{ label }}</span>{% endif %}
-    <span class="aia-grade" title="Evidence grade A: documented by the operator" aria-label="Evidence grade A: documented by the operator">A</span>
+    <span class="aia-grade{% if i.synthetic %} aia-grade-b{% endif %}" title="{{ i.grade.1 }}" aria-label="{{ i.grade.1 }}">{{ i.grade.0 }}</span>
     {% if !i.sources.is_empty() %}<span class="aia-sources">Sources: {% for s in i.sources %}<a href="{{ s.href }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
   </div>
 </article>

@@ -16,7 +16,13 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use codoseo_core::check::Severity;
 use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engines};
-use codoseo_geo::findings::{BotEvidence, Evidence, FindingKind, ROBOTS_DOC};
+use codoseo_geo::findings::{
+    BotEvidence, Evidence, FindingKind, ProbeEvidence, ROBOTS_DOC, VENDOR_DOCS,
+};
+use codoseo_geo::probe::{
+    FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
+    SkipReason, Verdict,
+};
 use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str, slug_str};
 use codoseo_geo::robots::{GroupMatch, MatchedRule, Pair, RobotsAvailability};
 use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
@@ -47,6 +53,9 @@ pub fn routes() -> Router<AppState> {
             post(mark_intended),
         )
 }
+
+/// What grade B means, on a synthetic incident's grade.
+const GRADE_B: &str = "Evidence grade B: observed by CodoSEO's synthetic check, compared with CodoSEObot's own fetch and confirmed by a second one. Grade A is what the operator documents.";
 
 /// Resolved incidents listed under "Recently resolved".
 const RESOLVED_SHOWN: i64 = 10;
@@ -253,6 +262,8 @@ pub struct Overview {
     pub incidents: Vec<IncidentView>,
     /// The empty "Open issues" state: its heading, its text and the mascot's mood.
     pub clear: (&'static str, &'static str, &'static str),
+    /// The synthetic fetch probes of the latest report, or why there are none.
+    pub fetch: FetchCheck,
     /// Shown instead of the bots table when robots.txt gave no verdicts.
     pub robots_callout: Option<Callout>,
     /// `robots.txt · HTTP 200`
@@ -328,6 +339,10 @@ pub struct IncidentView {
     pub id: i64,
     pub severity: &'static str,
     pub severity_label: &'static str,
+    /// Observed by CodoSEO's synthetic fetch check rather than documented by an operator.
+    pub synthetic: bool,
+    /// The evidence grade's letter and what it means.
+    pub grade: (&'static str, &'static str),
     pub title: String,
     pub summary: Vec<Seg>,
     pub opened: String,
@@ -347,6 +362,64 @@ pub struct IncidentView {
     pub fix: Option<String>,
     /// The confirmation for "Mark intended"; `None` when the finding can't be a choice.
     pub intend: Option<String>,
+}
+
+/// The "Fetch check" section: what the synthetic probes with each AI bot's user agent got.
+pub struct FetchCheck {
+    /// Set instead of the results when there are none, saying why.
+    pub empty: Option<FetchEmpty>,
+    /// `Sent each bot's documented user agent … on 3 pages, …`
+    pub note: String,
+    /// `45 requests · From hello@codoseo.com`
+    pub aside: String,
+    pub pages: Vec<UrlLink>,
+    /// Why the run stopped before its last page.
+    pub stop: Option<&'static str>,
+    pub rows: Vec<ProbeRowView>,
+    pub skipped: Vec<SkipGroup>,
+    pub skipped_total: usize,
+}
+
+/// What the screen says about open synthetic incidents while the fetch checks are off: they are
+/// kept, as nothing can judge them.
+pub const PROBES_OFF_INCIDENTS: &str = "Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved.";
+
+pub struct FetchEmpty {
+    pub title: &'static str,
+    pub text: &'static str,
+    /// A second line ([`PROBES_OFF_INCIDENTS`] when the checks are off).
+    pub note: Option<&'static str>,
+    /// Offer the intent form, where the switch is.
+    pub intent_link: bool,
+}
+
+/// One probed bot: its intent, what it got and on how many pages.
+pub struct ProbeRowView {
+    pub token: String,
+    pub operator: String,
+    pub product: String,
+    pub stance: &'static str,
+    pub stance_class: &'static str,
+    /// `Challenged (Cloudflare)`, `Same as CodoSEObot`, `Not probed: robots.txt`
+    pub result: String,
+    /// A badge class, or empty for plain text.
+    pub result_class: &'static str,
+    pub result_tip: String,
+    /// `2/3`: pages treated worse than CodoSEObot, of those compared.
+    pub pages: String,
+    pub pages_class: &'static str,
+    /// `HTTP 403 · 5.1 KB vs 46.9 KB`
+    pub detail: String,
+    /// The probe's page title, as the probed site sent it.
+    pub title: Option<String>,
+    /// The challenge marker, or where a redirect ended.
+    pub extra: Option<String>,
+}
+
+/// Bots that were not probed for one reason.
+pub struct SkipGroup {
+    pub label: &'static str,
+    pub tokens: Vec<String>,
 }
 
 pub struct BotGroup {
@@ -495,6 +568,7 @@ async fn render_page(
         .count();
 
     let bot_groups = bot_groups(report, &intent);
+    let probes_on = geo::get_ai_probes(pool, site.id).await?;
     let view = Overview {
         checked: fmt::ago(latest.created_at),
         checked_full: fmt::datetime(latest.created_at),
@@ -522,6 +596,14 @@ async fn render_page(
                 "ok",
             )
         },
+        fetch: fetch_check(
+            site,
+            &base,
+            report,
+            &intent,
+            probes_on,
+            state.config.probe_urls_for(user.account.plan) > 0,
+        ),
         robots_callout: robots_callout(report),
         robots_aside: robots_aside(report),
         bot_attention: bot_groups
@@ -704,6 +786,385 @@ fn robots_callout(report: &AccessReport) -> Option<Callout> {
     }
 }
 
+// ---- the fetch check -------------------------------------------------------------------------
+
+/// `5.1 KB`, `812 B`; a body cut at the probe limit reads `over 256 KB`.
+fn size(f: &ProbeFetch) -> String {
+    if f.truncated {
+        format!("over {} KB", MAX_PROBE_BODY / 1024)
+    } else if f.bytes < 1024 {
+        format!("{} B", f.bytes)
+    } else {
+        format!("{:.1} KB", f64::from(f.bytes) / 1024.0)
+    }
+}
+
+/// `HTTP 403`, or why there was no response.
+fn status_text(f: &ProbeFetch) -> String {
+    match (f.status, f.error) {
+        (Some(s), _) => format!("HTTP {s}"),
+        (None, Some(e)) => format!(
+            "no response ({})",
+            match e {
+                FetchErrorKind::Timeout => "timed out",
+                FetchErrorKind::Connect => "connection refused",
+                FetchErrorKind::Dropped => "connection dropped",
+                FetchErrorKind::TooManyRedirects => "too many redirects",
+                FetchErrorKind::Blocked => "a private address was refused",
+                FetchErrorKind::Other => "the request failed",
+            }
+        ),
+        (None, None) => "no response".to_owned(),
+    }
+}
+
+/// One fetch in a line: `HTTP 403 · 5.1 KB · “Just a moment...” · cf-mitigated: challenge`, and
+/// `→ https://…` when it ended somewhere else.
+fn fetch_summary(f: &ProbeFetch) -> String {
+    let mut parts = vec![status_text(f)];
+    if f.status.is_some() {
+        parts.push(size(f));
+    }
+    if let Some(t) = &f.title {
+        parts.push(format!("“{t}”"));
+    }
+    if let Some(c) = &f.challenge {
+        parts.push(c.signal.clone());
+    }
+    if let Some(to) = &f.final_url {
+        parts.push(format!("→ {to}"));
+    }
+    parts.join(" · ")
+}
+
+fn verdict_label(v: &Verdict) -> String {
+    match v {
+        Verdict::Same => "Same as CodoSEObot".to_owned(),
+        Verdict::Challenged { vendor } => format!("Challenged ({})", vendor.label()),
+        Verdict::Blocked { status: Some(s) } => format!("Blocked ({s})"),
+        Verdict::Blocked { status: None } => "Blocked (connection dropped)".to_owned(),
+        Verdict::Diverted { .. } => "Redirected".to_owned(),
+        Verdict::Degraded => "Different page".to_owned(),
+        Verdict::Throttled => "Rate limited".to_owned(),
+        Verdict::Inconclusive { .. } => "Inconclusive".to_owned(),
+        Verdict::SkippedRobots => "Not probed: robots.txt".to_owned(),
+    }
+}
+
+fn inconclusive_tip(r: InconclusiveReason) -> &'static str {
+    match r {
+        InconclusiveReason::BaselineFailed => {
+            "CodoSEObot didn't get the page either, so there was nothing to compare with"
+        }
+        InconclusiveReason::BaselineChallenged => {
+            "CodoSEObot was challenged too, so there was nothing to compare with"
+        }
+        InconclusiveReason::ProbeError => {
+            "No response: a timeout, too many redirects or a refused address"
+        }
+        InconclusiveReason::Unstable => "A second fetch disagreed with the first",
+        InconclusiveReason::Unconfirmed => {
+            "Worse than CodoSEObot once, with no time or requests left to confirm it"
+        }
+        InconclusiveReason::Stopped => "Not checked: the time limit came first",
+    }
+}
+
+fn skip_label(r: SkipReason) -> &'static str {
+    match r {
+        SkipReason::NoUserAgent => "Not probed: no documented user agent",
+        SkipReason::VerifiedSearchEngine => "Not probed: verified search engine",
+        SkipReason::NotProbedPurpose => "Not probed: training, ads and agents",
+    }
+}
+
+fn stop_text(s: ProbeStop) -> &'static str {
+    match s {
+        ProbeStop::Budget => {
+            "Stopped early: the time budget ran out before every page was checked."
+        }
+        ProbeStop::RequestCap => {
+            "Stopped early: the request cap was reached before every page was checked."
+        }
+    }
+}
+
+fn fetch_empty(title: &'static str, text: &'static str, intent_link: bool) -> FetchCheck {
+    FetchCheck {
+        empty: Some(FetchEmpty {
+            title,
+            text,
+            note: None,
+            intent_link,
+        }),
+        note: String::new(),
+        aside: String::new(),
+        pages: Vec::new(),
+        stop: None,
+        rows: Vec::new(),
+        skipped: Vec::new(),
+        skipped_total: 0,
+    }
+}
+
+fn fetch_check(
+    site: &Site,
+    base: &str,
+    report: &AccessReport,
+    intent: &Intent,
+    probes_on: bool,
+    installed: bool,
+) -> FetchCheck {
+    let off = |title, text, intent_link| {
+        let mut out = fetch_empty(title, text, intent_link);
+        if let Some(e) = out.empty.as_mut() {
+            e.note = Some(PROBES_OFF_INCIDENTS);
+        }
+        out
+    };
+    if !installed {
+        return off(
+            "Fetch checks are turned off on this install",
+            "CODOSEO_PROBE_URLS is 0, so no page is fetched with an AI bot's user agent. Set it to the number of pages to check (up to 10) to turn them on.",
+            false,
+        );
+    }
+    if !probes_on {
+        return off(
+            "Fetch checks are off for this site",
+            "Switch them on in your intent to see whether your CDN or firewall treats AI bots differently from CodoSEObot.",
+            true,
+        );
+    }
+    if !report.has_verdicts() {
+        return fetch_empty(
+            "Fetch checks need a readable robots.txt",
+            "A bot's user agent is only sent where robots.txt lets that bot in, so the checks wait until robots.txt can be read.",
+            false,
+        );
+    }
+    let Some(probes) = &report.probes else {
+        return fetch_empty(
+            "Fetch checks run after the next crawl",
+            "After a crawl, CodoSEO fetches a few important pages with each AI bot's documented user agent and compares the answers with CodoSEObot's. This report is from a crawl without them.",
+            false,
+        );
+    };
+    if probes.urls.is_empty() {
+        let mut out = fetch_empty(
+            "No page could be checked",
+            "The fetch check stopped before its first page. It runs again after the next crawl.",
+            false,
+        );
+        out.stop = probes.stop.map(stop_text);
+        return out;
+    }
+
+    let rows = probes
+        .bots
+        .iter()
+        .map(|token| probe_row(probes, intent, token))
+        .collect();
+    let mut skipped: Vec<SkipGroup> = Vec::new();
+    for reason in [
+        SkipReason::NoUserAgent,
+        SkipReason::VerifiedSearchEngine,
+        SkipReason::NotProbedPurpose,
+    ] {
+        let tokens: Vec<String> = probes
+            .skipped_bots
+            .iter()
+            .filter(|b| b.reason == reason)
+            .map(|b| b.token.clone())
+            .collect();
+        if !tokens.is_empty() {
+            skipped.push(SkipGroup {
+                label: skip_label(reason),
+                tokens,
+            });
+        }
+    }
+    let n = probes.urls.len();
+    FetchCheck {
+        empty: None,
+        note: format!(
+            "Sent each bot's documented user agent from CodoSEO's address on {}, compared with CodoSEObot. Real bots come from their own addresses and may be treated differently.",
+            plural(n, "page", "pages")
+        ),
+        aside: format!(
+            "{} · From {}",
+            plural(usize::from(probes.requests), "request", "requests"),
+            probes.from
+        ),
+        pages: probes
+            .urls
+            .iter()
+            .filter_map(|u| report.important.get(usize::from(u.url)))
+            .map(|u| UrlLink {
+                path: path_of(&u.url),
+                href: explorer_href(site, base, &u.url),
+            })
+            .collect(),
+        stop: probes.stop.map(stop_text),
+        rows,
+        skipped_total: probes.skipped_bots.len(),
+        skipped,
+    }
+}
+
+/// One bot's results over the probed pages. A bot treated worse than CodoSEObot anywhere shows
+/// that (the first such page's verdict); otherwise the same page, robots.txt or inconclusive.
+fn probe_row(probes: &ProbeReport, intent: &Intent, token: &str) -> ProbeRowView {
+    let bot = registry().bot(token);
+    let stance = bot.map_or(Stance::Any, |b| intent.effective(b));
+    let results: Vec<(&ProbeFetch, &codoseo_geo::probe::ProbeResult)> = probes
+        .urls
+        .iter()
+        .filter_map(|u| {
+            u.results
+                .iter()
+                .find(|r| r.token == token)
+                .map(|r| (&u.baseline, r))
+        })
+        .collect();
+    let positive = results
+        .iter()
+        .filter(|(_, r)| r.verdict.is_positive())
+        .count();
+    let inconclusive = results
+        .iter()
+        .filter(|(_, r)| matches!(r.verdict, Verdict::Inconclusive { .. }))
+        .count();
+    let skipped = results
+        .iter()
+        .filter(|(_, r)| r.verdict == Verdict::SkippedRobots)
+        .count();
+    let compared = results.len() - inconclusive - skipped;
+    let shown = results
+        .iter()
+        .find(|(_, r)| r.verdict.is_positive())
+        .or_else(|| results.iter().find(|(_, r)| r.verdict == Verdict::Same))
+        .or_else(|| {
+            results
+                .iter()
+                .find(|(_, r)| matches!(r.verdict, Verdict::Inconclusive { .. }))
+        })
+        .or(results.first());
+    let wanted = stance == Stance::Allow;
+    let (result, result_class, result_tip) = match shown.map(|(_, r)| &r.verdict) {
+        None => ("Not probed".to_owned(), "", String::new()),
+        Some(v @ Verdict::Same) => (
+            verdict_label(v),
+            "t-ok",
+            "The same page CodoSEObot got".to_owned(),
+        ),
+        Some(v @ Verdict::SkippedRobots) => (
+            verdict_label(v),
+            "",
+            "robots.txt keeps this bot out, so its user agent wasn't sent".to_owned(),
+        ),
+        Some(v @ Verdict::Inconclusive { reason }) => (
+            verdict_label(v),
+            "t-muted",
+            inconclusive_tip(*reason).to_owned(),
+        ),
+        Some(v) if !wanted => (
+            verdict_label(v),
+            "t-muted",
+            "Expected: you don't ask for this bot, so it isn't reported".to_owned(),
+        ),
+        Some(v @ (Verdict::Throttled | Verdict::Degraded)) => (
+            verdict_label(v),
+            "t-warn",
+            "Treated worse than CodoSEObot: see Open issues".to_owned(),
+        ),
+        Some(v) => (
+            verdict_label(v),
+            "t-err",
+            "Treated worse than CodoSEObot: see Open issues".to_owned(),
+        ),
+    };
+    let (detail, title, extra) = match shown {
+        Some((_, r)) if r.verdict == Verdict::SkippedRobots => (
+            format!(
+                "robots.txt disallows it on {} of {}",
+                skipped,
+                plural(results.len(), "page", "pages")
+            ),
+            None,
+            None,
+        ),
+        Some((baseline, r)) => match &r.fetch {
+            Some(f) => {
+                let mut detail = status_text(f);
+                if f.status.is_some() {
+                    detail.push_str(&format!(" · {} vs {}", size(f), size(baseline)));
+                }
+                if inconclusive > 0 && !matches!(r.verdict, Verdict::Inconclusive { .. }) {
+                    detail.push_str(&format!(" · {inconclusive} inconclusive"));
+                }
+                let extra = match (&r.verdict, &f.challenge) {
+                    (Verdict::Diverted { to }, _) => Some(format!("→ {to}")),
+                    (_, Some(c)) => Some(c.signal.clone()),
+                    _ => None,
+                };
+                // The same page needs no title: only what differs is shown.
+                let title = f.title.clone().filter(|_| r.verdict != Verdict::Same);
+                (detail, title, extra)
+            }
+            None => ("not requested".to_owned(), None, None),
+        },
+        None => (String::new(), None, None),
+    };
+    ProbeRowView {
+        token: token.to_owned(),
+        operator: bot.map(|b| b.operator.clone()).unwrap_or_default(),
+        product: bot.map(|b| b.product.clone()).unwrap_or_default(),
+        stance: stance_label(stance),
+        stance_class: stance_class(stance),
+        result,
+        result_class,
+        result_tip,
+        pages: if compared == 0 {
+            "—".to_owned()
+        } else {
+            format!("{positive}/{compared}")
+        },
+        pages_class: match (positive, wanted, result_class) {
+            (0, ..) => "c-muted",
+            (_, true, "t-warn") => "c-warn",
+            (_, true, _) => "c-err",
+            _ => "",
+        },
+        detail,
+        title,
+        extra,
+    }
+}
+
+/// A `FetchBlocked` bot's line: what it got on how many of the pages probed with its user agent.
+fn probe_detail(subject: &str, p: &ProbeEvidence) -> String {
+    let word = match subject {
+        "blocked_dropped" => "Connection dropped",
+        s if s.starts_with("challenge_") => "Challenged",
+        s if s.starts_with("blocked_") => "Blocked",
+        "diverted" => "Redirected elsewhere",
+        "degraded" => "Served a smaller, different page",
+        "throttled" => "Rate limited",
+        _ => "Treated differently",
+    };
+    let (a, n) = (p.urls_affected, p.urls_probed);
+    if n <= 1 && p.home_affected {
+        format!("{word} on the home page")
+    } else if a == n {
+        format!("{word} on all {n} probed pages")
+    } else if p.home_affected {
+        format!("{word} on {a} of {n} probed pages, including the home page")
+    } else {
+        format!("{word} on {a} of {n} probed pages; the home page was fine")
+    }
+}
+
 fn summary_segments(s: &str) -> Vec<Seg> {
     s.split('`')
         .enumerate()
@@ -735,10 +1196,33 @@ fn sources(kind: FindingKind, ev: &Evidence) -> Vec<SourceLink> {
             push(engine.source_url);
         }
     }
-    urls.into_iter()
-        .map(|href| SourceLink {
-            label: host_label(&href),
-            href,
+    for p in &ev.probes {
+        if let Some(bot) = registry().bot(&p.token) {
+            push(&bot.source_url);
+        }
+    }
+    let vendors: BTreeSet<&str> = ev
+        .probes
+        .iter()
+        .filter_map(|p| p.vendor)
+        .map(|v| v.slug())
+        .collect();
+    for (vendor, url) in VENDOR_DOCS {
+        if vendors.contains(vendor.slug()) {
+            push(url);
+        }
+    }
+    // Two pages on one host (Cloudflare's AI Crawl Control and bots docs) read by their path.
+    let hosts: Vec<String> = urls.iter().map(|u| host_label(u)).collect();
+    urls.iter()
+        .zip(&hosts)
+        .map(|(href, host)| SourceLink {
+            label: if hosts.iter().filter(|h| *h == host).count() > 1 {
+                format!("{host}{}", path_of(href).trim_end_matches('/'))
+            } else {
+                host.clone()
+            },
+            href: href.clone(),
         })
         .collect()
 }
@@ -904,6 +1388,33 @@ fn incident_view(
             }),
         }
     }
+    // Synthetic probes: bots whose probes got the same thing share a line.
+    for p in &ev.probes {
+        let detail = probe_detail(&i.subject, p);
+        let rule = p.sample.as_ref().map(|f| {
+            let mut line = format!("Probe: {}", fetch_summary(f));
+            if let Some(b) = &p.baseline {
+                line.push_str(&format!(" · CodoSEObot: {}", fetch_summary(b)));
+            }
+            line
+        });
+        let chip = BotChip {
+            token: p.token.clone(),
+            operator: p.operator.clone(),
+            control: false,
+        };
+        match bots
+            .iter_mut()
+            .find(|g| g.detail == detail && g.rule == rule)
+        {
+            Some(g) => g.bots.push(chip),
+            None => bots.push(BotEv {
+                bots: vec![chip],
+                detail,
+                rule,
+            }),
+        }
+    }
     let engines_ev = ev
         .engines
         .iter()
@@ -973,10 +1484,17 @@ fn incident_view(
             "Opened by a first check or an intent change",
         ),
     });
+    let synthetic = ev.synthetic || i.kind == FindingKind::FetchBlocked;
     IncidentView {
         id: i.id,
         severity,
         severity_label,
+        synthetic,
+        grade: if synthetic {
+            ("B", GRADE_B)
+        } else {
+            ("A", "Evidence grade A: documented by the operator")
+        },
         title: i.title.clone(),
         summary: summary_segments(&i.summary),
         opened: fmt::ago(i.opened_at),
@@ -1480,6 +1998,13 @@ pub struct IntentPage {
     pub directives: Vec<DirectivePick>,
     /// The saved intent differs from the defaults.
     pub custom: bool,
+    /// Synthetic fetch checks run after the site's crawls.
+    pub probes: bool,
+    /// How many pages they fetch on the account's plan: `up to 3 pages`.
+    pub probe_pages: String,
+    /// False when `CODOSEO_PROBE_URLS=0` turns the checks off for the whole install: the switch
+    /// is then shown disabled and the form does not send it.
+    pub probes_installed: bool,
 }
 
 /// The page directives the intent form offers to accept, each with what it does (as
@@ -1645,6 +2170,9 @@ async fn intent_page(
         cards: intent_cards(&intent),
         directives: directive_picks(&intent),
         custom: intent != Intent::default(),
+        probes: geo::get_ai_probes(&state.pool, site.id).await?,
+        probe_pages: probe_pages(state.config.probe_urls_for(user.account.plan)),
+        probes_installed: state.config.probe_urls_for(user.account.plan) > 0,
     })?
     .into_response())
 }
@@ -1695,6 +2223,25 @@ fn intent_from_form(current: &Intent, fields: &[(String, String)]) -> Result<Int
     Ok(intent)
 }
 
+/// The fetch check switch: the form sends a hidden `probes=off` and, when ticked, `probes=on`
+/// after it, so the last value wins. `None` when the form has no such field (it is left as is).
+fn probes_from_form(fields: &[(String, String)]) -> Result<Option<bool>, String> {
+    match fields.iter().rev().find(|(k, _)| k == "probes") {
+        None => Ok(None),
+        Some((_, v)) if v == "on" => Ok(Some(true)),
+        Some((_, v)) if v == "off" => Ok(Some(false)),
+        Some((_, v)) => Err(format!("\"{v}\" is not a choice for fetch checks.")),
+    }
+}
+
+/// The intent form's "up to N pages", from the pages a crawl probes.
+fn probe_pages(pages: u8) -> String {
+    match pages {
+        1 => "the home page".to_owned(),
+        n => format!("up to {n} pages"),
+    }
+}
+
 async fn save_intent(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -1705,6 +2252,9 @@ async fn save_intent(
     let site = load_site(&state, &user, site_id(&site)?).await?;
     let current = geo::get_intent(&state.pool, site.id).await?;
     let intent = intent_from_form(&current, &fields).map_err(AppError::BadRequest)?;
+    if let Some(on) = probes_from_form(&fields).map_err(AppError::BadRequest)? {
+        geo::set_ai_probes(&state.pool, site.id, on).await?;
+    }
     let outcome = apply_intent(&state, &site, &intent).await?;
     respond(
         &state,

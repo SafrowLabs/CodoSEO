@@ -3,7 +3,10 @@
 
 mod support;
 
-use codoseo::worker::{DEFAULT_MEMORY_BUDGET, address_policy_for_mode, worker_loop_once};
+use codoseo::worker::{
+    DEFAULT_MEMORY_BUDGET, ProbeSettings, WorkerSettings, address_policy_for_mode,
+    worker_loop_once, worker_loop_once_with,
+};
 use codoseo_core::crawl::AddressPolicy;
 use codoseo_store::crawl_queue::{CrawlQueue, CrawlTrigger};
 use codoseo_store::jobs::JobQueue;
@@ -549,26 +552,9 @@ async fn changing_site() -> (
     (codoseo_testkit::TestServer::start(router).await, knobs)
 }
 
+/// Runs one crawl of `site_id`, with short probe gaps for sites whose plan probes.
 async fn run_crawl(db: &TestDb, site_id: uuid::Uuid, trigger: CrawlTrigger) -> uuid::Uuid {
-    let crawl_queue = CrawlQueue::new(db.pool.clone());
-    let job_queue = JobQueue::new(db.pool.clone());
-    let id = crawl_queue
-        .enqueue(site_id, "example.test", trigger, 2, None, None)
-        .await
-        .expect("enqueue crawl");
-    assert!(
-        worker_loop_once(
-            &db.pool,
-            &crawl_queue,
-            &job_queue,
-            "test-worker",
-            DEFAULT_MEMORY_BUDGET,
-            AddressPolicy::AllowPrivate,
-        )
-        .await
-        .expect("worker_loop_once")
-    );
-    id
+    run_crawl_with(db, site_id, trigger, &fast_probes()).await
 }
 
 async fn ai_changes(db: &TestDb, crawl: uuid::Uuid) -> Vec<(String, String)> {
@@ -766,13 +752,14 @@ async fn retry(db: &TestDb) {
     let crawl_queue = CrawlQueue::new(db.pool.clone());
     let job_queue = JobQueue::new(db.pool.clone());
     assert!(
-        worker_loop_once(
+        worker_loop_once_with(
             &db.pool,
             &crawl_queue,
             &job_queue,
             "test-worker",
             DEFAULT_MEMORY_BUDGET,
             AddressPolicy::AllowPrivate,
+            &fast_probes(),
         )
         .await
         .unwrap()
@@ -857,4 +844,340 @@ async fn a_quick_audit_does_not_fetch_tdmrep_and_a_full_crawl_does() {
     assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 0);
     run_crawl(&db, site_id, CrawlTrigger::Manual).await;
     assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 1);
+}
+
+// ---- Synthetic AI-agent fetch probes ------------------------------------------------------
+
+/// What the fake WAF in front of the probe site does.
+#[derive(Clone, Default)]
+struct Waf {
+    /// User agents containing one of these get a 403.
+    blocked: Vec<&'static str>,
+    /// Every AI user agent gets a 429 with `Retry-After: 0`.
+    throttle_bots: bool,
+}
+
+/// One request the probe site saw: its path and user agent.
+type SeenLog = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
+/// A four-page site behind a fake WAF the test can change between crawls, logging every request.
+async fn waf_site() -> (
+    codoseo_testkit::TestServer,
+    std::sync::Arc<std::sync::Mutex<Waf>>,
+    SeenLog,
+) {
+    use axum::http::{HeaderMap, StatusCode, Uri, header};
+    use axum::response::IntoResponse;
+
+    let waf = std::sync::Arc::new(std::sync::Mutex::new(Waf::default()));
+    let seen: SeenLog = Default::default();
+    let (state, log) = (waf.clone(), seen.clone());
+    let router =
+        axum::Router::new().fallback(axum::routing::any(move |uri: Uri, headers: HeaderMap| {
+            let w = state.lock().unwrap().clone();
+            let ua = headers
+                .get(header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            log.lock()
+                .unwrap()
+                .push((uri.path().to_owned(), ua.clone()));
+            async move {
+                if w.blocked.iter().any(|b| ua.contains(b)) {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        [(header::CONTENT_TYPE, "text/html")],
+                        "<html><head><title>Forbidden</title></head><body>No.</body></html>",
+                    )
+                        .into_response();
+                }
+                if w.throttle_bots && is_ai_user_agent(&ua) {
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        [(header::RETRY_AFTER, "0")],
+                        "slow down",
+                    )
+                        .into_response();
+                }
+                match uri.path() {
+                    "/robots.txt" => (
+                        [(header::CONTENT_TYPE, "text/plain")],
+                        "User-agent: *\nAllow: /\n",
+                    )
+                        .into_response(),
+                    "/" | "/a" | "/b" | "/c" => {
+                        let links = if uri.path() == "/" {
+                            "<a href=\"/a\">A</a><a href=\"/b\">B</a><a href=\"/c\">C</a>"
+                        } else {
+                            "<a href=\"/\">Home</a>"
+                        };
+                        (
+                            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                            format!(
+                                "<!doctype html><html lang=\"en\"><head><title>Page {}</title>\
+                                 <meta name=\"description\" content=\"A page.\"></head>\
+                                 <body><h1>Page</h1>{links}</body></html>",
+                                uri.path()
+                            ),
+                        )
+                            .into_response()
+                    }
+                    _ => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+        }));
+    (codoseo_testkit::TestServer::start(router).await, waf, seen)
+}
+
+/// A user agent of a bot the probes impersonate.
+fn is_ai_user_agent(ua: &str) -> bool {
+    codoseo_geo::probe::candidates()
+        .0
+        .iter()
+        .any(|b| ua == b.user_agent)
+}
+
+fn ai_requests(seen: &SeenLog) -> usize {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, ua)| is_ai_user_agent(ua))
+        .count()
+}
+
+/// Worker settings with short probe gaps, so a probe run takes milliseconds.
+fn fast_probes() -> WorkerSettings {
+    WorkerSettings {
+        probes: ProbeSettings {
+            min_gap: std::time::Duration::from_millis(5),
+            request_timeout: std::time::Duration::from_secs(5),
+            ..ProbeSettings::default()
+        },
+        ..WorkerSettings::default()
+    }
+}
+
+/// A site owned by an account on `plan`.
+async fn seed_owned_site(db: &TestDb, start_url: &str, plan: &str) -> uuid::Uuid {
+    let account: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (email, email_canonical, plan) VALUES ($1, $1, $2::plan) RETURNING id",
+    )
+    .bind(format!("{}@example.com", uuid::Uuid::new_v4().simple()))
+    .bind(plan)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query_scalar(
+        "INSERT INTO sites (account_id, domain, start_url) VALUES ($1, 'example.test', $2) \
+         RETURNING id",
+    )
+    .bind(account)
+    .bind(start_url)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap()
+}
+
+async fn run_crawl_with(
+    db: &TestDb,
+    site_id: uuid::Uuid,
+    trigger: CrawlTrigger,
+    settings: &WorkerSettings,
+) -> uuid::Uuid {
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let job_queue = JobQueue::new(db.pool.clone());
+    let id = crawl_queue
+        .enqueue(site_id, "example.test", trigger, 2, None, None)
+        .await
+        .expect("enqueue crawl");
+    assert!(
+        worker_loop_once_with(
+            &db.pool,
+            &crawl_queue,
+            &job_queue,
+            "test-worker",
+            DEFAULT_MEMORY_BUDGET,
+            AddressPolicy::AllowPrivate,
+            settings,
+        )
+        .await
+        .expect("worker_loop_once_with")
+    );
+    id
+}
+
+async fn latest_probes(
+    db: &TestDb,
+    site_id: uuid::Uuid,
+) -> Option<codoseo_geo::probe::ProbeReport> {
+    codoseo_store::geo::latest_report(&db.pool, site_id)
+        .await
+        .unwrap()
+        .expect("a stored AI access report")
+        .report
+        .probes
+}
+
+async fn crawl_status(db: &TestDb, crawl: uuid::Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM crawls WHERE id = $1")
+        .bind(crawl)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn probes_open_a_quiet_incident_first_and_a_new_blocked_bot_writes_one_change() {
+    use codoseo_geo::findings::FindingKind;
+
+    let db = TestDb::new().await;
+    let (server, waf, seen) = waf_site().await;
+    let site_id = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+
+    waf.lock().unwrap().blocked = vec!["OAI-SearchBot"];
+    let first = run_crawl_with(&db, site_id, CrawlTrigger::Manual, &fast_probes()).await;
+    assert_eq!(crawl_status(&db, first).await, "done");
+    let probes = latest_probes(&db, site_id).await.expect("probes stored");
+    assert!(probes.synthetic);
+    assert_eq!(
+        probes.urls.len(),
+        1,
+        "the free plan probes the home page only"
+    );
+    assert!(ai_requests(&seen) > 0);
+    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
+        .await
+        .unwrap();
+    let fetch: Vec<_> = open
+        .iter()
+        .filter(|i| i.kind == FindingKind::FetchBlocked)
+        .collect();
+    assert_eq!(fetch.len(), 1, "{open:?}");
+    assert_eq!(fetch[0].subject, "blocked_403");
+    assert!(fetch[0].quiet, "the first evaluation is the baseline");
+    assert!(ai_changes(&db, first).await.is_empty());
+
+    waf.lock().unwrap().blocked = vec!["OAI-SearchBot", "PerplexityBot"];
+    let second = run_crawl_with(&db, site_id, CrawlTrigger::Manual, &fast_probes()).await;
+    assert_eq!(
+        ai_changes(&db, second).await,
+        vec![("ai_fetch_blocked".to_owned(), "warning".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn quick_audits_and_opted_out_sites_send_no_ai_requests() {
+    let db = TestDb::new().await;
+    let (server, _waf, seen) = waf_site().await;
+
+    // A no-signup audit: no account, quick limits.
+    let unclaimed = db.seed_site("example.test", server.url("/").as_str()).await;
+    run_crawl_with(&db, unclaimed, CrawlTrigger::Quick, &fast_probes()).await;
+    // A quick crawl of an owned site.
+    let owned = seed_owned_site(&db, server.url("/").as_str(), "pro").await;
+    run_crawl_with(&db, owned, CrawlTrigger::Quick, &fast_probes()).await;
+    assert_eq!(ai_requests(&seen), 0, "quick audits never probe");
+
+    // An owner who switched the probes off.
+    codoseo_store::geo::set_ai_probes(&db.pool, owned, false)
+        .await
+        .unwrap();
+    let crawl = run_crawl_with(&db, owned, CrawlTrigger::Manual, &fast_probes()).await;
+    assert_eq!(crawl_status(&db, crawl).await, "done");
+    assert_eq!(ai_requests(&seen), 0, "ai_probes = false never probes");
+    assert_eq!(latest_probes(&db, owned).await, None);
+}
+
+#[tokio::test]
+async fn probes_leave_the_health_score_alone() {
+    let db = TestDb::new().await;
+    let (server, waf, _seen) = waf_site().await;
+    waf.lock().unwrap().blocked = vec!["OAI-SearchBot"];
+    let with = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+    let without = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+    codoseo_store::geo::set_ai_probes(&db.pool, without, false)
+        .await
+        .unwrap();
+    let a = run_crawl_with(&db, with, CrawlTrigger::Manual, &fast_probes()).await;
+    let b = run_crawl_with(&db, without, CrawlTrigger::Manual, &fast_probes()).await;
+    assert!(latest_probes(&db, with).await.is_some());
+    assert!(latest_probes(&db, without).await.is_none());
+    let score = |crawl: uuid::Uuid| {
+        let pool = db.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<i16>>("SELECT health_score FROM crawls WHERE id = $1")
+                .bind(crawl)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let (sa, sb) = (score(a).await, score(b).await);
+    assert!(sa.is_some());
+    assert_eq!(sa, sb);
+}
+
+#[tokio::test]
+async fn a_throttling_waf_cannot_push_the_probes_past_the_plan_cap() {
+    let db = TestDb::new().await;
+    let (server, waf, seen) = waf_site().await;
+    waf.lock().unwrap().throttle_bots = true;
+    let site_id = seed_owned_site(&db, server.url("/").as_str(), "pro").await;
+    let before = seen.lock().unwrap().len();
+    run_crawl_with(&db, site_id, CrawlTrigger::Manual, &fast_probes()).await;
+    let probes = latest_probes(&db, site_id).await.expect("probes stored");
+    let cap =
+        codoseo_core::plan::PlanLimits::for_plan(codoseo_core::plan::Plan::Pro).probe_max_requests;
+    assert!(probes.requests <= cap, "{} > {cap}", probes.requests);
+    assert!(
+        ai_requests(&seen) <= usize::from(cap),
+        "{} AI requests",
+        ai_requests(&seen)
+    );
+    assert!(seen.lock().unwrap().len() > before);
+    // Retries and confirmations ate the cap: the run went further than one request per pair.
+    assert!(ai_requests(&seen) > probes.bots.len());
+}
+
+#[tokio::test]
+async fn heartbeats_continue_through_a_slow_probe_run() {
+    let db = TestDb::new().await;
+    let (server, _waf, seen) = waf_site().await;
+    let site_id = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+    // About 10 probe requests 300 ms apart: 3 s with no crawl progress, against a 1 s stale limit
+    // and a 100 ms liveness heartbeat.
+    let settings = WorkerSettings {
+        probes: ProbeSettings {
+            min_gap: std::time::Duration::from_millis(300),
+            ..fast_probes().probes
+        },
+        liveness_interval: std::time::Duration::from_millis(100),
+    };
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let stop = tokio_util::sync::CancellationToken::new();
+    let sweeper = {
+        let crawl_queue = crawl_queue.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            let mut moved = 0;
+            while !stop.is_cancelled() {
+                moved += crawl_queue
+                    .requeue_stale(std::time::Duration::from_secs(1))
+                    .await
+                    .unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+            moved
+        })
+    };
+    let started = std::time::Instant::now();
+    let crawl = run_crawl_with(&db, site_id, CrawlTrigger::Manual, &settings).await;
+    let elapsed = started.elapsed();
+    stop.cancel();
+    assert_eq!(sweeper.await.unwrap(), 0, "the crawl never looked dead");
+    assert!(elapsed > std::time::Duration::from_secs(2), "{elapsed:?}");
+    assert_eq!(crawl_status(&db, crawl).await, "done");
+    assert!(latest_probes(&db, site_id).await.is_some());
+    assert!(ai_requests(&seen) > 0);
 }

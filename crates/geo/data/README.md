@@ -18,6 +18,12 @@ crate is AGPL-3.0-only.
   says it generally ignores them), `unknown` (not stated).
 - `crawls`: false for control tokens such as Google-Extended that never make requests.
 - `user_agent_contains`: a substring to match in the User-Agent header, or null.
+- `user_agent`: the full User-Agent string copied verbatim from the operator's own page (`source_url`),
+  or null when that page prints none (only the token, or a template with placeholders). It is never
+  built by hand. Printable ASCII, at most 512 characters, and it contains `user_agent_contains`.
+  Only set for bots CodoSEO's synthetic fetch checks may use: search and user-fetch bots that make
+  requests, except the reverse-DNS-verified search engines (Googlebot, Bingbot, Applebot). Control
+  tokens are always null.
 - `ip_ranges_url`: a JSON file of `prefixes` (`ipv4Prefix` / `ipv6Prefix`), or null when the
   operator publishes none or only an HTML page.
 - `reverse_dns`: host suffixes for reverse-DNS verification.

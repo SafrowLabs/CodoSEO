@@ -7,6 +7,10 @@ use url::Url;
 
 pub const USER_AGENT: &str = "CodoSEObot/0.1 (+https://codoseo.com/bot)";
 
+/// The `From` header (RFC 9110 §10.1.2) on every synthetic AI fetch probe and its baseline, so a
+/// site owner who sees a bot's user agent from our address can reach us.
+pub const PROBE_FROM: &str = "hello@codoseo.com";
+
 /// Whether the crawler may connect to private and internal addresses.
 /// The cloud uses `Public`; self-hosted, the CLI and local MCP use `AllowPrivate`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

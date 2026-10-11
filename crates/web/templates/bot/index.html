@@ -41,6 +41,15 @@
 Disallow: /private/</pre>
   <p>Use <code>Disallow: /</code> to block it completely. If your firewall or bot protection stops it, allow the user agent above (and the address, if listed) to let audits through.</p>
 
+  <h2>Synthetic AI fetch checks</h2>
+  <p>After a monitored crawl, CodoSEO may fetch up to {{ probe_pages }} of the pages it just crawled again, using the documented user agents of AI search and user-triggered bots{% if !probe_bots.is_empty() %} ({{ probe_bots.join(", ") }}){% endif %}, and once more as CodoSEObot to compare. This tells the site's owner whether a firewall or CDN turns those bots away when robots.txt lets them in. So you may see an AI bot's user agent arriving from CodoSEO's address{% if ip.is_some() %} above{% endif %}: it is not the bot itself.</p>
+  <ul>
+    <li>Every one of these requests carries <code>From: {{ probe_from }}</code>, which is how to reach us about them.</li>
+    <li>It follows robots.txt for the bot token it uses: a page disallowed for that bot is never fetched with its user agent. Requests go one at a time, at least half a second apart, or further apart when robots.txt sets a <code>Crawl-delay</code> (up to 10 seconds).</li>
+    <li>It never runs for the instant audits anyone can start from the home page, only for sites monitored in an account.</li>
+  </ul>
+  <p>To stop it: the site's owner can switch the check off under AI access in their CodoSEO account, and anyone can block <code>CodoSEObot</code> in robots.txt as above, which stops both the crawls and these checks.</p>
+
   <h2>Questions</h2>
   <p>Open an issue on <a href="https://github.com/SafrowLabs/CodoSEO/issues">GitHub</a> and mention your domain. CodoSEO is open source, so you can read exactly what the crawler does.</p>
 </main>

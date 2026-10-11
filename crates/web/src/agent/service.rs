@@ -14,12 +14,15 @@ use codoseo_checks::def;
 use codoseo_core::check::{CheckId, IssueBits, Severity};
 use codoseo_core::plan::PlanLimits;
 use codoseo_geo::eligibility::{Effect, engines};
+use codoseo_geo::findings::Grade;
+use codoseo_geo::probe::{ProbeReport, Verdict};
 use codoseo_geo::report::AccessReport;
 use codoseo_geo::{Honours, Intent, Stance, registry};
 use codoseo_mcp::cloud::types::{
-    ActiveCrawl, AiAccessInfo, AiBotInfo, AiEngineInfo, AiIncidentInfo, AiRobotsInfo, ChangeInfo,
-    ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, PageInfo, PageIssue, RedirectHop,
-    SiteHealth, SiteInfo, Usage, clip, clip_change_text,
+    ActiveCrawl, AiAccessInfo, AiBotInfo, AiEngineInfo, AiIncidentInfo, AiNotProbedInfo,
+    AiProbeBotInfo, AiProbesInfo, AiRobotsInfo, ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued,
+    IssueUrlsPage, PageInfo, PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip,
+    clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
@@ -456,6 +459,7 @@ impl<'a> AgentService<'a> {
                 last_seen_at: i.last_seen_at,
             })
             .collect();
+        let probes_enabled = geo::get_ai_probes(pool, site.id).await?;
         let Some(latest) = geo::latest_report(pool, site.id).await? else {
             return Ok(AiAccessInfo {
                 site_id: site.id,
@@ -469,6 +473,8 @@ impl<'a> AgentService<'a> {
                 bots: Vec::new(),
                 engines: Vec::new(),
                 declared: Default::default(),
+                probes_enabled,
+                probes: None,
             });
         };
         let intent = geo::get_intent(pool, site.id).await?;
@@ -485,6 +491,12 @@ impl<'a> AgentService<'a> {
             open_incidents,
             bots: ai_bots(&report, &intent),
             engines: ai_engines(&report),
+            probes_enabled,
+            probes: report
+                .probes
+                .as_ref()
+                .filter(|_| probes_enabled)
+                .map(|p| ai_probes(p, &intent)),
             declared: report.declared,
         })
     }
@@ -706,6 +718,89 @@ fn ai_bots(report: &AccessReport, intent: &Intent) -> Vec<AiBotInfo> {
         .collect()
 }
 
+/// The synthetic fetch check, one row per probed bot. A bot treated worse than CodoSEObot on any
+/// page shows the first such result; otherwise the same page, then inconclusive, then robots.txt,
+/// as on the AI access screen.
+fn ai_probes(probes: &ProbeReport, intent: &Intent) -> AiProbesInfo {
+    let bots = probes
+        .bots
+        .iter()
+        .filter_map(|token| {
+            let bot = registry().bot(token)?;
+            let results: Vec<_> = probes
+                .urls
+                .iter()
+                .flat_map(|u| &u.results)
+                .filter(|r| &r.token == token)
+                .collect();
+            let verdicts: Vec<&Verdict> = results.iter().map(|r| &r.verdict).collect();
+            // Pages its user agent was actually sent to: not robots.txt skips, nor pages whose
+            // baseline gave nothing to compare with.
+            let requested = results.iter().filter(|r| r.fetch.is_some()).count();
+            let shown = verdicts
+                .iter()
+                .find(|v| v.is_positive())
+                .or_else(|| verdicts.iter().find(|v| **v == &Verdict::Same))
+                .or_else(|| {
+                    verdicts
+                        .iter()
+                        .find(|v| matches!(v, Verdict::Inconclusive { .. }))
+                })
+                .or_else(|| verdicts.first())?;
+            let count = |f: &dyn Fn(&Verdict) -> bool| {
+                u32::try_from(verdicts.iter().filter(|v| f(v)).count()).unwrap_or(u32::MAX)
+            };
+            Some(AiProbeBotInfo {
+                token: bot.token.clone(),
+                purpose: bot.purpose,
+                intent: intent.effective(bot),
+                result: verdict_slug(shown).to_owned(),
+                cause: shown.cause_slug().map(str::to_owned),
+                vendor: match shown {
+                    Verdict::Challenged { vendor } => Some(vendor.slug().to_owned()),
+                    _ => None,
+                },
+                status: match shown {
+                    Verdict::Blocked { status } => *status,
+                    _ => None,
+                },
+                urls_affected: count(&Verdict::is_positive),
+                urls_probed: u32::try_from(requested).unwrap_or(u32::MAX),
+            })
+        })
+        .collect();
+    AiProbesInfo {
+        synthetic: true,
+        grade: Grade::B,
+        urls_probed: u32::try_from(probes.urls.len()).unwrap_or(u32::MAX),
+        from: probes.from.clone(),
+        stop: probes.stop,
+        bots,
+        not_probed: probes
+            .skipped_bots
+            .iter()
+            .map(|s| AiNotProbedInfo {
+                token: s.token.clone(),
+                reason: s.reason,
+            })
+            .collect(),
+    }
+}
+
+/// A verdict's `kind`, as the stored report and the local MCP's `probe_ai_fetch` spell it.
+fn verdict_slug(v: &Verdict) -> &'static str {
+    match v {
+        Verdict::Same => "same",
+        Verdict::Blocked { .. } => "blocked",
+        Verdict::Challenged { .. } => "challenged",
+        Verdict::Diverted { .. } => "diverted",
+        Verdict::Degraded => "degraded",
+        Verdict::Throttled => "throttled",
+        Verdict::Inconclusive { .. } => "inconclusive",
+        Verdict::SkippedRobots => "skipped_robots",
+    }
+}
+
 fn ai_engines(report: &AccessReport) -> Vec<AiEngineInfo> {
     engines()
         .iter()
@@ -752,6 +847,49 @@ mod tests {
         assert_eq!(parse_severity(" notice ").unwrap(), Severity::Notice);
         assert!(parse_severity("Critical").is_err());
         assert!(parse_severity("severe").is_err());
+    }
+
+    #[test]
+    fn a_bots_urls_probed_counts_only_pages_its_user_agent_was_sent_to() {
+        use codoseo_geo::probe::{InconclusiveReason, ProbeFetch, ProbeResult, ProbedUrl};
+        let ok = ProbeFetch {
+            status: Some(200),
+            html: true,
+            ..ProbeFetch::default()
+        };
+        let page = |url: u16, fetch: Option<ProbeFetch>, verdict: Verdict| ProbedUrl {
+            url,
+            baseline: ok.clone(),
+            results: vec![ProbeResult {
+                token: "OAI-SearchBot".to_owned(),
+                fetch,
+                verdict,
+            }],
+        };
+        let probes = ProbeReport {
+            version: 1,
+            synthetic: true,
+            from: "hello@codoseo.com".to_owned(),
+            bots: vec!["OAI-SearchBot".to_owned()],
+            skipped_bots: Vec::new(),
+            urls: vec![
+                page(0, Some(ok.clone()), Verdict::Same),
+                // CodoSEObot got nothing here, so the bot was never sent.
+                page(
+                    1,
+                    None,
+                    Verdict::Inconclusive {
+                        reason: InconclusiveReason::BaselineFailed,
+                    },
+                ),
+                page(2, None, Verdict::SkippedRobots),
+            ],
+            stop: None,
+            requests: 3,
+        };
+        let info = ai_probes(&probes, &Intent::default());
+        assert_eq!(info.urls_probed, 3);
+        assert_eq!(info.bots[0].urls_probed, 1);
     }
 
     #[test]

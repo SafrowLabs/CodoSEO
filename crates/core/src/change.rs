@@ -30,6 +30,9 @@ pub enum ChangeKind {
     AiIssueResolved,
     /// The site's declared AI preferences (Content-Signal, Content-Usage, TDM) changed.
     AiPreferencesChanged,
+    /// A synthetic fetch with an AI bot's user agent was blocked, challenged, diverted or
+    /// degraded where CodoSEObot's own fetch was not.
+    AiFetchBlocked,
 }
 
 impl ChangeKind {
@@ -53,6 +56,7 @@ impl ChangeKind {
             ChangeKind::AiBlockNotApplied => "ai_block_not_applied",
             ChangeKind::AiIssueResolved => "ai_issue_resolved",
             ChangeKind::AiPreferencesChanged => "ai_preferences_changed",
+            ChangeKind::AiFetchBlocked => "ai_fetch_blocked",
         }
     }
 
@@ -76,6 +80,7 @@ impl ChangeKind {
             ChangeKind::AiBlockNotApplied => "AI block not applied",
             ChangeKind::AiIssueResolved => "AI issue resolved",
             ChangeKind::AiPreferencesChanged => "AI preferences changed",
+            ChangeKind::AiFetchBlocked => "AI fetch blocked (synthetic)",
         }
     }
 
@@ -89,6 +94,7 @@ impl ChangeKind {
                 | ChangeKind::AiBlockNotApplied
                 | ChangeKind::AiIssueResolved
                 | ChangeKind::AiPreferencesChanged
+                | ChangeKind::AiFetchBlocked
         )
     }
 }
@@ -126,6 +132,7 @@ mod tests {
             ChangeKind::AiBlockNotApplied,
             ChangeKind::AiIssueResolved,
             ChangeKind::AiPreferencesChanged,
+            ChangeKind::AiFetchBlocked,
         ];
         for kind in all {
             assert_eq!(

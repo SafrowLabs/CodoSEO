@@ -9,6 +9,7 @@ mod healthcheck;
 mod mcp;
 mod migrate;
 mod output;
+mod probe;
 mod redirects;
 mod robots;
 mod web;
@@ -85,6 +86,8 @@ enum Command {
     Robots(robots::RobotsArgs),
     /// List the AI crawlers, fetchers and control tokens CodoSEO knows
     Bots(bots::BotsArgs),
+    /// Fetch one page as each AI search and user-triggered bot and compare with CodoSEObot (synthetic)
+    Probe(probe::ProbeArgs),
     /// Follow a URL's redirects and show each hop
     Redirects(redirects::RedirectsArgs),
     /// Compare two saved audits (`crawl --format json`)
@@ -109,6 +112,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Check(args) => check::run(args).await,
         Command::Robots(args) => robots::run(args).await,
         Command::Bots(args) => bots::run(args),
+        Command::Probe(args) => probe::run(args).await,
         Command::Redirects(args) => redirects::run(args).await,
         Command::Diff(args) => diff::run(args),
         Command::Mcp(args) => mcp::run(args).await,

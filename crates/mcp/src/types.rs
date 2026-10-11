@@ -162,6 +162,24 @@ pub struct AiEngine {
     pub note: Option<String>,
 }
 
+/// What `probe_ai_fetch` returns: one page fetched as each AI search and user-triggered bot with
+/// its documented user agent, compared with a CodoSEObot baseline. Synthetic: the requests came
+/// from this machine, not from the bots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiProbeReport {
+    /// The probed page.
+    pub url: String,
+    /// One line an agent can relay as it is; always starts "Synthetic check:".
+    pub summary: String,
+    /// `synthetic: true`, the `From` header, the bots, the baseline and each bot's verdict.
+    #[serde(flatten)]
+    pub report: codoseo_geo::probe::ProbeReport,
+    /// The pages `urls[].url` points at.
+    pub pages: Vec<String>,
+    /// `fetch_blocked` findings under the default intent (every bot wanted).
+    pub findings: Vec<codoseo_geo::findings::Finding>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RedirectReport {
     pub hops: Vec<(u16, Url)>,

@@ -213,6 +213,70 @@ pub struct AiAccessInfo {
     pub engines: Vec<AiEngineInfo>,
     /// What the site declares about AI use. Declared, not enforced.
     pub declared: codoseo_geo::report::Declared,
+    /// Whether the synthetic fetch check runs after each crawl (the owner can switch it off).
+    pub probes_enabled: bool,
+    /// The latest synthetic fetch check; absent when it is switched off, or the report has none
+    /// (an older report, a quick audit, a crawl whose robots.txt gave no verdicts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probes: Option<AiProbesInfo>,
+}
+
+/// The synthetic fetch check: a few important pages fetched with each AI search and user-triggered
+/// bot's documented user agent, from CodoSEO's address, and compared with CodoSEObot fetching the
+/// same page at the same moment. Synthetic: real bots come from their own addresses and may be
+/// treated differently, so what it finds is evidence grade B.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiProbesInfo {
+    /// Always true.
+    pub synthetic: bool,
+    /// Always `B`: observed by CodoSEO against its own baseline, not documented by the operator.
+    pub grade: codoseo_geo::findings::Grade,
+    /// Pages probed, that is fetched as CodoSEObot; each bot's own `urls_probed` counts the ones
+    /// its user agent was actually sent to.
+    pub urls_probed: u32,
+    /// The `From` header every probe carried.
+    pub from: String,
+    /// Why the check stopped before its last planned page (`budget`: the time ran out, or `request_cap`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<codoseo_geo::probe::ProbeStop>,
+    /// One entry per probed bot, in probe order.
+    pub bots: Vec<AiProbeBotInfo>,
+    /// Crawling AI bots that were not probed, with why.
+    pub not_probed: Vec<AiNotProbedInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiProbeBotInfo {
+    pub token: String,
+    pub purpose: codoseo_geo::Purpose,
+    /// What the owner wants from this bot; only `allow` bots are reported as incidents.
+    pub intent: codoseo_geo::Stance,
+    /// Compared with CodoSEObot: `same`, `blocked`, `challenged`, `diverted` (redirected
+    /// elsewhere), `degraded` (a much smaller, different page), `throttled`, `inconclusive` or
+    /// `skipped_robots`. A bot treated worse on any page shows that page's result.
+    pub result: String,
+    /// The incident subject a worse result groups under (`challenge_cloudflare`, `blocked_403`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+    /// The bot manager behind a `challenged` result (`cloudflare`, `datadome`, `generic`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
+    /// The status of a `blocked` result; absent when the connection was dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    /// Probed pages where it was treated worse than CodoSEObot.
+    pub urls_affected: u32,
+    /// Pages actually requested with its user agent: robots.txt skips, and pages whose baseline
+    /// gave nothing to compare with, left out.
+    pub urls_probed: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiNotProbedInfo {
+    pub token: String,
+    /// `no_user_agent` (its operator documents no full user agent), `verified_search_engine` or
+    /// `not_probed_purpose` (training and ads crawlers, agents).
+    pub reason: codoseo_geo::probe::SkipReason,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,9 +289,12 @@ pub struct AiRobotsInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiIncidentInfo {
     pub id: i64,
-    /// `bots_blocked`, `bots_not_blocked`, `robots_unavailable` or `answers_restricted`.
+    /// `bots_blocked`, `bots_not_blocked`, `robots_unavailable`, `answers_restricted` or
+    /// `fetch_blocked` (the synthetic fetch check: a firewall or CDN blocks or challenges bots the
+    /// owner wants; evidence grade B).
     pub kind: String,
-    /// The purpose or directive the incident is about; empty for the robots.txt one.
+    /// The purpose or directive the incident is about, or for `fetch_blocked` the cause
+    /// (`challenge_cloudflare`, `blocked_403`, ...); empty for the robots.txt one.
     pub subject: String,
     pub severity: Severity,
     pub title: String,

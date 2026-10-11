@@ -14,13 +14,96 @@ AI access monitoring answers one question: can the AI crawlers and answer engine
 
 **Declared preferences, declared, not enforced.** `Content-Signal` and `Content-Usage` lines in robots.txt and response headers, and TDM reservation (`tdm-reservation` meta tag and header, `/.well-known/tdmrep.json`) are listed as the site states them. Nothing enforces them, and CodoSEO does not claim any bot honours them.
 
+## Synthetic fetch checks
+
+robots.txt can let a bot in while the CDN or firewall in front of the site turns it away: Cloudflare AI Crawl Control, DataDome, Akamai and the like decide by user agent before the request ever reaches your server. So after each monitored crawl CodoSEO fetches a few important pages with the user agents of the AI search and user-triggered bots, and compares each answer with what its own crawler gets for the same page at the same moment.
+
+It is a **synthetic** check: the requests come from CodoSEO's address, not from the bots. The AI access screen shows the latest check, bot by bot, in its **Fetch check** section. Every result says it is synthetic: the badge on that section, "(synthetic check)" at the end of each finding title, `synthetic: true` in the JSON, and a banner in the CLI.
+
+<table>
+  <tr>
+    <td width="50%"><a href="images/ai-access/ai-access-probes-light.png"><img src="images/ai-access/ai-access-probes-light.png" alt="The Fetch check section of the AI access screen, with two synthetic incidents"></a><br>The Fetch check section and two synthetic incidents</td>
+    <td width="50%"><a href="images/ai-access/intent-probes-light.png"><img src="images/ai-access/intent-probes-light.png" alt="The fetch check switch in the intent form"></a><br>The switch under <b>Edit intent</b></td>
+  </tr>
+</table>
+
+**What is sent.** Each bot's user agent exactly as its operator prints it on the page cited in the [registry](#the-public-registry), byte for byte, never assembled by CodoSEO. Every request also carries `From: hello@codoseo.com` (the RFC 9110 header for a contact address), so a site owner who sees a bot's user agent arriving from our address can reach us. Self-hosters can change it with `CODOSEO_PROBE_FROM` ([configuration.md](configuration.md#ai-access-probes)). There is no custom `X-` header: it would hand firewalls an easy way to wave the check through, and the user agent would no longer be what the bot sends.
+
+**The baseline.** Each probed page is also fetched with CodoSEObot's own user agent, just before the bots, from the same address with the same client and headers. The user agent is the only difference, so a different answer is down to it. The baseline is not a browser user agent: a Chrome user agent from a datacenter address with a non-browser TLS stack is challenged by most bot managers, which would make the baseline itself unreliable, and it would mean pretending to be a person. Only pages CodoSEObot has just crawled as HTML 200 are probed, so the baseline is a known-good control.
+
+**Who is probed.** The registry's search and user-triggered bots that make requests and whose operator documents a full user agent. Today that is nine: OAI-SearchBot, ChatGPT-User, PerplexityBot, Perplexity-User, meta-webindexer, meta-externalfetcher, DuckAssistBot, MistralAI-Index and MistralAI-User. Not probed, and listed as such:
+
+- Claude-SearchBot and Claude-User: Anthropic's page names the tokens but prints no full user agent. Amzn-SearchBot and Amzn-User: Amazon prints only a template with a placeholder version. CodoSEO never makes up a user agent, so these are "Not probed: no documented user agent" until the operators print one.
+- Googlebot, Bingbot and Applebot: bot managers verify these by reverse DNS and refuse a request that claims to be one from any other address, so a probe would always look blocked. They are search engines, not AI-specific, anyway.
+- Agents, training and ads crawlers. Agents drive real browsers and sign their requests (Web Bot Auth) or come from published addresses; an unsigned copy of their user agent would measure the missing signature, not your policy.
+
+Every probed bot is fetched whatever your intent, so a change of intent can re-evaluate from the stored results. Only bots whose intent is **Allow** become findings: a bot you want blocked, or have no preference about, being turned away is not reported.
+
+**robots.txt and pacing.** A bot is never sent to a page robots.txt disallows for its token; the result says "Not probed: robots.txt". Probes run only when robots.txt gave verdicts, one request at a time on one connection, at least 500 ms apart, or the longest `Crawl-delay` among CodoSEObot and the probed tokens when that is longer (capped at 10 seconds, like the crawler).
+
+**Retries and confirmation.** A 429, a 503, a timeout or a connection error is retried once, after `Retry-After` (at most 10 seconds; 2 seconds when there is none). A result worse than the baseline is fetched a second time the first time that bot meets that cause in a run; when the two fetches disagree the result is inconclusive ("the re-fetch disagreed"), not a finding. When the request cap or the time budget leaves no room for that second fetch, the result is inconclusive too ("no room left to confirm"): a grade B finding always rests on two fetches.
+
+**How much.** Pages are taken in order: the home page, then starred pages, then the most linked, HTML 200 only. Bodies are read up to 256 KiB and never stored; only the status, size, media type, final URL, title (cut to 120 characters) and any challenge marker are kept.
+
+| Plan | Pages probed | Requests per run (baseline, retries and confirmations included) | Time budget |
+|---|---|---|---|
+| No-signup audit | none | 0 | none |
+| Free | 1 (the home page) | at most 30 | 45 s |
+| Pro | 3 | at most 70 | 90 s |
+| Agency | 5 | at most 120 | 120 s |
+| Self-hosted | 5 (`CODOSEO_PROBE_URLS`, up to 10) | at most 160 | 180 s |
+
+A page is started only when the requests left and the time left cover all of its requests, counting each request as the gap or the site's average answer time so far, whichever is longer; otherwise the run stops and says why ("time budget used up" or "request cap reached"). Slow answers on the last page can still run over, so a run is stopped outright a minute past its budget: the pages that finished are kept, the bots not yet answered on the page under way are inconclusive ("the time limit came first"), and the run says "time budget used up". Probes never run after a failed crawl, never touch the health score, and never fail a crawl: if anything goes wrong the report simply has no probes.
+
+**Verdicts.** Each bot's answer is compared with the baseline; the first rule that matches wins.
+
+| Verdict | When |
+|---|---|
+| Inconclusive | CodoSEObot itself got no HTML 200 page, or was challenged too; the bot's request got no response (a timeout); the confirming re-fetch disagreed; or there was no room left for it |
+| Challenged | The bot got a bot-manager challenge or block page the baseline did not: Cloudflare, Vercel, AWS WAF, DataDome, HUMAN, Imperva, Akamai, Sucuri, or a generic CAPTCHA or "verify you are human" page. A CAPTCHA that is on the baseline too (a contact form) is the page's own and does not count |
+| Rate limited | HTTP 429 |
+| Blocked | Any other status from 400 (a 404 counts, as the baseline got the page), or the connection refused or dropped on both tries |
+| Redirected | It ended at another URL than the baseline, ignoring the fragment, a trailing slash and an http→https upgrade |
+| Different page | Both got a 2xx, the titles differ, and the bot's page is under half the size or has no title where the baseline has one: the misleading 200 |
+| Same | Anything else. The same title at another size counts as the same: dynamic content, prerendering for bots, rotating blocks. So does a 2xx Markdown or plain-text answer (`text/markdown`, `text/plain`) where CodoSEObot got HTML: the site serves AI bots a text version on purpose |
+| Not probed: robots.txt | robots.txt disallows the bot here, so it was not sent |
+
+Each worse-than-baseline cause is one incident (`fetch_blocked`), for example `challenge_cloudflare`, `blocked_403`, `diverted`, `degraded` or `throttled`, with the bots it hit as members: another bot hitting the same cause widens the incident. Only bots the run could judge change an incident: a bot that is inconclusive on any page it was sent to (CodoSEObot got no usable page, no response, or the re-fetch disagreed) keeps what the incident last knew about it, so one bad run neither narrows, widens, resolves nor re-escalates it. An incident resolves when every bot it covers got a real verdict on every page and none has its cause. Its severity is Warning when a bot is affected on the home page and Notice otherwise; rate limiting and a different page are always Notice. It is never Critical, because a real bot from its own address may be treated differently. The incident cites each bot's documentation page and, for a challenge, the vendor's bot settings documentation, and says where to look next.
+
+**What it can't see.** A synthetic probe changes the user agent, not the address or the signature, so it can be wrong in both directions:
+
+- A site that blocks the real bots by IP range, or lets them in only on verified addresses, looks the same to our probes as to CodoSEObot. Such a block is invisible here.
+- A site that lets bots in only when they come from their published addresses or sign their requests with Web Bot Auth refuses our copy while letting the real bot through.
+- Cloudflare may refuse any request that claims to be a verified bot from an address that is not the bot's, whatever your AI Crawl Control settings say. A Cloudflare finding may therefore be our address being refused rather than the real bot, and its summary says to confirm in your logs.
+
+Log evidence (milestone C1) is what will tell the two apart.
+
+**Known limits.** Two cases the comparison can misread:
+
+- A small prerendered page (under 32 KiB) that carries a reCAPTCHA, hCaptcha or Turnstile form, served to a bot while CodoSEObot gets a JavaScript app shell without the form, may read as a generic CAPTCHA challenge. The form's marker is only discounted when the baseline carries it too.
+- Titles are read from the first 64 KiB of the page only. A page whose `<title>` comes later has no title for the comparison, so a different page is judged on size alone and may be missed, or a smaller page with a title read as different.
+
+**Measured false positives.** The check is tested against a corpus of 23 fake sites that answer the way real servers, CDNs and bot managers do: a 403 by user agent, Cloudflare challenge and AI Crawl Control pages, DataDome, HUMAN "Press & Hold", Akamai, Imperva, Vercel, persistent and one-off 429s, geo-blocks and login walls that hit everyone, prerendering for bots, app shells, robots.txt rules, timeouts and maintenance pages. Probed with all nine bots, the 22 scored sites give 198 (site, bot) pairs: 50 true positives, 148 true negatives, **no false positives and no false negatives**, and no wrong cause. The 23rd, a block by IP address only, is listed as undetectable (its 9 pairs are not scored). The fixtures copy what the vendors really send, but they are fixtures: the real-world rate, Cloudflare above all, can be higher. Run it with:
+
+```sh
+cargo test -p codoseo-crawler --test probe_corpus -- --nocapture
+```
+
+**Switching it off.** The check is on by default for monitored sites. A site's owner can untick **Run synthetic fetch checks** under **Edit intent** on the AI access screen; from the next crawl no request is sent with an AI bot's user agent. A self-hosted install can set `CODOSEO_PROBE_URLS=0` (for the web and worker roles) to turn it off everywhere; the switch is then shown disabled and the AI access screen says fetch checks are turned off on this install. Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved: with the checks off nothing can judge them, so they are neither resolved nor updated. Anyone running a site can keep the check out: it follows robots.txt for each bot's token, and blocking `CodoSEObot` in robots.txt stops both the crawls and the probes. The [`/bot` page](https://codoseo.com/bot) explains this to site owners who see the requests.
+
 ## What is not checked yet
 
-- Whether a bot really gets through: **synthetic fetch probes** (fetching a page as each bot and comparing what comes back) arrive later, in milestone B1. Today the verdict is what robots.txt and the page's markup say, not what a firewall or CDN does.
-- Whether bots really visit: **log evidence** (which bots crawled you, verified by IP range) arrives later, in C1.
+- Whether bots really visit: **log evidence** (which bots crawled you, verified by IP range) arrives later, in C1. Until then the fetch check shows what CodoSEO's own requests get, not what the real bots get.
 - Whether any engine cites you. CodoSEO reports access, not outcomes.
 
-Every Phase A finding is evidence grade **A**: it rests on something the operator documents, and the finding links to that page.
+## Evidence grades
+
+Every finding carries a grade and links to its sources.
+
+| Grade | Means |
+|---|---|
+| **A** | It rests on something the operator documents: robots.txt rules, page-level controls, the operator's own description of its bot. Every robots.txt, page-control and preference finding is grade A. |
+| **B** | Observed by CodoSEO's synthetic fetch check: a request with the bot's documented user agent, compared with CodoSEObot's baseline for the same page at the same moment and, the first time, confirmed by a second fetch. Every `fetch_blocked` finding is grade B. |
 
 ## Intent
 
@@ -42,17 +125,18 @@ The CLI and the local MCP server have nowhere to keep your intent, so `codoseo c
 
 ## Incidents and alerts
 
-The web app turns findings into incidents that open when a crawl first sees a problem and resolve when a later crawl no longer does. The AI access screen lists the open ones, and the changes page and alerts use five change kinds for them:
+The web app turns findings into incidents that open when a crawl first sees a problem and resolve when a later crawl no longer does. The AI access screen lists the open ones, and the changes page and alerts use six change kinds for them:
 
 | Kind | Meaning |
 |---|---|
 | `ai_bot_blocked` | Bots you want are kept out by robots.txt, or robots.txt fails |
 | `ai_answers_restricted` | Page markup takes pages out of an engine's AI answers |
 | `ai_block_not_applied` | A bot you want blocked can still crawl the site |
+| `ai_fetch_blocked` | The synthetic fetch check saw a bot you want challenged, blocked, redirected, rate limited or served a different page, while CodoSEObot got the normal one |
 | `ai_issue_resolved` | An AI access incident is gone |
 | `ai_preferences_changed` | Your declared Content-Signal, Content-Usage or TDM preferences changed |
 
-They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them. By default `ai_bot_blocked`, `ai_answers_restricted` and `ai_issue_resolved` alert at once; the other two wait for the Monday digest. An alert whose changes are all AI access ones links to the AI access screen. A crawl that failed on robots.txt is not a finished crawl, so its incident shows on the AI access screen and in alerts, not on the changes page.
+They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them. By default `ai_bot_blocked`, `ai_answers_restricted`, `ai_fetch_blocked` and `ai_issue_resolved` alert at once; the other two wait for the Monday digest. An alert whose changes are all AI access ones links to the AI access screen. A crawl that failed on robots.txt is not a finished crawl, so its incident shows on the AI access screen and in alerts, not on the changes page.
 
 **The first check is quiet.** The incidents opened by the first report that could judge them are your baseline: they are listed but write no changes and send no alerts, so turning the feature on (or a site whose first crawls failed) does not fire a storm. Changing your intent re-evaluates quietly the same way. An open incident that gets worse, or names another bot or engine, writes a change again.
 
@@ -99,9 +183,42 @@ AI bots (path /pricing)
 
 `codoseo crawl` adds an **AI access** section to the table and markdown reports, and an `ai_access` object (`report` and `findings`, judged under the default intent) to the JSON audit. The audit's `format_version` stays 1; older audit files load and diff as before. `--fail-on` looks only at the SEO checks.
 
+A plain `codoseo crawl` sends no request as an AI bot. `codoseo probe` runs the [synthetic fetch check](#synthetic-fetch-checks) on one page, now, from your machine; `--bots` limits it to some tokens (any case, comma-separated). It takes at most two minutes, robots.txt included; past that it stops and prints what it has, the bots it did not reach marked inconclusive:
+
+```sh
+codoseo probe https://example.com/pricing
+codoseo probe https://example.com/ --bots OAI-SearchBot,PerplexityBot --format json
+```
+
+```
+SYNTHETIC CHECK. Requests sent from this machine with each bot's documented user agent and compared with CodoSEObot's. Real bots come from their own addresses and may be treated differently.
+
+URL       https://example.com/pricing
+Baseline  CodoSEObot · HTTP 200 · 5086 bytes · "Pricing - Example"
+From      hello@codoseo.com
+Requests  13
+
+Bot                   Result                   Status  Bytes  Title
+OAI-SearchBot         Same as CodoSEObot       200     5086   Pricing - Example
+PerplexityBot         Challenged (Cloudflare)  403     123    Just a moment...
+meta-webindexer       Blocked (403)            403     65     Forbidden
+...
+
+Not probed
+  Claude-SearchBot: no documented user agent
+  Googlebot: verified search engine
+  ...
+
+Findings (default intent)
+  Notice    HTTP 403 served to meta-webindexer on 1 page (synthetic check)
+  Notice    Cloudflare challenge served to PerplexityBot and Perplexity-User on 1 page (synthetic check)
+```
+
+`codoseo crawl --probes` does the same for up to 5 important pages after the crawl, with the self-hosted budget, and puts the results in the report's `ai_access` section (`report.probes`, plus the `fetch_blocked` findings). Both read robots.txt first and honour it for each token, and both send `From: hello@codoseo.com` unless `CODOSEO_PROBE_FROM` is set.
+
 ### Local MCP
 
-`audit_site` saves the same `ai_access` section as `codoseo crawl` in the cached audit, under the default intent. `check_ai_access` takes a `url` and fetches its robots.txt and the page right now. It returns a short `summary`, every registry bot's verdict for the path (`token`, `operator`, `purpose`, `allowed`, `line`, `rule`), the declared preferences, and for each engine the page's effect (`eligible`, `limited` or `excluded`) with its causes. See [mcp.md](mcp.md).
+`audit_site` saves the same `ai_access` section as `codoseo crawl` in the cached audit, under the default intent. `check_ai_access` takes a `url` and fetches its robots.txt and the page right now. It returns a short `summary`, every registry bot's verdict for the path (`token`, `operator`, `purpose`, `allowed`, `line`, `rule`), the declared preferences, and for each engine the page's effect (`eligible`, `limited` or `excluded`) with its causes. `probe_ai_fetch` runs the synthetic fetch check on one `url` (optionally only some `bots`), like `codoseo probe`; its summary starts "Synthetic check:". `audit_site` never probes. See [mcp.md](mcp.md).
 
 ### Hosted MCP and REST
 
@@ -138,7 +255,7 @@ curl -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/
 }
 ```
 
-Before a site has a report, `checked_at` is `null` and `note` says it appears after the next crawl. The call counts once against the daily allowance like any other ([api.md](api.md)).
+Before a site has a report, `checked_at` is `null` and `note` says it appears after the next crawl. The response also has `probes_enabled` and `probes`, the latest synthetic fetch check per bot, described in [api.md](api.md#the-synthetic-fetch-check-in-ai-access); its incidents are in `open_incidents` with kind `fetch_blocked`. The call counts once against the daily allowance like any other ([api.md](api.md)).
 
 ## Screenshots
 

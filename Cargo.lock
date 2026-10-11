@@ -705,6 +705,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
  "url",
  "xxhash-rust",
 ]
@@ -809,6 +810,8 @@ dependencies = [
  "axum",
  "codoseo-core",
  "flate2",
+ "futures-util",
+ "reqwest",
  "tokio",
 ]
 

@@ -13,8 +13,9 @@ use crate::dbenum::enum_slug;
 
 /// What is instant by default: a key page going noindex, a 4xx/5xx spike, robots.txt changing,
 /// the sitemap losing 10% or more, the site moving, and the AI access incidents that cost
-/// visibility: AI bots blocked, AI answers restricted, and one of those resolving.
-pub const DEFAULT_INSTANT: [ChangeKind; 8] = [
+/// visibility: AI bots blocked (by robots.txt or, in a synthetic fetch, by the server), AI answers
+/// restricted, and one of those resolving.
+pub const DEFAULT_INSTANT: [ChangeKind; 9] = [
     ChangeKind::BecameNoindex,
     ChangeKind::ErrorSpike,
     ChangeKind::RobotsTxtChanged,
@@ -23,10 +24,11 @@ pub const DEFAULT_INSTANT: [ChangeKind; 8] = [
     ChangeKind::AiBotBlocked,
     ChangeKind::AiAnswersRestricted,
     ChangeKind::AiIssueResolved,
+    ChangeKind::AiFetchBlocked,
 ];
 
 /// Every change kind, in the order the settings grid lists them.
-pub const ALL_KINDS: [ChangeKind; 17] = [
+pub const ALL_KINDS: [ChangeKind; 18] = [
     ChangeKind::BecameNoindex,
     ChangeKind::ErrorSpike,
     ChangeKind::RobotsTxtChanged,
@@ -34,6 +36,7 @@ pub const ALL_KINDS: [ChangeKind; 17] = [
     ChangeKind::SiteMoved,
     ChangeKind::AiBotBlocked,
     ChangeKind::AiAnswersRestricted,
+    ChangeKind::AiFetchBlocked,
     ChangeKind::AiIssueResolved,
     ChangeKind::StatusChanged,
     ChangeKind::RemovedUrl,

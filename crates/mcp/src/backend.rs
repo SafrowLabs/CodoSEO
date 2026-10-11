@@ -9,7 +9,8 @@ use codoseo_core::page::PageRecord;
 use url::Url;
 
 use crate::types::{
-    AiAccessReport, AuditHandle, AuditId, AuditState, RedirectReport, RobotsReport, UrlRow,
+    AiAccessReport, AiProbeReport, AuditHandle, AuditId, AuditState, RedirectReport, RobotsReport,
+    UrlRow,
 };
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -68,6 +69,14 @@ pub trait Backend: Send + Sync {
         &self,
         url: Url,
     ) -> impl Future<Output = Result<AiAccessReport, BackendError>> + Send;
+
+    /// A synthetic fetch check of one page: every probeable AI bot, or the `bots` subset, against
+    /// a CodoSEObot baseline. An unknown or unprobeable bot name is an error listing valid ones.
+    fn probe_ai_fetch(
+        &self,
+        url: Url,
+        bots: Option<Vec<String>>,
+    ) -> impl Future<Output = Result<AiProbeReport, BackendError>> + Send;
 
     fn check_redirects(
         &self,

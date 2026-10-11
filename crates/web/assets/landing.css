@@ -103,6 +103,9 @@
 .reg-token-cell .tag { display: block; width: fit-content; margin-top: 4px; }
 .reg-product > span { display: block; }
 .reg-product > .reg-notes { margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--faint-2); }
+.reg-product > .reg-ua { margin-top: 5px; font-size: 11.5px; line-height: 1.45; color: var(--faint-2); }
+.reg-ua > span { margin-right: 6px; }
+.reg-ua code { font: 11.5px var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
 .reg-table td a { color: var(--link); }
 .reg-table td a:hover { text-decoration: underline; }
 .reg-date { font-size: 12px; color: var(--muted-2); white-space: nowrap; }
