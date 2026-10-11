@@ -735,6 +735,8 @@ fn finding_change(finding: &Finding) -> Change {
         }
         FindingKind::BotsNotBlocked => (ChangeKind::AiBlockNotApplied, "intent: block"),
         FindingKind::AnswersRestricted => (ChangeKind::AiAnswersRestricted, "eligible"),
+        // Placeholder until `ChangeKind::AiFetchBlocked` exists (GB.8); no report carries probes yet.
+        FindingKind::FetchBlocked => (ChangeKind::AiBotBlocked, "reachable"),
     };
     Change {
         kind,

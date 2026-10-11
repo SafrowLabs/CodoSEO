@@ -1,9 +1,11 @@
 //! What the access report means for the site owner, in the owner's terms.
 //!
-//! Four kinds of finding, all grade A (documented by the operator): robots.txt can't be read,
+//! Four kinds of finding are grade A (documented by the operator): robots.txt can't be read,
 //! bots the owner wants are blocked, bots the owner wants blocked still get in, and page markup
-//! that takes pages out of an engine's AI answers. Severity follows the owner's [`Intent`]: a
-//! blocked training bot is not a problem unless the owner said they want it to crawl.
+//! that takes pages out of an engine's AI answers. A fifth, grade B, comes from the synthetic fetch
+//! probes: the site's CDN or firewall blocks, challenges or diverts bots it lets in by robots.txt.
+//! Severity follows the owner's [`Intent`]: a blocked training bot is not a problem unless the
+//! owner said they want it to crawl.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,8 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, EngineId, engines};
 use crate::intent::{Intent, Stance};
+use crate::probe::{ProbeFetch, ProbeReport, Vendor, Verdict};
 use crate::registry::{Bot, Honours, Purpose, registry};
-use crate::report::{AccessReport, slug_str};
+use crate::report::{AccessReport, Reason, slug_str};
 use crate::robots::{GroupMatch, MatchedRule, RobotsAvailability};
 
 /// How many URLs the evidence lists as a sample.
@@ -23,6 +26,34 @@ const MAX_NAMES: usize = 3;
 /// Google's account of what a failing robots.txt does, cited by `RobotsUnavailable`.
 pub const ROBOTS_DOC: &str =
     "https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt";
+/// Where each bot manager documents its bot settings, cited by `FetchBlocked` findings for its
+/// challenges. Only pages the vendor owns and that were confirmed to exist; Imperva is left out
+/// because its documentation moved and no stable page could be confirmed.
+pub const VENDOR_DOCS: &[(Vendor, &str)] = &[
+    (
+        Vendor::Cloudflare,
+        "https://developers.cloudflare.com/ai-crawl-control/",
+    ),
+    (
+        Vendor::Cloudflare,
+        "https://developers.cloudflare.com/bots/",
+    ),
+    (Vendor::Vercel, "https://vercel.com/docs/bot-management"),
+    (
+        Vendor::AwsWaf,
+        "https://docs.aws.amazon.com/waf/latest/developerguide/waf-bot-control.html",
+    ),
+    (Vendor::DataDome, "https://docs.datadome.co/docs/"),
+    (
+        Vendor::Human,
+        "https://docs.humansecurity.com/applications-and-accounts/docs/getting-started-with-bot-defender",
+    ),
+    (
+        Vendor::Akamai,
+        "https://techdocs.akamai.com/cloud-security/docs/about-bots",
+    ),
+    (Vendor::Sucuri, "https://docs.sucuri.net/website-firewall/"),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -31,6 +62,8 @@ pub enum FindingKind {
     BotsBlocked,
     BotsNotBlocked,
     AnswersRestricted,
+    /// Synthetic: a probe with a bot's user agent was blocked, challenged or diverted.
+    FetchBlocked,
 }
 
 impl FindingKind {
@@ -40,6 +73,7 @@ impl FindingKind {
             FindingKind::BotsBlocked => "bots_blocked",
             FindingKind::BotsNotBlocked => "bots_not_blocked",
             FindingKind::AnswersRestricted => "answers_restricted",
+            FindingKind::FetchBlocked => "fetch_blocked",
         }
     }
 
@@ -49,16 +83,19 @@ impl FindingKind {
             FindingKind::BotsBlocked,
             FindingKind::BotsNotBlocked,
             FindingKind::AnswersRestricted,
+            FindingKind::FetchBlocked,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
     }
 }
 
-/// Evidence grade: A is what the operator documents.
+/// Evidence grade: A is what the operator documents; B is what CodoSEO's synthetic check
+/// observed, against its own baseline and confirmed by a second fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Grade {
     A,
+    B,
 }
 
 /// One bot's part in a finding.
@@ -93,6 +130,32 @@ pub struct EngineEvidence {
     pub site_pages: u32,
 }
 
+/// One bot's part in a `FetchBlocked` finding: what the synthetic probes with its user agent got.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeEvidence {
+    pub token: String,
+    pub operator: String,
+    pub purpose: Purpose,
+    /// Probed pages where the bot got this finding's cause.
+    pub urls_affected: u32,
+    /// Pages actually requested with its user agent (robots.txt skips left out).
+    pub urls_probed: u32,
+    pub home_affected: bool,
+    /// The status of the sample probe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<Vendor>,
+    /// The challenge marker the sample probe carried.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
+    /// One representative probe (the first affected page's) and its baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample: Option<ProbeFetch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<ProbeFetch>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UrlSample {
     /// Up to ten important URLs.
@@ -112,15 +175,26 @@ pub struct Evidence {
     /// The robots.txt status, for `RobotsUnavailable`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub robots_status: Option<u16>,
+    /// The probed bots, for `FetchBlocked`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<ProbeEvidence>,
+    /// Observed by CodoSEO's synthetic check rather than documented by an operator.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub synthetic: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl Evidence {
-    /// Who the finding is about: its bots' tokens (lower-cased) and its engines' names. An
-    /// incident whose finding gains a member has widened.
+    /// Who the finding is about: its bots' and probed bots' tokens (lower-cased) and its engines'
+    /// names. An incident whose finding gains a member has widened.
     pub fn members(&self) -> BTreeSet<String> {
         self.bots
             .iter()
             .map(|b| b.token.to_ascii_lowercase())
+            .chain(self.probes.iter().map(|p| p.token.to_ascii_lowercase()))
             .chain(self.engines.iter().map(|e| e.name.clone()))
             .collect()
     }
@@ -153,6 +227,9 @@ pub fn evaluated_kinds(report: &AccessReport) -> Vec<FindingKind> {
     if report.html_important() > 0 {
         kinds.push(FindingKind::AnswersRestricted);
     }
+    if report.probes.as_ref().is_some_and(ProbeReport::conclusive) {
+        kinds.push(FindingKind::FetchBlocked);
+    }
     kinds
 }
 
@@ -165,6 +242,7 @@ pub fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
     } else {
         out.extend(bots_blocked(report, intent));
         out.extend(bots_not_blocked(report, intent));
+        out.extend(fetch_blocked(report, intent));
     }
     out.extend(answers_restricted(report, intent));
     out.sort_by(|a, b| (a.kind, &a.subject).cmp(&(b.kind, &b.subject)));
@@ -787,4 +865,226 @@ fn answers_restricted(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
             }
         })
         .collect()
+}
+
+// ---- synthetic fetch probes ------------------------------------------------------------------
+
+/// One bot's results under one cause, while they are gathered.
+struct ProbeRow<'a> {
+    bot: &'a Bot,
+    urls: BTreeSet<u16>,
+    home: bool,
+    sample: Option<ProbeFetch>,
+    baseline: Option<ProbeFetch>,
+    /// The first affected page's verdict, for the wording.
+    verdict: Verdict,
+}
+
+fn fetch_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
+    let Some(probes) = &report.probes else {
+        return Vec::new();
+    };
+    let is_home = |i: u16| {
+        report
+            .important
+            .get(usize::from(i))
+            .is_some_and(|u| u.reason == Reason::Home)
+    };
+    // cause -> rows, both in the order the probes ran.
+    let mut causes: Vec<(&'static str, Vec<ProbeRow>)> = Vec::new();
+    for url in &probes.urls {
+        for result in &url.results {
+            let Some(cause) = result.verdict.cause_slug() else {
+                continue;
+            };
+            let Some(bot) = registry()
+                .bot(&result.token)
+                .filter(|b| intent.effective(b) == Stance::Allow)
+            else {
+                continue;
+            };
+            let rows = match causes.iter().position(|(c, _)| *c == cause) {
+                Some(i) => &mut causes[i].1,
+                None => {
+                    causes.push((cause, Vec::new()));
+                    &mut causes.last_mut().expect("just pushed").1
+                }
+            };
+            let row = match rows.iter().position(|r| r.bot.token == bot.token) {
+                Some(i) => &mut rows[i],
+                None => {
+                    rows.push(ProbeRow {
+                        bot,
+                        urls: BTreeSet::new(),
+                        home: false,
+                        sample: result.fetch.clone(),
+                        baseline: Some(url.baseline.clone()),
+                        verdict: result.verdict.clone(),
+                    });
+                    rows.last_mut().expect("just pushed")
+                }
+            };
+            row.urls.insert(url.url);
+            row.home |= is_home(url.url);
+        }
+    }
+
+    let probed = |token: &str| {
+        probes
+            .urls
+            .iter()
+            .filter(|u| {
+                u.results
+                    .iter()
+                    .any(|r| r.token == token && r.verdict != Verdict::SkippedRobots)
+            })
+            .count() as u32
+    };
+    let mut out: Vec<Finding> = causes
+        .into_iter()
+        .map(|(cause, rows)| {
+            let first = &rows[0];
+            let vendor = match first.verdict {
+                Verdict::Challenged { vendor } => Some(vendor),
+                _ => None,
+            };
+            let soft = matches!(first.verdict, Verdict::Throttled | Verdict::Degraded);
+            let severity = if !soft && rows.iter().any(|r| r.home) {
+                Severity::Warning
+            } else {
+                Severity::Notice
+            };
+            let mut urls = BTreeSet::new();
+            for r in &rows {
+                urls.extend(&r.urls);
+            }
+            let tokens: Vec<String> = rows.iter().map(|r| r.bot.token.clone()).collect();
+            let pages = if urls.len() == 1 && urls.iter().all(|u| is_home(*u)) {
+                "the home page".to_owned()
+            } else if urls.len() == 1 {
+                "1 page".to_owned()
+            } else {
+                format!("{} pages", urls.len())
+            };
+            let title = format!(
+                "{} {} on {pages} (synthetic check)",
+                probe_headline(&first.verdict),
+                join_capped(&tokens)
+            );
+            let summary = probe_summary(first, &tokens, vendor);
+
+            let mut sources = Vec::new();
+            for r in &rows {
+                push_source(&mut sources, &r.bot.source_url);
+            }
+            for (v, url) in VENDOR_DOCS {
+                if Some(*v) == vendor {
+                    push_source(&mut sources, url);
+                }
+            }
+            let evidence = rows
+                .into_iter()
+                .map(|r| ProbeEvidence {
+                    token: r.bot.token.clone(),
+                    operator: r.bot.operator.clone(),
+                    purpose: r.bot.purpose,
+                    urls_affected: r.urls.len() as u32,
+                    urls_probed: probed(&r.bot.token),
+                    home_affected: r.home,
+                    status: r.sample.as_ref().and_then(|s| s.status),
+                    vendor,
+                    signal: r
+                        .sample
+                        .as_ref()
+                        .and_then(|s| s.challenge.as_ref())
+                        .map(|c| c.signal.clone()),
+                    sample: r.sample,
+                    baseline: r.baseline,
+                })
+                .collect();
+            Finding {
+                kind: FindingKind::FetchBlocked,
+                subject: cause.to_owned(),
+                severity,
+                grade: Grade::B,
+                title,
+                summary,
+                evidence: Evidence {
+                    urls: sample(report, &urls),
+                    probes: evidence,
+                    synthetic: true,
+                    ..Evidence::default()
+                },
+                sources,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.subject.cmp(&b.subject));
+    out
+}
+
+/// The start of a `FetchBlocked` title, before the bots' names.
+fn probe_headline(verdict: &Verdict) -> String {
+    match verdict {
+        Verdict::Challenged {
+            vendor: Vendor::Generic,
+        } => "CAPTCHA challenge served to".to_owned(),
+        Verdict::Challenged { vendor } => format!("{} challenge served to", vendor.label()),
+        Verdict::Blocked { status: None } => "Connection dropped for".to_owned(),
+        Verdict::Blocked {
+            status: Some(s @ (401 | 403 | 404 | 451)),
+        } => format!("HTTP {s} served to"),
+        Verdict::Blocked { status: Some(s) } if *s >= 500 => "Server errors served to".to_owned(),
+        Verdict::Blocked { .. } => "Client errors served to".to_owned(),
+        Verdict::Diverted { .. } => "Redirect elsewhere served to".to_owned(),
+        Verdict::Degraded => "Smaller, different page served to".to_owned(),
+        Verdict::Throttled => "Rate limiting (HTTP 429) served to".to_owned(),
+        Verdict::Same | Verdict::Inconclusive { .. } | Verdict::SkippedRobots => String::new(),
+    }
+}
+
+/// What the probes saw, what to check next, and what a synthetic check can't tell.
+fn probe_summary(first: &ProbeRow, tokens: &[String], vendor: Option<Vendor>) -> String {
+    let what = match &first.verdict {
+        Verdict::Challenged {
+            vendor: Vendor::Generic,
+        } => "a CAPTCHA or \"verify you are human\" page".to_owned(),
+        Verdict::Challenged { vendor } => format!("a {} challenge or block page", vendor.label()),
+        Verdict::Blocked { status: None } => "a dropped connection".to_owned(),
+        Verdict::Blocked { status: Some(s) } => format!("HTTP {s}"),
+        Verdict::Diverted { to } => format!("a redirect to {to}"),
+        Verdict::Degraded => "a much smaller page with another title".to_owned(),
+        Verdict::Throttled => "HTTP 429 (too many requests)".to_owned(),
+        Verdict::Same | Verdict::Inconclusive { .. } | Verdict::SkippedRobots => String::new(),
+    };
+    let ua = if tokens.len() == 1 {
+        format!("{}'s documented user agent", tokens[0])
+    } else {
+        format!("the documented user agents of {}", join_capped(tokens))
+    };
+    let next = match vendor {
+        Some(Vendor::Cloudflare) => {
+            "Check AI Crawl Control and Security › Bots in the Cloudflare dashboard. Cloudflare may also refuse requests that claim to be a verified bot from an unverified address, so confirm in your logs that the real bots are refused too."
+        }
+        Some(Vendor::Vercel) => {
+            "Check the Bot Protection and AI Bots managed rulesets under Firewall in the Vercel dashboard."
+        }
+        Some(Vendor::AwsWaf) => "Check the Bot Control rule group in your AWS WAF web ACL.",
+        Some(Vendor::DataDome) => "Check your DataDome bot rules and allow the AI bots you want.",
+        Some(Vendor::Human) => "Check the known bots and crawlers policy in HUMAN Bot Defender.",
+        Some(Vendor::Imperva) => "Check the bot management settings in Imperva.",
+        Some(Vendor::Akamai) => "Check the bot categories and actions in Akamai Bot Manager.",
+        Some(Vendor::Sucuri) => {
+            "Check the access control and blocked user agents in the Sucuri firewall."
+        }
+        Some(Vendor::Generic) => {
+            "Find which plugin, CDN or firewall serves the CAPTCHA and let the AI bots you want through."
+        }
+        None => {
+            "Check your CDN, firewall and server rules for blocks by user agent, and let the AI bots you want through."
+        }
+    };
+    format!(
+        "A request with {ua}, sent from CodoSEO's address, got {what}, while the same request as CodoSEObot got the normal page. {next} Real bots come from their own addresses and may be treated differently."
+    )
 }

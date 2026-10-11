@@ -601,3 +601,350 @@ fn a_redirecting_robots_txt_is_missing_not_off_limits() {
         not_blocked.summary
     );
 }
+
+// ---- Synthetic fetch probes ------------------------------------------------------------------
+
+use codoseo_geo::findings::{Evidence, VENDOR_DOCS};
+use codoseo_geo::probe::{
+    InconclusiveReason, ProbeFetch, ProbeReport, ProbeResult, ProbedUrl, Vendor, Verdict,
+};
+use codoseo_geo::report::Reason;
+
+fn fetch(status: u16, title: &str, bytes: u32) -> ProbeFetch {
+    ProbeFetch {
+        status: Some(status),
+        html: true,
+        bytes,
+        title: Some(title.to_owned()),
+        ..ProbeFetch::default()
+    }
+}
+
+/// What a probe fetch looked like for a verdict, roughly.
+fn fetch_for(verdict: &Verdict) -> Option<ProbeFetch> {
+    Some(match verdict {
+        Verdict::SkippedRobots => return None,
+        Verdict::Challenged { vendor } => ProbeFetch {
+            challenge: Some(codoseo_geo::probe::Challenge {
+                vendor: *vendor,
+                signal: "cf-mitigated: challenge".to_owned(),
+            }),
+            ..fetch(403, "Just a moment...", 4_000)
+        },
+        Verdict::Blocked { status } => ProbeFetch {
+            status: *status,
+            ..fetch(status.unwrap_or(0), "Forbidden", 300)
+        },
+        Verdict::Throttled => fetch(429, "Too many requests", 200),
+        Verdict::Degraded => fetch(200, "Please enable JavaScript", 500),
+        Verdict::Diverted { to } => ProbeFetch {
+            final_url: Some(to.clone()),
+            ..fetch(200, "Home", 20_000)
+        },
+        _ => fetch(200, "Shop", 20_000),
+    })
+}
+
+/// A site of `pages` pages with these probe verdicts per page (home is index 0).
+fn probed(pages: u32, urls: &[(u16, &[(&str, Verdict)])]) -> AccessReport {
+    let mut report = report_for(&site(pages, |p| p));
+    assert_eq!(report.important[0].reason, Reason::Home);
+    let mut bots: Vec<String> = Vec::new();
+    let urls = urls
+        .iter()
+        .map(|(url, results)| ProbedUrl {
+            url: *url,
+            baseline: fetch(200, "Shop", 20_000),
+            results: results
+                .iter()
+                .map(|(token, verdict)| {
+                    if !bots.iter().any(|b| b == token) {
+                        bots.push((*token).to_owned());
+                    }
+                    ProbeResult {
+                        token: (*token).to_owned(),
+                        fetch: fetch_for(verdict),
+                        verdict: verdict.clone(),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    report.probes = Some(ProbeReport {
+        version: 1,
+        synthetic: true,
+        from: "hello@codoseo.com".to_owned(),
+        bots,
+        skipped_bots: Vec::new(),
+        urls,
+        stop: None,
+        requests: 0,
+    });
+    report
+}
+
+fn cf() -> Verdict {
+    Verdict::Challenged {
+        vendor: Vendor::Cloudflare,
+    }
+}
+
+fn fetch_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
+    findings(report, intent)
+        .into_iter()
+        .filter(|f| f.kind == FindingKind::FetchBlocked)
+        .collect()
+}
+
+#[test]
+fn three_bots_challenged_by_cloudflare_are_one_finding_with_three_members() {
+    let report = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", cf()),
+                ("Claude-SearchBot", cf()),
+                ("PerplexityBot", cf()),
+                ("ChatGPT-User", Verdict::Same),
+            ],
+        )],
+    );
+    let f = fetch_blocked(&report, &Intent::default());
+    assert_eq!(f.len(), 1, "{f:#?}");
+    let f = &f[0];
+    println!("{} | {}", f.title, f.summary);
+    assert_eq!(f.subject, "challenge_cloudflare");
+    assert_eq!(f.grade, Grade::B);
+    assert!(f.evidence.synthetic);
+    assert_eq!(
+        f.title,
+        "Cloudflare challenge served to OAI-SearchBot, Claude-SearchBot and PerplexityBot on the home page (synthetic check)"
+    );
+    let members: Vec<String> = f.evidence.members().into_iter().collect();
+    assert_eq!(
+        members,
+        ["claude-searchbot", "oai-searchbot", "perplexitybot"]
+    );
+    let p = &f.evidence.probes[0];
+    assert_eq!(p.token, "OAI-SearchBot");
+    assert_eq!(
+        (p.urls_affected, p.urls_probed, p.home_affected),
+        (1, 1, true)
+    );
+    assert_eq!(p.vendor, Some(Vendor::Cloudflare));
+    assert_eq!(p.signal.as_deref(), Some("cf-mitigated: challenge"));
+    assert_eq!(p.status, Some(403));
+    assert!(p.sample.is_some() && p.baseline.is_some());
+    // Cloudflare refuses unverified copies of verified bots: the summary says so.
+    assert!(f.summary.contains("AI Crawl Control"), "{}", f.summary);
+    assert!(f.summary.contains("verified bot"), "{}", f.summary);
+    assert!(f.summary.contains("logs"), "{}", f.summary);
+    // Every bot's source, then Cloudflare's docs.
+    assert!(
+        f.sources
+            .contains(&"https://developers.openai.com/api/docs/bots".to_owned())
+    );
+    for (vendor, url) in VENDOR_DOCS {
+        if *vendor == Vendor::Cloudflare {
+            assert!(f.sources.contains(&(*url).to_owned()), "{url}");
+        }
+    }
+}
+
+#[test]
+fn a_403_for_one_bot_and_a_challenge_for_others_are_two_findings() {
+    let report = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", Verdict::Blocked { status: Some(403) }),
+                ("Claude-SearchBot", cf()),
+                ("PerplexityBot", cf()),
+            ],
+        )],
+    );
+    let f = fetch_blocked(&report, &Intent::default());
+    let subjects: Vec<&str> = f.iter().map(|f| f.subject.as_str()).collect();
+    assert_eq!(subjects, ["blocked_403", "challenge_cloudflare"]);
+    println!("{} | {}", f[0].title, f[0].summary);
+    assert_eq!(f[0].evidence.probes.len(), 1);
+    assert_eq!(f[0].evidence.probes[0].status, Some(403));
+    assert!(f[0].title.contains("403"), "{}", f[0].title);
+    // Not a Cloudflare page: no Cloudflare caveat.
+    assert!(!f[0].summary.contains("Cloudflare"), "{}", f[0].summary);
+    assert_eq!(f[1].evidence.probes.len(), 2);
+}
+
+#[test]
+fn a_bot_the_owner_blocks_or_does_not_mind_is_not_reported() {
+    let report = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", cf()),
+                ("PerplexityBot", cf()),
+                ("ChatGPT-User", Verdict::Blocked { status: Some(403) }),
+            ],
+        )],
+    );
+    let i = intent(r#"{"bots":{"OAI-SearchBot":"block","PerplexityBot":"any"}}"#);
+    let f = fetch_blocked(&report, &i);
+    let subjects: Vec<&str> = f.iter().map(|f| f.subject.as_str()).collect();
+    assert_eq!(subjects, ["blocked_403"]);
+    let i = intent(r#"{"purposes":{"search":"block","user_fetch":"any"}}"#);
+    assert!(fetch_blocked(&report, &i).is_empty());
+}
+
+#[test]
+fn the_home_page_is_a_warning_and_other_pages_a_notice() {
+    let home = probed(3, &[(0, &[("OAI-SearchBot", cf())])]);
+    assert_eq!(
+        fetch_blocked(&home, &Intent::default())[0].severity,
+        Severity::Warning
+    );
+    let inner = probed(
+        3,
+        &[
+            (0, &[("OAI-SearchBot", Verdict::Same)]),
+            (1, &[("OAI-SearchBot", cf())]),
+            (2, &[("OAI-SearchBot", cf())]),
+        ],
+    );
+    let f = fetch_blocked(&inner, &Intent::default());
+    assert_eq!(f[0].severity, Severity::Notice);
+    assert_eq!(
+        f[0].title,
+        "Cloudflare challenge served to OAI-SearchBot on 2 pages (synthetic check)"
+    );
+    let p = &f[0].evidence.probes[0];
+    assert_eq!(
+        (p.urls_affected, p.urls_probed, p.home_affected),
+        (2, 3, false)
+    );
+    assert_eq!(f[0].evidence.urls.total, 2);
+    // Throttling and a degraded page are never more than a notice, even on the home page.
+    let soft = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", Verdict::Throttled),
+                ("PerplexityBot", Verdict::Degraded),
+            ],
+        )],
+    );
+    let f = fetch_blocked(&soft, &Intent::default());
+    let got: Vec<(&str, Severity)> = f.iter().map(|f| (f.subject.as_str(), f.severity)).collect();
+    assert_eq!(
+        got,
+        [
+            ("degraded", Severity::Notice),
+            ("throttled", Severity::Notice)
+        ]
+    );
+    // Never critical.
+    let everything = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", Verdict::Blocked { status: None }),
+                ("PerplexityBot", Verdict::Blocked { status: Some(451) }),
+                (
+                    "ChatGPT-User",
+                    Verdict::Diverted {
+                        to: "https://example.com/login".to_owned(),
+                    },
+                ),
+            ],
+        )],
+    );
+    let f = fetch_blocked(&everything, &Intent::default());
+    assert_eq!(f.len(), 3);
+    assert!(f.iter().all(|f| f.severity != Severity::Critical));
+}
+
+#[test]
+fn all_inconclusive_probes_do_not_evaluate_the_kind() {
+    let inconclusive = probed(
+        3,
+        &[(
+            0,
+            &[
+                (
+                    "OAI-SearchBot",
+                    Verdict::Inconclusive {
+                        reason: InconclusiveReason::BaselineFailed,
+                    },
+                ),
+                ("PerplexityBot", Verdict::SkippedRobots),
+            ],
+        )],
+    );
+    assert!(!evaluated_kinds(&inconclusive).contains(&FindingKind::FetchBlocked));
+    assert!(fetch_blocked(&inconclusive, &Intent::default()).is_empty());
+    let fine = probed(3, &[(0, &[("OAI-SearchBot", Verdict::Same)])]);
+    assert_eq!(
+        evaluated_kinds(&fine).last(),
+        Some(&FindingKind::FetchBlocked)
+    );
+    assert!(fetch_blocked(&fine, &Intent::default()).is_empty());
+    // No probes at all: not evaluated either.
+    assert!(!evaluated_kinds(&report_for(&site(3, |p| p))).contains(&FindingKind::FetchBlocked));
+}
+
+#[test]
+fn fetch_blocked_is_grade_b_synthetic_and_round_trips() {
+    let report = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", Verdict::Throttled),
+                ("PerplexityBot", Verdict::Degraded),
+                (
+                    "ChatGPT-User",
+                    Verdict::Challenged {
+                        vendor: Vendor::DataDome,
+                    },
+                ),
+            ],
+        )],
+    );
+    let f = fetch_blocked(&report, &Intent::default());
+    assert_eq!(f.len(), 3);
+    for f in &f {
+        println!("{} | {}", f.title, f.summary);
+        assert_eq!(f.grade, Grade::B);
+        assert!(f.title.ends_with("(synthetic check)"), "{}", f.title);
+        assert!(f.title.contains("synthetic"));
+        assert!(f.evidence.synthetic);
+    }
+    let json = serde_json::to_string(&f).expect("json");
+    assert!(json.contains(r#""grade":"B""#));
+    assert!(json.contains(r#""kind":"fetch_blocked""#));
+    assert!(json.contains(r#""synthetic":true"#));
+    let back: Vec<Finding> = serde_json::from_str(&json).expect("back");
+    assert_eq!(back, f);
+    assert_eq!(
+        FindingKind::from_slug("fetch_blocked"),
+        Some(FindingKind::FetchBlocked)
+    );
+    assert_eq!(FindingKind::FetchBlocked.slug(), "fetch_blocked");
+    // Phase A evidence still serialises without the probe fields.
+    let plain = serde_json::to_value(Evidence::default()).expect("json");
+    assert!(plain.get("probes").is_none() && plain.get("synthetic").is_none());
+}
+
+#[test]
+fn a_broken_robots_file_hides_fetch_blocked() {
+    let mut report = probed(3, &[(0, &[("OAI-SearchBot", cf())])]);
+    let down = report_for(&with_robots(site(3, |p| p), 503, ""));
+    report.robots = down.robots.clone();
+    let f = findings(&report, &Intent::default());
+    assert!(f.iter().any(|f| f.kind == FindingKind::RobotsUnavailable));
+    assert!(f.iter().all(|f| f.kind != FindingKind::FetchBlocked));
+}
