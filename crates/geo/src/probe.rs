@@ -770,4 +770,25 @@ impl ProbeReport {
             )
         })
     }
+
+    /// The probed bots this run can speak for: every page they were sent to (or skipped by
+    /// robots.txt) got a real verdict. A bot inconclusive on any page (the baseline failed or
+    /// was challenged, no response, a re-fetch that disagreed) is not judged, so an open
+    /// incident keeps what it last knew about it.
+    pub fn judged_bots(&self) -> Vec<String> {
+        self.bots
+            .iter()
+            .filter(|token| {
+                let mut results = self
+                    .urls
+                    .iter()
+                    .flat_map(|u| &u.results)
+                    .filter(|r| &&r.token == token)
+                    .peekable();
+                results.peek().is_some()
+                    && results.all(|r| !matches!(r.verdict, Verdict::Inconclusive { .. }))
+            })
+            .cloned()
+            .collect()
+    }
 }

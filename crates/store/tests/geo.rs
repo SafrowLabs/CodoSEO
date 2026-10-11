@@ -1346,3 +1346,77 @@ async fn the_probe_switch_defaults_on_and_round_trips() {
     geo::set_ai_probes(&db.pool, site, true).await.unwrap();
     assert!(geo::get_ai_probes(&db.pool, site).await.unwrap());
 }
+
+#[tokio::test]
+async fn a_bot_inconclusive_for_one_run_neither_narrows_rewidens_nor_resolves() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let both = [
+        ("OAI-SearchBot", cloudflare()),
+        ("PerplexityBot", cloudflare()),
+    ];
+    probed_crawl(&db.pool, site, &both).await;
+    let open = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(open.len(), 1);
+    let unstable = Verdict::Inconclusive {
+        reason: codoseo_geo::probe::InconclusiveReason::Unstable,
+    };
+
+    // PerplexityBot's re-fetch disagreed: it keeps its place in the incident.
+    let flaky = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("PerplexityBot", unstable.clone()),
+        ],
+    )
+    .await;
+    let still = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(still.len(), 1);
+    assert_eq!(still[0].id, open[0].id);
+    assert_eq!(still[0].title, open[0].title, "not narrowed");
+    assert!(change_kinds(&db.pool, flaky).await.is_empty());
+
+    // Back the next run: not a widening, so no alert.
+    let back = probed_crawl(&db.pool, site, &both).await;
+    assert!(change_kinds(&db.pool, back).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, back).await, 0);
+
+    // OAI-SearchBot is fine now but PerplexityBot can't be judged: still open, about
+    // PerplexityBot.
+    let half = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", Verdict::Same),
+            ("PerplexityBot", unstable),
+        ],
+    )
+    .await;
+    let still = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(still.len(), 1, "not resolved");
+    assert!(
+        still[0].title.contains("PerplexityBot"),
+        "{}",
+        still[0].title
+    );
+    assert!(
+        !still[0].title.contains("OAI-SearchBot"),
+        "{}",
+        still[0].title
+    );
+    assert!(change_kinds(&db.pool, half).await.is_empty());
+
+    // Both judged and fine: resolved.
+    probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", Verdict::Same),
+            ("PerplexityBot", Verdict::Same),
+        ],
+    )
+    .await;
+    assert!(fetch_blocked_open(&db.pool, site).await.is_empty());
+}

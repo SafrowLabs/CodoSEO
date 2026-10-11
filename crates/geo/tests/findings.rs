@@ -948,3 +948,244 @@ fn a_broken_robots_file_hides_fetch_blocked() {
     assert!(f.iter().any(|f| f.kind == FindingKind::RobotsUnavailable));
     assert!(f.iter().all(|f| f.kind != FindingKind::FetchBlocked));
 }
+
+// ---- Holding back bots a probe run could not judge (B1 review) -------------------------------
+
+use codoseo_geo::findings::hold_unjudged_probes;
+use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
+
+fn unstable() -> Verdict {
+    Verdict::Inconclusive {
+        reason: InconclusiveReason::Unstable,
+    }
+}
+
+/// The open `fetch_blocked` incidents `before` would leave, as the store reads them back.
+fn open_from(before: &[Finding]) -> (Vec<OpenIncident>, Vec<(String, Evidence)>) {
+    let open = before
+        .iter()
+        .enumerate()
+        .map(|(i, f)| OpenIncident {
+            id: i as i64 + 1,
+            kind: f.kind,
+            subject: f.subject.clone(),
+            severity: f.severity,
+            members: f.evidence.members(),
+        })
+        .collect();
+    let evidence = before
+        .iter()
+        .map(|f| (f.subject.clone(), f.evidence.clone()))
+        .collect();
+    (open, evidence)
+}
+
+/// The transitions of `after`'s report against the incidents `before` left open.
+fn next(before: &[Finding], after: &AccessReport, intent: &Intent) -> Vec<Transition> {
+    let (open, evidence) = open_from(before);
+    let found: Vec<Finding> =
+        hold_unjudged_probes(after, intent, &evidence, findings(after, intent))
+            .into_iter()
+            .filter(|f| f.kind == FindingKind::FetchBlocked)
+            .collect();
+    reconcile(&open, &found, &[FindingKind::FetchBlocked])
+}
+
+fn updated(t: &[Transition]) -> (&Finding, bool, bool) {
+    match t {
+        [
+            Transition::Updated {
+                finding,
+                escalated,
+                widened,
+                ..
+            },
+        ] => (finding, *escalated, *widened),
+        other => panic!("one update, got {other:#?}"),
+    }
+}
+
+#[test]
+fn a_bot_inconclusive_this_run_keeps_its_evidence_and_the_severity() {
+    let first = probed(
+        3,
+        &[
+            (
+                0,
+                &[("OAI-SearchBot", cf()), ("PerplexityBot", Verdict::Same)],
+            ),
+            (1, &[("OAI-SearchBot", cf()), ("PerplexityBot", cf())]),
+        ],
+    );
+    let before = fetch_blocked(&first, &Intent::default());
+    assert_eq!(before[0].severity, Severity::Warning);
+
+    // OAI-SearchBot's home page re-fetch disagreed: it drops out of this run's finding, which
+    // without it would be a notice about PerplexityBot alone.
+    let second = probed(
+        3,
+        &[
+            (
+                0,
+                &[
+                    ("OAI-SearchBot", unstable()),
+                    ("PerplexityBot", Verdict::Same),
+                ],
+            ),
+            (1, &[("OAI-SearchBot", cf()), ("PerplexityBot", cf())]),
+        ],
+    );
+    let raw = fetch_blocked(&second, &Intent::default());
+    assert_eq!(
+        raw[0].severity,
+        Severity::Notice,
+        "the flap this guards against"
+    );
+    let t = next(&before, &second, &Intent::default());
+    let (f, escalated, widened) = updated(&t);
+    assert!(!escalated && !widened);
+    assert_eq!(f.severity, Severity::Warning, "{f:#?}");
+    assert_eq!(f.evidence.members(), before[0].evidence.members());
+    let oai = f
+        .evidence
+        .probes
+        .iter()
+        .find(|p| p.token == "OAI-SearchBot")
+        .expect("OAI-SearchBot held");
+    assert_eq!(oai, &before[0].evidence.probes[0], "its previous evidence");
+    assert_eq!(f.title, before[0].title);
+
+    // The run after that sees the home page again: back to the same incident, not escalated.
+    let t = next(std::slice::from_ref(f), &first, &Intent::default());
+    let (_, escalated, widened) = updated(&t);
+    assert!(!escalated && !widened);
+}
+
+#[test]
+fn a_bot_with_a_baseline_problem_neither_narrows_nor_resolves() {
+    let first = probed(
+        3,
+        &[(0, &[("OAI-SearchBot", cf()), ("PerplexityBot", cf())])],
+    );
+    let before = fetch_blocked(&first, &Intent::default());
+    let baseline_failed = Verdict::Inconclusive {
+        reason: InconclusiveReason::BaselineFailed,
+    };
+    // Another page is fine for both, but the home page had no baseline: nobody is judged.
+    let second = probed(
+        3,
+        &[
+            (
+                0,
+                &[
+                    ("OAI-SearchBot", baseline_failed.clone()),
+                    ("PerplexityBot", baseline_failed),
+                ],
+            ),
+            (
+                1,
+                &[
+                    ("OAI-SearchBot", Verdict::Same),
+                    ("PerplexityBot", Verdict::Same),
+                ],
+            ),
+        ],
+    );
+    assert!(evaluated_kinds(&second).contains(&FindingKind::FetchBlocked));
+    let t = next(&before, &second, &Intent::default());
+    let (f, escalated, widened) = updated(&t);
+    assert!(!escalated && !widened);
+    assert_eq!(f, &before[0]);
+}
+
+#[test]
+fn only_bots_judged_this_run_narrow_widen_or_resolve() {
+    let first = probed(
+        3,
+        &[(0, &[("OAI-SearchBot", cf()), ("PerplexityBot", cf())])],
+    );
+    let before = fetch_blocked(&first, &Intent::default());
+
+    // PerplexityBot is conclusively fine now; OAI-SearchBot could not be judged: narrowed to
+    // OAI-SearchBot, not resolved.
+    let second = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", unstable()),
+                ("PerplexityBot", Verdict::Same),
+            ],
+        )],
+    );
+    let t = next(&before, &second, &Intent::default());
+    let (f, escalated, widened) = updated(&t);
+    assert!(!escalated && !widened);
+    let members: Vec<String> = f.evidence.members().into_iter().collect();
+    assert_eq!(members, ["oai-searchbot"]);
+    assert!(f.title.contains("OAI-SearchBot") && !f.title.contains("PerplexityBot"));
+
+    // A bot that is not judged this run does not widen the incident, even with a positive on
+    // another page.
+    let third = probed(
+        3,
+        &[
+            (0, &[("OAI-SearchBot", cf()), ("ChatGPT-User", unstable())]),
+            (1, &[("OAI-SearchBot", cf()), ("ChatGPT-User", cf())]),
+        ],
+    );
+    let t = next(std::slice::from_ref(f), &third, &Intent::default());
+    let (g, _, widened) = updated(&t);
+    assert!(!widened, "{g:#?}");
+    let members: Vec<String> = g.evidence.members().into_iter().collect();
+    assert_eq!(members, ["oai-searchbot"]);
+
+    // Resolved only once every bot it covers was judged and none has the cause.
+    let fine = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", Verdict::Same),
+                ("PerplexityBot", Verdict::SkippedRobots),
+            ],
+        )],
+    );
+    let t = next(&before, &fine, &Intent::default());
+    assert!(
+        matches!(t.as_slice(), [Transition::Resolved { .. }]),
+        "{t:#?}"
+    );
+    let partly = probed(
+        3,
+        &[(
+            0,
+            &[
+                ("OAI-SearchBot", Verdict::Same),
+                ("PerplexityBot", unstable()),
+            ],
+        )],
+    );
+    let t = next(&before, &partly, &Intent::default());
+    let (f, _, _) = updated(&t);
+    let members: Vec<String> = f.evidence.members().into_iter().collect();
+    assert_eq!(members, ["perplexitybot"]);
+}
+
+#[test]
+fn a_held_bot_the_owner_no_longer_wants_is_dropped() {
+    let first = probed(
+        3,
+        &[(0, &[("OAI-SearchBot", cf()), ("PerplexityBot", cf())])],
+    );
+    let before = fetch_blocked(&first, &Intent::default());
+    let second = probed(
+        3,
+        &[(0, &[("OAI-SearchBot", unstable()), ("PerplexityBot", cf())])],
+    );
+    let i = intent(r#"{"bots":{"OAI-SearchBot":"block"}}"#);
+    let t = next(&before, &second, &i);
+    let (f, _, _) = updated(&t);
+    let members: Vec<String> = f.evidence.members().into_iter().collect();
+    assert_eq!(members, ["perplexitybot"]);
+}

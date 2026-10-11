@@ -19,7 +19,9 @@ use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::Severity;
 use codoseo_geo::Intent;
 use codoseo_geo::eligibility::DirectiveSlug;
-use codoseo_geo::findings::{Evidence, Finding, FindingKind, evaluated_kinds, findings};
+use codoseo_geo::findings::{
+    Evidence, Finding, FindingKind, evaluated_kinds, findings, hold_unjudged_probes,
+};
 use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
 use codoseo_geo::report::{AccessReport, Declared};
 use codoseo_geo::robots::Pair;
@@ -362,10 +364,11 @@ pub async fn reevaluate_quietly(
         if kinds.is_empty() {
             continue;
         }
-        let found: Vec<Finding> = findings(report, &intent)
-            .into_iter()
-            .filter(|f| kinds.contains(&f.kind))
-            .collect();
+        let found: Vec<Finding> =
+            hold_unjudged_probes(report, &intent, &held(&open), findings(report, &intent))
+                .into_iter()
+                .filter(|f| kinds.contains(&f.kind))
+                .collect();
         let transitions = reconcile(&as_open(&open), &found, &kinds);
         opened += transitions
             .iter()
@@ -473,9 +476,14 @@ pub(crate) async fn apply_geo(
         .execute(&mut **tx)
         .await?;
 
-    let found = findings(&input.report, &intent);
     let evaluated = evaluated_kinds(&input.report);
     let open = lock_open(tx, site_id).await?;
+    let found = hold_unjudged_probes(
+        &input.report,
+        &intent,
+        &held(&open),
+        findings(&input.report, &intent),
+    );
     let transitions = reconcile(&as_open(&open), &found, &evaluated);
     let mut changes = write_transitions(
         tx,
@@ -597,6 +605,7 @@ struct OpenRow {
     title: String,
     quiet: bool,
     members: BTreeSet<String>,
+    evidence: Evidence,
 }
 
 async fn lock_open(
@@ -613,6 +622,7 @@ async fn lock_open(
     Ok(rows
         .into_iter()
         .filter_map(|(id, kind, subject, severity, title, quiet, evidence)| {
+            let evidence = serde_json::from_value::<Evidence>(evidence).unwrap_or_default();
             Some(OpenRow {
                 id,
                 kind: FindingKind::from_slug(&kind)?,
@@ -620,12 +630,19 @@ async fn lock_open(
                 severity: parse_severity(&severity)?,
                 title,
                 quiet,
-                members: serde_json::from_value::<Evidence>(evidence)
-                    .unwrap_or_default()
-                    .members(),
+                members: evidence.members(),
+                evidence,
             })
         })
         .collect())
+}
+
+/// The open `fetch_blocked` incidents' subjects and evidence, for [`hold_unjudged_probes`].
+fn held(rows: &[OpenRow]) -> Vec<(String, Evidence)> {
+    rows.iter()
+        .filter(|r| r.kind == FindingKind::FetchBlocked)
+        .map(|r| (r.subject.clone(), r.evidence.clone()))
+        .collect()
 }
 
 fn as_open(rows: &[OpenRow]) -> Vec<OpenIncident> {
