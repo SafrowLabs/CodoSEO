@@ -101,6 +101,7 @@ codoseo diff baseline.json audit.json
 | `codoseo check <URL>` | Inspect one page: fields, redirect chain, page-level issues |
 | `codoseo robots <URL>` | Show the site's `robots.txt`, test whether CodoSEObot may fetch a path and what it says to each AI bot |
 | `codoseo bots` | List the AI crawlers, fetchers and control tokens CodoSEO knows (`--format json` prints the public registry file) |
+| `codoseo probe <URL>` | Synthetic check: fetch one page as each AI search and user-triggered bot with its documented user agent and compare with CodoSEObot (`--bots` for a subset; `crawl --probes` does it for up to 5 pages) |
 | `codoseo redirects <URL>` | Follow a URL's redirect chain hop by hop |
 | `codoseo diff <BEFORE> <AFTER>` | Compare two saved JSON audits; surface new issues and regressions |
 | `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [MCP for AI agents](#mcp-for-ai-agents)) |
@@ -331,7 +332,7 @@ Any other client that takes a stdio command (Cursor, Claude Desktop, ...) needs 
 { "mcpServers": { "codoseo": { "command": "codoseo", "args": ["mcp"] } } }
 ```
 
-Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_ai_access`, `check_redirects`, `compare_audits`. Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
+Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_ai_access`, `check_redirects`, `compare_audits`, `probe_ai_fetch` (a synthetic check: fetches one page as each AI search and user-triggered bot and compares with CodoSEObot). Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
 
 ### Hosted server (codoseo.com)
 
@@ -394,7 +395,7 @@ crates/
   checks/     — the 44 check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
   geo/        — AI bot registry (CC0 data), robots.txt verdicts, AI access report and findings
-  mcp/        — MCP server: the 9 local tools and the hosted tools, over rmcp
+  mcp/        — MCP server: the 10 local tools and the hosted tools, over rmcp
   store/      — Postgres: migrations, crawl and jobs queues, queries for the web app
   web/        — the web app: axum routes, askama templates, htmx, bundled assets
   app/        — CLI (the `codoseo` binary)

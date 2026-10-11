@@ -17,9 +17,12 @@ use codoseo_core::page::PageRecord;
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::{crawl, inspect_page};
 use codoseo_crawler::fetch::{FetchError, Fetcher, FetcherConfig, Hop};
+use codoseo_crawler::probe::{DEFAULT_MIN_GAP, probe_from_env, probe_page};
 use codoseo_crawler::robots::fetch_robots;
 use codoseo_diff::{diff, key_pages};
 use codoseo_geo::eligibility::{Effect, engines, record_effect};
+use codoseo_geo::findings::{FindingKind, findings};
+use codoseo_geo::probe::{InconclusiveReason, ProbeReport, Verdict};
 use codoseo_geo::report::{BotVerdict, RobotsDeclared, bot_verdicts};
 use codoseo_geo::robots::{RobotsTxt, availability};
 use url::Url;
@@ -27,9 +30,9 @@ use url::Url;
 use crate::backend::{Backend, BackendError};
 use crate::cache::{AuditCache, CacheError};
 use crate::types::{
-    AiAccessReport, AiEngine, AiRobots, AuditHandle, AuditId, AuditState, AuditStatus,
-    AuditSummary, FailingCheck, MAX_FAILING_CHECKS, RedirectReport, RobotsReport, UrlRow,
-    rank_failing,
+    AiAccessReport, AiEngine, AiProbeReport, AiRobots, AuditHandle, AuditId, AuditState,
+    AuditStatus, AuditSummary, FailingCheck, MAX_FAILING_CHECKS, RedirectReport, RobotsReport,
+    UrlRow, rank_failing,
 };
 
 pub struct LocalBackend {
@@ -290,6 +293,40 @@ impl Backend for LocalBackend {
         })
     }
 
+    async fn probe_ai_fetch(
+        &self,
+        url: Url,
+        bots: Option<Vec<String>>,
+    ) -> Result<AiProbeReport, BackendError> {
+        // Local, like the other tools: private and internal addresses are allowed.
+        let probed = probe_page(
+            &url,
+            bots.as_deref(),
+            AddressPolicy::AllowPrivate,
+            &probe_from_env(),
+            DEFAULT_MIN_GAP,
+        )
+        .await
+        .map_err(BackendError::Other)?;
+        let found = findings(&probed.report, &codoseo_geo::Intent::default())
+            .into_iter()
+            .filter(|f| f.kind == FindingKind::FetchBlocked)
+            .collect();
+        let page = probed.page_url().to_owned();
+        Ok(AiProbeReport {
+            summary: probe_summary(&page, probed.probes()),
+            url: page,
+            report: probed.probes().clone(),
+            pages: probed
+                .report
+                .important
+                .iter()
+                .map(|u| u.url.clone())
+                .collect(),
+            findings: found,
+        })
+    }
+
     async fn check_redirects(&self, url: Url) -> Result<RedirectReport, BackendError> {
         let fetcher = Fetcher::new(FetcherConfig::new(AddressPolicy::AllowPrivate))
             .map_err(|e| BackendError::Fetch(e.to_string()))?;
@@ -360,6 +397,85 @@ fn ai_access_summary(
         ));
     }
     text
+}
+
+/// One line for `probe_ai_fetch`, starting "Synthetic check:": which bots the page treats worse
+/// than CodoSEObot and how, and how many got the same page.
+fn probe_summary(url: &str, r: &ProbeReport) -> String {
+    let Some(page) = r.urls.first() else {
+        return format!("Synthetic check: nothing was probed on {url}.");
+    };
+    let results = &page.results;
+    if !results.is_empty()
+        && results.iter().all(|x| {
+            matches!(
+                x.verdict,
+                Verdict::Inconclusive {
+                    reason: InconclusiveReason::BaselineFailed
+                        | InconclusiveReason::BaselineChallenged
+                }
+            )
+        })
+    {
+        let got = match (page.baseline.status, &page.baseline.challenge) {
+            (_, Some(c)) => format!("a {} challenge", c.vendor.label()),
+            (Some(s), None) => format!("HTTP {s} without an HTML page"),
+            (None, None) => "no response".to_owned(),
+        };
+        return format!(
+            "Synthetic check: CodoSEObot itself got {got} on {url}, so there is nothing to compare \
+             the AI bots with."
+        );
+    }
+    let worse: Vec<String> = results
+        .iter()
+        .filter(|x| x.verdict.is_positive())
+        .map(|x| format!("{} ({})", x.token, verdict_words(&x.verdict)))
+        .collect();
+    let count = |f: fn(&Verdict) -> bool| results.iter().filter(|x| f(&x.verdict)).count();
+    let same = count(|v| *v == Verdict::Same);
+    let robots = count(|v| *v == Verdict::SkippedRobots);
+    let unsure = count(|v| matches!(v, Verdict::Inconclusive { .. }));
+    let mut text = if worse.is_empty() {
+        format!(
+            "Synthetic check: all {same} AI bots probed on {url} got the same page as CodoSEObot."
+        )
+    } else {
+        format!(
+            "Synthetic check: {} of {} AI bots probed on {url} were treated worse than CodoSEObot: {}.",
+            worse.len(),
+            results.len(),
+            worse.join(", ")
+        )
+    };
+    if !worse.is_empty() && same > 0 {
+        text.push_str(&format!(" {same} got the same page."));
+    }
+    if robots > 0 {
+        text.push_str(&format!(
+            " {robots} not requested: robots.txt disallows them."
+        ));
+    }
+    if unsure > 0 {
+        text.push_str(&format!(" {unsure} inconclusive."));
+    }
+    text.push_str(
+        " The requests came from this machine with each bot's documented user agent; real bots \
+         come from their own addresses and may be treated differently.",
+    );
+    text
+}
+
+fn verdict_words(v: &Verdict) -> String {
+    match v {
+        Verdict::Blocked { status: Some(s) } => format!("blocked, HTTP {s}"),
+        Verdict::Blocked { status: None } => "connection dropped".to_owned(),
+        Verdict::Challenged { vendor } => format!("{} challenge", vendor.label()),
+        Verdict::Diverted { to } => format!("redirected to {to}"),
+        Verdict::Degraded => "a different, smaller page".to_owned(),
+        Verdict::Throttled => "rate limited".to_owned(),
+        Verdict::Same | Verdict::Inconclusive { .. } | Verdict::SkippedRobots => String::new(),
+    }
 }
 
 fn hops(chain: Vec<Hop>) -> Vec<(u16, Url)> {
@@ -653,6 +769,40 @@ mod tests {
                 .any(|e| e.effect == codoseo_geo::eligibility::Effect::Excluded)
         );
         assert!(report.summary.contains("GPTBot"), "{}", report.summary);
+    }
+
+    #[test]
+    fn probe_summary_says_when_the_baseline_has_nothing_to_compare() {
+        use codoseo_geo::probe::{ProbeFetch, ProbeResult, ProbedUrl};
+        let inconclusive = Verdict::Inconclusive {
+            reason: InconclusiveReason::BaselineFailed,
+        };
+        let report = ProbeReport {
+            version: 1,
+            synthetic: true,
+            from: "hello@codoseo.com".to_owned(),
+            bots: vec!["OAI-SearchBot".to_owned()],
+            skipped_bots: Vec::new(),
+            urls: vec![ProbedUrl {
+                url: 0,
+                baseline: ProbeFetch {
+                    status: Some(503),
+                    ..ProbeFetch::default()
+                },
+                results: vec![ProbeResult {
+                    token: "OAI-SearchBot".to_owned(),
+                    fetch: None,
+                    verdict: inconclusive,
+                }],
+            }],
+            stop: None,
+            requests: 1,
+        };
+        let text = probe_summary("https://example.com/", &report);
+        assert!(
+            text.starts_with("Synthetic check: CodoSEObot itself got HTTP 503"),
+            "{text}"
+        );
     }
 
     #[tokio::test]

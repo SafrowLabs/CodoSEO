@@ -8,9 +8,11 @@ use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
 use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::output::StopReason;
+use codoseo_geo::probe::{InconclusiveReason, ProbeFetch, ProbeReport, SkipReason, Verdict};
 use serde::Serialize;
 use url::Url;
 
+use super::probe::{ProbeFormat, ProbeOutput};
 use super::{CliError, CrawlFormat, DiffFormat};
 
 mod csv_rows;
@@ -237,6 +239,149 @@ pub fn write_changes(
         DiffFormat::Md => markdown::changes(w, changes)?,
     }
     Ok(())
+}
+
+/// Said first wherever probe results are shown.
+pub(super) const PROBE_CAVEAT: &str = "Requests sent from this machine with each bot's documented \
+    user agent and compared with CodoSEObot's. Real bots come from their own addresses and may be \
+    treated differently.";
+
+pub fn write_probe(
+    w: &mut impl Write,
+    format: ProbeFormat,
+    out: &ProbeOutput,
+) -> Result<(), CliError> {
+    match format {
+        ProbeFormat::Json => write_json(w, out)?,
+        ProbeFormat::Table => table::probe(w, out)?,
+        ProbeFormat::Markdown => markdown::probe(w, out)?,
+    }
+    Ok(())
+}
+
+/// A verdict in the words of the web's fetch check table.
+pub(super) fn verdict_text(v: &Verdict) -> String {
+    match v {
+        Verdict::Same => "Same as CodoSEObot".to_owned(),
+        Verdict::Blocked { status: Some(s) } => format!("Blocked ({s})"),
+        Verdict::Blocked { status: None } => "Blocked (connection dropped)".to_owned(),
+        Verdict::Challenged { vendor } => format!("Challenged ({})", vendor.label()),
+        Verdict::Diverted { to } => format!("Redirected to {}", clean(to)),
+        Verdict::Degraded => "Different page".to_owned(),
+        Verdict::Throttled => "Rate limited".to_owned(),
+        Verdict::Inconclusive { reason } => format!(
+            "Inconclusive ({})",
+            match reason {
+                InconclusiveReason::BaselineFailed => "CodoSEObot got no HTML page",
+                InconclusiveReason::BaselineChallenged => "CodoSEObot was challenged too",
+                InconclusiveReason::ProbeError => "no response",
+                InconclusiveReason::Unstable => "the re-fetch disagreed",
+            }
+        ),
+        Verdict::SkippedRobots => "Not probed: robots.txt".to_owned(),
+    }
+}
+
+/// `HTTP 200 · 1234 bytes · "Title"`, or the error.
+pub(super) fn fetch_text(f: &ProbeFetch) -> String {
+    let mut parts = Vec::new();
+    match (f.status, f.error) {
+        (Some(s), _) => parts.push(format!("HTTP {s}")),
+        (None, Some(e)) => parts.push(format!("no response ({})", slug(&e))),
+        (None, None) => parts.push("no response".to_owned()),
+    }
+    if f.status.is_some() {
+        parts.push(format!("{} bytes", f.bytes));
+    }
+    if let Some(t) = &f.title {
+        parts.push(format!("\"{}\"", clean(t)));
+    }
+    parts.join(" · ")
+}
+
+/// One row per probed bot on the first probed page: token, result, status, bytes, title.
+pub(super) fn probe_rows(r: &ProbeReport) -> Vec<[String; 5]> {
+    let Some(page) = r.urls.first() else {
+        return Vec::new();
+    };
+    page.results
+        .iter()
+        .map(|res| {
+            let f = res.fetch.as_ref();
+            [
+                res.token.clone(),
+                verdict_text(&res.verdict),
+                f.and_then(|f| f.status)
+                    .map_or_else(|| "-".to_owned(), |s| s.to_string()),
+                f.filter(|f| f.status.is_some())
+                    .map_or_else(|| "-".to_owned(), |f| f.bytes.to_string()),
+                f.and_then(|f| f.title.as_deref())
+                    .map_or_else(|| "-".to_owned(), clean),
+            ]
+        })
+        .collect()
+}
+
+/// The bots left out of a probe run: those named with their reason, then a count of the crawlers
+/// that are never probed (training, ads, agents).
+pub(super) fn not_probed_lines(r: &ProbeReport) -> Vec<String> {
+    let mut lines: Vec<String> = r
+        .skipped_bots
+        .iter()
+        .filter_map(|s| {
+            let why = match s.reason {
+                SkipReason::NoUserAgent => "no documented user agent",
+                SkipReason::VerifiedSearchEngine => "verified search engine",
+                SkipReason::NotProbedPurpose => return None,
+            };
+            Some(format!("{}: {why}", s.token))
+        })
+        .collect();
+    let others = r
+        .skipped_bots
+        .iter()
+        .filter(|s| s.reason == SkipReason::NotProbedPurpose)
+        .count();
+    if others > 0 {
+        lines.push(format!(
+            "{others} other crawlers (training, ads, agents) are never probed"
+        ));
+    }
+    lines
+}
+
+/// Why a run stopped early, in words.
+pub(super) fn probe_stop_text(r: &ProbeReport) -> Option<&'static str> {
+    use codoseo_geo::probe::ProbeStop;
+    r.stop.map(|s| match s {
+        ProbeStop::Budget => "stopped early: time budget used up",
+        ProbeStop::RequestCap => "stopped early: request cap reached",
+        ProbeStop::Cancelled => "stopped early: cancelled",
+    })
+}
+
+/// The probes saved in an audit's AI access section (`crawl --probes`).
+pub(super) fn audit_probes(audit: &Audit) -> Option<ProbeReport> {
+    let probes = audit.ai_access.as_ref()?.get("report")?.get("probes")?;
+    serde_json::from_value(probes.clone()).ok()
+}
+
+/// `Synthetic fetch check: 3 pages × 13 bots, 2 results worse than CodoSEObot (45 requests)`.
+pub(super) fn probe_summary_line(r: &ProbeReport) -> String {
+    let worse = r
+        .urls
+        .iter()
+        .flat_map(|u| &u.results)
+        .filter(|res| res.verdict.is_positive())
+        .count();
+    let pages = r.urls.len();
+    format!(
+        "Synthetic fetch check: {pages} page{} × {} bots, {worse} result{} worse than CodoSEObot ({} requests)",
+        if pages == 1 { "" } else { "s" },
+        r.bots.len(),
+        if worse == 1 { "" } else { "s" },
+        r.requests
+    )
 }
 
 pub(super) fn one_line(text: &str) -> String {

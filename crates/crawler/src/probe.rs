@@ -13,13 +13,18 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use codoseo_core::crawl::{AddressPolicy, PROBE_FROM, Politeness, USER_AGENT};
+use codoseo_core::check::IssueBits;
+use codoseo_core::crawl::{AddressPolicy, PROBE_FROM, Politeness, SitemapSummary, USER_AGENT};
+use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
+use codoseo_core::page::{Indexability, PageFields, PageRecord};
+use codoseo_core::url::url_hash;
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeBot, ProbeFetch, ProbePlan,
-    ProbeReport, ProbeResult, ProbeStop, ProbedUrl, Verdict, classify, detect_challenge,
-    page_title, robots_skips,
+    ProbeReport, ProbeResult, ProbeStop, ProbedUrl, SkipReason, Verdict, candidates, classify,
+    detect_challenge, page_title, plan_probes, robots_skips,
 };
-use codoseo_geo::report::AccessReport;
+use codoseo_geo::report::{AccessReport, build_report, important_urls};
+use codoseo_geo::robots::RobotsTxt;
 use reqwest::header::{FROM, HeaderMap, HeaderValue, USER_AGENT as USER_AGENT_HEADER};
 use tokio::sync::Semaphore;
 use tokio::time::{Instant, sleep};
@@ -27,6 +32,7 @@ use url::Url;
 
 use crate::fetch::{FetchError, FetchResult, Fetcher, FetcherConfig, is_html};
 use crate::politeness::{Limiter, retry_after_of};
+use crate::robots::fetch_robots;
 
 /// The shortest gap between two probe requests.
 pub const DEFAULT_MIN_GAP: Duration = Duration::from_millis(500);
@@ -350,6 +356,178 @@ fn probe_fetch(
         challenge: detect_challenge(r.status, &headers, body),
         retried,
     }
+}
+
+// ---- One page on its own --------------------------------------------------------------------
+
+/// Budget and request cap for a single-page run (`codoseo probe`, the local MCP's
+/// `probe_ai_fetch`): the self-hosted caps, far more than one page needs.
+pub const PAGE_PROBE_BUDGET: Duration = Duration::from_secs(180);
+pub const PAGE_PROBE_MAX_REQUESTS: u16 = 160;
+/// The environment variable that overrides the `From` header on self-run probes.
+pub const PROBE_FROM_ENV: &str = "CODOSEO_PROBE_FROM";
+
+/// The `From` header for probes run by the CLI or the local MCP server: `CODOSEO_PROBE_FROM`
+/// when set, else [`PROBE_FROM`].
+pub fn probe_from_env() -> String {
+    std::env::var(PROBE_FROM_ENV)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| PROBE_FROM.to_owned())
+}
+
+/// The probe candidates named in `wanted` (any case), in registry order. An unknown token, one
+/// that is never probed, or an empty list is an error that lists the valid tokens.
+pub fn select_bots(wanted: &[String]) -> Result<Vec<ProbeBot>, String> {
+    let (bots, skipped) = candidates();
+    let valid = bots
+        .iter()
+        .map(|b| b.token.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if wanted.iter().all(|w| w.trim().is_empty()) {
+        return Err(format!("no bots given; probeable bots: {valid}"));
+    }
+    for w in wanted.iter().map(|w| w.trim()).filter(|w| !w.is_empty()) {
+        if bots.iter().any(|b| b.token.eq_ignore_ascii_case(w)) {
+            continue;
+        }
+        let why = match skipped.iter().find(|s| s.token.eq_ignore_ascii_case(w)) {
+            Some(s) => format!(
+                "{} is not probed ({})",
+                s.token,
+                match s.reason {
+                    SkipReason::NoUserAgent => "its operator documents no full user agent",
+                    SkipReason::VerifiedSearchEngine =>
+                        "a verified search engine, refused from any other address",
+                    SkipReason::NotProbedPurpose =>
+                        "only search and user-triggered fetchers are probed",
+                }
+            ),
+            None => format!("unknown bot {w}"),
+        };
+        return Err(format!("{why}; probeable bots: {valid}"));
+    }
+    Ok(bots
+        .into_iter()
+        .filter(|b| {
+            wanted
+                .iter()
+                .any(|w| b.token.eq_ignore_ascii_case(w.trim()))
+        })
+        .collect())
+}
+
+/// A single page probed on its own: an access report over just that page (and the home page,
+/// unrequested, when the page is not it) with the probes in [`AccessReport::probes`].
+#[derive(Debug, Clone)]
+pub struct PageProbe {
+    pub report: AccessReport,
+}
+
+impl PageProbe {
+    /// The probe run; always present on a `PageProbe`.
+    pub fn probes(&self) -> &ProbeReport {
+        self.report
+            .probes
+            .as_ref()
+            .expect("a PageProbe always carries its probes")
+    }
+
+    /// The probed page's URL.
+    pub fn page_url(&self) -> &str {
+        self.probes()
+            .urls
+            .first()
+            .and_then(|u| self.report.important.get(usize::from(u.url)))
+            .map_or("", |u| u.url.as_str())
+    }
+}
+
+/// Probes `url` alone with every candidate bot, or the `bots` subset (see [`select_bots`]): reads
+/// the site's robots.txt, skips what it disallows, and compares each bot with a CodoSEObot
+/// baseline. The page itself is not fetched beforehand: the baseline says whether it is an HTML
+/// 200. Errors are messages for the user: bad bot names, an unreadable robots.txt.
+pub async fn probe_page(
+    url: &Url,
+    bots: Option<&[String]>,
+    address_policy: AddressPolicy,
+    from: &str,
+    min_gap: Duration,
+) -> Result<PageProbe, String> {
+    let selected = bots.map(select_bots).transpose()?;
+    let mut url = url.clone();
+    url.set_fragment(None);
+    let origin = url
+        .join("/")
+        .map_err(|e| format!("not a site address: {e}"))?;
+
+    let fetcher = Fetcher::new(FetcherConfig::new(address_policy)).map_err(|e| e.to_string())?;
+    let (_, file) = fetch_robots(&fetcher, &url)
+        .await
+        .map_err(|e| format!("could not fetch robots.txt: {e}"))?;
+    let robots = RobotsTxt::from_response(Some(file.status), file.body.as_bytes());
+
+    // A one-page crawl standing in for the real one: the page counts as an HTML 200 so the plan
+    // takes it, and the baseline then shows what it really is.
+    let page = PageRecord {
+        url_hash: url_hash(&url),
+        url: url.clone(),
+        status: 200,
+        redirect_chain: Vec::new(),
+        response_ms: 0,
+        size_bytes: 0,
+        content_type: Some("text/html".to_owned()),
+        depth: Some(0),
+        in_sitemap: false,
+        indexability: Indexability::Indexable,
+        fields: PageFields::default(),
+        inlinks: 0,
+        outlinks_internal: 0,
+        outlinks_external: 0,
+        issues: IssueBits::default(),
+        key_hash: 0,
+        redirect_target: None,
+        outlinks_nofollow: 0,
+        error: None,
+    };
+    let robots_status = file.status;
+    let out = CrawlOutput {
+        origin: origin.clone(),
+        pages: vec![page],
+        links: LinkGraph::default(),
+        robots: Some(file),
+        sitemap: SitemapSummary::default(),
+        stop: StopReason::Completed,
+        duration_ms: 0,
+        signals: SiteSignals::default(),
+    };
+    let important = important_urls(&out.pages, &origin, &HashSet::new());
+    let mut report = build_report(&out, &important);
+    if !report.has_verdicts() {
+        return Err(format!(
+            "robots.txt answered HTTP {robots_status}, so crawlers are told to stay away for now; \
+             nothing was probed"
+        ));
+    }
+    let Some(mut plan) = plan_probes(&report, robots.as_ref(), 1) else {
+        return Err("nothing to probe on this page".to_owned());
+    };
+    if let Some(selected) = selected {
+        plan.bots = selected;
+    }
+    let mut cfg = ProbeConfig::new(
+        &report,
+        plan,
+        address_policy,
+        PAGE_PROBE_BUDGET,
+        PAGE_PROBE_MAX_REQUESTS,
+    );
+    cfg.from = from.to_owned();
+    cfg.min_gap = min_gap;
+    report.probes = Some(run_probes(cfg).await);
+    Ok(PageProbe { report })
 }
 
 #[cfg(test)]

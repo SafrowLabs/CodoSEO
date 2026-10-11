@@ -13,7 +13,7 @@ use codoseo_core::crawl::{AddressPolicy, PROBE_FROM, RobotsFile, SitemapSummary,
 use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, PageFields, PageRecord};
 use codoseo_core::url::url_hash;
-use codoseo_crawler::probe::{ProbeConfig, run_probes};
+use codoseo_crawler::probe::{ProbeConfig, probe_page, run_probes, select_bots};
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, ProbeBot, ProbePlan, ProbeReport, ProbeResult, ProbeStop,
     Vendor, Verdict, candidates, plan_probes,
@@ -519,4 +519,106 @@ async fn the_address_guard_holds_on_every_probe() {
             .iter()
             .all(|r| r.fetch.is_none() && !r.verdict.is_positive())
     );
+}
+
+// ---- One page on its own (`codoseo probe`, the local MCP's `probe_ai_fetch`) ----------------
+
+fn tokens(list: &[&str]) -> Vec<String> {
+    list.iter().map(|t| (*t).to_owned()).collect()
+}
+
+#[test]
+fn select_bots_matches_tokens_case_insensitively_in_registry_order() {
+    let picked = select_bots(&tokens(&["perplexitybot", "OAI-SearchBot"])).expect("known tokens");
+    let names: Vec<&str> = picked.iter().map(|b| b.token.as_str()).collect();
+    assert_eq!(names, [OAI, PPLX]);
+    assert_eq!(picked[0].user_agent, bot(OAI).user_agent);
+}
+
+#[test]
+fn select_bots_rejects_unknown_and_unprobeable_tokens_listing_the_valid_ones() {
+    let err = select_bots(&tokens(&["OAI-SearchBot", "NoSuchBot"])).unwrap_err();
+    assert!(err.contains("NoSuchBot"), "{err}");
+    for valid in [OAI, PPLX, DUCK] {
+        assert!(err.contains(valid), "{err}");
+    }
+    let err = select_bots(&tokens(&["Googlebot"])).unwrap_err();
+    assert!(err.contains("Googlebot"), "{err}");
+    assert!(err.contains("verified search engine"), "{err}");
+    let err = select_bots(&tokens(&["GPTBot"])).unwrap_err();
+    assert!(
+        err.contains("GPTBot") && err.contains("not probed"),
+        "{err}"
+    );
+    assert!(select_bots(&[]).is_err(), "an empty list is a mistake");
+}
+
+#[tokio::test]
+async fn probe_page_probes_one_page_against_its_robots_txt() {
+    let site = SiteBuilder::new()
+        .robots(
+            200,
+            "User-agent: DuckAssistBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n",
+        )
+        .every_path(Page::by_user_agent(
+            vec![(
+                PPLX,
+                Page::status(403, "<title>Just a moment...</title>")
+                    .header("cf-mitigated", "challenge"),
+            )],
+            ok_page("Pricing"),
+        ))
+        .start()
+        .await;
+    let url = site.url("/pricing");
+    let probed = probe_page(
+        &url,
+        Some(&tokens(&[OAI, PPLX, DUCK])),
+        AddressPolicy::AllowPrivate,
+        PROBE_FROM,
+        Duration::from_millis(20),
+    )
+    .await
+    .expect("a probe");
+    let probes = probed.report.probes.as_ref().expect("probes in the report");
+    assert!(probes.synthetic);
+    assert_eq!(probes.bots, [OAI, PPLX, DUCK]);
+    assert_eq!(probes.urls.len(), 1);
+    let idx = usize::from(probes.urls[0].url);
+    assert_eq!(probed.report.important[idx].url, url.as_str());
+    assert_eq!(verdict(probes, 0, OAI), Verdict::Same);
+    assert_eq!(
+        verdict(probes, 0, PPLX),
+        Verdict::Challenged {
+            vendor: Vendor::Cloudflare
+        }
+    );
+    assert_eq!(verdict(probes, 0, DUCK), Verdict::SkippedRobots);
+    assert_eq!(site.hits_from(DUCK), 0);
+    // Only the page: the home page is not requested.
+    assert!(
+        site.requests().iter().all(|r| r.path != "/"),
+        "{:?}",
+        site.requests()
+    );
+}
+
+#[tokio::test]
+async fn probe_page_refuses_when_robots_txt_gives_no_verdicts() {
+    let site = SiteBuilder::new()
+        .robots(503, "down")
+        .every_path(ok_page("Home"))
+        .start()
+        .await;
+    let err = probe_page(
+        &site.url("/"),
+        None,
+        AddressPolicy::AllowPrivate,
+        PROBE_FROM,
+        Duration::from_millis(20),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.contains("503"), "{err}");
+    assert_eq!(site.hits_from(OAI), 0);
 }

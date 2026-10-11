@@ -1,4 +1,4 @@
-//! The 9 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
+//! The 10 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
 //! `wait_timeout` (50 s in production, shorter in tests) before reporting "still
 //! running" with an `audit_id` the caller polls with `get_audit`.
 
@@ -70,6 +70,15 @@ struct CheckRobotsRequest {
     url: String,
     /// The path to test (default: the URL's own path).
     path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ProbeAiFetchRequest {
+    /// The page to probe.
+    url: String,
+    /// Only these bot tokens, e.g. ["OAI-SearchBot", "PerplexityBot"] (default: every probeable
+    /// AI search and user-triggered bot).
+    bots: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -247,6 +256,22 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
         to_json(&report)
     }
 
+    #[tool(
+        description = "Synthetic check: fetch one page now as each AI search and user-triggered bot (OAI-SearchBot, ChatGPT-User, PerplexityBot, ...) with its documented user agent, and compare each response with a CodoSEObot baseline, to catch a CDN or firewall that blocks, challenges or redirects AI bots robots.txt lets in. Pairs robots.txt disallows are not requested. Returns a one-line summary starting \"Synthetic check:\", each bot's verdict and the findings. The requests come from this machine, so real bots may be treated differently."
+    )]
+    async fn probe_ai_fetch(
+        &self,
+        Parameters(ProbeAiFetchRequest { url, bots }): Parameters<ProbeAiFetchRequest>,
+    ) -> Result<String, String> {
+        let url = parse_url(&url)?;
+        let report = self
+            .backend
+            .probe_ai_fetch(url, bots)
+            .await
+            .map_err(|e| e.to_string())?;
+        to_json(&report)
+    }
+
     #[tool(description = "Follow a URL's redirects and show each hop.")]
     async fn check_redirects(
         &self,
@@ -329,7 +354,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_has_all_9_tools_with_descriptions() {
+    async fn tools_list_has_all_10_tools_with_descriptions() {
         let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
         let client = serve(CodoseoMcp::new(backend)).await;
         let tools = client.peer().list_tools(None).await.unwrap();
@@ -344,10 +369,11 @@ mod tests {
             "check_ai_access",
             "check_redirects",
             "compare_audits",
+            "probe_ai_fetch",
         ] {
             assert!(names.contains(&expected), "missing tool {expected}");
         }
-        assert_eq!(tools.tools.len(), 9);
+        assert_eq!(tools.tools.len(), 10);
         for t in &tools.tools {
             assert!(
                 t.description.as_deref().is_some_and(|d| !d.is_empty()),
@@ -355,6 +381,103 @@ mod tests {
                 t.name
             );
         }
+    }
+
+    #[tokio::test]
+    async fn probe_ai_fetch_schema_takes_a_url_and_optional_bots() {
+        let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
+        let client = serve(CodoseoMcp::new(backend)).await;
+        let tools = client.peer().list_tools(None).await.unwrap();
+        let tool = tools
+            .tools
+            .iter()
+            .find(|t| t.name == "probe_ai_fetch")
+            .expect("probe_ai_fetch is listed");
+        assert!(
+            tool.description
+                .as_deref()
+                .is_some_and(|d| d.starts_with("Synthetic check"))
+        );
+        let schema = Value::Object((*tool.input_schema).clone());
+        assert_eq!(schema["required"], json!(["url"]), "{schema}");
+        assert_eq!(schema["properties"]["url"]["type"], "string", "{schema}");
+        let bots = &schema["properties"]["bots"];
+        assert!(
+            bots["type"] == json!(["array", "null"]) || bots["type"] == "array",
+            "{schema}"
+        );
+        assert_eq!(bots["items"]["type"], "string", "{schema}");
+    }
+
+    #[tokio::test]
+    async fn probe_ai_fetch_returns_the_report_and_a_synthetic_summary() {
+        let site = SiteBuilder::new()
+            .robots(200, "User-agent: *\nAllow: /\n")
+            .page(
+                "/",
+                Page::by_user_agent(
+                    vec![(
+                        "PerplexityBot",
+                        Page::status(403, "<title>Just a moment...</title>")
+                            .header("cf-mitigated", "challenge"),
+                    )],
+                    Page::html(&codoseo_testkit::html_page("Home", &[])),
+                ),
+            )
+            .start()
+            .await;
+        let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
+        let client = serve(CodoseoMcp::new(backend)).await;
+        let result = client
+            .peer()
+            .call_tool(
+                CallToolRequestParams::new("probe_ai_fetch").with_arguments(args(json!({
+                    "url": site.url("/").to_string(),
+                    "bots": ["OAI-SearchBot", "PerplexityBot"],
+                }))),
+            )
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_str(&text_of(&result)).unwrap();
+        let summary = body["summary"].as_str().unwrap();
+        assert!(summary.starts_with("Synthetic check:"), "{summary}");
+        assert!(
+            summary.contains("PerplexityBot (Cloudflare challenge)"),
+            "{summary}"
+        );
+        assert_eq!(body["synthetic"], true);
+        assert_eq!(body["url"], site.url("/").as_str());
+        assert_eq!(body["bots"], json!(["OAI-SearchBot", "PerplexityBot"]));
+        assert_eq!(
+            body["urls"][0]["results"][1]["verdict"]["kind"],
+            "challenged"
+        );
+        assert_eq!(body["findings"][0]["kind"], "fetch_blocked");
+        assert_eq!(body["findings"][0]["grade"], "B");
+
+        // A bad bot name is an error naming the valid ones; nothing is fetched.
+        let before = site.hits();
+        let err = client
+            .peer()
+            .call_tool(
+                CallToolRequestParams::new("probe_ai_fetch").with_arguments(args(json!({
+                    "url": site.url("/").to_string(),
+                    "bots": ["Googlebot"],
+                }))),
+            )
+            .await;
+        let text = match err {
+            Ok(r) => {
+                assert_eq!(r.is_error, Some(true));
+                text_of(&r)
+            }
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            text.contains("Googlebot") && text.contains("OAI-SearchBot"),
+            "{text}"
+        );
+        assert_eq!(site.hits(), before);
     }
 
     #[tokio::test]
@@ -542,6 +665,14 @@ mod tests {
             &self,
             _url: Url,
         ) -> Result<crate::types::RedirectReport, crate::backend::BackendError> {
+            unimplemented!("not exercised by this test")
+        }
+
+        async fn probe_ai_fetch(
+            &self,
+            _url: Url,
+            _bots: Option<Vec<String>>,
+        ) -> Result<crate::types::AiProbeReport, crate::backend::BackendError> {
             unimplemented!("not exercised by this test")
         }
 
