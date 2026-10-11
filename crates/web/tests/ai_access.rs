@@ -1009,10 +1009,7 @@ type Outcome = dyn Fn(&str, usize) -> Option<(Verdict, ProbeFetch)>;
 /// The probe report for `report` on up to three pages: `outcome(token, page index)` says what
 /// each bot got, `None` for the same page as CodoSEObot. Pairs robots.txt disallows are skipped,
 /// as the executor does.
-fn probes_with(
-    report: &AccessReport,
-    outcome: &Outcome,
-) -> ProbeReport {
+fn probes_with(report: &AccessReport, outcome: &Outcome) -> ProbeReport {
     let plan = plan_probes(report, None, 3).expect("a probe plan");
     let mut out = ProbeReport::new("hello@codoseo.com", &plan);
     for (i, &url) in plan.urls.iter().enumerate() {
