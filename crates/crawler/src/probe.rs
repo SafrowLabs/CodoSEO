@@ -464,7 +464,7 @@ pub async fn probe_page(
         .map_err(|e| format!("not a site address: {e}"))?;
 
     let fetcher = Fetcher::new(FetcherConfig::new(address_policy)).map_err(|e| e.to_string())?;
-    let (_, file) = fetch_robots(&fetcher, &url)
+    let (rules, file) = fetch_robots(&fetcher, &url)
         .await
         .map_err(|e| format!("could not fetch robots.txt: {e}"))?;
     let robots = RobotsTxt::from_response(Some(file.status), file.body.as_bytes());
@@ -510,6 +510,14 @@ pub async fn probe_page(
             "robots.txt answered HTTP {robots_status}, so crawlers are told to stay away for now; \
              nothing was probed"
         ));
+    }
+    // The baseline is a request as CodoSEObot, so CodoSEObot's own rules apply to it, as in a
+    // crawl.
+    if !rules.allowed(url.as_str()) {
+        return Err(
+            "robots.txt disallows CodoSEObot on this page, so it is not fetched; nothing was probed"
+                .to_owned(),
+        );
     }
     let Some(mut plan) = plan_probes(&report, robots.as_ref(), 1) else {
         return Err("nothing to probe on this page".to_owned());

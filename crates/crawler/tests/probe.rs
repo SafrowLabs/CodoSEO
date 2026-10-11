@@ -622,3 +622,27 @@ async fn probe_page_refuses_when_robots_txt_gives_no_verdicts() {
     assert!(err.contains("503"), "{err}");
     assert_eq!(site.hits_from(OAI), 0);
 }
+
+#[tokio::test]
+async fn probe_page_refuses_a_page_robots_txt_keeps_codoseobot_from() {
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: CodoSEObot\nDisallow: /private\n")
+        .every_path(ok_page("Private"))
+        .start()
+        .await;
+    let err = probe_page(
+        &site.url("/private/report"),
+        None,
+        AddressPolicy::AllowPrivate,
+        PROBE_FROM,
+        Duration::from_millis(20),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.contains("CodoSEObot"), "{err}");
+    assert!(
+        site.requests().iter().all(|r| r.path == "/robots.txt"),
+        "{:?}",
+        site.requests()
+    );
+}
