@@ -20,6 +20,7 @@ use crate::declared::{
     parse_content_usage, parse_tdmrep,
 };
 use crate::eligibility::{Cause, DirectiveSlug, Effect, EngineId, engines, record_effect};
+use crate::probe::ProbeReport;
 use crate::registry::{Honours, Purpose, registry};
 use crate::robots::{
     AgentRules, ContentSignal, ContentUsage, GroupMatch, MatchedRule, Pair, RobotsAvailability,
@@ -291,6 +292,10 @@ pub struct AccessReport {
     pub engines: Vec<EngineAccess>,
     #[serde(default)]
     pub declared: Declared,
+    /// The synthetic fetch probes run after the crawl; `None` when none ran (older reports, quick
+    /// audits, probes switched off or not possible).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probes: Option<ProbeReport>,
 }
 
 impl EngineAccess {
@@ -496,6 +501,7 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         rules,
         engines: engines_out,
         declared: declared(out, readable_robots, home),
+        probes: None,
     }
 }
 

@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use codoseo_geo::{Bot, Honours, Purpose, Registry, registry, registry_json};
+use codoseo_geo::probe::{candidates, is_probe_candidate};
+use codoseo_geo::{Honours, Purpose, Registry, registry, registry_json};
 use serde_json::Value;
 
 /// Parses `YYYY-MM-DD` into (y, m, d), rejecting impossible dates.
@@ -51,21 +52,11 @@ fn parses_and_is_large_enough() {
     assert!(serde_json::from_str::<Value>(registry_json()).is_ok());
 }
 
-/// Bots the synthetic fetch probes may impersonate: verified search engines are never probed, so a
-/// documented user agent for them has no use.
-const NEVER_PROBE: [&str; 3] = ["Googlebot", "Bingbot", "Applebot"];
-
 /// Tokens outside the probe candidates that may still carry a `user_agent`, each with a reason.
 const EXTRA_USER_AGENTS: [&str; 0] = [];
 
 /// The longest `user_agent` the lint accepts.
 const MAX_USER_AGENT: usize = 512;
-
-fn is_probe_candidate(b: &Bot) -> bool {
-    matches!(b.purpose, Purpose::Search | Purpose::UserFetch)
-        && b.crawls
-        && !NEVER_PROBE.iter().any(|n| n.eq_ignore_ascii_case(&b.token))
-}
 
 const OPERATORS: [&str; 11] = [
     "OpenAI",
@@ -295,6 +286,10 @@ fn only_probe_candidates_document_a_user_agent() {
         .collect();
     with.sort_unstable();
     assert!(with.len() >= 6, "{with:?}");
+    // Every documented user agent is probed: the probes' candidate list is the one the lint uses.
+    let mut probed: Vec<String> = candidates().0.into_iter().map(|b| b.token).collect();
+    probed.sort_unstable();
+    assert_eq!(probed, with);
     let ua = |t: &str| registry().bot(t).unwrap().user_agent.as_deref();
     assert_eq!(
         ua("ChatGPT-User"),
