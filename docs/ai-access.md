@@ -32,7 +32,7 @@ It is a **synthetic** check: the requests come from CodoSEO's address, not from 
 
 Every probed bot is fetched whatever your intent, so a change of intent can re-evaluate from the stored results. Only bots whose intent is **Allow** become findings: a bot you want blocked, or have no preference about, being turned away is not reported.
 
-**robots.txt and pacing.** A bot is never sent to a page robots.txt disallows for its token; the result says "Not probed: robots.txt". Probes run only when robots.txt gave verdicts, one request at a time on one connection, at least 500 ms apart, or the longest `Crawl-delay` among CodoSEObot and the probed tokens when that is longer (capped at 10 seconds, like the crawler). A page is probed for every bot or not at all.
+**robots.txt and pacing.** A bot is never sent to a page robots.txt disallows for its token; the result says "Not probed: robots.txt". Probes run only when robots.txt gave verdicts, one request at a time on one connection, at least 500 ms apart, or the longest `Crawl-delay` among CodoSEObot and the probed tokens when that is longer (capped at 10 seconds, like the crawler).
 
 **Retries and confirmation.** A 429, a 503, a timeout or a connection error is retried once, after `Retry-After` (at most 10 seconds; 2 seconds when there is none). A result worse than the baseline is fetched a second time the first time that bot meets that cause in a run; when the two fetches disagree the result is inconclusive ("the re-fetch disagreed"), not a finding. When the request cap or the time budget leaves no room for that second fetch, the result is inconclusive too ("no room left to confirm"): a grade B finding always rests on two fetches.
 
@@ -46,7 +46,7 @@ Every probed bot is fetched whatever your intent, so a change of intent can re-e
 | Agency | 5 | at most 120 | 120 s |
 | Self-hosted | 5 (`CODOSEO_PROBE_URLS`, up to 10) | at most 160 | 180 s |
 
-A page is started only when the requests left and the time left cover all of its requests; otherwise the run stops and says why ("time budget used up" or "request cap reached"). Probes never run after a failed crawl, never touch the health score, and never fail a crawl: if anything goes wrong the report simply has no probes.
+A page is started only when the requests left and the time left cover all of its requests, counting each request as the gap or the site's average answer time so far, whichever is longer; otherwise the run stops and says why ("time budget used up" or "request cap reached"). Slow answers on the last page can still run over, so a run is stopped outright a minute past its budget: the pages that finished are kept, the bots not yet answered on the page under way are inconclusive ("the time limit came first"), and the run says "time budget used up". Probes never run after a failed crawl, never touch the health score, and never fail a crawl: if anything goes wrong the report simply has no probes.
 
 **Verdicts.** Each bot's answer is compared with the baseline; the first rule that matches wins.
 

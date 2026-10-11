@@ -514,6 +514,8 @@ pub enum InconclusiveReason {
     /// A worse result the request cap or the time budget left no room to confirm with a second
     /// fetch. Grade B means confirmed, so a single fetch is not reported.
     Unconfirmed,
+    /// The run's time limit came before this bot's answer on the page.
+    Stopped,
 }
 
 /// What one probe says about one bot on one page, compared with the baseline.
@@ -719,6 +721,8 @@ pub struct ProbedUrl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeStop {
+    /// The time ran out: the budget had no room for the next URL, or the run's deadline came in
+    /// the middle of one (whose unanswered bots are then [`InconclusiveReason::Stopped`]).
     Budget,
     RequestCap,
     Cancelled,
@@ -738,7 +742,8 @@ pub struct ProbeReport {
     pub bots: Vec<String>,
     #[serde(default)]
     pub skipped_bots: Vec<SkippedBot>,
-    /// The URLs probed, in plan order; a URL is probed for every bot or not at all.
+    /// The URLs probed, in plan order. Each lists every bot; a URL the deadline cut short
+    /// lists the bots it did not reach as [`InconclusiveReason::Stopped`].
     #[serde(default)]
     pub urls: Vec<ProbedUrl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

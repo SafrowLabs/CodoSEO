@@ -277,6 +277,7 @@ pub(super) fn verdict_text(v: &Verdict) -> String {
                 InconclusiveReason::ProbeError => "no response",
                 InconclusiveReason::Unstable => "the re-fetch disagreed",
                 InconclusiveReason::Unconfirmed => "no room left to confirm",
+                InconclusiveReason::Stopped => "the time limit came first",
             }
         ),
         Verdict::SkippedRobots => "Not probed: robots.txt".to_owned(),

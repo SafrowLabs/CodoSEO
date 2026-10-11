@@ -16,10 +16,12 @@ use tracing::Instrument;
 
 /// The most pages `CODOSEO_PROBE_URLS` may ask for.
 pub const MAX_PROBE_URLS: u8 = 10;
-/// How long past its budget a probe run may go before it is abandoned. The executor checks the
-/// budget between pages only, so the last page's requests (each with its own timeout and maybe a
-/// retry) can run over.
-const OVERRUN: Duration = Duration::from_secs(60);
+/// How long past its own deadline (the budget plus [`MAX_OVERRUN`]) a probe run may go before it
+/// is abandoned. The run stops itself at the deadline, keeping the pages that finished; this is
+/// only a backstop.
+///
+/// [`MAX_OVERRUN`]: codoseo_crawler::probe::MAX_OVERRUN
+const BACKSTOP: Duration = Duration::from_secs(15);
 
 /// How the worker probes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,8 +101,9 @@ impl ProbeSettings {
 }
 
 /// Probes up to `urls` important pages of `report` (built from `out`) within the budget and
-/// request cap of `limits`. `None` when there is nothing to probe (no robots verdicts, no HTML 200
-/// page), or when the run panicked or overran its budget by more than a minute.
+/// request cap of `limits`. A run still going a minute past its budget stops there and keeps the
+/// pages that finished, with `stop` set to `budget`. `None` when there is nothing to probe (no
+/// robots verdicts, no HTML 200 page), or when the run panicked or did not stop at its deadline.
 pub async fn probe(
     report: &AccessReport,
     out: &CrawlOutput,
@@ -128,8 +131,9 @@ pub async fn probe(
         )
     };
     // Its own task, so a panic in the executor is caught here instead of failing the crawl.
+    let backstop = cfg.deadline + BACKSTOP;
     let mut run = tokio::spawn(run_probes(cfg).in_current_span());
-    match tokio::time::timeout(limits.probe_budget + OVERRUN, &mut run).await {
+    match tokio::time::timeout(backstop, &mut run).await {
         Ok(Ok(probes)) => {
             metrics::probe_requests(u64::from(probes.requests));
             tracing::info!(
@@ -146,7 +150,9 @@ pub async fn probe(
         }
         Err(_elapsed) => {
             run.abort();
-            tracing::warn!("synthetic probe run overran its budget; the report keeps no probes");
+            tracing::warn!(
+                "synthetic probe run did not stop at its deadline; the report keeps no probes"
+            );
             None
         }
     }

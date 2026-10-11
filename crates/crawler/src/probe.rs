@@ -5,9 +5,10 @@
 //!
 //! Every request carries the same headers apart from `User-Agent`: the client defaults plus
 //! `From`. Requests go one at a time through one [`Limiter`], at least `min_gap` apart or the
-//! robots.txt `Crawl-delay` (capped at 10 s) when that is longer. A URL is probed for every bot or
-//! not at all: the budget and the request cap are checked before each URL, and retries and
-//! confirmations only use what is left once the URL's planned requests are kept aside.
+//! robots.txt `Crawl-delay` (capped at 10 s) when that is longer. The budget and the request cap
+//! are checked before each URL, which is started only when both cover all of its requests, and
+//! retries and confirmations only use what is left once the URL's planned requests are kept
+//! aside. A hard deadline past the budget stops the run even inside a URL, keeping what finished.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -42,6 +43,10 @@ pub const MAX_PROBE_WAIT: Duration = Duration::from_secs(10);
 pub const DEFAULT_RETRY_WAIT: Duration = Duration::from_secs(2);
 /// Per-request timeout: short, as a probe run has a budget of a minute or two.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long past its budget [`ProbeConfig::new`] lets a run go before its deadline. The budget is
+/// checked between URLs only, so the last URL's requests (each with its own timeout and maybe a
+/// retry) can run over.
+pub const MAX_OVERRUN: Duration = Duration::from_secs(60);
 
 /// One probe run.
 #[derive(Debug, Clone)]
@@ -56,8 +61,12 @@ pub struct ProbeConfig {
     pub from: String,
     pub address_policy: AddressPolicy,
     /// Wall time for the run; a URL is started only when the rest covers its requests at the
-    /// current gap.
+    /// current gap or the site's average answer time, whichever is longer.
     pub budget: Duration,
+    /// Wall time after which the run stops even inside a URL: the request under way is dropped,
+    /// the bots of that URL still unanswered are [`InconclusiveReason::Stopped`], and the URLs
+    /// that finished are kept. `stop` is then [`ProbeStop::Budget`].
+    pub deadline: Duration,
     /// Requests for the whole run, retries and confirmations included.
     pub max_requests: u16,
     pub min_gap: Duration,
@@ -99,6 +108,7 @@ impl ProbeConfig {
             from: PROBE_FROM.to_owned(),
             address_policy,
             budget,
+            deadline: budget + MAX_OVERRUN,
             max_requests,
             min_gap: DEFAULT_MIN_GAP,
             request_timeout: PROBE_TIMEOUT,
@@ -122,13 +132,17 @@ pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
         Ok(f) => f,
         Err(_) => return report,
     };
+    let start = Instant::now();
     let mut run = Run {
         fetcher,
         limiter: limiter(cfg.min_gap, cfg.plan.crawl_delay),
         from,
-        deadline: Instant::now() + cfg.budget,
+        deadline: start + cfg.budget,
+        hard_deadline: start + cfg.deadline,
         max_requests: cfg.max_requests,
         requests: 0,
+        answered: 0,
+        answer_time: Duration::ZERO,
     };
     let disallowed: HashSet<(u16, &str)> = cfg
         .disallowed
@@ -153,19 +167,23 @@ pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
             report.stop = Some(ProbeStop::RequestCap);
             break;
         }
-        let need = run.limiter.interval().saturating_mul(u32::from(planned));
+        let need = run.per_request().saturating_mul(u32::from(planned));
         if run.deadline.saturating_duration_since(Instant::now()) < need {
             report.stop = Some(ProbeStop::Budget);
             break;
         }
 
         let mut left = wanted.len() as u16;
-        let baseline = run.fetch(url, USER_AGENT, left).await;
+        let Some(baseline) = run.fetch_by_deadline(url, USER_AGENT, left).await else {
+            report.stop = Some(ProbeStop::Budget);
+            break;
+        };
         // The baseline against itself: inconclusive exactly when it can't serve as a baseline.
         let base_verdict = classify(url.as_str(), &baseline, &baseline);
         let usable = !matches!(base_verdict, Verdict::Inconclusive { .. });
 
         let mut results = Vec::with_capacity(cfg.plan.bots.len());
+        let mut stopped = false;
         for bot in &cfg.plan.bots {
             if disallowed.contains(&(idx, bot.token.as_str())) {
                 results.push(ProbeResult {
@@ -184,7 +202,22 @@ pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
                 });
                 continue;
             }
-            let mut fetch = run.fetch(url, &bot.user_agent, left).await;
+            let first = if stopped {
+                None
+            } else {
+                run.fetch_by_deadline(url, &bot.user_agent, left).await
+            };
+            let Some(mut fetch) = first else {
+                stopped = true;
+                results.push(ProbeResult {
+                    token: bot.token.clone(),
+                    fetch: None,
+                    verdict: Verdict::Inconclusive {
+                        reason: InconclusiveReason::Stopped,
+                    },
+                });
+                continue;
+            };
             let mut verdict = classify(url.as_str(), &baseline, &fetch);
             if let Some(cause) = verdict.cause_slug()
                 && !confirmed.contains(&(bot.token.clone(), cause))
@@ -200,7 +233,19 @@ pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
                     });
                     continue;
                 }
-                fetch = run.fetch(url, &bot.user_agent, left).await;
+                let Some(second) = run.fetch_by_deadline(url, &bot.user_agent, left).await else {
+                    // The deadline came during the second fetch a finding needs.
+                    stopped = true;
+                    results.push(ProbeResult {
+                        token: bot.token.clone(),
+                        fetch: Some(fetch),
+                        verdict: Verdict::Inconclusive {
+                            reason: InconclusiveReason::Unconfirmed,
+                        },
+                    });
+                    continue;
+                };
+                fetch = second;
                 let again = classify(url.as_str(), &baseline, &fetch);
                 if again.cause_slug() == Some(cause) {
                     confirmed.insert((bot.token.clone(), cause));
@@ -222,6 +267,10 @@ pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
             baseline,
             results,
         });
+        if stopped {
+            report.stop = Some(ProbeStop::Budget);
+            break;
+        }
     }
     report.requests = run.requests;
     report
@@ -252,11 +301,40 @@ struct Run {
     limiter: Limiter,
     from: HeaderValue,
     deadline: Instant,
+    hard_deadline: Instant,
     max_requests: u16,
     requests: u16,
+    /// Requests that got an answer or an error, and the time they took, for the budget.
+    answered: u32,
+    answer_time: Duration,
 }
 
 impl Run {
+    /// What one request costs: the gap, or the site's average answer time when it is slower.
+    fn per_request(&self) -> Duration {
+        let gap = self.limiter.interval();
+        match self.answered {
+            0 => gap,
+            n => gap.max(self.answer_time / n),
+        }
+    }
+
+    /// [`Run::fetch`] unless the hard deadline comes first; `None` when it does.
+    async fn fetch_by_deadline(
+        &mut self,
+        url: &Url,
+        user_agent: &str,
+        reserved: u16,
+    ) -> Option<ProbeFetch> {
+        let deadline = self.hard_deadline;
+        if Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::timeout_at(deadline, self.fetch(url, user_agent, reserved))
+            .await
+            .ok()
+    }
+
     /// Room for one request beyond the plan, with `reserved` planned requests of this URL still
     /// to come, and time left.
     fn can_extra(&self, reserved: u16) -> bool {
@@ -292,7 +370,11 @@ impl Run {
     async fn send(&mut self, url: &Url, headers: &HeaderMap) -> Result<FetchResult, FetchError> {
         let _permit = self.limiter.acquire().await;
         self.requests = self.requests.saturating_add(1);
-        self.fetcher.fetch_with(url, headers, MAX_PROBE_BODY).await
+        let sent = Instant::now();
+        let result = self.fetcher.fetch_with(url, headers, MAX_PROBE_BODY).await;
+        self.answered += 1;
+        self.answer_time += sent.elapsed();
+        result
     }
 }
 

@@ -853,6 +853,7 @@ fn inconclusive_tip(r: InconclusiveReason) -> &'static str {
         InconclusiveReason::Unconfirmed => {
             "Worse than CodoSEObot once, with no time or requests left to confirm it"
         }
+        InconclusiveReason::Stopped => "Not checked: the time limit came first",
     }
 }
 

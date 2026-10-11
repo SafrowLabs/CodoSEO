@@ -62,6 +62,7 @@ fn config(site: &TestSite, paths: &[&str], bots: Vec<ProbeBot>) -> ProbeConfig {
         from: PROBE_FROM.to_owned(),
         address_policy: AddressPolicy::AllowPrivate,
         budget: Duration::from_secs(600),
+        deadline: Duration::from_secs(600),
         max_requests: 1000,
         min_gap: Duration::from_millis(50),
         request_timeout: Duration::from_secs(5),
@@ -346,6 +347,65 @@ async fn the_budget_stops_between_urls_never_inside_one() {
     assert!(report.urls.is_empty());
     assert_eq!(report.requests, 0);
     assert_eq!(site.hits(), 4);
+}
+
+#[tokio::test]
+async fn the_budget_counts_how_long_the_site_takes_to_answer() {
+    // Each answer takes 0.4 s, far more than the 50 ms gap: a page of four requests needs about
+    // 1.6 s, so after the first page the 2.5 s budget has room for none.
+    let site = SiteBuilder::new()
+        .every_path(ok_page("Home").delayed(Duration::from_millis(400)))
+        .start()
+        .await;
+    let mut cfg = config(&site, &["/", "/a", "/b"], bots());
+    cfg.budget = Duration::from_millis(2_500);
+    let start = Instant::now();
+    let report = run_probes(cfg).await;
+    assert_eq!(report.stop, Some(ProbeStop::Budget));
+    assert_eq!(report.urls.len(), 1, "{:?}", start.elapsed());
+    assert_eq!(site.path_hits("/a"), 0);
+    assert!(start.elapsed() < Duration::from_millis(2_500));
+}
+
+#[tokio::test]
+async fn the_deadline_stops_inside_a_page_and_keeps_what_finished() {
+    // PerplexityBot's answers on /a hang; the run's deadline comes while it waits.
+    let site = SiteBuilder::new()
+        .page("/", ok_page("Home"))
+        .page(
+            "/a",
+            Page::by_user_agent(
+                vec![(PPLX, ok_page("A").delayed(Duration::from_secs(4)))],
+                ok_page("A"),
+            ),
+        )
+        .start()
+        .await;
+    let mut cfg = config(&site, &["/", "/a"], bots());
+    cfg.deadline = Duration::from_millis(1_500);
+    let start = Instant::now();
+    let report = run_probes(cfg).await;
+    let took = start.elapsed();
+    assert!(took < Duration::from_millis(2_500), "{took:?}");
+    assert_eq!(report.stop, Some(ProbeStop::Budget));
+    // The first page finished and is kept whole.
+    assert_eq!(report.urls.len(), 2);
+    assert!(
+        report.urls[0]
+            .results
+            .iter()
+            .all(|r| r.verdict == Verdict::Same)
+    );
+    // The second keeps the bot that answered; the rest are inconclusive, not lost.
+    assert_eq!(verdict(&report, 1, OAI), Verdict::Same);
+    let stopped = Verdict::Inconclusive {
+        reason: InconclusiveReason::Stopped,
+    };
+    assert_eq!(verdict(&report, 1, PPLX), stopped);
+    assert_eq!(result(&report, 1, PPLX).fetch, None);
+    assert_eq!(verdict(&report, 1, DUCK), stopped);
+    assert_eq!(site.hits_from(DUCK), 1);
+    assert!(report.conclusive());
 }
 
 #[tokio::test]
