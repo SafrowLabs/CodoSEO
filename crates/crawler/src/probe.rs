@@ -22,7 +22,7 @@ use codoseo_core::url::url_hash;
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeBot, ProbeFetch, ProbePlan,
     ProbeReport, ProbeResult, ProbeStop, ProbedUrl, SkipReason, Verdict, candidates, classify,
-    detect_challenge, page_title, plan_probes, robots_skips,
+    detect_challenge, media_type, page_title, plan_probes, robots_skips,
 };
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::RobotsTxt;
@@ -444,6 +444,7 @@ fn probe_fetch(
         bytes: body.len().min(u32::MAX as usize) as u32,
         truncated: r.truncated,
         html: is_html(r.content_type.as_deref()),
+        content_type: r.content_type.as_deref().and_then(media_type),
         title: page_title(body),
         challenge: detect_challenge(r.status, &headers, body),
         retried,

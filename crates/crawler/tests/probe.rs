@@ -641,6 +641,32 @@ async fn the_address_guard_holds_on_every_probe() {
     );
 }
 
+#[tokio::test]
+async fn markdown_for_an_ai_bot_is_the_same_page() {
+    let site = SiteBuilder::new()
+        .every_path(Page::by_user_agent(
+            vec![(
+                OAI,
+                Page::status(200, "# Home\n\nShort text version.")
+                    .header("content-type", "text/markdown; charset=utf-8"),
+            )],
+            Page::html(&format!(
+                "{}{}",
+                html_page("Home", &[]),
+                "<!-- padding -->".repeat(2_000)
+            )),
+        ))
+        .start()
+        .await;
+    let report = run_probes(config(&site, &["/"], vec![bot(OAI)])).await;
+    let r = result(&report, 0, OAI);
+    assert_eq!(r.verdict, Verdict::Same);
+    let fetch = r.fetch.as_ref().expect("fetched");
+    assert_eq!(fetch.content_type.as_deref(), Some("text/markdown"));
+    assert!(!fetch.html && fetch.title.is_none());
+    assert_eq!(site.hits_from(OAI), 1, "nothing to confirm");
+}
+
 // ---- One page on its own (`codoseo probe`, the local MCP's `probe_ai_fetch`) ----------------
 
 fn tokens(list: &[&str]) -> Vec<String> {

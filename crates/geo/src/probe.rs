@@ -129,6 +129,9 @@ pub struct ProbeFetch {
     /// The response said it was HTML.
     #[serde(default, skip_serializing_if = "is_false")]
     pub html: bool,
+    /// The response's media type, lower-cased and without parameters (`text/markdown`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -581,10 +584,37 @@ impl Verdict {
     }
 }
 
+/// Longest media type kept per fetch, in characters.
+pub const MAX_CONTENT_TYPE: usize = 100;
+
+/// A `Content-Type` value as [`ProbeFetch::content_type`] keeps it: the media type only,
+/// lower-cased and cut to [`MAX_CONTENT_TYPE`] characters; `None` when blank.
+pub fn media_type(content_type: &str) -> Option<String> {
+    let t: String = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .take(MAX_CONTENT_TYPE)
+        .collect();
+    (!t.is_empty()).then_some(t)
+}
+
 impl ProbeFetch {
     /// A 2xx HTML response.
     pub fn is_html_ok(&self) -> bool {
         self.error.is_none() && self.html && self.status.is_some_and(|s| (200..300).contains(&s))
+    }
+
+    /// Markdown or plain text: what a site that negotiates content serves AI bots instead of
+    /// HTML on purpose.
+    pub fn is_text_alternative(&self) -> bool {
+        matches!(
+            self.content_type.as_deref(),
+            Some("text/markdown" | "text/x-markdown" | "text/plain")
+        )
     }
 }
 
@@ -603,9 +633,11 @@ impl ProbeFetch {
 /// 5. Any other status from 400: blocked.
 /// 6. It ended at another URL than the baseline, ignoring the fragment, a trailing slash and an
 ///    http→https upgrade: diverted.
-/// 7. Both 2xx, the titles differ (ignoring case and spacing), and the probe is under half the
+/// 7. A 2xx Markdown or plain-text answer (`text/markdown`, `text/plain`) to the HTML baseline:
+///    the same. The site serves AI bots a text version on purpose (content negotiation).
+/// 8. Both 2xx, the titles differ (ignoring case and spacing), and the probe is under half the
 ///    baseline's size or has no title where the baseline has one: degraded.
-/// 8. Otherwise the same; the same title at another size is dynamic content or prerendering.
+/// 9. Otherwise the same; the same title at another size is dynamic content or prerendering.
 pub fn classify(requested: &str, baseline: &ProbeFetch, probe: &ProbeFetch) -> Verdict {
     let base_ok = baseline.status.is_some_and(|s| (200..300).contains(&s));
     let base_generic = baseline
@@ -651,6 +683,9 @@ pub fn classify(requested: &str, baseline: &ProbeFetch, probe: &ProbeFetch) -> V
         return Verdict::Diverted {
             to: probe_url.to_owned(),
         };
+    }
+    if (200..300).contains(&status) && probe.is_text_alternative() {
+        return Verdict::Same;
     }
     if (200..300).contains(&status) {
         let base_title = norm_title(baseline.title.as_deref());

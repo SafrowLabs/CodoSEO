@@ -493,6 +493,7 @@ fn a_probe_fetch_round_trips_and_defaults_its_fields() {
         bytes: 512,
         truncated: false,
         html: true,
+        content_type: Some("text/html".to_owned()),
         title: Some("Just a moment...".to_owned()),
         challenge: Some(Challenge {
             vendor: Vendor::Cloudflare,
@@ -1259,4 +1260,49 @@ fn access_reports_carry_probes_and_old_ones_still_load() {
     r.probes = Some(probe_report(vec![result("OAI-SearchBot", Verdict::Same)]));
     let back: AccessReport = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
     assert_eq!(back, r);
+}
+
+#[test]
+fn markdown_or_plain_text_for_the_bot_is_content_negotiation_not_a_smaller_page() {
+    let base = html(40_000, Some("Blue Widgets | Shop"));
+    for ct in ["text/markdown", "text/plain", "text/x-markdown"] {
+        let md = ProbeFetch {
+            status: Some(200),
+            bytes: 3_000,
+            html: false,
+            content_type: Some(ct.to_owned()),
+            ..ProbeFetch::default()
+        };
+        assert_eq!(classify(PAGE, &base, &md), Verdict::Same, "{ct}");
+        // Still a block when the status says so.
+        let refused = ProbeFetch {
+            status: Some(403),
+            ..md.clone()
+        };
+        assert_eq!(
+            classify(PAGE, &base, &refused),
+            Verdict::Blocked { status: Some(403) },
+            "{ct}"
+        );
+    }
+    // Any other small, untitled 2xx answer is still a different page.
+    let json = ProbeFetch {
+        status: Some(200),
+        bytes: 3_000,
+        content_type: Some("application/json".to_owned()),
+        ..ProbeFetch::default()
+    };
+    assert_eq!(classify(PAGE, &base, &json), Verdict::Degraded);
+}
+
+#[test]
+fn media_type_keeps_the_type_only() {
+    use codoseo_geo::probe::{MAX_CONTENT_TYPE, media_type};
+    assert_eq!(
+        media_type("Text/Markdown; charset=utf-8").as_deref(),
+        Some("text/markdown")
+    );
+    assert_eq!(media_type(" ; x"), None);
+    let long = "a".repeat(500);
+    assert_eq!(media_type(&long).map(|t| t.len()), Some(MAX_CONTENT_TYPE));
 }

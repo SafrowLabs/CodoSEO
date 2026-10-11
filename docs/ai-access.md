@@ -36,7 +36,7 @@ Every probed bot is fetched whatever your intent, so a change of intent can re-e
 
 **Retries and confirmation.** A 429, a 503, a timeout or a connection error is retried once, after `Retry-After` (at most 10 seconds; 2 seconds when there is none). A result worse than the baseline is fetched a second time the first time that bot meets that cause in a run; when the two fetches disagree the result is inconclusive ("the re-fetch disagreed"), not a finding. When the request cap or the time budget leaves no room for that second fetch, the result is inconclusive too ("no room left to confirm"): a grade B finding always rests on two fetches.
 
-**How much.** Pages are taken in order: the home page, then starred pages, then the most linked, HTML 200 only. Bodies are read up to 256 KiB and never stored; only the status, size, final URL, title (cut to 120 characters) and any challenge marker are kept.
+**How much.** Pages are taken in order: the home page, then starred pages, then the most linked, HTML 200 only. Bodies are read up to 256 KiB and never stored; only the status, size, media type, final URL, title (cut to 120 characters) and any challenge marker are kept.
 
 | Plan | Pages probed | Requests per run (baseline, retries and confirmations included) | Time budget |
 |---|---|---|---|
@@ -58,7 +58,7 @@ A page is started only when the requests left and the time left cover all of its
 | Blocked | Any other status from 400 (a 404 counts, as the baseline got the page), or the connection refused or dropped on both tries |
 | Redirected | It ended at another URL than the baseline, ignoring the fragment, a trailing slash and an http→https upgrade |
 | Different page | Both got a 2xx, the titles differ, and the bot's page is under half the size or has no title where the baseline has one: the misleading 200 |
-| Same | Anything else. The same title at another size counts as the same: dynamic content, prerendering for bots, rotating blocks |
+| Same | Anything else. The same title at another size counts as the same: dynamic content, prerendering for bots, rotating blocks. So does a 2xx Markdown or plain-text answer (`text/markdown`, `text/plain`) where CodoSEObot got HTML: the site serves AI bots a text version on purpose |
 | Not probed: robots.txt | robots.txt disallows the bot here, so it was not sent |
 
 Each worse-than-baseline cause is one incident (`fetch_blocked`), for example `challenge_cloudflare`, `blocked_403`, `diverted`, `degraded` or `throttled`, with the bots it hit as members: another bot hitting the same cause widens the incident. Only bots the run could judge change an incident: a bot that is inconclusive on any page it was sent to (CodoSEObot got no usable page, no response, or the re-fetch disagreed) keeps what the incident last knew about it, so one bad run neither narrows, widens, resolves nor re-escalates it. An incident resolves when every bot it covers got a real verdict on every page and none has its cause. Its severity is Warning when a bot is affected on the home page and Notice otherwise; rate limiting and a different page are always Notice. It is never Critical, because a real bot from its own address may be treated differently. The incident cites each bot's documentation page and, for a challenge, the vendor's bot settings documentation, and says where to look next.
@@ -70,6 +70,11 @@ Each worse-than-baseline cause is one incident (`fetch_blocked`), for example `c
 - Cloudflare may refuse any request that claims to be a verified bot from an address that is not the bot's, whatever your AI Crawl Control settings say. A Cloudflare finding may therefore be our address being refused rather than the real bot, and its summary says to confirm in your logs.
 
 Log evidence (milestone C1) is what will tell the two apart.
+
+**Known limits.** Two cases the comparison can misread:
+
+- A small prerendered page (under 32 KiB) that carries a reCAPTCHA, hCaptcha or Turnstile form, served to a bot while CodoSEObot gets a JavaScript app shell without the form, may read as a generic CAPTCHA challenge. The form's marker is only discounted when the baseline carries it too.
+- Titles are read from the first 64 KiB of the page only. A page whose `<title>` comes later has no title for the comparison, so a different page is judged on size alone and may be missed, or a smaller page with a title read as different.
 
 **Measured false positives.** The check is tested against a corpus of 23 fake sites that answer the way real servers, CDNs and bot managers do: a 403 by user agent, Cloudflare challenge and AI Crawl Control pages, DataDome, HUMAN "Press & Hold", Akamai, Imperva, Vercel, persistent and one-off 429s, geo-blocks and login walls that hit everyone, prerendering for bots, app shells, robots.txt rules, timeouts and maintenance pages. Probed with all nine bots, the 22 scored sites give 198 (site, bot) pairs: 50 true positives, 148 true negatives, **no false positives and no false negatives**, and no wrong cause. The 23rd, a block by IP address only, is listed as undetectable (its 9 pairs are not scored). The fixtures copy what the vendors really send, but they are fixtures: the real-world rate, Cloudflare above all, can be higher. Run it with:
 
