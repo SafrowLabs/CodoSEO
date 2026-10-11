@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use codoseo_geo::{Honours, Purpose, Registry, registry, registry_json};
+use codoseo_geo::{Bot, Honours, Purpose, Registry, registry, registry_json};
 use serde_json::Value;
 
 /// Parses `YYYY-MM-DD` into (y, m, d), rejecting impossible dates.
@@ -46,9 +46,25 @@ fn today() -> (u32, u32, u32) {
 #[test]
 fn parses_and_is_large_enough() {
     let r = registry();
-    assert_eq!(r.version, 1);
+    assert_eq!(r.version, 2);
     assert_eq!(r.license, "CC0-1.0");
     assert!(serde_json::from_str::<Value>(registry_json()).is_ok());
+}
+
+/// Bots the synthetic fetch probes may impersonate: verified search engines are never probed, so a
+/// documented user agent for them has no use.
+const NEVER_PROBE: [&str; 3] = ["Googlebot", "Bingbot", "Applebot"];
+
+/// Tokens outside the probe candidates that may still carry a `user_agent`, each with a reason.
+const EXTRA_USER_AGENTS: [&str; 0] = [];
+
+/// The longest `user_agent` the lint accepts.
+const MAX_USER_AGENT: usize = 512;
+
+fn is_probe_candidate(b: &Bot) -> bool {
+    matches!(b.purpose, Purpose::Search | Purpose::UserFetch)
+        && b.crawls
+        && !NEVER_PROBE.iter().any(|n| n.eq_ignore_ascii_case(&b.token))
 }
 
 const OPERATORS: [&str; 11] = [
@@ -111,6 +127,24 @@ fn lint(r: &Registry) -> Vec<String> {
         }
         if !b.crawls && (b.user_agent_contains.is_some() || b.ip_ranges_url.is_some()) {
             problems.push(format!("control token {t} has a network identity"));
+        }
+        if let Some(ua) = &b.user_agent {
+            if !b.crawls {
+                problems.push(format!("control token {t} has a user_agent"));
+            }
+            match &b.user_agent_contains {
+                Some(needle) if ua.contains(needle.as_str()) => {}
+                _ => problems.push(format!("{t} user_agent lacks user_agent_contains")),
+            }
+            if ua.is_empty() || !ua.bytes().all(|c| (0x20..0x7f).contains(&c)) {
+                problems.push(format!("{t} user_agent is not printable ASCII"));
+            }
+            if ua.len() > MAX_USER_AGENT {
+                problems.push(format!("{t} user_agent is longer than {MAX_USER_AGENT}"));
+            }
+            if b.crawls && !is_probe_candidate(b) && !EXTRA_USER_AGENTS.contains(&t.as_str()) {
+                problems.push(format!("{t} has a user_agent but is not a probe candidate"));
+            }
         }
         if let Some(fallback) = &b.robots_fallback {
             let known = r.bots.iter().any(|o| {
@@ -181,6 +215,51 @@ fn the_lint_catches_each_kind_of_mistake() {
         }),
         "network identity",
     );
+    let with_ua = |r: &Registry| r.bots.iter().position(|b| b.user_agent.is_some()).unwrap();
+    has(
+        broken(&|r| {
+            let i = with_ua(r);
+            r.bots[i].user_agent = Some("Mozilla/5.0 (compatible; SomethingElse/1.0)".into());
+        }),
+        "lacks user_agent_contains",
+    );
+    has(
+        broken(&|r| {
+            let i = with_ua(r);
+            let ua = r.bots[i].user_agent.clone().unwrap();
+            r.bots[i].user_agent = Some(format!("{ua}\r\nX-Injected: 1"));
+        }),
+        "not printable ASCII",
+    );
+    has(
+        broken(&|r| {
+            let i = with_ua(r);
+            let ua = r.bots[i].user_agent.clone().unwrap();
+            r.bots[i].user_agent = Some(format!("{ua}{}", "x".repeat(MAX_USER_AGENT)));
+        }),
+        "longer than",
+    );
+    has(
+        broken(&|r| {
+            let i = r.bots.iter().position(|b| !b.crawls).unwrap();
+            r.bots[i].user_agent = Some(r.bots[i].token.clone());
+        }),
+        "control token",
+    );
+    has(
+        broken(&|r| {
+            let i = r.bots.iter().position(|b| b.token == "GPTBot").unwrap();
+            r.bots[i].user_agent = Some("GPTBot/1.0".into());
+        }),
+        "not a probe candidate",
+    );
+    has(
+        broken(&|r| {
+            let i = r.bots.iter().position(|b| b.token == "Googlebot").unwrap();
+            r.bots[i].user_agent = Some("Googlebot/2.1".into());
+        }),
+        "not a probe candidate",
+    );
     has(
         broken(&|r| r.bots.retain(|b| b.operator != "Microsoft")),
         "missing operator Microsoft",
@@ -204,6 +283,28 @@ fn only_applebot_documents_a_fallback() {
         .collect();
     assert_eq!(with, [("Applebot", "Googlebot")]);
     assert_eq!(registry().robots_fallback("applebot"), Some("Googlebot"));
+}
+
+#[test]
+fn only_probe_candidates_document_a_user_agent() {
+    let mut with: Vec<&str> = registry()
+        .bots
+        .iter()
+        .filter(|b| b.user_agent.is_some())
+        .map(|b| b.token.as_str())
+        .collect();
+    with.sort_unstable();
+    assert!(with.len() >= 6, "{with:?}");
+    let ua = |t: &str| registry().bot(t).unwrap().user_agent.as_deref();
+    assert_eq!(
+        ua("ChatGPT-User"),
+        Some(
+            "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot"
+        )
+    );
+    // Never documented in full by the operator, so never constructed here.
+    assert_eq!(ua("Claude-User"), None);
+    assert_eq!(ua("Googlebot"), None);
 }
 
 #[test]

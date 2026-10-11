@@ -45,6 +45,9 @@ pub struct Bot {
     pub crawls: bool,
     /// A substring to look for in the User-Agent header.
     pub user_agent_contains: Option<String>,
+    /// The full User-Agent string exactly as the operator's own page prints it, or `None` when it
+    /// prints none. Never constructed: the synthetic fetch probes send it byte for byte.
+    pub user_agent: Option<String>,
     /// A JSON file of `prefixes`, when the operator publishes one.
     pub ip_ranges_url: Option<String>,
     /// Host suffixes for reverse-DNS verification.

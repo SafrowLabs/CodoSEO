@@ -1,8 +1,8 @@
 {
   "$schema": "./ai-bots.schema.json",
   "name": "CodoSEO AI bot registry",
-  "version": 1,
-  "updated": "2026-10-09",
+  "version": 2,
+  "updated": "2026-10-11",
   "license": "CC0-1.0",
   "homepage": "https://codoseo.com/ai-bots",
   "bots": [
@@ -14,6 +14,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "GPTBot",
+      "user_agent": null,
       "ip_ranges_url": "https://openai.com/gptbot.json",
       "reverse_dns": [],
       "signature_agent": null,
@@ -29,11 +30,12 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "OAI-SearchBot",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36; compatible; OAI-SearchBot/1.4; +https://openai.com/searchbot",
       "ip_ranges_url": "https://openai.com/searchbot.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developers.openai.com/api/docs/bots",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Blocking it removes the site from ChatGPT search answers; changes take about 24 hours."
     },
     {
@@ -44,11 +46,12 @@
       "honours_robots": "partial",
       "crawls": true,
       "user_agent_contains": "ChatGPT-User",
+      "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot",
       "ip_ranges_url": "https://openai.com/chatgpt-user.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developers.openai.com/api/docs/bots",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "User-initiated, so robots.txt rules may not apply."
     },
     {
@@ -59,6 +62,7 @@
       "honours_robots": "unknown",
       "crawls": true,
       "user_agent_contains": "OAI-AdsBot",
+      "user_agent": null,
       "ip_ranges_url": "https://openai.com/adsbot.json",
       "reverse_dns": [],
       "signature_agent": null,
@@ -74,6 +78,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "ClaudeBot",
+      "user_agent": null,
       "ip_ranges_url": "https://claude.com/crawling/bots.json",
       "reverse_dns": [],
       "signature_agent": null,
@@ -89,11 +94,12 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "Claude-SearchBot",
+      "user_agent": null,
       "ip_ranges_url": "https://claude.com/crawling/bots.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Improves Claude search result quality; blocking it can reduce visibility in Claude search."
     },
     {
@@ -104,11 +110,12 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "Claude-User",
+      "user_agent": null,
       "ip_ranges_url": "https://claude.com/crawling/bots.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Fetches pages when a user asks Claude; honours robots.txt, unlike most user-triggered fetchers."
     },
     {
@@ -119,11 +126,12 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "PerplexityBot",
+      "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
       "ip_ranges_url": "https://www.perplexity.com/perplexitybot.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://docs.perplexity.ai/guides/bots",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Surfaces and links sites in Perplexity search results."
     },
     {
@@ -134,11 +142,12 @@
       "honours_robots": "no",
       "crawls": true,
       "user_agent_contains": "Perplexity-User",
+      "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)",
       "ip_ranges_url": "https://www.perplexity.com/perplexity-user.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://docs.perplexity.ai/guides/bots",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Since a user requested the fetch, this fetcher generally ignores robots.txt rules."
     },
     {
@@ -149,6 +158,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "Googlebot",
+      "user_agent": null,
       "ip_ranges_url": "https://developers.google.com/static/crawling/ipranges/common-crawlers.json",
       "reverse_dns": [
         "googlebot.com",
@@ -168,6 +178,7 @@
       "honours_robots": "yes",
       "crawls": false,
       "user_agent_contains": null,
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
@@ -183,6 +194,7 @@
       "honours_robots": "no",
       "crawls": true,
       "user_agent_contains": "Google-Agent",
+      "user_agent": null,
       "ip_ranges_url": "https://developers.google.com/static/crawling/ipranges/user-triggered-agents.json",
       "reverse_dns": [
         "google.com",
@@ -201,6 +213,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "Applebot",
+      "user_agent": null,
       "ip_ranges_url": "https://search.developer.apple.com/applebot.json",
       "reverse_dns": [
         "applebot.apple.com"
@@ -219,6 +232,7 @@
       "honours_robots": "yes",
       "crawls": false,
       "user_agent_contains": null,
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
@@ -234,6 +248,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "meta-externalagent",
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
@@ -249,11 +264,12 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "meta-webindexer",
+      "user_agent": "meta-webindexer/1.1",
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Improves Meta AI search results; allowing it helps Meta cite and link to the site."
     },
     {
@@ -264,11 +280,12 @@
       "honours_robots": "partial",
       "crawls": true,
       "user_agent_contains": "meta-externalfetcher",
+      "user_agent": "meta-externalfetcher/1.1",
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Fetches links at a user's request and may bypass robots.txt rules."
     },
     {
@@ -279,6 +296,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "meta-externalads",
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
@@ -294,6 +312,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "Amazonbot",
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
@@ -309,11 +328,12 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "Amzn-SearchBot",
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developer.amazon.com/amazonbot",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Improves search in Alexa and other Amazon products; not used for generative AI training; IP list is an HTML page, not JSON."
     },
     {
@@ -324,11 +344,12 @@
       "honours_robots": "partial",
       "crawls": true,
       "user_agent_contains": "Amzn-User",
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://developer.amazon.com/amazonbot",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Fetches pages for live user queries and may not follow all robots.txt directives; IP list is an HTML page, not JSON."
     },
     {
@@ -339,6 +360,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "bingbot",
+      "user_agent": null,
       "ip_ranges_url": "https://www.bing.com/toolbox/bingbot.json",
       "reverse_dns": [
         "search.msn.com"
@@ -356,11 +378,12 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "DuckAssistBot",
+      "user_agent": "DuckAssistBot/1.2; (+http://duckduckgo.com/duckassistbot.html)",
       "ip_ranges_url": "https://duckduckgo.com/duckassistbot.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://duckduckgo.com/duckduckgo-help-pages/results/duckassistbot",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Crawls in real time for AI-assisted answers and is not used for training; a robots.txt opt-out takes about 72 hours."
     },
     {
@@ -371,11 +394,12 @@
       "honours_robots": "unknown",
       "crawls": true,
       "user_agent_contains": "MistralAI-Index",
+      "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; MistralAI-Index/1.0; +https://docs.mistral.ai/robots)",
       "ip_ranges_url": "https://mistral.ai/mistralai-index-ips.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://docs.mistral.ai/robots",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Indexes pages to answer questions in Mistral products; the documentation does not state robots.txt behaviour."
     },
     {
@@ -386,11 +410,12 @@
       "honours_robots": "unknown",
       "crawls": true,
       "user_agent_contains": "MistralAI-User",
+      "user_agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; MistralAI-User/1.0; +https://docs.mistral.ai/robots)",
       "ip_ranges_url": "https://mistral.ai/mistralai-user-ips.json",
       "reverse_dns": [],
       "signature_agent": null,
       "source_url": "https://docs.mistral.ai/robots",
-      "last_reviewed": "2026-10-09",
+      "last_reviewed": "2026-10-11",
       "notes": "Visits pages when a user asks a question; the documentation does not state robots.txt behaviour."
     },
     {
@@ -401,6 +426,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "MistralAI-Training",
+      "user_agent": null,
       "ip_ranges_url": null,
       "reverse_dns": [],
       "signature_agent": null,
@@ -416,6 +442,7 @@
       "honours_robots": "yes",
       "crawls": true,
       "user_agent_contains": "CCBot",
+      "user_agent": null,
       "ip_ranges_url": "https://index.commoncrawl.org/ccbot.json",
       "reverse_dns": [
         "crawl.commoncrawl.org"

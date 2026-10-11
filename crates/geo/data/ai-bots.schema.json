@@ -22,7 +22,7 @@
       "additionalProperties": false,
       "required": [
         "token", "operator", "product", "purpose", "honours_robots", "crawls",
-        "user_agent_contains", "ip_ranges_url", "reverse_dns", "signature_agent",
+        "user_agent_contains", "user_agent", "ip_ranges_url", "reverse_dns", "signature_agent",
         "source_url", "last_reviewed", "notes"
       ],
       "properties": {
@@ -33,6 +33,7 @@
         "honours_robots": { "enum": ["yes", "partial", "no", "unknown"] },
         "crawls": { "type": "boolean", "description": "False for control tokens that never make requests." },
         "user_agent_contains": { "type": ["string", "null"] },
+        "user_agent": { "type": ["string", "null"], "maxLength": 512, "pattern": "^[ -~]+$", "description": "The full User-Agent string exactly as the operator's own page prints it, or null when it prints none." },
         "ip_ranges_url": { "anyOf": [{ "$ref": "#/$defs/httpsUri" }, { "type": "null" }], "description": "A JSON file of prefixes, or null." },
         "reverse_dns": { "type": "array", "items": { "type": "string" } },
         "signature_agent": { "anyOf": [{ "$ref": "#/$defs/httpsUri" }, { "type": "null" }] },
