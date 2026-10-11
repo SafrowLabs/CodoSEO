@@ -53,6 +53,15 @@ In self-host mode the plan limits do not apply (no caps on sites, no API quota; 
 | `SCHEDULER_HEARTBEAT_URL` | none | web, all | A URL that gets a GET after every successful scheduler tick, for a dead-man's-switch monitor. An invalid URL is logged and ignored. |
 | `RETENTION_DAYS_SELFHOST` | `365` | worker, all | Days of crawl history a self-hosted install keeps; the daily cleanup deletes older crawls. A whole number. |
 
+## AI access probes
+
+After each monitored crawl the worker fetches a few important pages as the AI search and user-fetch bots (the synthetic fetch probes; see [ai-access.md](ai-access.md)).
+
+| Variable | Default | Roles | Meaning |
+|---|---|---|---|
+| `CODOSEO_PROBE_FROM` | `hello@codoseo.com` | worker, all | The `From` header on every probe request and its baseline. An empty or invalid value is logged and ignored. |
+| `CODOSEO_PROBE_URLS` | `5` | worker, all | Pages probed per crawl on a self-hosted install (plan `self_hosted`), at most `10`. `0` turns the probes off for the whole install. Cloud plans keep their own caps (Free 1, Pro 3, Agency 5). An invalid value is logged and ignored. |
+
 ## Logging, metrics and error reporting
 
 | Variable | Default | Roles | Meaning |

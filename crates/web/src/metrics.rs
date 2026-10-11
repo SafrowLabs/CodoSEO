@@ -20,9 +20,10 @@ pub const API_REQUESTS_TOTAL: &str = "codoseo_api_requests_total";
 pub const SCHEDULER_LAST_TICK_TIMESTAMP_SECONDS: &str =
     "codoseo_scheduler_last_tick_timestamp_seconds";
 pub const JOBS_FAILED_TOTAL: &str = "codoseo_jobs_failed_total";
+pub const PROBE_REQUESTS_TOTAL: &str = "codoseo_probe_requests_total";
 
 /// Every metric name, for the tests and the docs.
-pub const ALL: [&str; 11] = [
+pub const ALL: [&str; 12] = [
     CRAWL_QUEUE_WAIT_SECONDS,
     CRAWLS_RUNNING,
     CRAWLS_FINISHED_TOTAL,
@@ -34,6 +35,7 @@ pub const ALL: [&str; 11] = [
     API_REQUESTS_TOTAL,
     SCHEDULER_LAST_TICK_TIMESTAMP_SECONDS,
     JOBS_FAILED_TOTAL,
+    PROBE_REQUESTS_TOTAL,
 ];
 
 /// Crawl priorities run 0 (most urgent) to 5; the label is the lane.
@@ -131,10 +133,15 @@ pub fn register() {
         "Unix time of the scheduler's last tick"
     );
     describe_counter!(JOBS_FAILED_TOTAL, "Job runs that failed, by job kind");
+    describe_counter!(
+        PROBE_REQUESTS_TOTAL,
+        "Requests sent by synthetic AI-agent fetch probes (baselines, retries and confirmations included)"
+    );
 
     gauge!(CRAWLS_RUNNING).set(0.0);
     gauge!(WORKER_MEMORY_RESERVED_BYTES).set(0.0);
     counter!(PAGES_CRAWLED_TOTAL).absolute(0);
+    counter!(PROBE_REQUESTS_TOTAL).absolute(0);
     for outcome in ["completed", "failed"] {
         counter!(CRAWLS_FINISHED_TOTAL, "outcome" => outcome).absolute(0);
     }
@@ -196,6 +203,11 @@ pub fn crawl_finished(completed: bool) {
 
 pub fn pages_crawled(pages: u64) {
     counter!(PAGES_CRAWLED_TOTAL).increment(pages);
+}
+
+/// A synthetic probe run after a crawl sent `requests` requests.
+pub fn probe_requests(requests: u64) {
+    counter!(PROBE_REQUESTS_TOTAL).increment(requests);
 }
 
 pub fn worker_memory_budget(bytes: u64) {

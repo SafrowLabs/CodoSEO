@@ -39,6 +39,13 @@ pub struct PlanLimits {
     pub history_days: Option<u32>,
     pub api_calls_per_day: Option<u32>,
     pub email_alerts_only: bool,
+    /// Pages fetched as the AI search and user-fetch bots after each monitored crawl (the
+    /// synthetic fetch probes); 0 means no probes.
+    pub probe_urls: u8,
+    /// Wall time for one probe run: a page is probed only when what is left covers it.
+    pub probe_budget: Duration,
+    /// Requests for one probe run, baseline, retries and confirmations included.
+    pub probe_max_requests: u16,
 }
 
 const HOUR: u64 = 3600;
@@ -55,6 +62,9 @@ impl PlanLimits {
                 history_days: Some(30),
                 api_calls_per_day: Some(100),
                 email_alerts_only: true,
+                probe_urls: 1,
+                probe_budget: Duration::from_secs(45),
+                probe_max_requests: 30,
             },
             Plan::Pro => PlanLimits {
                 max_sites: Some(5),
@@ -65,6 +75,9 @@ impl PlanLimits {
                 history_days: Some(365),
                 api_calls_per_day: Some(2_000),
                 email_alerts_only: false,
+                probe_urls: 3,
+                probe_budget: Duration::from_secs(90),
+                probe_max_requests: 70,
             },
             Plan::Agency => PlanLimits {
                 max_sites: Some(25),
@@ -75,6 +88,9 @@ impl PlanLimits {
                 history_days: Some(365),
                 api_calls_per_day: Some(10_000),
                 email_alerts_only: false,
+                probe_urls: 5,
+                probe_budget: Duration::from_secs(120),
+                probe_max_requests: 120,
             },
             // No plan caps, but finite defaults so a calendar or faceted search
             // can't crawl forever. Self-hosters can raise them in config.
@@ -87,11 +103,15 @@ impl PlanLimits {
                 history_days: Some(365),
                 api_calls_per_day: None,
                 email_alerts_only: false,
+                // `CODOSEO_PROBE_URLS` can change it, up to 10 pages.
+                probe_urls: 5,
+                probe_budget: Duration::from_secs(180),
+                probe_max_requests: 160,
             },
         }
     }
 
-    /// The no-signup audit: one 100-page crawl, nothing else.
+    /// The no-signup audit: one 100-page crawl, nothing else (no synthetic probes).
     pub fn quick_audit() -> PlanLimits {
         PlanLimits {
             max_sites: Some(0),
@@ -102,6 +122,10 @@ impl PlanLimits {
             history_days: Some(7),
             api_calls_per_day: Some(0),
             email_alerts_only: true,
+            // A no-signup audit never sends a request as an AI bot.
+            probe_urls: 0,
+            probe_budget: Duration::ZERO,
+            probe_max_requests: 0,
         }
     }
 }

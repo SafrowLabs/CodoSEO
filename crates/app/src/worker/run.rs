@@ -27,6 +27,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use url::Url;
 
+use crate::worker::probes::{self, ProbeSettings};
+
 /// How often a crawl's progress callback is allowed to write a heartbeat.
 const HEARTBEAT_THROTTLE: Duration = Duration::from_secs(2);
 /// A liveness heartbeat is forced at least this often, even if progress is silent.
@@ -50,6 +52,34 @@ pub const SWEEP_PERIOD: Duration = Duration::from_secs(30);
 /// Postgres's SQLSTATE for a unique-constraint violation.
 const UNIQUE_VIOLATION: &str = "23505";
 
+/// What a worker reads from its environment once, at startup.
+#[derive(Debug, Clone)]
+pub struct WorkerSettings {
+    /// The synthetic fetch probes after each monitored crawl.
+    pub probes: ProbeSettings,
+    /// How often a liveness heartbeat is forced; [`LIVENESS_INTERVAL`] outside tests.
+    pub liveness_interval: Duration,
+}
+
+impl Default for WorkerSettings {
+    fn default() -> WorkerSettings {
+        WorkerSettings {
+            probes: ProbeSettings::default(),
+            liveness_interval: LIVENESS_INTERVAL,
+        }
+    }
+}
+
+impl WorkerSettings {
+    /// The settings from the environment (`CODOSEO_PROBE_FROM`, `CODOSEO_PROBE_URLS`).
+    pub fn from_env() -> WorkerSettings {
+        WorkerSettings {
+            probes: ProbeSettings::from_env(),
+            ..WorkerSettings::default()
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
     #[error(transparent)]
@@ -59,7 +89,7 @@ pub enum WorkerError {
 /// One claim-and-run cycle: claims the next eligible crawl (if any) and runs it to completion
 /// in a spawned task, isolating a panic to that crawl. Returns `Ok(true)` when a crawl was
 /// claimed and handled (whether it ended `done` or `failed`), `Ok(false)` when the queue was
-/// empty.
+/// empty. Uses the default [`WorkerSettings`].
 pub async fn worker_loop_once(
     pool: &PgPool,
     crawl_queue: &CrawlQueue,
@@ -68,6 +98,28 @@ pub async fn worker_loop_once(
     default_budget: u64,
     policy: AddressPolicy,
 ) -> Result<bool, WorkerError> {
+    worker_loop_once_with(
+        pool,
+        crawl_queue,
+        job_queue,
+        worker_id,
+        default_budget,
+        policy,
+        &WorkerSettings::default(),
+    )
+    .await
+}
+
+/// [`worker_loop_once`] with explicit settings.
+pub async fn worker_loop_once_with(
+    pool: &PgPool,
+    crawl_queue: &CrawlQueue,
+    job_queue: &JobQueue,
+    worker_id: &str,
+    default_budget: u64,
+    policy: AddressPolicy,
+    settings: &WorkerSettings,
+) -> Result<bool, WorkerError> {
     let Some((crawl_id, handle)) = claim_and_spawn(
         pool,
         crawl_queue,
@@ -75,6 +127,7 @@ pub async fn worker_loop_once(
         worker_id,
         default_budget,
         policy,
+        settings,
     )
     .await?
     else {
@@ -99,6 +152,7 @@ async fn claim_and_spawn(
     worker_id: &str,
     default_budget: u64,
     policy: AddressPolicy,
+    settings: &WorkerSettings,
 ) -> Result<Option<(uuid::Uuid, JoinHandle<Result<(), String>>)>, WorkerError> {
     let claimed = match crawl_queue.claim(worker_id).await {
         Ok(Some(claimed)) => claimed,
@@ -118,6 +172,7 @@ async fn claim_and_spawn(
     let pool_for_task = pool.clone();
     let crawl_queue_for_task = crawl_queue.clone();
     let worker_id = worker_id.to_owned();
+    let settings = settings.clone();
     let handle = tokio::spawn(async move {
         run_one_crawl(
             &pool_for_task,
@@ -125,6 +180,7 @@ async fn claim_and_spawn(
             &worker_id,
             default_budget,
             policy,
+            &settings,
             claimed,
         )
         .instrument(span)
@@ -194,6 +250,12 @@ pub async fn resolve_limits(
     site_id: uuid::Uuid,
     crawl_settings: &serde_json::Value,
 ) -> Result<PlanLimits, String> {
+    let plan = resolve_plan(pool, site_id).await?;
+    Ok(limits_for(plan, crawl_settings))
+}
+
+/// The plan of the site's account, or `None` for an unclaimed site (a no-signup audit).
+async fn resolve_plan(pool: &PgPool, site_id: uuid::Uuid) -> Result<Option<Plan>, String> {
     let plan_text: Option<String> =
         sqlx::query_scalar("SELECT a.plan::text FROM sites s LEFT JOIN accounts a ON a.id = s.account_id WHERE s.id = $1")
             .bind(site_id)
@@ -201,13 +263,19 @@ pub async fn resolve_limits(
             .await
             .map_err(|e| format!("could not resolve plan for site: {e}"))?
             .flatten();
-    let limits = match plan_text {
+    plan_text
+        .map(|text| {
+            serde_json::from_value(serde_json::Value::String(text.clone()))
+                .map_err(|e| format!("unknown plan '{text}': {e}"))
+        })
+        .transpose()
+}
+
+/// The limits for `plan` (see [`resolve_limits`]).
+fn limits_for(plan: Option<Plan>, crawl_settings: &serde_json::Value) -> PlanLimits {
+    let limits = match plan {
         None => PlanLimits::quick_audit(),
-        Some(text) => {
-            let plan: Plan = serde_json::from_value(serde_json::Value::String(text.clone()))
-                .map_err(|e| format!("unknown plan '{text}': {e}"))?;
-            PlanLimits::for_plan(plan)
-        }
+        Some(plan) => PlanLimits::for_plan(plan),
     };
 
     let override_max_pages = crawl_settings
@@ -221,21 +289,22 @@ pub async fn resolve_limits(
         (None, None) => CrawlLimits::default().max_pages,
     };
 
-    Ok(PlanLimits {
+    PlanLimits {
         max_pages: Some(max_pages),
         ..limits
-    })
+    }
 }
 
-/// Runs one claimed crawl end to end: crawl → checks → diff → finalize. Returns a human-sized
-/// reason on failure so the caller can fail the crawl the same way whether this returned an
-/// error or panicked.
+/// Runs one claimed crawl end to end: crawl → checks → diff → AI access report and synthetic
+/// probes → finalize. Returns a human-sized reason on failure so the caller can fail the crawl
+/// the same way whether this returned an error or panicked.
 async fn run_one_crawl(
     pool: &PgPool,
     crawl_queue: &CrawlQueue,
     worker_id: &str,
     default_budget: u64,
     policy: AddressPolicy,
+    settings: &WorkerSettings,
     claimed: ClaimedCrawl,
 ) -> Result<(), String> {
     // Test-only panic seam: lets integration tests prove a panicking crawl is isolated to its
@@ -250,7 +319,8 @@ async fn run_one_crawl(
     }
 
     let start_url = Url::parse(&claimed.start_url).map_err(|e| format!("bad start URL: {e}"))?;
-    let limits = resolve_limits(pool, claimed.site_id, &claimed.crawl_settings).await?;
+    let plan = resolve_plan(pool, claimed.site_id).await?;
+    let limits = limits_for(plan, &claimed.crawl_settings);
     let max_pages = limits.max_pages.unwrap_or(CrawlLimits::default().max_pages);
     let max_duration = limits
         .max_duration
@@ -306,9 +376,11 @@ async fn run_one_crawl(
     };
 
     // A liveness heartbeat independent of progress, so a crawl stuck between progress calls
-    // (e.g. one very slow page) doesn't look dead to `requeue_stale`. Cancelled once the crawl
-    // finishes, below.
-    let liveness = {
+    // (e.g. one very slow page), or the synthetic probes after it, doesn't look dead to
+    // `requeue_stale`. Cancelled once the probes finish, below, or when this function returns
+    // early.
+    let liveness_interval = settings.liveness_interval;
+    let liveness = AbortOnDrop({
         let crawl_queue = crawl_queue.clone();
         tokio::spawn(async move {
             let idle = Progress {
@@ -319,16 +391,15 @@ async fn run_one_crawl(
                 elapsed_ms: 0,
             };
             loop {
-                tokio::time::sleep(LIVENESS_INTERVAL).await;
+                tokio::time::sleep(liveness_interval).await;
                 if crawl_queue.heartbeat(crawl_id, &idle).await.is_err() {
                     return;
                 }
             }
         })
-    };
+    });
 
     let crawl_result = crawl(cfg, on_progress).await;
-    liveness.abort();
     if let Ok(out) = &crawl_result {
         metrics::pages_crawled(out.pages.len() as u64);
     }
@@ -376,10 +447,28 @@ async fn run_one_crawl(
         }
         None => Vec::new(),
     };
-    let geo = with_geo.then(|| {
+    let mut geo = with_geo.then(|| {
         let important = important_urls(&out.pages, &out.origin, &starred);
         GeoInput::new(build_report(&out, &important))
     });
+    // The synthetic probes: a few important pages fetched as the AI bots, after a monitored crawl
+    // only (never a quick audit or a failed crawl), unless the owner switched them off.
+    let probe_urls = settings.probes.probe_urls(plan, &limits);
+    if let Some(input) = geo.as_mut()
+        && probe_urls > 0
+        && probes_enabled(pool, claimed.site_id).await
+    {
+        input.report.probes = probes::probe(
+            &input.report,
+            &out,
+            probe_urls,
+            &limits,
+            &settings.probes,
+            policy,
+        )
+        .await;
+    }
+    drop(liveness);
 
     finalize(
         pool,
@@ -396,6 +485,27 @@ async fn run_one_crawl(
 
     tracing::info!(pages = out.pages.len(), "crawl finished");
     Ok(())
+}
+
+/// Whether the site's owner left the synthetic probes on. A database error skips them: they are
+/// never worth failing the crawl for.
+async fn probes_enabled(pool: &PgPool, site_id: uuid::Uuid) -> bool {
+    match geo::get_ai_probes(pool, site_id).await {
+        Ok(on) => on,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read the probe setting; skipping the probes");
+            false
+        }
+    }
+}
+
+/// Aborts the task when dropped, so a heartbeat task never outlives its crawl.
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// For a crawl that is about to fail for good with no pages: when robots.txt answered 5xx or
@@ -462,6 +572,7 @@ pub async fn worker_loop(
     shutdown: CancellationToken,
 ) {
     let mut backoff = Duration::from_secs(1);
+    let settings = WorkerSettings::from_env();
 
     loop {
         if shutdown.is_cancelled() {
@@ -475,6 +586,7 @@ pub async fn worker_loop(
             worker_id,
             default_budget,
             policy,
+            &settings,
         )
         .await;
         match claimed {

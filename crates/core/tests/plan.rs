@@ -67,3 +67,19 @@ fn quick_audit_is_100_pages_in_2_minutes_and_nothing_else() {
     assert_eq!(l.history_days, Some(7));
     assert_eq!(l.api_calls_per_day, Some(0));
 }
+
+#[test]
+fn synthetic_probe_caps_match_the_b1_table() {
+    let secs = Duration::from_secs;
+    for (limits, urls, budget, max_requests) in [
+        (PlanLimits::quick_audit(), 0, secs(0), 0),
+        (PlanLimits::for_plan(Plan::Free), 1, secs(45), 30),
+        (PlanLimits::for_plan(Plan::Pro), 3, secs(90), 70),
+        (PlanLimits::for_plan(Plan::Agency), 5, secs(120), 120),
+        (PlanLimits::for_plan(Plan::SelfHosted), 5, secs(180), 160),
+    ] {
+        assert_eq!(limits.probe_urls, urls);
+        assert_eq!(limits.probe_budget, budget);
+        assert_eq!(limits.probe_max_requests, max_requests);
+    }
+}
