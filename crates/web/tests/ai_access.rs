@@ -983,3 +983,403 @@ async fn a_bot_that_follows_another_bots_group_says_so() {
         "{body}"
     );
 }
+
+// ---- synthetic fetch checks (GB.10) ----------------------------------------------------------
+
+use codoseo_geo::probe::{
+    Challenge, InconclusiveReason, ProbeFetch, ProbeReport, ProbeResult, ProbedUrl, Vendor,
+    Verdict, plan_probes, robots_skips,
+};
+use codoseo_geo::report::AccessReport;
+
+/// What CodoSEObot got on every probed page.
+fn baseline() -> ProbeFetch {
+    ProbeFetch {
+        status: Some(200),
+        bytes: 48_000,
+        html: true,
+        title: Some("Example".to_owned()),
+        ..ProbeFetch::default()
+    }
+}
+
+/// What a bot got on a probed page (bot token, page index), `None` for the same page.
+type Outcome = dyn Fn(&str, usize) -> Option<(Verdict, ProbeFetch)>;
+
+/// The probe report for `report` on up to three pages: `outcome(token, page index)` says what
+/// each bot got, `None` for the same page as CodoSEObot. Pairs robots.txt disallows are skipped,
+/// as the executor does.
+fn probes_with(
+    report: &AccessReport,
+    outcome: &Outcome,
+) -> ProbeReport {
+    let plan = plan_probes(report, None, 3).expect("a probe plan");
+    let mut out = ProbeReport::new("hello@codoseo.com", &plan);
+    for (i, &url) in plan.urls.iter().enumerate() {
+        let results = plan
+            .bots
+            .iter()
+            .map(|b| {
+                if robots_skips(report, url, &b.token) {
+                    return ProbeResult {
+                        token: b.token.clone(),
+                        fetch: None,
+                        verdict: Verdict::SkippedRobots,
+                    };
+                }
+                let (verdict, fetch) = outcome(&b.token, i).unwrap_or((Verdict::Same, baseline()));
+                ProbeResult {
+                    token: b.token.clone(),
+                    fetch: Some(fetch),
+                    verdict,
+                }
+            })
+            .collect();
+        out.urls.push(ProbedUrl {
+            url,
+            baseline: baseline(),
+            results,
+        });
+        out.requests += 1 + plan.bots.len() as u16;
+    }
+    out
+}
+
+/// A Cloudflare challenge page.
+fn cloudflare() -> (Verdict, ProbeFetch) {
+    (
+        Verdict::Challenged {
+            vendor: Vendor::Cloudflare,
+        },
+        ProbeFetch {
+            status: Some(403),
+            bytes: 5_200,
+            html: true,
+            title: Some("Just a moment...".to_owned()),
+            challenge: Some(Challenge {
+                vendor: Vendor::Cloudflare,
+                signal: "cf-mitigated: challenge".to_owned(),
+            }),
+            ..ProbeFetch::default()
+        },
+    )
+}
+
+/// Cloudflare challenges OAI-SearchBot and PerplexityBot everywhere; ChatGPT-User times out on
+/// the second page.
+fn waf(token: &str, page: usize) -> Option<(Verdict, ProbeFetch)> {
+    match token {
+        "OAI-SearchBot" | "PerplexityBot" => Some(cloudflare()),
+        "ChatGPT-User" if page == 1 => Some((
+            Verdict::Inconclusive {
+                reason: InconclusiveReason::ProbeError,
+            },
+            ProbeFetch {
+                error: Some(codoseo_geo::probe::FetchErrorKind::Timeout),
+                ..ProbeFetch::default()
+            },
+        )),
+        _ => None,
+    }
+}
+
+async fn ai_access_body(app: &TestApp, site: &Site, cookie: &str) -> String {
+    let res = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    res.body
+}
+
+#[tokio::test]
+async fn the_fetch_check_section_shows_each_probed_bot() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+
+    // Between "Open issues" and "AI bots", badged as synthetic.
+    let issues = body.find(r#"id="aia-issues""#).expect("open issues");
+    let check = body.find(r#"id="aia-fetch""#).expect("fetch check");
+    let bots = body.find(r#"id="aia-bots""#).expect("bots");
+    assert!(issues < check && check < bots, "section order");
+    let section = &body[check..bots];
+    for needle in [
+        ">Fetch check</h2>",
+        r#"<span class="badge aia-synthetic">Synthetic</span>"#,
+        "Sent each bot&#39;s documented user agent from CodoSEO&#39;s address on 3 pages, compared with CodoSEObot. Real bots come from their own addresses and may be treated differently.",
+        // The table.
+        "OAI-SearchBot",
+        "Challenged (Cloudflare)",
+        "Same as CodoSEObot",
+        "1 inconclusive",
+        "3/3",
+        "HTTP 403 · 5.1 KB vs 46.9 KB",
+        "“Just a moment...”",
+        "cf-mitigated: challenge",
+        // The bots that were not probed, by reason.
+        "Not probed",
+        "Not probed: no documented user agent",
+        "Claude-SearchBot",
+        "Not probed: verified search engine",
+        "Googlebot",
+    ] {
+        assert!(section.contains(needle), "missing {needle:?} in {section}");
+    }
+    // ChatGPT-User was compared on two pages and timed out on one: still the same page.
+    assert!(section.contains("0/2"), "{section}");
+
+    // The incident it opened: synthetic, grade B, a line per bot from the probe evidence.
+    let incident = &body[issues..check];
+    for needle in [
+        "Cloudflare challenge served to OAI-SearchBot and PerplexityBot on 3 pages (synthetic check)",
+        r#"<span class="badge aia-synthetic">Synthetic</span>"#,
+        "Evidence grade B: observed by CodoSEO&#39;s synthetic check",
+        ">B</span>",
+        "Challenged on all 3 probed pages",
+        "Probe: HTTP 403 · 5.1 KB · “Just a moment...” · cf-mitigated: challenge · CodoSEObot: HTTP 200 · 46.9 KB · “Example”",
+        "developers.cloudflare.com",
+        "developers.openai.com",
+    ] {
+        assert!(
+            incident.contains(needle),
+            "missing {needle:?} in {incident}"
+        );
+    }
+    assert!(!incident.contains("Evidence grade A"), "{incident}");
+}
+
+#[tokio::test]
+async fn bots_robots_txt_keeps_out_are_not_probed_and_unwanted_ones_are_expected() {
+    let (app, site, cookie) = setup().await;
+    // OAI-SearchBot is disallowed; PerplexityBot is challenged, but the owner blocks it.
+    geo::set_intent(
+        app.pool(),
+        site.id,
+        &codoseo_geo::Intent {
+            bots: [("PerplexityBot".to_owned(), Stance::Block)].into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    app.finished_crawl_with_probes(&site, pages(), (200, BLOCK_OAI), &|r| probes_with(r, &waf))
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let check = body.find(r#"id="aia-fetch""#).expect("fetch check");
+    let section = &body[check..body.find(r#"id="aia-bots""#).unwrap()];
+    assert!(section.contains("Not probed: robots.txt"), "{section}");
+    assert!(
+        section.contains("Expected: you don&#39;t ask for this bot, so it isn&#39;t reported"),
+        "{section}"
+    );
+    // No fetch_blocked incident: the only challenged bot is one the owner blocks.
+    assert!(!body.contains("(synthetic check)"), "{body}");
+}
+
+#[tokio::test]
+async fn the_fetch_check_says_why_there_are_no_results() {
+    let (app, site, cookie) = setup().await;
+    // An older report, written before probes existed.
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(body.contains(">Fetch check</h2>"), "{body}");
+    assert!(
+        body.contains("Fetch checks run after the next crawl"),
+        "{body}"
+    );
+
+    // Switched off: says so and links to the intent.
+    geo::set_ai_probes(app.pool(), site.id, false)
+        .await
+        .unwrap();
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(
+        body.contains("Fetch checks are off for this site"),
+        "{body}"
+    );
+    assert!(body.contains(&format!(r#"href="/s/{}/ai-access/intent#probes""#, site.id)));
+    // Even with a stored probe report.
+    app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(
+        body.contains("Fetch checks are off for this site"),
+        "{body}"
+    );
+    assert!(!body.contains("Challenged (Cloudflare)"), "{body}");
+
+    // A robots.txt that can't be read: no per-bot verdicts, so no probes.
+    geo::set_ai_probes(app.pool(), site.id, true).await.unwrap();
+    app.finished_crawl_with_robots(&site, pages(), (503, ""), Vec::new())
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(
+        body.contains("Fetch checks need a readable robots.txt"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn the_probe_switch_is_saved_with_the_intent() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let path = format!("/s/{}/ai-access/intent", site.id);
+    let form = app.get(&path, Some(&cookie)).await.body;
+    for needle in [
+        r#"id="probes""#,
+        "Run synthetic fetch checks",
+        r#"type="hidden" name="probes" value="off""#,
+        r#"name="probes" value="on" checked"#,
+    ] {
+        assert!(form.contains(needle), "missing {needle:?} in {form}");
+    }
+
+    // Unticked: only the hidden field is sent.
+    let res = app.post_hx(&path, "probes=off", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(!geo::get_ai_probes(app.pool(), site.id).await.unwrap());
+    assert!(res.body.contains("Fetch checks are off for this site"));
+    let form = app.get(&path, Some(&cookie)).await.body;
+    assert!(
+        !form.contains(r#"name="probes" value="on" checked"#),
+        "{form}"
+    );
+
+    // A post without the field (an older form) leaves it as it is.
+    app.post_hx(&path, "p.training=block", Some(&cookie)).await;
+    assert!(!geo::get_ai_probes(app.pool(), site.id).await.unwrap());
+
+    // Ticked again.
+    app.post_hx(&path, "probes=off&probes=on", Some(&cookie))
+        .await;
+    assert!(geo::get_ai_probes(app.pool(), site.id).await.unwrap());
+
+    let res = app.post_hx(&path, "probes=maybe", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn probed_page_content_is_escaped_everywhere_it_shows() {
+    let (app, site, cookie) = setup().await;
+    let hostile = |token: &str, _page: usize| -> Option<(Verdict, ProbeFetch)> {
+        match token {
+            "OAI-SearchBot" => Some((
+                Verdict::Challenged {
+                    vendor: Vendor::Generic,
+                },
+                ProbeFetch {
+                    status: Some(200),
+                    bytes: 900,
+                    html: true,
+                    title: Some("<script>alert(1)</script>".to_owned()),
+                    challenge: Some(Challenge {
+                        vendor: Vendor::Generic,
+                        signal: "<img src=x onerror=alert(2)>".to_owned(),
+                    }),
+                    ..ProbeFetch::default()
+                },
+            )),
+            "PerplexityBot" => {
+                let to = "https://evil.example/\"><svg/onload=alert(3)>".to_owned();
+                Some((
+                    Verdict::Diverted { to: to.clone() },
+                    ProbeFetch {
+                        status: Some(200),
+                        bytes: 900,
+                        html: true,
+                        final_url: Some(to),
+                        redirects: 1,
+                        ..ProbeFetch::default()
+                    },
+                ))
+            }
+            _ => None,
+        }
+    };
+    app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &hostile))
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(body.contains("(synthetic check)"), "{body}");
+    for raw in ["<script>alert(1)", "<img src=x", "<svg/onload"] {
+        assert!(!body.contains(raw), "unescaped {raw:?}: {body}");
+    }
+    for escaped in [
+        "&#60;script&#62;alert(1)&#60;/script&#62;",
+        "&#60;img src=x onerror=alert(2)&#62;",
+        "https://evil.example/&#34;&#62;&#60;svg/onload=alert(3)&#62;",
+    ] {
+        assert!(body.contains(escaped), "missing {escaped:?}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn the_fetch_blocked_kind_reads_well_on_changes_and_alerts() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl(&site, pages(), Vec::new()).await;
+    app.finished_crawl(
+        &site,
+        pages(),
+        vec![Change {
+            kind: ChangeKind::AiFetchBlocked,
+            severity: Severity::Warning,
+            url: None,
+            before: "reachable".to_owned(),
+            after:
+                "Cloudflare challenge served to OAI-SearchBot on the home page (synthetic check)"
+                    .to_owned(),
+        }],
+    )
+    .await;
+    let changes = app
+        .get(&format!("/s/{}/changes", site.id), Some(&cookie))
+        .await
+        .body;
+    for needle in [
+        "AI fetch blocked (synthetic)",
+        "AI bots got through",
+        "on the home page (synthetic check)",
+    ] {
+        assert!(changes.contains(needle), "missing {needle:?}");
+    }
+    let alerts = app.get("/settings/alerts", Some(&cookie)).await.body;
+    let ai = alerts.find(">AI access</th>").expect("AI access section");
+    assert!(
+        alerts[ai..].contains("AI fetch blocked (synthetic)"),
+        "{alerts}"
+    );
+    assert!(
+        alerts[ai..].contains(
+            "your firewall or CDN blocks or challenges AI bots you want (synthetic check)"
+        ),
+        "{alerts}"
+    );
+}
+
+#[tokio::test]
+async fn the_registry_page_shows_each_documented_user_agent() {
+    let app = TestApp::new().await;
+    let body = app.get("/ai-bots", None).await.body;
+    let escape = |s: &str| {
+        s.replace('&', "&#38;")
+            .replace('<', "&#60;")
+            .replace('>', "&#62;")
+            .replace('"', "&#34;")
+            .replace('\'', "&#39;")
+    };
+    let mut documented = 0;
+    for bot in &registry().bots {
+        if let Some(ua) = &bot.user_agent {
+            documented += 1;
+            assert!(
+                body.contains(&escape(ua)),
+                "missing the user agent of {}",
+                bot.token
+            );
+        }
+    }
+    assert!(documented > 0);
+    assert!(body.contains("User agent"), "{body}");
+}

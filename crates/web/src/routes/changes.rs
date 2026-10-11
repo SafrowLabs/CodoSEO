@@ -408,7 +408,7 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
         }
         ChangeKind::AiIssueResolved if value == "resolved" => "Resolved".to_owned(),
         ChangeKind::AiPreferencesChanged if value == "none" => "none declared".to_owned(),
-        ChangeKind::AiFetchBlocked if value == "reachable" => "AI bots get the page".to_owned(),
+        ChangeKind::AiFetchBlocked if value == "reachable" => "AI bots got through".to_owned(),
         _ => value.to_owned(),
     }
 }

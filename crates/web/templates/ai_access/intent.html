@@ -37,6 +37,22 @@
     </div>
 
     <div class="aia-intent-side">
+      <section class="card aia-probes" id="probes" aria-labelledby="h-probes">
+        <div class="aia-purpose-main">
+          <div class="aia-purpose-text">
+            <h2 class="card-title" id="h-probes">Fetch checks <span class="badge aia-synthetic">Synthetic</span></h2>
+            <p>Catches a CDN or firewall that blocks, challenges or redirects AI bots that robots.txt lets in. Results show under Fetch check on the AI access screen.</p>
+          </div>
+        </div>
+        <div class="aia-dirs">
+          <input type="hidden" name="probes" value="off">
+          <label class="aia-dir" for="probes-on">
+            <input class="check" type="checkbox" id="probes-on" name="probes" value="on"{% if probes %} checked{% endif %}>
+            <span class="aia-dir-text"><span class="aia-dir-title">Run synthetic fetch checks</span><span class="aia-sub">Sends each AI bot's documented user agent to {{ probe_pages }} after each crawl, from CodoSEO's address, and compares the answers with CodoSEObot's. Bots robots.txt keeps out are never sent.</span></span>
+          </label>
+        </div>
+      </section>
+
       <section class="card aia-directives" aria-labelledby="h-directives">
         <div class="aia-purpose-main">
           <div class="aia-purpose-text">

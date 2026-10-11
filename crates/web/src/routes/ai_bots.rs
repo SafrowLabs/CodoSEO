@@ -35,6 +35,8 @@ pub struct BotEntry {
     pub source_host: String,
     pub last_reviewed: String,
     pub notes: String,
+    /// The full user agent as the operator prints it; `None` when only the token is documented.
+    pub user_agent: Option<String>,
     /// Lower-cased text the search box matches against.
     pub haystack: String,
 }
@@ -113,6 +115,7 @@ async fn page(State(state): State<AppState>) -> Result<Response, AppError> {
             source_host: site_of(&bot.source_url),
             last_reviewed: bot.last_reviewed.clone(),
             notes: bot.notes.clone(),
+            user_agent: bot.user_agent.clone(),
             haystack: format!(
                 "{} {} {} {}",
                 bot.token,
