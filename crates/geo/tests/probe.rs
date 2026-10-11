@@ -1306,3 +1306,20 @@ fn media_type_keeps_the_type_only() {
     let long = "a".repeat(500);
     assert_eq!(media_type(&long).map(|t| t.len()), Some(MAX_CONTENT_TYPE));
 }
+
+#[test]
+fn a_site_controlled_url_is_capped_before_it_is_kept() {
+    use codoseo_geo::probe::{MAX_URL, cap_url};
+    let long = format!("https://example.com/{}", "a".repeat(5_000));
+    let capped = cap_url(&long);
+    assert_eq!(capped.chars().count(), MAX_URL);
+    assert!(capped.ends_with('…'), "{capped}");
+    assert_eq!(cap_url("https://example.com/"), "https://example.com/");
+    let base = html(10_000, Some("Shop"));
+    let Verdict::Diverted { to } =
+        classify(PAGE, &base, &landed(html(10_000, Some("Shop")), &long))
+    else {
+        panic!("diverted");
+    };
+    assert_eq!(to, capped);
+}

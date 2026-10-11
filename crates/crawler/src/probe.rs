@@ -21,8 +21,8 @@ use codoseo_core::page::{Indexability, PageFields, PageRecord};
 use codoseo_core::url::url_hash;
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeBot, ProbeFetch, ProbePlan,
-    ProbeReport, ProbeResult, ProbeStop, ProbedUrl, SkipReason, Verdict, candidates, classify,
-    detect_challenge, media_type, page_title, plan_probes, robots_skips,
+    ProbeReport, ProbeResult, ProbeStop, ProbedUrl, SkipReason, Verdict, candidates, cap_url,
+    classify, detect_challenge, media_type, page_title, plan_probes, robots_skips,
 };
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::RobotsTxt;
@@ -439,7 +439,7 @@ fn probe_fetch(
     ProbeFetch {
         status: Some(r.status),
         error: None,
-        final_url: (r.final_url != *requested).then(|| r.final_url.to_string()),
+        final_url: (r.final_url != *requested).then(|| cap_url(r.final_url.as_str())),
         redirects: r.chain.len().min(usize::from(u8::MAX)) as u8,
         bytes: body.len().min(u32::MAX as usize) as u32,
         truncated: r.truncated,
@@ -740,6 +740,15 @@ mod tests {
             f.challenge.map(|c| c.vendor),
             Some(codoseo_geo::probe::Vendor::Cloudflare)
         );
+
+        let long = format!("https://example.com/{}", "x".repeat(4_000));
+        let far = response(200, None).map(|mut r| {
+            r.final_url = Url::parse(&long).unwrap();
+            r
+        });
+        let capped = probe_fetch(&requested, far, false).final_url.unwrap();
+        assert_eq!(capped.chars().count(), codoseo_geo::probe::MAX_URL);
+        assert!(capped.ends_with('…'));
 
         let same = response(200, None).map(|mut r| {
             r.final_url = requested.clone();

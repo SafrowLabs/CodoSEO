@@ -231,7 +231,8 @@ pub struct AiProbesInfo {
     pub synthetic: bool,
     /// Always `B`: observed by CodoSEO against its own baseline, not documented by the operator.
     pub grade: codoseo_geo::findings::Grade,
-    /// Pages probed; every probed bot was tried on each (robots.txt permitting).
+    /// Pages probed, that is fetched as CodoSEObot; each bot's own `urls_probed` counts the ones
+    /// its user agent was actually sent to.
     pub urls_probed: u32,
     /// The `From` header every probe carried.
     pub from: String,
@@ -265,7 +266,8 @@ pub struct AiProbeBotInfo {
     pub status: Option<u16>,
     /// Probed pages where it was treated worse than CodoSEObot.
     pub urls_affected: u32,
-    /// Pages actually requested with its user agent (robots.txt skips left out).
+    /// Pages actually requested with its user agent: robots.txt skips, and pages whose baseline
+    /// gave nothing to compare with, left out.
     pub urls_probed: u32,
 }
 

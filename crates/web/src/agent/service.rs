@@ -727,13 +727,16 @@ fn ai_probes(probes: &ProbeReport, intent: &Intent) -> AiProbesInfo {
         .iter()
         .filter_map(|token| {
             let bot = registry().bot(token)?;
-            let verdicts: Vec<&Verdict> = probes
+            let results: Vec<_> = probes
                 .urls
                 .iter()
                 .flat_map(|u| &u.results)
                 .filter(|r| &r.token == token)
-                .map(|r| &r.verdict)
                 .collect();
+            let verdicts: Vec<&Verdict> = results.iter().map(|r| &r.verdict).collect();
+            // Pages its user agent was actually sent to: not robots.txt skips, nor pages whose
+            // baseline gave nothing to compare with.
+            let requested = results.iter().filter(|r| r.fetch.is_some()).count();
             let shown = verdicts
                 .iter()
                 .find(|v| v.is_positive())
@@ -762,7 +765,7 @@ fn ai_probes(probes: &ProbeReport, intent: &Intent) -> AiProbesInfo {
                     _ => None,
                 },
                 urls_affected: count(&Verdict::is_positive),
-                urls_probed: count(&|v| *v != Verdict::SkippedRobots),
+                urls_probed: u32::try_from(requested).unwrap_or(u32::MAX),
             })
         })
         .collect();
@@ -844,6 +847,49 @@ mod tests {
         assert_eq!(parse_severity(" notice ").unwrap(), Severity::Notice);
         assert!(parse_severity("Critical").is_err());
         assert!(parse_severity("severe").is_err());
+    }
+
+    #[test]
+    fn a_bots_urls_probed_counts_only_pages_its_user_agent_was_sent_to() {
+        use codoseo_geo::probe::{InconclusiveReason, ProbeFetch, ProbeResult, ProbedUrl};
+        let ok = ProbeFetch {
+            status: Some(200),
+            html: true,
+            ..ProbeFetch::default()
+        };
+        let page = |url: u16, fetch: Option<ProbeFetch>, verdict: Verdict| ProbedUrl {
+            url,
+            baseline: ok.clone(),
+            results: vec![ProbeResult {
+                token: "OAI-SearchBot".to_owned(),
+                fetch,
+                verdict,
+            }],
+        };
+        let probes = ProbeReport {
+            version: 1,
+            synthetic: true,
+            from: "hello@codoseo.com".to_owned(),
+            bots: vec!["OAI-SearchBot".to_owned()],
+            skipped_bots: Vec::new(),
+            urls: vec![
+                page(0, Some(ok.clone()), Verdict::Same),
+                // CodoSEObot got nothing here, so the bot was never sent.
+                page(
+                    1,
+                    None,
+                    Verdict::Inconclusive {
+                        reason: InconclusiveReason::BaselineFailed,
+                    },
+                ),
+                page(2, None, Verdict::SkippedRobots),
+            ],
+            stop: None,
+            requests: 3,
+        };
+        let info = ai_probes(&probes, &Intent::default());
+        assert_eq!(info.urls_probed, 3);
+        assert_eq!(info.bots[0].urls_probed, 1);
     }
 
     #[test]

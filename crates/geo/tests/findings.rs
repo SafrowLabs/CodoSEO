@@ -1189,3 +1189,28 @@ fn a_held_bot_the_owner_no_longer_wants_is_dropped() {
     let members: Vec<String> = f.evidence.members().into_iter().collect();
     assert_eq!(members, ["perplexitybot"]);
 }
+
+#[test]
+fn urls_probed_counts_only_pages_the_bots_user_agent_was_sent_to() {
+    let mut report = probed(
+        3,
+        &[
+            (0, &[("OAI-SearchBot", cf())]),
+            (
+                1,
+                &[(
+                    "OAI-SearchBot",
+                    Verdict::Inconclusive {
+                        reason: InconclusiveReason::BaselineFailed,
+                    },
+                )],
+            ),
+            (2, &[("OAI-SearchBot", cf())]),
+        ],
+    );
+    // The baseline failed on the second page, so the bot was never sent there.
+    report.probes.as_mut().unwrap().urls[1].results[0].fetch = None;
+    let f = fetch_blocked(&report, &Intent::default());
+    let p = &f[0].evidence.probes[0];
+    assert_eq!((p.urls_affected, p.urls_probed), (2, 2));
+}

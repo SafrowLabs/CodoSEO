@@ -138,7 +138,8 @@ pub struct ProbeEvidence {
     pub purpose: Purpose,
     /// Probed pages where the bot got this finding's cause.
     pub urls_affected: u32,
-    /// Pages actually requested with its user agent (robots.txt skips left out).
+    /// Pages actually requested with its user agent: robots.txt skips, and pages whose baseline
+    /// gave nothing to compare with, left out.
     pub urls_probed: u32,
     pub home_affected: bool,
     /// The status of the sample probe.
@@ -943,7 +944,7 @@ fn fetch_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
             .filter(|u| {
                 u.results
                     .iter()
-                    .any(|r| r.token == token && r.verdict != Verdict::SkippedRobots)
+                    .any(|r| r.token == token && r.fetch.is_some())
             })
             .count() as u32
     };

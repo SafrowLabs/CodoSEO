@@ -19,6 +19,19 @@ pub const PROBE_VERSION: u32 = 1;
 pub const MAX_PROBE_BODY: usize = 256 * 1024;
 /// Longest page title kept per fetch, in characters.
 pub const MAX_TITLE: usize = 120;
+/// Longest site-controlled URL kept (a final URL, a redirect target), in characters.
+pub const MAX_URL: usize = 2048;
+
+/// `url` cut to [`MAX_URL`] characters, the last one an ellipsis when it was longer: a site
+/// controls where it redirects, so what is stored and quoted in summaries is capped.
+pub fn cap_url(url: &str) -> String {
+    if url.chars().count() <= MAX_URL {
+        return url.to_owned();
+    }
+    let mut out: String = url.chars().take(MAX_URL - 1).collect();
+    out.push('…');
+    out
+}
 /// Body bytes searched for challenge markers and the title.
 const SCAN_BYTES: usize = 64 * 1024;
 /// Generic CAPTCHA markers count only on pages smaller than this: a full page carrying a
@@ -115,7 +128,8 @@ pub struct ProbeFetch {
     pub status: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<FetchErrorKind>,
-    /// Where the redirects ended, only when that is not the requested URL.
+    /// Where the redirects ended, only when that is not the requested URL; at most [`MAX_URL`]
+    /// characters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_url: Option<String>,
     #[serde(default, skip_serializing_if = "is_zero_u8")]
@@ -681,7 +695,7 @@ pub fn classify(requested: &str, baseline: &ProbeFetch, probe: &ProbeFetch) -> V
     let probe_url = probe.final_url.as_deref().unwrap_or(requested);
     if url_key(base_url) != url_key(probe_url) {
         return Verdict::Diverted {
-            to: probe_url.to_owned(),
+            to: cap_url(probe_url),
         };
     }
     if (200..300).contains(&status) && probe.is_text_alternative() {
