@@ -567,10 +567,24 @@ fn classify_follows_the_precedence() {
             inconclusive(BaselineFailed),
         ),
         (
-            "baseline challenged, probe too",
+            "baseline challenged by a vendor, probe too",
+            PAGE,
+            challenged(base.clone(), Vendor::DataDome),
+            challenged(same(), Vendor::Cloudflare),
+            inconclusive(BaselineChallenged),
+        ),
+        (
+            "baseline a 2xx page with a generic marker only is not challenged",
             PAGE,
             challenged(base.clone(), Vendor::Generic),
-            challenged(same(), Vendor::Cloudflare),
+            same(),
+            Verdict::Same,
+        ),
+        (
+            "baseline a non-2xx page with a generic marker",
+            PAGE,
+            challenged(status(403), Vendor::Generic),
+            same(),
             inconclusive(BaselineChallenged),
         ),
         (
@@ -656,6 +670,73 @@ fn classify_follows_the_precedence() {
             challenged(same(), Vendor::Human),
             Verdict::Challenged {
                 vendor: Vendor::Human,
+            },
+        ),
+        // A generic marker on both sides is compared away, not a challenge; what else differs
+        // still counts.
+        (
+            "generic marker on both, same page",
+            PAGE,
+            challenged(base.clone(), Vendor::Generic),
+            challenged(same(), Vendor::Generic),
+            Verdict::Same,
+        ),
+        (
+            "generic marker on both, probe gets 403",
+            PAGE,
+            challenged(base.clone(), Vendor::Generic),
+            challenged(status(403), Vendor::Generic),
+            Verdict::Blocked { status: Some(403) },
+        ),
+        (
+            "generic marker on both, probe throttled",
+            PAGE,
+            challenged(base.clone(), Vendor::Generic),
+            challenged(status(429), Vendor::Generic),
+            Verdict::Throttled,
+        ),
+        (
+            "generic marker on both, probe diverted",
+            PAGE,
+            challenged(base.clone(), Vendor::Generic),
+            challenged(
+                landed(html(9_000, Some("Shop")), "https://example.com/"),
+                Vendor::Generic,
+            ),
+            Verdict::Diverted {
+                to: "https://example.com/".to_owned(),
+            },
+        ),
+        (
+            "generic marker on both, probe degraded",
+            PAGE,
+            challenged(base.clone(), Vendor::Generic),
+            challenged(html(3_000, Some("Please wait")), Vendor::Generic),
+            Verdict::Degraded,
+        ),
+        (
+            "generic marker on the baseline, vendor challenge on the probe",
+            PAGE,
+            challenged(base.clone(), Vendor::Generic),
+            challenged(status(403), Vendor::Cloudflare),
+            Verdict::Challenged {
+                vendor: Vendor::Cloudflare,
+            },
+        ),
+        (
+            "generic marker on the baseline, 403 without a marker for the probe",
+            PAGE,
+            challenged(base.clone(), Vendor::Generic),
+            status(403),
+            Verdict::Blocked { status: Some(403) },
+        ),
+        (
+            "generic marker on the probe only",
+            PAGE,
+            base.clone(),
+            challenged(status(403), Vendor::Generic),
+            Verdict::Challenged {
+                vendor: Vendor::Generic,
             },
         ),
         // 4. Throttled.

@@ -587,11 +587,14 @@ impl ProbeFetch {
 /// The verdict for one probe of `requested` against the baseline fetched the same way with
 /// CodoSEObot's user agent. The first rule that matches wins:
 ///
-/// 1. The baseline is challenged, or is not a 2xx HTML page: inconclusive.
+/// 1. The baseline is challenged, or is not a 2xx HTML page: inconclusive. A generic CAPTCHA
+///    marker on a 2xx baseline does not count as a challenge: small pages with a contact form
+///    carry one, and the probe is compared against it instead (rule 3).
 /// 2. The probe got no response: a connection refused or dropped on both tries is a block, any
 ///    other failure is inconclusive.
-/// 3. The probe is a challenge page (the baseline is not, by rule 1): challenged, whatever the
-///    status.
+/// 3. The probe is a challenge page and the baseline is not: challenged, whatever the status. A
+///    generic marker the baseline also carries is the page's own and is passed over, so a 403,
+///    redirect or smaller page behind it is still caught by the rules below.
 /// 4. 429: throttled.
 /// 5. Any other status from 400: blocked.
 /// 6. It ended at another URL than the baseline, ignoring the fragment, a trailing slash and an
@@ -600,7 +603,12 @@ impl ProbeFetch {
 ///    baseline's size or has no title where the baseline has one: degraded.
 /// 8. Otherwise the same; the same title at another size is dynamic content or prerendering.
 pub fn classify(requested: &str, baseline: &ProbeFetch, probe: &ProbeFetch) -> Verdict {
-    if baseline.challenge.is_some() {
+    let base_ok = baseline.status.is_some_and(|s| (200..300).contains(&s));
+    let base_generic = baseline
+        .challenge
+        .as_ref()
+        .is_some_and(|c| c.vendor == Vendor::Generic);
+    if baseline.challenge.is_some() && !(base_generic && base_ok) {
         return Verdict::Inconclusive {
             reason: InconclusiveReason::BaselineChallenged,
         };
@@ -620,7 +628,9 @@ pub fn classify(requested: &str, baseline: &ProbeFetch, probe: &ProbeFetch) -> V
             },
         };
     };
-    if let Some(c) = &probe.challenge {
+    if let Some(c) = &probe.challenge
+        && !(c.vendor == Vendor::Generic && base_generic)
+    {
         return Verdict::Challenged { vendor: c.vendor };
     }
     if status == 429 {
@@ -687,8 +697,8 @@ fn norm_title(t: Option<&str>) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeResult {
     pub token: String,
-    /// The probe as fetched (the confirming re-fetch, when there was one); `None` when robots.txt
-    /// kept it from being requested.
+    /// The probe as fetched (the confirming re-fetch, when there was one); `None` when it was not
+    /// requested: robots.txt disallows it, or the baseline gave nothing to compare with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fetch: Option<ProbeFetch>,
     pub verdict: Verdict,
