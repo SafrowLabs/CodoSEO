@@ -114,15 +114,32 @@ impl Fetcher {
 
     /// Fetches a page. Only HTML bodies are read, up to the configured cap.
     pub async fn fetch(&self, url: &Url) -> Result<FetchResult, FetchError> {
-        self.run(url, BodyMode::HtmlOnly).await
+        self.run(url, BodyMode::HtmlOnly, None).await
     }
 
     /// Fetches any resource (robots.txt, sitemaps) and reads up to `max_bytes` of its body.
     pub async fn fetch_raw(&self, url: &Url, max_bytes: usize) -> Result<FetchResult, FetchError> {
-        self.run(url, BodyMode::Any(max_bytes)).await
+        self.run(url, BodyMode::Any(max_bytes), None).await
     }
 
-    async fn run(&self, start: &Url, mode: BodyMode) -> Result<FetchResult, FetchError> {
+    /// Like [`Fetcher::fetch_raw`], sending `headers` on every request of the redirect chain.
+    /// They take precedence over the client's defaults, so a `User-Agent` here replaces the
+    /// configured one. The address check still runs on every hop.
+    pub async fn fetch_with(
+        &self,
+        url: &Url,
+        headers: &HeaderMap,
+        max_bytes: usize,
+    ) -> Result<FetchResult, FetchError> {
+        self.run(url, BodyMode::Any(max_bytes), Some(headers)).await
+    }
+
+    async fn run(
+        &self,
+        start: &Url,
+        mode: BodyMode,
+        headers: Option<&HeaderMap>,
+    ) -> Result<FetchResult, FetchError> {
         let mut current = start.clone();
         let mut chain: Vec<Hop> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
@@ -131,12 +148,11 @@ impl Fetcher {
             seen.insert(current.as_str().to_owned());
 
             let sent = Instant::now();
-            let resp = self
-                .client
-                .get(current.clone())
-                .send()
-                .await
-                .map_err(map_err)?;
+            let mut req = self.client.get(current.clone());
+            if let Some(headers) = headers {
+                req = req.headers(headers.clone());
+            }
+            let resp = req.send().await.map_err(map_err)?;
             let response_ms = sent.elapsed().as_millis().min(u32::MAX as u128) as u32;
             let status = resp.status().as_u16();
 
@@ -230,7 +246,7 @@ impl Fetcher {
     }
 }
 
-fn is_html(content_type: Option<&str>) -> bool {
+pub(crate) fn is_html(content_type: Option<&str>) -> bool {
     match content_type {
         None => true,
         Some(ct) => {

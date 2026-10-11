@@ -9,6 +9,7 @@ pub mod frontier;
 pub mod guard;
 pub mod politeness;
 pub mod preflight;
+pub mod probe;
 pub(crate) mod record;
 pub mod robots;
 pub mod scope;
