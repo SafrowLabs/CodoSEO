@@ -7,6 +7,7 @@ pub mod eligibility;
 pub mod findings;
 pub mod incident;
 pub mod intent;
+pub mod probe;
 pub mod registry;
 pub mod report;
 pub mod robots;
