@@ -13,7 +13,9 @@ use codoseo_core::crawl::{AddressPolicy, PROBE_FROM, RobotsFile, SitemapSummary,
 use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, PageFields, PageRecord};
 use codoseo_core::url::url_hash;
-use codoseo_crawler::probe::{ProbeConfig, probe_page, run_probes, select_bots};
+use codoseo_crawler::probe::{
+    PAGE_PROBE_DEADLINE, ProbeConfig, probe_page, run_probes, select_bots,
+};
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, ProbeBot, ProbePlan, ProbeReport, ProbeResult, ProbeStop,
     Vendor, Verdict, candidates, plan_probes,
@@ -695,6 +697,7 @@ async fn probe_page_probes_one_page_against_its_robots_txt() {
         AddressPolicy::AllowPrivate,
         PROBE_FROM,
         Duration::from_millis(20),
+        PAGE_PROBE_DEADLINE,
     )
     .await
     .expect("a probe");
@@ -734,6 +737,7 @@ async fn probe_page_refuses_when_robots_txt_gives_no_verdicts() {
         AddressPolicy::AllowPrivate,
         PROBE_FROM,
         Duration::from_millis(20),
+        PAGE_PROBE_DEADLINE,
     )
     .await
     .unwrap_err();
@@ -754,6 +758,7 @@ async fn probe_page_refuses_a_page_robots_txt_keeps_codoseobot_from() {
         AddressPolicy::AllowPrivate,
         PROBE_FROM,
         Duration::from_millis(20),
+        PAGE_PROBE_DEADLINE,
     )
     .await
     .unwrap_err();
@@ -763,4 +768,38 @@ async fn probe_page_refuses_a_page_robots_txt_keeps_codoseobot_from() {
         "{:?}",
         site.requests()
     );
+}
+
+#[tokio::test]
+async fn probe_page_stops_at_its_deadline_with_what_it_has() {
+    let site = SiteBuilder::new()
+        .every_path(Page::by_user_agent(
+            vec![(PPLX, ok_page("Pricing").delayed(Duration::from_secs(5)))],
+            ok_page("Pricing"),
+        ))
+        .start()
+        .await;
+    let start = Instant::now();
+    let probed = probe_page(
+        &site.url("/pricing"),
+        Some(&tokens(&[OAI, PPLX, DUCK])),
+        AddressPolicy::AllowPrivate,
+        PROBE_FROM,
+        Duration::from_millis(20),
+        Duration::from_millis(1_500),
+    )
+    .await
+    .expect("a partial report, not an error");
+    let took = start.elapsed();
+    assert!(took < Duration::from_millis(2_500), "{took:?}");
+    let probes = probed.probes();
+    assert_eq!(probes.stop, Some(ProbeStop::Budget));
+    assert_eq!(probes.urls.len(), 1);
+    assert_eq!(verdict(probes, 0, OAI), Verdict::Same);
+    let stopped = Verdict::Inconclusive {
+        reason: InconclusiveReason::Stopped,
+    };
+    assert_eq!(verdict(probes, 0, PPLX), stopped);
+    assert_eq!(verdict(probes, 0, DUCK), stopped);
+    assert_eq!(PAGE_PROBE_DEADLINE, Duration::from_secs(120));
 }

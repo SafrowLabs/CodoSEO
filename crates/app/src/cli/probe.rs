@@ -6,7 +6,7 @@ use std::io::Write;
 
 use clap::{Args, ValueEnum};
 use codoseo_core::crawl::AddressPolicy;
-use codoseo_crawler::probe::{DEFAULT_MIN_GAP, probe_from_env, probe_page};
+use codoseo_crawler::probe::{DEFAULT_MIN_GAP, PAGE_PROBE_DEADLINE, probe_from_env, probe_page};
 use codoseo_geo::Intent;
 use codoseo_geo::findings::{Finding, FindingKind, findings};
 use codoseo_geo::probe::ProbeReport;
@@ -56,6 +56,7 @@ pub async fn run(args: ProbeArgs) -> Outcome {
         AddressPolicy::AllowPrivate,
         &probe_from_env(),
         DEFAULT_MIN_GAP,
+        PAGE_PROBE_DEADLINE,
     )
     .await
     .map_err(CliError::msg)?;

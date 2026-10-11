@@ -235,7 +235,7 @@ pub struct AiProbesInfo {
     pub urls_probed: u32,
     /// The `From` header every probe carried.
     pub from: String,
-    /// Why the check stopped before its last planned page (`budget`, `request_cap`, `cancelled`).
+    /// Why the check stopped before its last planned page (`budget`: the time ran out, or `request_cap`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop: Option<codoseo_geo::probe::ProbeStop>,
     /// One entry per probed bot, in probe order.

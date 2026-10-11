@@ -17,7 +17,7 @@ use codoseo_core::page::PageRecord;
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::{crawl, inspect_page};
 use codoseo_crawler::fetch::{FetchError, Fetcher, FetcherConfig, Hop};
-use codoseo_crawler::probe::{DEFAULT_MIN_GAP, probe_from_env, probe_page};
+use codoseo_crawler::probe::{DEFAULT_MIN_GAP, PAGE_PROBE_DEADLINE, probe_from_env, probe_page};
 use codoseo_crawler::robots::fetch_robots;
 use codoseo_diff::{diff, key_pages};
 use codoseo_geo::eligibility::{Effect, engines, record_effect};
@@ -305,6 +305,7 @@ impl Backend for LocalBackend {
             AddressPolicy::AllowPrivate,
             &probe_from_env(),
             DEFAULT_MIN_GAP,
+            PAGE_PROBE_DEADLINE,
         )
         .await
         .map_err(BackendError::Other)?;

@@ -452,9 +452,11 @@ fn probe_fetch(
 
 // ---- One page on its own --------------------------------------------------------------------
 
-/// Budget and request cap for a single-page run (`codoseo probe`, the local MCP's
-/// `probe_ai_fetch`): the self-hosted caps, far more than one page needs.
-pub const PAGE_PROBE_BUDGET: Duration = Duration::from_secs(180);
+/// The overall time limit of a single-page run (`codoseo probe`, the local MCP's
+/// `probe_ai_fetch`), robots.txt included: past it the run stops and returns what it has, with
+/// `stop` set to `budget`.
+pub const PAGE_PROBE_DEADLINE: Duration = Duration::from_secs(120);
+/// The request cap of a single-page run: the self-hosted cap, far more than one page needs.
 pub const PAGE_PROBE_MAX_REQUESTS: u16 = 160;
 /// The environment variable that overrides the `From` header on self-run probes.
 pub const PROBE_FROM_ENV: &str = "CODOSEO_PROBE_FROM";
@@ -540,14 +542,18 @@ impl PageProbe {
 /// Probes `url` alone with every candidate bot, or the `bots` subset (see [`select_bots`]): reads
 /// the site's robots.txt, skips what it disallows, and compares each bot with a CodoSEObot
 /// baseline. The page itself is not fetched beforehand: the baseline says whether it is an HTML
-/// 200. Errors are messages for the user: bad bot names, an unreadable robots.txt.
+/// 200. Everything, robots.txt included, ends by `deadline` (see [`PAGE_PROBE_DEADLINE`]): a run
+/// cut short returns the bots it reached, the rest inconclusive and `stop` set to `budget`.
+/// Errors are messages for the user: bad bot names, an unreadable robots.txt.
 pub async fn probe_page(
     url: &Url,
     bots: Option<&[String]>,
     address_policy: AddressPolicy,
     from: &str,
     min_gap: Duration,
+    deadline: Duration,
 ) -> Result<PageProbe, String> {
+    let until = Instant::now() + deadline;
     let selected = bots.map(select_bots).transpose()?;
     let mut url = url.clone();
     url.set_fragment(None);
@@ -556,8 +562,9 @@ pub async fn probe_page(
         .map_err(|e| format!("not a site address: {e}"))?;
 
     let fetcher = Fetcher::new(FetcherConfig::new(address_policy)).map_err(|e| e.to_string())?;
-    let (rules, file) = fetch_robots(&fetcher, &url)
+    let (rules, file) = tokio::time::timeout_at(until, fetch_robots(&fetcher, &url))
         .await
+        .map_err(|_| "could not fetch robots.txt in time; nothing was probed".to_owned())?
         .map_err(|e| format!("could not fetch robots.txt: {e}"))?;
     let robots = RobotsTxt::from_response(Some(file.status), file.body.as_bytes());
 
@@ -617,13 +624,9 @@ pub async fn probe_page(
     if let Some(selected) = selected {
         plan.bots = selected;
     }
-    let mut cfg = ProbeConfig::new(
-        &report,
-        plan,
-        address_policy,
-        PAGE_PROBE_BUDGET,
-        PAGE_PROBE_MAX_REQUESTS,
-    );
+    let left = until.saturating_duration_since(Instant::now());
+    let mut cfg = ProbeConfig::new(&report, plan, address_policy, left, PAGE_PROBE_MAX_REQUESTS);
+    cfg.deadline = left;
     cfg.from = from.to_owned();
     cfg.min_gap = min_gap;
     report.probes = Some(run_probes(cfg).await);

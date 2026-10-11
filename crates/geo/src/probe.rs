@@ -725,7 +725,6 @@ pub enum ProbeStop {
     /// the middle of one (whose unanswered bots are then [`InconclusiveReason::Stopped`]).
     Budget,
     RequestCap,
-    Cancelled,
 }
 
 /// The synthetic fetch probes of one crawl, stored in [`AccessReport::probes`]. Synthetic: the

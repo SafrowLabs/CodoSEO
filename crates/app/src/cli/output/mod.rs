@@ -358,7 +358,6 @@ pub(super) fn probe_stop_text(r: &ProbeReport) -> Option<&'static str> {
     r.stop.map(|s| match s {
         ProbeStop::Budget => "stopped early: time budget used up",
         ProbeStop::RequestCap => "stopped early: request cap reached",
-        ProbeStop::Cancelled => "stopped early: cancelled",
     })
 }
 

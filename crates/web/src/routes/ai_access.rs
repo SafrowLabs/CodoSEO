@@ -873,7 +873,6 @@ fn stop_text(s: ProbeStop) -> &'static str {
         ProbeStop::RequestCap => {
             "Stopped early: the request cap was reached before every page was checked."
         }
-        ProbeStop::Cancelled => "Stopped early: the crawl was cancelled.",
     }
 }
 
