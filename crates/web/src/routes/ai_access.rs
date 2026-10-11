@@ -380,9 +380,15 @@ pub struct FetchCheck {
     pub skipped_total: usize,
 }
 
+/// What the screen says about open synthetic incidents while the fetch checks are off: they are
+/// kept, as nothing can judge them.
+pub const PROBES_OFF_INCIDENTS: &str = "Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved.";
+
 pub struct FetchEmpty {
     pub title: &'static str,
     pub text: &'static str,
+    /// A second line ([`PROBES_OFF_INCIDENTS`] when the checks are off).
+    pub note: Option<&'static str>,
     /// Offer the intent form, where the switch is.
     pub intent_link: bool,
 }
@@ -888,6 +894,7 @@ fn fetch_empty(title: &'static str, text: &'static str, intent_link: bool) -> Fe
         empty: Some(FetchEmpty {
             title,
             text,
+            note: None,
             intent_link,
         }),
         note: String::new(),
@@ -908,15 +915,22 @@ fn fetch_check(
     probes_on: bool,
     installed: bool,
 ) -> FetchCheck {
+    let off = |title, text, intent_link| {
+        let mut out = fetch_empty(title, text, intent_link);
+        if let Some(e) = out.empty.as_mut() {
+            e.note = Some(PROBES_OFF_INCIDENTS);
+        }
+        out
+    };
     if !installed {
-        return fetch_empty(
+        return off(
             "Fetch checks are turned off on this install",
             "CODOSEO_PROBE_URLS is 0, so no page is fetched with an AI bot's user agent. Set it to the number of pages to check (up to 10) to turn them on.",
             false,
         );
     }
     if !probes_on {
-        return fetch_empty(
+        return off(
             "Fetch checks are off for this site",
             "Switch them on in your intent to see whether your CDN or firewall treats AI bots differently from CodoSEObot.",
             true,

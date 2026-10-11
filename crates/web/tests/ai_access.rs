@@ -1197,6 +1197,7 @@ async fn the_fetch_check_says_why_there_are_no_results() {
         "{body}"
     );
     assert!(body.contains(&format!(r#"href="/s/{}/ai-access/intent#probes""#, site.id)));
+    assert!(body.contains(STAY_OPEN), "{body}");
     // Even with a stored probe report.
     app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
         .await;
@@ -1398,6 +1399,7 @@ async fn probe_urls_zero_turns_the_checks_off_for_the_whole_install() {
         body.contains("Fetch checks are turned off on this install"),
         "{body}"
     );
+    assert!(body.contains(STAY_OPEN), "{body}");
     assert!(
         !body.contains("Fetch checks run after the next crawl"),
         "{body}"
@@ -1412,3 +1414,6 @@ async fn probe_urls_zero_turns_the_checks_off_for_the_whole_install() {
     app.post_hx(&path, "p.training=block", Some(&cookie)).await;
     assert!(geo::get_ai_probes(app.pool(), site.id).await.unwrap());
 }
+
+/// What the AI access screen says about open synthetic incidents while the checks are off.
+const STAY_OPEN: &str = "Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved.";
