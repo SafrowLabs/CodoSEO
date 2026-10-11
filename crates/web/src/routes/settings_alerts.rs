@@ -216,6 +216,7 @@ fn note(kind: ChangeKind) -> &'static str {
         ChangeKind::AiIssueResolved => "an AI access issue went away",
         ChangeKind::AiBlockNotApplied => "a bot you block can still crawl",
         ChangeKind::AiPreferencesChanged => "Content-Signal, Content-Usage or TDM changed",
+        ChangeKind::AiFetchBlocked => "a test fetch as a bot you want was refused or challenged",
         _ => "",
     }
 }

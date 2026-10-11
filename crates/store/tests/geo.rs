@@ -658,13 +658,15 @@ async fn intent_validation_rejects_nonsense_tokens() {
 
 #[tokio::test]
 async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
-    assert!(ALL_KINDS.len() >= 17);
+    assert!(ALL_KINDS.len() >= 18);
     for kind in [
         codoseo_core::change::ChangeKind::AiBotBlocked,
         codoseo_core::change::ChangeKind::AiAnswersRestricted,
         codoseo_core::change::ChangeKind::AiIssueResolved,
+        codoseo_core::change::ChangeKind::AiFetchBlocked,
     ] {
         assert!(DEFAULT_INSTANT.contains(&kind), "{kind:?}");
+        assert!(ALL_KINDS.contains(&kind));
     }
     for kind in [
         codoseo_core::change::ChangeKind::AiBlockNotApplied,
@@ -719,11 +721,12 @@ async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
     alert_rules::create_defaults_for_site(&db.pool, account, site)
         .await
         .unwrap();
-    assert_eq!(count(&db.pool).await, 8);
+    assert_eq!(count(&db.pool).await, 9);
     for kind in [
         codoseo_core::change::ChangeKind::AiBotBlocked,
         codoseo_core::change::ChangeKind::AiAnswersRestricted,
         codoseo_core::change::ChangeKind::AiIssueResolved,
+        codoseo_core::change::ChangeKind::AiFetchBlocked,
     ] {
         assert_eq!(
             alert_rules::instant_channels_for(&db.pool, site, kind)
@@ -1111,4 +1114,235 @@ async fn a_stale_worker_cannot_record_a_failed_crawl() {
             .unwrap()
             .is_empty()
     );
+}
+
+// ---- Synthetic fetch probes (GB.8) -------------------------------------------------------------
+
+use codoseo_geo::probe::{ProbeFetch, ProbeReport, ProbeResult, ProbedUrl, Vendor, Verdict};
+
+fn probe_fetch(status: u16, title: &str, bytes: u32) -> ProbeFetch {
+    ProbeFetch {
+        status: Some(status),
+        html: true,
+        bytes,
+        title: Some(title.to_owned()),
+        ..ProbeFetch::default()
+    }
+}
+
+fn cloudflare() -> Verdict {
+    Verdict::Challenged {
+        vendor: Vendor::Cloudflare,
+    }
+}
+
+/// Finalizes a new full crawl that allows every bot in robots.txt and whose probes of the home
+/// page gave these verdicts.
+async fn probed_crawl(pool: &PgPool, site: Uuid, verdicts: &[(&str, Verdict)]) -> Uuid {
+    let crawl = make_crawl(pool, site, "manual", "running").await;
+    let out = crawl_of(200, ALLOW_ALL, None);
+    let mut input = input_for(&out);
+    let results: Vec<ProbeResult> = verdicts
+        .iter()
+        .map(|(token, verdict)| ProbeResult {
+            token: (*token).to_owned(),
+            fetch: Some(match verdict {
+                Verdict::Same => probe_fetch(200, "Home", 20_000),
+                _ => probe_fetch(403, "Just a moment...", 4_000),
+            }),
+            verdict: verdict.clone(),
+        })
+        .collect();
+    input.report.probes = Some(ProbeReport {
+        version: 1,
+        synthetic: true,
+        from: "hello@codoseo.com".to_owned(),
+        bots: verdicts.iter().map(|(t, _)| (*t).to_owned()).collect(),
+        skipped_bots: Vec::new(),
+        urls: vec![ProbedUrl {
+            url: 0,
+            baseline: probe_fetch(200, "Home", 20_000),
+            results,
+        }],
+        stop: None,
+        requests: 0,
+    });
+    assert!(evaluated_kinds(&input.report).contains(&FindingKind::FetchBlocked));
+    finalize(
+        pool,
+        crawl,
+        site,
+        WORKER,
+        &out,
+        &check_report(),
+        &[],
+        Some(&input),
+    )
+    .await
+    .expect("finalize");
+    crawl
+}
+
+/// The site's open `fetch_blocked` incidents.
+async fn fetch_blocked_open(pool: &PgPool, site: Uuid) -> Vec<geo::Incident> {
+    geo::open_incidents(pool, site)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == FindingKind::FetchBlocked)
+        .collect()
+}
+
+#[tokio::test]
+async fn the_first_probes_open_fetch_blocked_quietly_even_after_earlier_reports() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    // Phase A reports only: they judged robots.txt and markup, never fetches.
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+
+    let crawl = probed_crawl(&db.pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+    let open = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].subject, "challenge_cloudflare");
+    assert_eq!(open[0].severity, Severity::Warning, "the home page");
+    assert!(
+        open[0].quiet,
+        "the first report that probes is fetch_blocked's baseline"
+    );
+    assert!(change_kinds(&db.pool, crawl).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, crawl).await, 0);
+}
+
+#[tokio::test]
+async fn probes_widen_resolve_and_a_report_without_probes_leaves_them_alone() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    probed_crawl(&db.pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+    assert!(quiet_of(&db.pool, site, "fetch_blocked").await);
+
+    // Claude-SearchBot is challenged too: the same incident, widened, and announced.
+    let widened = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    let open = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(open.len(), 1);
+    assert!(!open[0].quiet, "announced, so no longer quiet");
+    assert_eq!(
+        change_kinds(&db.pool, widened).await,
+        vec![("ai_fetch_blocked".to_owned(), "warning".to_owned())]
+    );
+    let (before, after): (String, String) =
+        sqlx::query_as("SELECT before_value, after_value FROM changes WHERE crawl_id = $1")
+            .bind(widened)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(before, "reachable");
+    assert_eq!(after, open[0].title);
+    assert_eq!(alert_jobs(&db.pool, widened).await, 1);
+
+    // A crawl without probes (switched off, or a failed run) can't judge fetches.
+    let unprobed = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let still = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(still.len(), 1);
+    assert_eq!(still[0].id, open[0].id);
+    assert!(change_kinds(&db.pool, unprobed).await.is_empty());
+
+    // Every bot gets the page again: resolved, and the owner hears of it.
+    let clear = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", Verdict::Same),
+            ("Claude-SearchBot", Verdict::Same),
+        ],
+    )
+    .await;
+    assert!(fetch_blocked_open(&db.pool, site).await.is_empty());
+    let resolved = geo::recent_resolved(&db.pool, site, 5).await.unwrap();
+    assert_eq!(resolved[0].kind, FindingKind::FetchBlocked);
+    assert_eq!(resolved[0].resolution.as_deref(), Some("fixed"));
+    assert_eq!(
+        change_kinds(&db.pool, clear).await,
+        vec![("ai_issue_resolved".to_owned(), "notice".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn the_newest_probed_report_is_kept_and_an_intent_change_resolves_from_it_quietly() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let probed = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    for _ in 0..3 {
+        full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    }
+    // The two newest, plus the newest that judged fetch_blocked.
+    assert_eq!(report_count(&db.pool, site).await, 3);
+    let kept: Vec<Uuid> = sqlx::query_scalar("SELECT crawl_id FROM ai_reports WHERE site_id = $1")
+        .bind(site)
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+    assert!(kept.contains(&probed));
+    assert_eq!(fetch_blocked_open(&db.pool, site).await.len(), 1);
+    let changes_before: i64 = sqlx::query_scalar("SELECT count(*) FROM changes WHERE site_id = $1")
+        .bind(site)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+
+    // The owner wants both bots kept out after all: the challenge is no longer a problem.
+    let intent = Intent {
+        bots: [
+            ("OAI-SearchBot".to_owned(), Stance::Block),
+            ("Claude-SearchBot".to_owned(), Stance::Block),
+        ]
+        .into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    geo::reevaluate_quietly(&db.pool, site).await.unwrap();
+    assert!(fetch_blocked_open(&db.pool, site).await.is_empty());
+    let resolved: Vec<geo::Incident> = geo::recent_resolved(&db.pool, site, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == FindingKind::FetchBlocked)
+        .collect();
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].resolution.as_deref(), Some("intent"));
+    let changes_after: i64 = sqlx::query_scalar("SELECT count(*) FROM changes WHERE site_id = $1")
+        .bind(site)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(changes_after, changes_before, "an intent change is quiet");
+}
+
+#[tokio::test]
+async fn the_probe_switch_defaults_on_and_round_trips() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let other = make_site(&db.pool, "other.example").await;
+    assert!(geo::get_ai_probes(&db.pool, site).await.unwrap());
+    geo::set_ai_probes(&db.pool, site, false).await.unwrap();
+    assert!(!geo::get_ai_probes(&db.pool, site).await.unwrap());
+    assert!(geo::get_ai_probes(&db.pool, other).await.unwrap());
+    geo::set_ai_probes(&db.pool, site, true).await.unwrap();
+    assert!(geo::get_ai_probes(&db.pool, site).await.unwrap());
 }

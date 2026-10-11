@@ -41,6 +41,24 @@ async fn migrate_creates_every_table() {
     // api_usage from 0010, ai_reports and ai_incidents from 0011, and sqlx's own
     // _sqlx_migrations bookkeeping table.
     assert_eq!(count, 20);
+
+    // 0012: the per-site switch for synthetic agent fetch probes, on unless switched off.
+    let (nullable, default): (String, Option<String>) = sqlx::query_as(
+        "SELECT is_nullable, column_default FROM information_schema.columns \
+         WHERE table_name = 'sites' AND column_name = 'ai_probes'",
+    )
+    .fetch_one(&mut check)
+    .await
+    .expect("sites.ai_probes exists");
+    assert_eq!(nullable, "NO");
+    assert_eq!(default.as_deref(), Some("true"));
+    let kind: bool = sqlx::query_scalar(
+        "SELECT 'ai_fetch_blocked' = ANY(enum_range(NULL::change_kind)::text[])",
+    )
+    .fetch_one(&mut check)
+    .await
+    .expect("read change_kind");
+    assert!(kind, "change_kind has ai_fetch_blocked");
     drop(check);
 
     admin

@@ -18,6 +18,8 @@ pub struct Site {
     pub monitoring_active: bool,
     /// Starred key pages, as URL hashes.
     pub key_pages: Vec<u64>,
+    /// Synthetic AI agent fetch probes run after monitored crawls (the owner can switch them off).
+    pub ai_probes: bool,
     pub created_at: OffsetDateTime,
 }
 
@@ -30,6 +32,7 @@ pub(crate) struct SiteRow {
     pub(crate) schedule: Option<String>,
     pub(crate) monitoring_active: bool,
     pub(crate) key_pages: Vec<i64>,
+    pub(crate) ai_probes: bool,
     pub(crate) created_at: OffsetDateTime,
 }
 
@@ -43,13 +46,14 @@ impl From<SiteRow> for Site {
             schedule: r.schedule,
             monitoring_active: r.monitoring_active,
             key_pages: r.key_pages.into_iter().map(hash::from_db).collect(),
+            ai_probes: r.ai_probes,
             created_at: r.created_at,
         }
     }
 }
 
-pub(crate) const COLUMNS: &str =
-    "id, account_id, domain, start_url, schedule, monitoring_active, key_pages, created_at";
+pub(crate) const COLUMNS: &str = "id, account_id, domain, start_url, schedule, \
+     monitoring_active, key_pages, ai_probes, created_at";
 
 /// The starred key pages of a site (URL hashes), for the diff. Empty when the site is gone.
 pub async fn starred_key_pages(

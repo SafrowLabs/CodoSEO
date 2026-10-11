@@ -35,11 +35,12 @@ use crate::finalize::{enqueue_alert_job, insert_changes};
 /// newest two can't stand in for (see [`reports_to_keep`]).
 const KEEP_REPORTS: usize = 2;
 /// Every kind of finding, for the kinds a run opens quietly.
-const ALL_KINDS: [FindingKind; 4] = [
+const ALL_KINDS: [FindingKind; 5] = [
     FindingKind::RobotsUnavailable,
     FindingKind::BotsBlocked,
     FindingKind::BotsNotBlocked,
     FindingKind::AnswersRestricted,
+    FindingKind::FetchBlocked,
 ];
 /// Longest `before_value`/`after_value` a change row gets, in characters.
 const MAX_CHANGE_TEXT: usize = 300;
@@ -186,6 +187,28 @@ pub async fn set_intent(pool: &PgPool, site_id: Uuid, intent: &Intent) -> Result
     sqlx::query("UPDATE sites SET ai_intent = $2 WHERE id = $1")
         .bind(site_id)
         .bind(value)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Whether synthetic agent fetch probes run after the site's monitored crawls (on unless the
+/// owner switched them off). A site that is gone reads as the default.
+pub async fn get_ai_probes(pool: &PgPool, site_id: Uuid) -> Result<bool, sqlx::Error> {
+    let on: Option<bool> = sqlx::query_scalar("SELECT ai_probes FROM sites WHERE id = $1")
+        .bind(site_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(on.unwrap_or(true))
+}
+
+/// Switches the site's synthetic agent fetch probes on or off. Stored reports and incidents are
+/// left alone: a crawl without probes does not judge `fetch_blocked`, so an open one stays open
+/// until a crawl probes again or the owner's intent makes it moot.
+pub async fn set_ai_probes(pool: &PgPool, site_id: Uuid, on: bool) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE sites SET ai_probes = $2 WHERE id = $1")
+        .bind(site_id)
+        .bind(on)
         .execute(pool)
         .await?;
     Ok(())
@@ -735,8 +758,7 @@ fn finding_change(finding: &Finding) -> Change {
         }
         FindingKind::BotsNotBlocked => (ChangeKind::AiBlockNotApplied, "intent: block"),
         FindingKind::AnswersRestricted => (ChangeKind::AiAnswersRestricted, "eligible"),
-        // Placeholder until `ChangeKind::AiFetchBlocked` exists (GB.8); no report carries probes yet.
-        FindingKind::FetchBlocked => (ChangeKind::AiBotBlocked, "reachable"),
+        FindingKind::FetchBlocked => (ChangeKind::AiFetchBlocked, "reachable"),
     };
     Change {
         kind,
