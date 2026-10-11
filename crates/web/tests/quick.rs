@@ -761,6 +761,25 @@ async fn the_bot_page_robots_and_llms_txt_are_served_in_the_cloud() {
     ] {
         assert!(res.body.contains(needle), "{needle}: {}", res.body);
     }
+    // The synthetic AI fetch checks: what they send, how many pages, and how to stop them.
+    for needle in [
+        "Synthetic AI fetch checks",
+        "up to 5 of the pages",
+        "<code>From: hello@codoseo.com</code>",
+        "OAI-SearchBot, ChatGPT-User",
+        "follows robots.txt for the bot token it uses",
+        "switch the check off under AI access",
+        "block <code>CodoSEObot</code> in robots.txt",
+    ] {
+        assert!(res.body.contains(needle), "{needle}: {}", res.body);
+    }
+    for token in ["Googlebot", "Claude-User", "GPTBot"] {
+        assert!(
+            !res.body.contains(token),
+            "{token} is never probed: {}",
+            res.body
+        );
+    }
 
     let res = app.get("/robots.txt", None).await;
     assert_eq!(res.status, StatusCode::OK);

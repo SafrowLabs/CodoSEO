@@ -14,7 +14,7 @@ CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in R
 - **A web app** with scheduled crawls, a URL explorer, change tracking and email, Slack, Discord and webhook alerts. Self-host it with Docker, or use the hosted version at [codoseo.com](https://codoseo.com).
 - **A REST API and a hosted MCP server** at codoseo.com for your monitored sites.
 
-It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. See [docs/ai-access.md](docs/ai-access.md).
+It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. A synthetic fetch check requests a few pages with the AI bots' documented user agents to catch a CDN or firewall that turns them away. See [docs/ai-access.md](docs/ai-access.md).
 
 ![The AI access screen](docs/images/ai-access/ai-access-hero.png)
 
@@ -377,7 +377,7 @@ DATABASE_URL=postgres://localhost/codoseo codoseo all
 - [docs/deploy-coolify.md](docs/deploy-coolify.md): Coolify template and the two-container layout
 - [docs/operations.md](docs/operations.md): logs, metrics, health checks, upgrades
 - [docs/mcp.md](docs/mcp.md) and [docs/api.md](docs/api.md): agent access
-- [docs/ai-access.md](docs/ai-access.md): AI access monitoring, the intent model and the public AI bot registry
+- [docs/ai-access.md](docs/ai-access.md): AI access monitoring, the synthetic fetch checks, the intent model and the public AI bot registry
 - [RELEASING.md](RELEASING.md): how releases are cut
 
 Keyboard: <kbd>⌘K</kbd> command palette and URL search, <kbd>G</kbd> then <kbd>E</kbd>/<kbd>A</kbd>/<kbd>C</kbd>/<kbd>H</kbd>/<kbd>I</kbd> to switch screens, <kbd>J</kbd>/<kbd>K</kbd> to move through rows, <kbd>/</kbd> to filter, <kbd>[</kbd> to collapse the sidebar, <kbd>?</kbd> for the full list.
