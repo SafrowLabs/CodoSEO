@@ -7,7 +7,9 @@ use std::time::Duration;
 use codoseo_core::crawl::{AddressPolicy, PROBE_FROM};
 use codoseo_core::output::CrawlOutput;
 use codoseo_core::plan::{Plan, PlanLimits};
-use codoseo_crawler::probe::{DEFAULT_MIN_GAP, PROBE_TIMEOUT, ProbeConfig, run_probes};
+use codoseo_crawler::probe::{
+    DEFAULT_MIN_GAP, PROBE_TIMEOUT, ProbeConfig, probe_from_value, run_probes,
+};
 use codoseo_geo::probe::{ProbeReport, plan_probes};
 use codoseo_geo::report::AccessReport;
 use codoseo_geo::robots::RobotsTxt;
@@ -60,17 +62,10 @@ impl ProbeSettings {
     /// The settings for these variable values. An empty or invalid value is logged and ignored;
     /// a page count above [`MAX_PROBE_URLS`] is clamped to it.
     pub fn from_vars(from: Option<&str>, urls: Option<&str>) -> ProbeSettings {
-        let mut settings = ProbeSettings::default();
-        if let Some(from) = from.map(str::trim).filter(|f| !f.is_empty()) {
-            // A header value: visible ASCII and spaces only.
-            if from.bytes().all(|b| (0x20..0x7f).contains(&b)) {
-                settings.from = from.to_owned();
-            } else {
-                tracing::warn!(
-                    "CODOSEO_PROBE_FROM is not a valid header value; using {PROBE_FROM}"
-                );
-            }
-        }
+        let mut settings = ProbeSettings {
+            from: probe_from_value(from),
+            ..ProbeSettings::default()
+        };
         if let Some(urls) = urls.map(str::trim).filter(|u| !u.is_empty()) {
             match urls.parse::<u32>() {
                 Ok(n) => {

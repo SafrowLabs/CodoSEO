@@ -122,6 +122,37 @@ async fn every_request_carries_the_verbatim_user_agent_and_from() {
 }
 
 #[tokio::test]
+async fn an_invalid_from_is_replaced_and_the_report_names_what_was_sent() {
+    use codoseo_crawler::probe::probe_from_value;
+    let site = SiteBuilder::new().every_path(ok_page("Home")).start().await;
+    let mut cfg = config(&site, &["/"], vec![bot(OAI)]);
+    cfg.from = "ops\tteam@example.org".to_owned();
+    let report = run_probes(cfg).await;
+    assert_eq!(report.from, PROBE_FROM);
+    assert!(
+        site.requests()
+            .iter()
+            .all(|r| r.from.as_deref() == Some(PROBE_FROM)),
+        "{:?}",
+        site.requests()
+    );
+
+    assert_eq!(probe_from_value(None), PROBE_FROM);
+    assert_eq!(probe_from_value(Some("  ")), PROBE_FROM);
+    assert_eq!(
+        probe_from_value(Some(" ops@example.org ")),
+        "ops@example.org"
+    );
+    for bad in [
+        "bad\nvalue",
+        "ops\tteam@example.org",
+        "op\u{e9}@example.org",
+    ] {
+        assert_eq!(probe_from_value(Some(bad)), PROBE_FROM, "{bad:?}");
+    }
+}
+
+#[tokio::test]
 async fn headers_are_sent_on_every_redirect_hop() {
     let site = SiteBuilder::new()
         .page("/old", Page::redirect(301, "/new"))

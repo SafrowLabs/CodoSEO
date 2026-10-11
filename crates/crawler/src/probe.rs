@@ -120,8 +120,10 @@ impl ProbeConfig {
 /// and a run cut short says why in `stop`. Bodies are read up to [`MAX_PROBE_BODY`] and dropped
 /// once their title, size and challenge markers are taken.
 pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
-    let from =
-        HeaderValue::from_str(&cfg.from).unwrap_or_else(|_| HeaderValue::from_static(PROBE_FROM));
+    let from = valid_from(&cfg.from)
+        .and_then(|f| HeaderValue::from_str(&f).ok())
+        .unwrap_or_else(|| HeaderValue::from_static(PROBE_FROM));
+    // The value actually sent.
     let mut report = ProbeReport::new(from.to_str().unwrap_or(PROBE_FROM), &cfg.plan);
     let fetcher = match Fetcher::new(FetcherConfig {
         request_timeout: cfg.request_timeout,
@@ -463,13 +465,28 @@ pub const PAGE_PROBE_MAX_REQUESTS: u16 = 160;
 pub const PROBE_FROM_ENV: &str = "CODOSEO_PROBE_FROM";
 
 /// The `From` header for probes run by the CLI or the local MCP server: `CODOSEO_PROBE_FROM`
-/// when set, else [`PROBE_FROM`].
+/// when set to a valid value, else [`PROBE_FROM`] (see [`probe_from_value`]).
 pub fn probe_from_env() -> String {
-    std::env::var(PROBE_FROM_ENV)
-        .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| PROBE_FROM.to_owned())
+    probe_from_value(std::env::var(PROBE_FROM_ENV).ok().as_deref())
+}
+
+/// The `From` header for a `CODOSEO_PROBE_FROM` value: the value trimmed, or [`PROBE_FROM`] when
+/// it is unset or blank, or (with a warning in the log) not a valid header value.
+pub fn probe_from_value(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        return PROBE_FROM.to_owned();
+    };
+    valid_from(value).unwrap_or_else(|| {
+        tracing::warn!("{PROBE_FROM_ENV} is not a valid header value; using {PROBE_FROM}");
+        PROBE_FROM.to_owned()
+    })
+}
+
+/// `value` trimmed when it is a `From` the probes can send: visible ASCII and spaces only.
+fn valid_from(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty() && value.bytes().all(|b| (0x20..0x7f).contains(&b)))
+        .then(|| value.to_owned())
 }
 
 /// The probe candidates named in `wanted` (any case), in registry order. An unknown token, one

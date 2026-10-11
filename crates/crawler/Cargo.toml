@@ -26,6 +26,7 @@ quick-xml.workspace = true
 flate2.workspace = true
 httpdate.workspace = true
 futures-util.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 codoseo-testkit.workspace = true
