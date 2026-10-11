@@ -276,6 +276,7 @@ pub(super) fn verdict_text(v: &Verdict) -> String {
                 InconclusiveReason::BaselineChallenged => "CodoSEObot was challenged too",
                 InconclusiveReason::ProbeError => "no response",
                 InconclusiveReason::Unstable => "the re-fetch disagreed",
+                InconclusiveReason::Unconfirmed => "no room left to confirm",
             }
         ),
         Verdict::SkippedRobots => "Not probed: robots.txt".to_owned(),

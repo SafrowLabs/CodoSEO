@@ -188,8 +188,18 @@ pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
             let mut verdict = classify(url.as_str(), &baseline, &fetch);
             if let Some(cause) = verdict.cause_slug()
                 && !confirmed.contains(&(bot.token.clone(), cause))
-                && run.can_extra(left)
             {
+                if !run.can_extra(left) {
+                    // No room for the second fetch a finding needs.
+                    results.push(ProbeResult {
+                        token: bot.token.clone(),
+                        fetch: Some(fetch),
+                        verdict: Verdict::Inconclusive {
+                            reason: InconclusiveReason::Unconfirmed,
+                        },
+                    });
+                    continue;
+                }
                 fetch = run.fetch(url, &bot.user_agent, left).await;
                 let again = classify(url.as_str(), &baseline, &fetch);
                 if again.cause_slug() == Some(cause) {

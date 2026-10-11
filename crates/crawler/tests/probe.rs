@@ -378,9 +378,67 @@ async fn the_request_cap_holds_with_retries_and_confirmations() {
     assert_eq!(report.requests, 5);
     assert_eq!(site.hits(), 5);
     assert_eq!(site.hits_from(OAI), 2);
-    assert_eq!(verdict(&report, 0, OAI), Verdict::Throttled);
+    // No room for the confirming re-fetch: not reported.
+    assert_eq!(
+        verdict(&report, 0, OAI),
+        Verdict::Inconclusive {
+            reason: InconclusiveReason::Unconfirmed
+        }
+    );
     assert_eq!(verdict(&report, 0, PPLX), Verdict::Same);
     assert_eq!(verdict(&report, 0, DUCK), Verdict::Same);
+}
+
+#[tokio::test]
+async fn a_positive_with_no_room_left_to_confirm_is_unconfirmed() {
+    let site = SiteBuilder::new()
+        .every_path(Page::by_user_agent(
+            vec![(OAI, Page::status(403, "<title>Forbidden</title>"))],
+            ok_page("Home"),
+        ))
+        .start()
+        .await;
+    // The cap: the baseline and one fetch per bot, nothing more.
+    let mut cfg = config(&site, &["/"], vec![bot(OAI), bot(PPLX)]);
+    cfg.max_requests = 3;
+    let report = run_probes(cfg).await;
+    let r = result(&report, 0, OAI);
+    assert_eq!(
+        r.verdict,
+        Verdict::Inconclusive {
+            reason: InconclusiveReason::Unconfirmed
+        }
+    );
+    assert_eq!(r.fetch.as_ref().and_then(|f| f.status), Some(403));
+    assert_eq!(site.hits_from(OAI), 1);
+    assert!(
+        !report.urls[0]
+            .results
+            .iter()
+            .any(|r| r.verdict.is_positive())
+    );
+
+    // The budget: the time is up by the time the re-fetch would go.
+    let site = SiteBuilder::new()
+        .every_path(Page::by_user_agent(
+            vec![(
+                OAI,
+                Page::status(403, "<title>Forbidden</title>").delayed(Duration::from_millis(700)),
+            )],
+            ok_page("Home"),
+        ))
+        .start()
+        .await;
+    let mut cfg = config(&site, &["/"], vec![bot(OAI)]);
+    cfg.budget = Duration::from_millis(500);
+    let report = run_probes(cfg).await;
+    assert_eq!(
+        verdict(&report, 0, OAI),
+        Verdict::Inconclusive {
+            reason: InconclusiveReason::Unconfirmed
+        }
+    );
+    assert_eq!(site.hits_from(OAI), 1);
 }
 
 #[tokio::test]

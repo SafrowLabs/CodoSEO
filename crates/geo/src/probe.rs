@@ -511,6 +511,9 @@ pub enum InconclusiveReason {
     ProbeError,
     /// The confirming re-fetch disagreed with the first.
     Unstable,
+    /// A worse result the request cap or the time budget left no room to confirm with a second
+    /// fetch. Grade B means confirmed, so a single fetch is not reported.
+    Unconfirmed,
 }
 
 /// What one probe says about one bot on one page, compared with the baseline.

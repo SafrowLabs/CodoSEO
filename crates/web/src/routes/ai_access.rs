@@ -850,6 +850,9 @@ fn inconclusive_tip(r: InconclusiveReason) -> &'static str {
             "No response: a timeout, too many redirects or a refused address"
         }
         InconclusiveReason::Unstable => "A second fetch disagreed with the first",
+        InconclusiveReason::Unconfirmed => {
+            "Worse than CodoSEObot once, with no time or requests left to confirm it"
+        }
     }
 }
 

@@ -34,7 +34,7 @@ Every probed bot is fetched whatever your intent, so a change of intent can re-e
 
 **robots.txt and pacing.** A bot is never sent to a page robots.txt disallows for its token; the result says "Not probed: robots.txt". Probes run only when robots.txt gave verdicts, one request at a time on one connection, at least 500 ms apart, or the longest `Crawl-delay` among CodoSEObot and the probed tokens when that is longer (capped at 10 seconds, like the crawler). A page is probed for every bot or not at all.
 
-**Retries and confirmation.** A 429, a 503, a timeout or a connection error is retried once, after `Retry-After` (at most 10 seconds; 2 seconds when there is none). A result worse than the baseline is fetched a second time the first time that bot meets that cause in a run; when the two fetches disagree the result is inconclusive ("the re-fetch disagreed"), not a finding.
+**Retries and confirmation.** A 429, a 503, a timeout or a connection error is retried once, after `Retry-After` (at most 10 seconds; 2 seconds when there is none). A result worse than the baseline is fetched a second time the first time that bot meets that cause in a run; when the two fetches disagree the result is inconclusive ("the re-fetch disagreed"), not a finding. When the request cap or the time budget leaves no room for that second fetch, the result is inconclusive too ("no room left to confirm"): a grade B finding always rests on two fetches.
 
 **How much.** Pages are taken in order: the home page, then starred pages, then the most linked, HTML 200 only. Bodies are read up to 256 KiB and never stored; only the status, size, final URL, title (cut to 120 characters) and any challenge marker are kept.
 
@@ -52,7 +52,7 @@ A page is started only when the requests left and the time left cover all of its
 
 | Verdict | When |
 |---|---|
-| Inconclusive | CodoSEObot itself got no HTML 200 page, or was challenged too; the bot's request got no response (a timeout); or the confirming re-fetch disagreed |
+| Inconclusive | CodoSEObot itself got no HTML 200 page, or was challenged too; the bot's request got no response (a timeout); the confirming re-fetch disagreed; or there was no room left for it |
 | Challenged | The bot got a bot-manager challenge or block page the baseline did not: Cloudflare, Vercel, AWS WAF, DataDome, HUMAN, Imperva, Akamai, Sucuri, or a generic CAPTCHA or "verify you are human" page. A CAPTCHA that is on the baseline too (a contact form) is the page's own and does not count |
 | Rate limited | HTTP 429 |
 | Blocked | Any other status from 400 (a 404 counts, as the baseline got the page), or the connection refused or dropped on both tries |
