@@ -20,6 +20,13 @@ robots.txt can let a bot in while the CDN or firewall in front of the site turns
 
 It is a **synthetic** check: the requests come from CodoSEO's address, not from the bots. The AI access screen shows the latest check, bot by bot, in its **Fetch check** section. Every result says it is synthetic: the badge on that section, "(synthetic check)" at the end of each finding title, `synthetic: true` in the JSON, and a banner in the CLI.
 
+<table>
+  <tr>
+    <td width="50%"><a href="images/ai-access/ai-access-probes-light.png"><img src="images/ai-access/ai-access-probes-light.png" alt="The Fetch check section of the AI access screen, with two synthetic incidents"></a><br>The Fetch check section and two synthetic incidents</td>
+    <td width="50%"><a href="images/ai-access/intent-probes-light.png"><img src="images/ai-access/intent-probes-light.png" alt="The fetch check switch in the intent form"></a><br>The switch under <b>Edit intent</b></td>
+  </tr>
+</table>
+
 **What is sent.** Each bot's user agent exactly as its operator prints it on the page cited in the [registry](#the-public-registry), byte for byte, never assembled by CodoSEO. Every request also carries `From: hello@codoseo.com` (the RFC 9110 header for a contact address), so a site owner who sees a bot's user agent arriving from our address can reach us. Self-hosters can change it with `CODOSEO_PROBE_FROM` ([configuration.md](configuration.md#ai-access-probes)). There is no custom `X-` header: it would hand firewalls an easy way to wave the check through, and the user agent would no longer be what the bot sends.
 
 **The baseline.** Each probed page is also fetched with CodoSEObot's own user agent, just before the bots, from the same address with the same client and headers. The user agent is the only difference, so a different answer is down to it. The baseline is not a browser user agent: a Chrome user agent from a datacenter address with a non-browser TLS stack is challenged by most bot managers, which would make the baseline itself unreliable, and it would mean pretending to be a person. Only pages CodoSEObot has just crawled as HTML 200 are probed, so the baseline is a known-good control.
