@@ -590,7 +590,14 @@ async fn render_page(
                 "ok",
             )
         },
-        fetch: fetch_check(site, &base, report, &intent, probes_on),
+        fetch: fetch_check(
+            site,
+            &base,
+            report,
+            &intent,
+            probes_on,
+            state.config.probe_urls_for(user.account.plan) > 0,
+        ),
         robots_callout: robots_callout(report),
         robots_aside: robots_aside(report),
         bot_attention: bot_groups
@@ -899,7 +906,15 @@ fn fetch_check(
     report: &AccessReport,
     intent: &Intent,
     probes_on: bool,
+    installed: bool,
 ) -> FetchCheck {
+    if !installed {
+        return fetch_empty(
+            "Fetch checks are turned off on this install",
+            "CODOSEO_PROBE_URLS is 0, so no page is fetched with an AI bot's user agent. Set it to the number of pages to check (up to 10) to turn them on.",
+            false,
+        );
+    }
     if !probes_on {
         return fetch_empty(
             "Fetch checks are off for this site",
@@ -1973,6 +1988,9 @@ pub struct IntentPage {
     pub probes: bool,
     /// How many pages they fetch on the account's plan: `up to 3 pages`.
     pub probe_pages: String,
+    /// False when `CODOSEO_PROBE_URLS=0` turns the checks off for the whole install: the switch
+    /// is then shown disabled and the form does not send it.
+    pub probes_installed: bool,
 }
 
 /// The page directives the intent form offers to accept, each with what it does (as
@@ -2139,7 +2157,8 @@ async fn intent_page(
         directives: directive_picks(&intent),
         custom: intent != Intent::default(),
         probes: geo::get_ai_probes(&state.pool, site.id).await?,
-        probe_pages: probe_pages(user.account.plan),
+        probe_pages: probe_pages(state.config.probe_urls_for(user.account.plan)),
+        probes_installed: state.config.probe_urls_for(user.account.plan) > 0,
     })?
     .into_response())
 }
@@ -2201,9 +2220,9 @@ fn probes_from_form(fields: &[(String, String)]) -> Result<Option<bool>, String>
     }
 }
 
-/// The intent form's "up to N pages", from the plan's limit.
-fn probe_pages(plan: codoseo_core::plan::Plan) -> String {
-    match codoseo_core::plan::PlanLimits::for_plan(plan).probe_urls {
+/// The intent form's "up to N pages", from the pages a crawl probes.
+fn probe_pages(pages: u8) -> String {
+    match pages {
         1 => "the home page".to_owned(),
         n => format!("up to {n} pages"),
     }

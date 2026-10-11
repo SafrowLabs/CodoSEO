@@ -45,11 +45,18 @@
           </div>
         </div>
         <div class="aia-dirs">
+          {% if probes_installed %}
           <input type="hidden" name="probes" value="off">
           <label class="aia-dir" for="probes-on">
             <input class="check" type="checkbox" id="probes-on" name="probes" value="on"{% if probes %} checked{% endif %}>
             <span class="aia-dir-text"><span class="aia-dir-title">Run synthetic fetch checks</span><span class="aia-sub">Sends each AI bot's documented user agent to {{ probe_pages }} after each crawl, from CodoSEO's address, and compares the answers with CodoSEObot's. Bots robots.txt keeps out are never sent.</span></span>
           </label>
+          {% else %}
+          <label class="aia-dir" for="probes-on">
+            <input class="check" type="checkbox" id="probes-on" value="on"{% if probes %} checked{% endif %} disabled>
+            <span class="aia-dir-text"><span class="aia-dir-title">Run synthetic fetch checks</span><span class="aia-sub">Fetch checks are turned off on this install (<code>CODOSEO_PROBE_URLS=0</code>), so no request is sent with an AI bot's user agent.</span></span>
+          </label>
+          {% endif %}
         </div>
       </section>
 

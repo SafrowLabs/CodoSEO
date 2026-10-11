@@ -1380,3 +1380,35 @@ async fn the_registry_page_shows_each_documented_user_agent() {
     assert!(documented > 0);
     assert!(body.contains("User agent"), "{body}");
 }
+
+#[tokio::test]
+async fn probe_urls_zero_turns_the_checks_off_for_the_whole_install() {
+    let config =
+        codoseo_web::Config::from_lookup(|k| (k == "CODOSEO_PROBE_URLS").then(|| "0".to_owned()))
+            .expect("config");
+    assert_eq!(config.probe_urls, Some(0));
+    let app = TestApp::with_config(config).await;
+    let (account, cookie) = app.login("ana@example.com").await;
+    let site = app.site(&account, DOMAIN).await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(
+        body.contains("Fetch checks are turned off on this install"),
+        "{body}"
+    );
+    assert!(
+        !body.contains("Fetch checks run after the next crawl"),
+        "{body}"
+    );
+
+    // The intent form can't switch them on, and saving it leaves the site's switch alone.
+    let path = format!("/s/{}/ai-access/intent", site.id);
+    let form = app.get(&path, Some(&cookie)).await.body;
+    assert!(form.contains("turned off on this install"), "{form}");
+    assert!(!form.contains(r#"type="hidden" name="probes""#), "{form}");
+    assert!(form.contains(r#"value="on" checked disabled"#), "{form}");
+    app.post_hx(&path, "p.training=block", Some(&cookie)).await;
+    assert!(geo::get_ai_probes(app.pool(), site.id).await.unwrap());
+}

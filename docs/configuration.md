@@ -60,7 +60,7 @@ After each monitored crawl the worker fetches a few important pages as the AI se
 | Variable | Default | Roles | Meaning |
 |---|---|---|---|
 | `CODOSEO_PROBE_FROM` | `hello@codoseo.com` | worker, all | The `From` header on every probe request and its baseline. An empty or invalid value is logged and ignored. The CLI (`codoseo probe`, `crawl --probes`) and the local MCP server's `probe_ai_fetch` read it too. |
-| `CODOSEO_PROBE_URLS` | `5` | worker, all | Pages probed per crawl on a self-hosted install (plan `self_hosted`), at most `10`. `0` turns the probes off for the whole install. Cloud plans keep their own caps (Free 1, Pro 3, Agency 5). An invalid value is logged and ignored. |
+| `CODOSEO_PROBE_URLS` | `5` | web, worker, all | Pages probed per crawl on a self-hosted install (plan `self_hosted`), at most `10`. `0` turns the probes off for the whole install: the worker sends none, and the web app shows the switch in **Edit intent** disabled and says on the AI access screen that fetch checks are turned off on this install. Set it to the same value for the web and worker roles. Cloud plans keep their own caps (Free 1, Pro 3, Agency 5). An invalid value is ignored (the worker logs it). |
 
 ## Logging, metrics and error reporting
 
