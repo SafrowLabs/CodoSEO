@@ -71,7 +71,7 @@ fn every_vendor_marker_is_detected() {
             403,
             vec![],
             b"<div id=\"cf-chl-widget\"></div>".to_vec(),
-            Vendor::Cloudflare,
+            Vendor::Generic,
             "cf-chl",
         ),
         (
@@ -85,7 +85,7 @@ fn every_vendor_marker_is_detected() {
             403,
             vec![],
             b"<script src=\"https://challenges.cloudflare.com/x.js\"></script>".to_vec(),
-            Vendor::Cloudflare,
+            Vendor::Generic,
             "challenges.cloudflare.com",
         ),
         (
@@ -391,6 +391,38 @@ fn ordinary_pages_are_not_challenges() {
     for (name, status, headers, body) in clean {
         assert_eq!(detect_challenge(status, &headers, &body), None, "{name}");
     }
+}
+
+/// Cloudflare Turnstile on an ordinary page: the script tag the HTML carries, and the widget it
+/// renders (what a prerendering service serves bots). Neither is a challenge page.
+#[test]
+fn a_page_with_a_turnstile_form_is_not_a_cloudflare_challenge() {
+    let script = "<script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\" async defer></script>";
+    let widget = "<form><div class=\"cf-turnstile\" data-sitekey=\"0x4AAA\"><div><iframe \
+         src=\"https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/x\" \
+         id=\"cf-chl-widget-a1b2c\"></iframe><input type=\"hidden\" name=\"cf-turnstile-response\" \
+         id=\"cf-chl-widget-a1b2c_response\"></div></div></form>";
+    for inner in [script, widget] {
+        let page = padded(inner, 60 * 1024);
+        assert_eq!(detect_challenge(200, &[], &page), None, "{inner}");
+    }
+
+    // The baseline carries the script: the probes are still compared with it.
+    let mut baseline = html(60_000, Some("Contact us"));
+    baseline.challenge = detect_challenge(200, &[], &padded(script, 60 * 1024));
+    let probe = html(60_000, Some("Contact us"));
+    assert_eq!(
+        classify("https://a.example/", &baseline, &probe),
+        Verdict::Same
+    );
+
+    // A bot gets the prerendered page with the widget, CodoSEObot the script-only HTML.
+    let mut prerendered = html(60_000, Some("Contact us"));
+    prerendered.challenge = detect_challenge(200, &[], &padded(widget, 60 * 1024));
+    assert_eq!(
+        classify("https://a.example/", &probe, &prerendered),
+        Verdict::Same
+    );
 }
 
 #[test]

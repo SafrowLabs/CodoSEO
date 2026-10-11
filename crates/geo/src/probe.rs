@@ -187,13 +187,7 @@ const BODY_MARKERS: &[(Vendor, &str, &[&str])] = &[
         "Just a moment...",
         &["just a moment..."],
     ),
-    (Vendor::Cloudflare, "cf-chl", &["cf-chl"]),
     (Vendor::Cloudflare, "_cf_chl_opt", &["_cf_chl_opt"]),
-    (
-        Vendor::Cloudflare,
-        "challenges.cloudflare.com",
-        &["challenges.cloudflare.com"],
-    ),
     (
         Vendor::Cloudflare,
         "Attention Required! | Cloudflare",
@@ -243,11 +237,16 @@ const BODY_MARKERS: &[(Vendor, &str, &[&str])] = &[
     ),
 ];
 
-/// Generic markers, counted only on a small page.
+/// Generic markers, counted only on a small page. `challenges.cloudflare.com` and `cf-chl` are
+/// Cloudflare Turnstile's script host and widget ids: an ordinary page with a Turnstile form
+/// carries them (and a prerendered copy of it carries the widget), while Cloudflare's own
+/// challenge page is caught by its title, `_cf_chl_opt` and `cf-mitigated`.
 const GENERIC_MARKERS: &[(&str, &str)] = &[
     ("g-recaptcha", "g-recaptcha"),
     ("hcaptcha.com", "hcaptcha.com"),
     ("cf-turnstile", "cf-turnstile"),
+    ("challenges.cloudflare.com", "challenges.cloudflare.com"),
+    ("cf-chl", "cf-chl"),
     ("verify you are human", "verify you are human"),
     (
         "enable JavaScript and cookies",
