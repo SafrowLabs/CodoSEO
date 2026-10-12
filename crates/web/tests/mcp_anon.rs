@@ -819,8 +819,19 @@ async fn shutdown_ends_a_quick_audit_that_is_waiting() {
     let app = cloud().await;
     let client = Client::new(&app, Duration::from_secs(60), Some(SHARED_UA));
     let state = app.state.clone();
+    let pool = app.pool().clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        // Shut down once the audit exists, so quick_audit is in its wait.
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let crawls: i64 = sqlx::query_scalar("SELECT count(*) FROM crawls")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            if crawls > 0 {
+                break;
+            }
+        }
         state.shutdown.cancel();
     });
     let started = std::time::Instant::now();
