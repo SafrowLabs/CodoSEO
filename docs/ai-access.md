@@ -298,6 +298,22 @@ The site overview shows an **AI access** panel next to the health score: open in
 
 **Issues CSV** and **JSON** on the AI access screen download the site's open incidents and those resolved in the last 90 days: `kind`, `subject`, `severity`, `grade`, `title`, `state`, `first_seen`, `last_seen`, `resolved_at`, `resolved_by` (`crawl`, `recheck` or `intent`), `verified_at`, `affected_urls` and `sources`. The same rows come from the API ([`GET .../ai-access/incidents`](api.md#ai-access-incidents)). Text cells that start like a spreadsheet formula get a leading `'` in the CSV, since titles and URLs come from the crawled site.
 
+![An incident card with the How to fix panel open, and the Recheck now, Copy and Snooze actions](images/ai-access/ai-access-fix-light.png)
+
+![The same card in the dark theme](images/ai-access/ai-access-fix-dark.png)
+
+![The same card on a phone](images/ai-access/ai-access-fix-mobile.png)
+
+After a recheck sees the fix, the card says so and until when it verifies:
+
+![An incident whose fix was detected, verifying until the follow-up recheck](images/ai-access/ai-access-verifying-light.png)
+
+Accepted and snoozed incidents are set aside:
+
+![The Accepted section and a snoozed incident](images/ai-access/ai-access-accepted-light.png)
+
+![The AI access panel on the overview, next to the health score](images/ai-access/overview-ai-access-light.png)
+
 ## The public registry
 
 The list of bots behind all this is public at `/ai-bots` (a searchable table) and `/ai-bots.json` (the data), on codoseo.com and on every self-hosted install, no login needed. The data file is licensed **CC0-1.0**: use it for anything, no attribution needed. Each bot has its robots.txt token, operator, product, purpose, whether the operator says it honours robots.txt, the operator's IP-range file and verification hints where published, the source page it was checked against, and the date it was last reviewed.
