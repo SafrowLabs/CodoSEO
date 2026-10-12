@@ -49,6 +49,26 @@
       {% endif %}
     </div>
     <div class="stack">
+      {% if let Some(ai) = d.ai %}
+      <div class="card" id="ai-access-panel">
+        <div class="card-head"><span class="card-title">AI access</span><span class="card-aside">Not part of the health score</span></div>
+        <div class="card-pad">
+          {% if ai.clear %}
+          <div style="display:flex;align-items:center;gap:10px"><span class="badge t-ok"><svg class="icon" style="width:13px;height:13px"><use href="#i-check"/></svg>No issues</span>Nothing open, accepted or snoozed.</div>
+          {% else %}
+          <div class="legend">
+            {% for r in ai.rows %}
+            <div><span class="k">{{ r.label }}</span><span class="mono num">{{ r.total }}</span>{% for c in r.chips %}<span class="badge {{ c.0 }}">{{ c.1 }}</span>{% endfor %}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if ai.weakest.is_some() || ai.verifying.is_some() %}
+          <p class="muted" style="margin:10px 0 0;font-size:12px">{% if let Some(w) = ai.weakest %}{{ w }}{% endif %}{% if ai.weakest.is_some() && ai.verifying.is_some() %} · {% endif %}{% if let Some(v) = ai.verifying %}{{ v }}{% endif %}</p>
+          {% endif %}
+          <p style="margin:10px 0 0"><a href="{{ base }}/ai-access">View AI access</a></p>
+        </div>
+      </div>
+      {% endif %}
       <div class="card">
         <div class="card-head"><span class="card-title">Response codes</span><span class="card-aside">{{ d.pages_label }}</span></div>
         <div class="card-pad">

@@ -2271,3 +2271,283 @@ async fn a_fetch_blocked_card_names_the_probe_identity() {
     assert!(c.contains("sent from CodoSEO's address"), "{c}");
     assert!(c.contains(">Accept<"), "{c}");
 }
+
+// ---- the overview's panel and the exports (B3.14) ---------------------------------------------
+
+/// The text of the panel on the site's audit page.
+async fn panel(app: &TestApp, site: &Site, cookie: &str) -> Option<String> {
+    let body = app
+        .get(&format!("/s/{}/audit", site.id), Some(cookie))
+        .await
+        .body;
+    let start = body.find(r#"id="ai-access-panel""#)?;
+    Some(body[start..start + body[start..].find("View AI access").unwrap()].to_owned())
+}
+
+#[tokio::test]
+async fn the_overview_has_an_ai_access_panel_beside_the_health_score_and_not_in_it() {
+    let (app, site, cookie, _) = blocked_incident().await;
+    let body = app
+        .get(&format!("/s/{}/audit", site.id), Some(&cookie))
+        .await
+        .body;
+    let panel = panel(&app, &site, &cookie).await.expect("a panel");
+    assert!(panel.contains("Not part of the health score"), "{panel}");
+    assert!(panel.contains("1 critical"), "{panel}");
+    assert!(panel.contains("Weakest evidence: A"), "{panel}");
+    assert!(
+        body.contains(&format!(r#"href="/s/{}/ai-access""#, site.id)),
+        "{body}"
+    );
+    // The health score KPI is the crawl's own score and says nothing about AI access.
+    let score: i16 = sqlx::query_scalar(
+        "SELECT health_score FROM crawls WHERE site_id = $1 ORDER BY finished_at DESC LIMIT 1",
+    )
+    .bind(site.id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let kpi_start = body.find("Health score").expect("the health score KPI");
+    let kpi = &body[kpi_start..kpi_start + body[kpi_start..].find("kpi-delta").unwrap()];
+    assert!(kpi.contains(&format!(r#"data-count="{score}""#)), "{kpi}");
+    assert!(!kpi.contains("AI access"), "{kpi}");
+    assert!(body.find("Health score").unwrap() < body.find(r#"id="ai-access-panel""#).unwrap());
+    // The score is what it is without the incident: both crawls hold the same pages.
+    let scores: Vec<i16> = sqlx::query_scalar(
+        "SELECT health_score FROM crawls WHERE site_id = $1 ORDER BY created_at",
+    )
+    .bind(site.id)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(scores.len(), 2);
+    assert_eq!(scores[0], scores[1]);
+}
+
+#[tokio::test]
+async fn the_panel_splits_open_accepted_and_snoozed_and_counts_fixes_being_verified() {
+    let (app, site, cookie, id) = llms_incident().await;
+    let p = panel(&app, &site, &cookie).await.unwrap();
+    assert!(p.contains("1 warning"), "{p}");
+    assert!(p.contains("Weakest evidence"), "{p}");
+
+    let res = app
+        .post_hx(&action(&site, id, "accept"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let p = panel(&app, &site, &cookie).await.unwrap();
+    // Open is empty now and Accepted has the notice.
+    let row = |p: &str, label: &str| {
+        let at = p
+            .find(&format!(r#"<span class="k">{label}</span>"#))
+            .unwrap();
+        p[at..at + p[at..].find("</div>").unwrap()].to_owned()
+    };
+    assert!(!row(&p, "Open").contains("warning"), "{p}");
+    assert!(row(&p, "Accepted").contains("1 warning"), "{p}");
+    assert!(!p.contains("Weakest evidence"), "{p}");
+
+    app.post_hx(&action(&site, id, "unaccept"), "", Some(&cookie))
+        .await;
+    app.post_hx(&action(&site, id, "snooze"), "days=7", Some(&cookie))
+        .await;
+    let p = panel(&app, &site, &cookie).await.unwrap();
+    assert!(row(&p, "Snoozed").contains("1 warning"), "{p}");
+    assert!(!row(&p, "Open").contains("warning"), "{p}");
+
+    app.post_hx(&action(&site, id, "unsnooze"), "", Some(&cookie))
+        .await;
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
+         VALUES ($1, $2, 'followup', now() + interval '24 hours')",
+    )
+    .bind(site.id)
+    .bind(id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let p = panel(&app, &site, &cookie).await.unwrap();
+    assert!(p.contains("1 fix being verified"), "{p}");
+}
+
+#[tokio::test]
+async fn a_clear_site_says_so_and_a_site_without_a_report_has_no_panel() {
+    let (app, site, cookie) = setup().await;
+    assert!(panel(&app, &site, &cookie).await.is_none());
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let p = panel(&app, &site, &cookie).await.unwrap();
+    assert!(p.contains("Nothing open, accepted or snoozed"), "{p}");
+}
+
+fn csv_rows(body: &str) -> Vec<Vec<String>> {
+    let mut r = csv::Reader::from_reader(body.as_bytes());
+    let mut rows = vec![r.headers().unwrap().iter().map(str::to_owned).collect()];
+    rows.extend(
+        r.records()
+            .map(|rec| rec.unwrap().iter().map(str::to_owned).collect::<Vec<_>>()),
+    );
+    rows
+}
+
+#[tokio::test]
+async fn the_incident_csv_lists_open_and_recently_resolved_in_column_order_and_neutralises_formulas()
+ {
+    let (app, site, cookie, id) = blocked_incident().await;
+    // Strings from the site can start like a formula; the file must not run them.
+    sqlx::query("UPDATE ai_incidents SET title = '=HYPERLINK(\"http://evil.example\",\"x\")', subject = '@cmd' WHERE id = $1")
+        .bind(id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let ins = |kind: &'static str, title: &'static str, days: i32| {
+        let (pool, site) = (app.pool().clone(), site.id);
+        async move {
+            sqlx::query(
+                "INSERT INTO ai_incidents (site_id, kind, subject, severity, title, summary, evidence, opened_at, last_seen_at, resolved_at, resolution, resolved_by) \
+                 SELECT site_id, $2, subject, severity, $3, summary, evidence, now() - interval '200 days', now() - ($4 || ' days')::interval, now() - ($4 || ' days')::interval, 'fixed', 'crawl' \
+                 FROM ai_incidents WHERE site_id = $1 LIMIT 1",
+            )
+            .bind(site)
+            .bind(kind)
+            .bind(title)
+            .bind(days.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    ins("llms_txt_unavailable", "Resolved ten days ago", 10).await;
+    ins("llms_txt_unavailable", "Resolved a hundred days ago", 100).await;
+
+    let res = app
+        .get(
+            &format!("/s/{}/ai-access/incidents.csv", site.id),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("content-type"), Some("text/csv; charset=utf-8"));
+    assert!(
+        res.header("content-disposition").is_some_and(
+            |d| d.starts_with("attachment; filename=\"example.com-ai-access-incidents-")
+        ),
+        "{:?}",
+        res.header("content-disposition")
+    );
+    let rows = csv_rows(&res.body);
+    assert_eq!(
+        rows[0],
+        [
+            "kind",
+            "subject",
+            "severity",
+            "grade",
+            "title",
+            "state",
+            "first_seen",
+            "last_seen",
+            "resolved_at",
+            "resolved_by",
+            "verified_at",
+            "affected_urls",
+            "sources"
+        ]
+    );
+    assert_eq!(
+        rows.len(),
+        3,
+        "open + resolved in 90 days, not older: {rows:?}"
+    );
+    // Open first.
+    let open = &rows[1];
+    assert_eq!(open[0], "bots_blocked");
+    assert_eq!(open[1], "'@cmd");
+    assert_eq!(open[2], "critical");
+    assert_eq!(open[3], "A");
+    assert_eq!(open[4], "'=HYPERLINK(\"http://evil.example\",\"x\")");
+    assert_eq!(open[5], "open");
+    assert!(
+        open[6].starts_with("20") && open[6].contains('T'),
+        "{open:?}"
+    );
+    assert_eq!(open[8], "");
+    assert!(open[11].contains(&format!("https://{DOMAIN}/")), "{open:?}");
+    assert!(open[12].contains("developers.openai.com"), "{open:?}");
+    let done = &rows[2];
+    assert_eq!(done[4], "Resolved ten days ago");
+    assert_eq!(done[5], "resolved");
+    assert_eq!(done[9], "crawl");
+    assert!(done[8].starts_with("20"), "{done:?}");
+    // No cell starts like a formula.
+    for row in &rows[1..] {
+        for cell in row {
+            assert!(!cell.starts_with(['=', '+', '-', '@']), "{cell:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_incident_json_is_the_same_rows_with_lists_as_arrays() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let res = app
+        .get(
+            &format!("/s/{}/ai-access/incidents.json", site.id),
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("content-type"), Some("application/json"));
+    let v: serde_json::Value = serde_json::from_str(&res.body).unwrap();
+    let rows = v.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    let keys: Vec<&str> = rows[0]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    let mut want = codoseo_web::ai_incident::EXPORT_COLUMNS.to_vec();
+    want.sort();
+    assert_eq!(sorted, want);
+    assert_eq!(rows[0]["kind"], "bots_blocked");
+    assert_eq!(rows[0]["state"], "open");
+    assert_eq!(rows[0]["resolved_at"], serde_json::Value::Null);
+    assert!(rows[0]["affected_urls"].is_array());
+    assert!(rows[0]["sources"].is_array());
+    let _ = id;
+}
+
+#[tokio::test]
+async fn the_incident_exports_are_the_signed_in_owners_only() {
+    let (app, site, cookie, _) = blocked_incident().await;
+    let (_, other) = app.login("other@example.com").await;
+    for ext in ["csv", "json"] {
+        let path = format!("/s/{}/ai-access/incidents.{ext}", site.id);
+        assert_eq!(
+            app.get(&path, Some(&other)).await.status,
+            StatusCode::NOT_FOUND,
+            "{ext}"
+        );
+        assert_eq!(
+            app.get(&path, None).await.status,
+            StatusCode::SEE_OTHER,
+            "{ext}"
+        );
+        assert_eq!(app.get(&path, Some(&cookie)).await.status, StatusCode::OK);
+    }
+    // The AI access page links to both.
+    let body = app
+        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(body.contains(&format!("/s/{}/ai-access/incidents.csv", site.id)));
+    assert!(body.contains(&format!("/s/{}/ai-access/incidents.json", site.id)));
+}

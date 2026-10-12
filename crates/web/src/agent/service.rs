@@ -20,10 +20,10 @@ use codoseo_geo::report::AccessReport;
 use codoseo_geo::{Honours, Intent, Stance, registry};
 use codoseo_mcp::cloud::types::{
     ActiveCrawl, AiAccessInfo, AiBotInfo, AiContentInfo, AiContentPage, AiEngineInfo, AiFixInfo,
-    AiIncidentInfo, AiIncidentState, AiLagInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo,
-    AiProbesInfo, AiRecheckInfo, AiRecheckQueued, AiRemedyInfo, AiRobotsInfo, AiSnippetInfo,
-    ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES,
-    PageInfo, PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
+    AiIncidentInfo, AiLagInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo, AiProbesInfo,
+    AiRecheckInfo, AiRecheckQueued, AiRemedyInfo, AiRobotsInfo, AiSnippetInfo, ChangeInfo,
+    ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES, PageInfo,
+    PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
@@ -40,7 +40,7 @@ use uuid::Uuid;
 
 use super::auth::ApiCaller;
 use super::error::AgentError;
-use crate::ai_incident::{self, Phase};
+use crate::ai_incident::{self, IncidentRecord, Phase};
 use crate::crawl_policy::{limit_message, manual_priority};
 use crate::state::AppState;
 
@@ -175,6 +175,23 @@ impl<'a> AgentService<'a> {
     pub async fn ai_access(&self, caller: &ApiCaller, site: &str) -> Reply<AiAccessInfo> {
         self.metered(caller, self.ai_access_work(caller, site))
             .await
+    }
+
+    /// The site's open AI access incidents and those resolved in the last 90 days, one record
+    /// each: what the incident export has.
+    pub async fn incident_export(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+    ) -> Reply<Vec<IncidentRecord>> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            Ok(
+                ai_incident::export_records(&self.state.pool, site.id, OffsetDateTime::now_utc())
+                    .await?,
+            )
+        })
+        .await
     }
 
     /// What to change for one incident, and the texts to hand to whoever changes it.
@@ -715,20 +732,7 @@ fn incident_info(i: Incident, latest: Option<&Recheck>, now: OffsetDateTime) -> 
     let phase = ai_incident::phase(&i, latest);
     let snoozed_until = i.snoozed_until.filter(|t| *t > now);
     let accepted = i.accepted_at.is_some();
-    // The owner's decisions win over what CodoSEO is doing about it.
-    let state = if accepted {
-        AiIncidentState::Accepted
-    } else if snoozed_until.is_some() {
-        AiIncidentState::Snoozed
-    } else {
-        match phase {
-            None => AiIncidentState::Open,
-            Some(Phase::Verifying { .. }) => AiIncidentState::Verifying,
-            Some(Phase::Waiting) => AiIncidentState::WaitingForCrawl,
-            Some(Phase::Rechecking { running: true, .. }) => AiIncidentState::RecheckRunning,
-            Some(Phase::Rechecking { .. }) => AiIncidentState::RecheckQueued,
-        }
-    };
+    let state = ai_incident::state(&i, latest, now);
     let lag = codoseo_geo::ledger::lag(i.kind, &ev);
     AiIncidentInfo {
         id: i.id,

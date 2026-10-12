@@ -527,6 +527,34 @@ pub async fn recent_resolved(
         .collect())
 }
 
+/// The most incidents an export lists.
+pub const EXPORT_LIMIT: i64 = 5000;
+
+/// The incidents an export lists: every open one, then those resolved in the last
+/// `resolved_days` days, newest resolution first; at most [`EXPORT_LIMIT`].
+pub async fn export_incidents(
+    pool: &PgPool,
+    site_id: Uuid,
+    resolved_days: i32,
+) -> Result<Vec<Incident>, sqlx::Error> {
+    let rows: Vec<IncidentRow> = sqlx::query_as(&format!(
+        "SELECT {INCIDENT_COLUMNS} FROM ai_incidents \
+         WHERE site_id = $1 \
+           AND (resolved_at IS NULL OR resolved_at > now() - make_interval(days => $2)) \
+         ORDER BY resolved_at IS NOT NULL, severity, COALESCE(resolved_at, opened_at) DESC, id DESC \
+         LIMIT $3"
+    ))
+    .bind(site_id)
+    .bind(resolved_days)
+    .bind(EXPORT_LIMIT)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(IncidentRow::into_incident)
+        .collect())
+}
+
 /// One incident of the site, open or resolved. `None` for another site's id.
 pub async fn incident(
     pool: &PgPool,

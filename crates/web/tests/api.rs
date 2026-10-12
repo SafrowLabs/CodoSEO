@@ -1717,3 +1717,66 @@ async fn repair_calls_count_against_the_quota_and_stop_at_the_limit() {
             .unwrap();
     assert!(accepted);
 }
+
+// ---- AI access incident export (B3.14) ----
+
+#[tokio::test]
+async fn the_incident_export_is_json_by_default_or_csv_and_is_metered() {
+    let (f, blocked, _) = with_incidents(Plan::Pro).await;
+    sqlx::query("UPDATE ai_incidents SET title = '=1+1' WHERE id = $1")
+        .bind(blocked)
+        .execute(f.app.pool())
+        .await
+        .unwrap();
+    let path = format!("/api/v1/sites/{}/ai-access/incidents", f.site.id);
+
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    let rows = json(&res);
+    let rows = rows.as_array().unwrap();
+    assert!(rows.len() >= 2, "{rows:?}");
+    assert_eq!(rows[0]["kind"], "bots_blocked");
+    assert_eq!(rows[0]["state"], "open");
+    assert!(rows[0]["sources"].is_array());
+    // JSON keeps the title as it is.
+    assert_eq!(rows[0]["title"], "=1+1");
+    let explicit = get(&f.app, &format!("{path}?format=json"), &f.key).await;
+    assert_eq!(explicit.body, res.body);
+
+    let res = get(&f.app, &format!("{path}?format=csv"), &f.key).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1997"));
+    assert_eq!(res.header("content-type"), Some("text/csv; charset=utf-8"));
+    let mut lines = res.body.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "kind,subject,severity,grade,title,state,first_seen,last_seen,resolved_at,resolved_by,verified_at,affected_urls,sources"
+    );
+    // The formula is neutralised in the file, and only there.
+    assert!(lines.next().unwrap().contains(",'=1+1,"), "{}", res.body);
+}
+
+#[tokio::test]
+async fn an_unknown_export_format_is_a_counted_400_and_another_accounts_site_is_a_404() {
+    let (f, _, _) = with_incidents(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access/incidents", f.site.id);
+    let res = get(&f.app, &format!("{path}?format=xml"), &f.key).await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    assert_eq!(
+        json(&res)["error"]["message"],
+        "format must be csv or json."
+    );
+
+    let (other, _) = f.app.login("other@example.com").await;
+    let (other_key, _) = make_key(&f.app, &other).await;
+    for format in ["json", "csv"] {
+        let res = get(&f.app, &format!("{path}?format={format}"), &other_key).await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{format}");
+        assert_eq!(error_code(&res), "not_found");
+    }
+    set_calls_today(&f.app, &f.account, 2000).await;
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+}

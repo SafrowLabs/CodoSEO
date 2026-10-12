@@ -2,14 +2,16 @@
 //! and do to it: its state, the fix, and the messages for a refused action. One place, so the
 //! three surfaces cannot drift: the same words, the same snooze choices, the same plan limits.
 
+use codoseo_core::check::Severity;
 use codoseo_core::plan::PlanLimits;
-use codoseo_geo::findings::Evidence;
+use codoseo_geo::findings::{Evidence, Grade};
 use codoseo_geo::incident::Before;
 use codoseo_geo::ledger;
 use codoseo_geo::remedy::{
     IncidentFacts, Remedy, RemedyContext, before_text, clean, now_text, remedy,
 };
 use codoseo_geo::report::AccessReport;
+use codoseo_mcp::cloud::types::AiIncidentState;
 use codoseo_store::geo::{
     self, Incident, IncidentActionError, Recheck, RecheckError, RecheckOrigin, RecheckOutcome,
     RecheckQueued, RecheckStatus,
@@ -176,6 +178,24 @@ pub fn phase(i: &Incident, latest: Option<&Recheck>) -> Option<Phase> {
     })
 }
 
+/// What the owner and CodoSEO are doing about an open incident. The owner's decisions win over
+/// what CodoSEO is doing about it.
+pub fn state(i: &Incident, latest: Option<&Recheck>, now: OffsetDateTime) -> AiIncidentState {
+    if i.accepted_at.is_some() {
+        return AiIncidentState::Accepted;
+    }
+    if i.snoozed_until.is_some_and(|t| t > now) {
+        return AiIncidentState::Snoozed;
+    }
+    match phase(i, latest) {
+        None => AiIncidentState::Open,
+        Some(Phase::Verifying { .. }) => AiIncidentState::Verifying,
+        Some(Phase::Waiting) => AiIncidentState::WaitingForCrawl,
+        Some(Phase::Rechecking { running: true, .. }) => AiIncidentState::RecheckRunning,
+        Some(Phase::Rechecking { .. }) => AiIncidentState::RecheckQueued,
+    }
+}
+
 /// The last finished recheck of an incident.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastRecheck {
@@ -272,5 +292,260 @@ pub fn fix(origin: &str, report: Option<&AccessReport>, i: &Incident, ev: &Evide
         facts,
         before_line,
         now_line,
+    }
+}
+
+// ---- the AI access panel on the overview -------------------------------------------------------
+
+/// Incidents per severity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BySeverity {
+    pub critical: u32,
+    pub warning: u32,
+    pub notice: u32,
+}
+
+impl BySeverity {
+    pub fn total(&self) -> u32 {
+        self.critical + self.warning + self.notice
+    }
+
+    fn add(&mut self, s: Severity) {
+        match s {
+            Severity::Critical => self.critical += 1,
+            Severity::Warning => self.warning += 1,
+            Severity::Notice => self.notice += 1,
+        }
+    }
+}
+
+/// What the overview's AI access panel says about a site's open incidents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PanelCounts {
+    /// Open and asking for attention: neither accepted nor snoozed. As the sidebar counts.
+    pub open: BySeverity,
+    pub accepted: BySeverity,
+    /// Snoozed until later (and not accepted).
+    pub snoozed: BySeverity,
+    /// The weakest evidence among the open ones.
+    pub weakest_grade: Option<Grade>,
+    /// Fixes seen and not yet confirmed.
+    pub verifying: u32,
+}
+
+/// Counts `open` incidents for the panel. `latest` is each incident's newest recheck.
+pub fn panel_counts(
+    open: &[Incident],
+    latest: &std::collections::HashMap<i64, Recheck>,
+    now: OffsetDateTime,
+) -> PanelCounts {
+    let mut c = PanelCounts::default();
+    for i in open {
+        if i.accepted_at.is_some() {
+            c.accepted.add(i.severity);
+            continue;
+        }
+        if !asks_attention(i, now) {
+            c.snoozed.add(i.severity);
+            continue;
+        }
+        c.open.add(i.severity);
+        let grade = ledger::for_kind(i.kind).grade;
+        if c.weakest_grade.is_none_or(|g| grade.rank() < g.rank()) {
+            c.weakest_grade = Some(grade);
+        }
+    }
+    c.verifying = open
+        .iter()
+        .filter(|i| matches!(phase(i, latest.get(&i.id)), Some(Phase::Verifying { .. })))
+        .count() as u32;
+    c
+}
+
+// ---- exports ----------------------------------------------------------------------------------
+
+/// How far back an export lists resolved incidents.
+pub const EXPORT_RESOLVED_DAYS: i32 = 90;
+
+/// The columns of an incident export, in order.
+pub const EXPORT_COLUMNS: [&str; 13] = [
+    "kind",
+    "subject",
+    "severity",
+    "grade",
+    "title",
+    "state",
+    "first_seen",
+    "last_seen",
+    "resolved_at",
+    "resolved_by",
+    "verified_at",
+    "affected_urls",
+    "sources",
+];
+
+/// One incident of an export.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct IncidentRecord {
+    pub kind: String,
+    pub subject: String,
+    pub severity: Severity,
+    pub grade: Grade,
+    pub title: String,
+    /// `resolved`, or what [`state`] says of an open one.
+    pub state: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub first_seen: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub last_seen: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub resolved_at: Option<OffsetDateTime>,
+    /// `crawl`, `recheck` or `intent`.
+    pub resolved_by: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub verified_at: Option<OffsetDateTime>,
+    pub affected_urls: Vec<String>,
+    pub sources: Vec<String>,
+}
+
+/// The site's open incidents and those resolved in the last [`EXPORT_RESOLVED_DAYS`] days.
+pub async fn export_records(
+    pool: &PgPool,
+    site_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<Vec<IncidentRecord>, sqlx::Error> {
+    let incidents = geo::export_incidents(pool, site_id, EXPORT_RESOLVED_DAYS).await?;
+    let latest = geo::latest_rechecks(pool, site_id).await?;
+    Ok(incidents
+        .into_iter()
+        .map(|i| {
+            let ev: Evidence = serde_json::from_value(i.evidence.clone()).unwrap_or_default();
+            let state = match i.resolved_at {
+                Some(_) => "resolved".to_owned(),
+                None => serde_json::to_value(state(&i, latest.get(&i.id), now))
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .unwrap_or_default(),
+            };
+            IncidentRecord {
+                kind: i.kind.slug().to_owned(),
+                subject: i.subject,
+                severity: i.severity,
+                grade: ledger::for_kind(i.kind).grade,
+                title: i.title,
+                state,
+                first_seen: i.opened_at,
+                last_seen: i.last_seen_at,
+                resolved_at: i.resolved_at,
+                resolved_by: i.resolved_by,
+                verified_at: i.verified_at,
+                affected_urls: affected_urls(&ev),
+                sources: ledger::finding_sources(i.kind, &ev),
+            }
+        })
+        .collect())
+}
+
+fn severity_slug(s: Severity) -> &'static str {
+    match s {
+        Severity::Critical => "critical",
+        Severity::Warning => "warning",
+        Severity::Notice => "notice",
+    }
+}
+
+/// The records as CSV in [`EXPORT_COLUMNS`] order. Every text cell goes through `text`, which
+/// keeps a spreadsheet from running one that starts like a formula: titles and URLs came from
+/// the crawled site. URLs and sources are joined by a space.
+pub fn to_csv(records: &[IncidentRecord], text: impl Fn(Option<&str>) -> String) -> String {
+    let mut w = csv::Writer::from_writer(Vec::new());
+    let _ = w.write_record(EXPORT_COLUMNS);
+    let when = |t: Option<OffsetDateTime>| {
+        t.and_then(|t| {
+            t.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_default()
+    };
+    for r in records {
+        let _ = w.write_record([
+            text(Some(&r.kind)),
+            text(Some(&r.subject)),
+            severity_slug(r.severity).to_owned(),
+            r.grade.label().to_owned(),
+            text(Some(&r.title)),
+            r.state.clone(),
+            when(Some(r.first_seen)),
+            when(Some(r.last_seen)),
+            when(r.resolved_at),
+            text(r.resolved_by.as_deref()),
+            when(r.verified_at),
+            text(Some(&r.affected_urls.join(" "))),
+            text(Some(&r.sources.join(" "))),
+        ]);
+    }
+    String::from_utf8(w.into_inner().unwrap_or_default()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codoseo_geo::findings::FindingKind;
+    use std::collections::HashMap;
+
+    fn incident(id: i64, kind: FindingKind, severity: Severity) -> Incident {
+        let at = OffsetDateTime::UNIX_EPOCH;
+        Incident {
+            id,
+            kind,
+            subject: String::new(),
+            severity,
+            title: String::new(),
+            summary: String::new(),
+            evidence: serde_json::json!({}),
+            opened_crawl_id: None,
+            opened_at: at,
+            last_seen_at: at,
+            resolved_at: None,
+            resolution: None,
+            quiet: false,
+            before: None,
+            accepted_at: None,
+            accepted_by: None,
+            snoozed_until: None,
+            recovered_at: None,
+            verified_at: None,
+            resolved_by: None,
+        }
+    }
+
+    #[test]
+    fn the_panel_counts_what_the_sidebar_counts_and_sets_the_rest_aside() {
+        let now = OffsetDateTime::now_utc();
+        let mut accepted = incident(2, FindingKind::LlmsTxtUnavailable, Severity::Notice);
+        accepted.accepted_at = Some(now);
+        let mut snoozed = incident(3, FindingKind::BotsBlocked, Severity::Critical);
+        snoozed.snoozed_until = Some(now + time::Duration::days(1));
+        let mut lapsed = incident(4, FindingKind::ContentMissing, Severity::Warning);
+        lapsed.snoozed_until = Some(now - time::Duration::days(1));
+        let open = vec![
+            incident(1, FindingKind::FetchBlocked, Severity::Critical),
+            accepted,
+            snoozed,
+            lapsed,
+        ];
+        let c = panel_counts(&open, &HashMap::new(), now);
+        assert_eq!((c.open.critical, c.open.warning, c.open.notice), (1, 1, 0));
+        assert_eq!(c.accepted.notice, 1);
+        assert_eq!(c.snoozed.critical, 1);
+        assert_eq!(c.verifying, 0);
+        // fetch_blocked is graded B, content_missing A-: the weakest of the open ones is B.
+        assert_eq!(c.weakest_grade, Some(Grade::B));
+    }
+
+    #[test]
+    fn no_open_incident_means_no_grade() {
+        let c = panel_counts(&[], &HashMap::new(), OffsetDateTime::now_utc());
+        assert_eq!(c, PanelCounts::default());
     }
 }

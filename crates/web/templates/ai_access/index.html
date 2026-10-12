@@ -21,6 +21,8 @@
     <h1>AI access</h1>
     <span class="grow"></span>
     <span class="aia-checked" title="{{ v.checked_full }}">Last checked {{ v.checked }} · <a href="{{ base }}/crawls">{{ v.crawl_label }}</a></span>
+    <a class="btn btn-sm" href="{{ base }}/ai-access/incidents.csv" hx-boost="false" download title="Open issues and those resolved in the last 90 days"><svg class="icon"><use href="#i-download"/></svg>Issues CSV</a>
+    <a class="btn btn-sm" href="{{ base }}/ai-access/incidents.json" hx-boost="false" download title="Open issues and those resolved in the last 90 days">JSON</a>
     <a class="btn btn-sm" href="{{ base }}/ai-access/intent"><svg class="icon"><use href="#i-settings"/></svg>Edit intent</a>
   </div>
   <p class="page-sub">Can AI assistants and search engines reach, read and quote your site?</p>

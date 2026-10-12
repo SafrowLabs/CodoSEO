@@ -22,6 +22,7 @@ use serde::Serialize;
 use crate::agent::auth::ApiCaller;
 use crate::agent::error::AgentError;
 use crate::agent::service::{AgentService, Reply};
+use crate::ai_incident;
 use crate::metrics::{self, Surface, Tier};
 use crate::state::AppState;
 
@@ -36,6 +37,7 @@ pub fn routes() -> Router<AppState> {
         .route("/sites/{site}/page", get(page))
         .route("/sites/{site}/changes", get(changes))
         .route("/sites/{site}/ai-access", get(ai_access))
+        .route("/sites/{site}/ai-access/incidents", get(incident_export))
         .route(
             "/sites/{site}/ai-access/incidents/{id}/fix",
             get(incident_fix),
@@ -103,8 +105,19 @@ async fn counted<Q, T: Serialize, F: Future<Output = Reply<T>>>(
     }
 }
 
-/// The reply as a response: the body, or the JSON error, with the rate-limit headers.
+/// The reply as a JSON response: the body, or the JSON error, with the rate-limit headers.
 fn respond<T: Serialize>(status: StatusCode, reply: Reply<T>) -> Response {
+    respond_with(status, reply, |status, value| {
+        (status, Json(value)).into_response()
+    })
+}
+
+/// [`respond`] with another body: `render` makes the success response.
+fn respond_with<T>(
+    status: StatusCode,
+    reply: Reply<T>,
+    render: impl FnOnce(StatusCode, T) -> Response,
+) -> Response {
     metrics::api_request(
         Surface::Rest,
         Tier::Key,
@@ -114,7 +127,7 @@ fn respond<T: Serialize>(status: StatusCode, reply: Reply<T>) -> Response {
             .map_or_else(AgentError::code, |_| "ok"),
     );
     let mut res = match reply.outcome {
-        Ok(value) => (status, Json(value)).into_response(),
+        Ok(value) => render(status, value),
         Err(e) => e.into_response(),
     };
     let h = res.headers_mut();
@@ -328,6 +341,57 @@ async fn unaccept_incident(
             .unaccept_incident(&caller, &site, incident_id(&id))
             .await,
     )
+}
+
+#[derive(Deserialize)]
+struct ExportQuery {
+    format: Option<String>,
+}
+
+/// The incident export, as JSON (default) or CSV; the same rows as the app's download.
+async fn incident_export(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+    q: ApiQuery<ExportQuery>,
+) -> Response {
+    let service = AgentService::new(&state);
+    let format = match q.0 {
+        Ok(q) => match q.format.as_deref().map(str::trim) {
+            None | Some("") | Some("json") => Ok(false),
+            Some("csv") => Ok(true),
+            Some(_) => Err(AgentError::BadRequest(
+                "format must be csv or json.".to_owned(),
+            )),
+        },
+        Err(e) => Err(e),
+    };
+    match format {
+        Err(e) => respond(
+            StatusCode::OK,
+            service
+                .refuse::<Vec<ai_incident::IncidentRecord>>(&caller, e)
+                .await,
+        ),
+        Ok(csv) => respond_with(
+            StatusCode::OK,
+            service.incident_export(&caller, &site).await,
+            move |status, records| {
+                if !csv {
+                    return (status, Json(records)).into_response();
+                }
+                (
+                    status,
+                    [(
+                        header::CONTENT_TYPE,
+                        HeaderValue::from_static("text/csv; charset=utf-8"),
+                    )],
+                    ai_incident::to_csv(&records, super::export::text),
+                )
+                    .into_response()
+            },
+        ),
+    }
 }
 
 async fn run_crawl(
