@@ -2277,7 +2277,8 @@ fn llms_card(report: Option<&LlmsTxtReport>, skipped: Option<LlmsSkip>) -> LlmsC
         .map(|c| LlmsCheckRow {
             label: c.id.label(),
             ok: c.ok,
-            detail: c.detail.clone(),
+            // Reports stored before details were capped can hold a whole H1.
+            detail: codoseo_mcp::cloud::types::clip(&c.detail, codoseo_geo::llms::MAX_DETAIL),
         })
         .collect();
     if r.state == LlmsState::Available {
@@ -2286,7 +2287,11 @@ fn llms_card(report: Option<&LlmsTxtReport>, skipped: Option<LlmsSkip>) -> LlmsC
             "{} checked · {} failing · {} not checked (other sites or past the limit)",
             l.checked, l.failing, l.not_checked
         ));
-        card.failing = l.failing_urls.clone();
+        card.failing = l
+            .failing_urls
+            .iter()
+            .map(|u| codoseo_geo::probe::cap_url(u))
+            .collect();
     }
     card
 }

@@ -1617,3 +1617,29 @@ async fn an_adopted_llms_txt_that_fails_is_an_incident_graded_a() {
         "{card}"
     );
 }
+
+#[tokio::test]
+async fn a_huge_llms_txt_h1_is_clipped_on_the_card() {
+    let (app, site, cookie) = setup().await;
+    let body = format!(
+        "# {}\n\n> A site.\n\n## Docs\n\n- [Start](/start)\n",
+        "A".repeat(100 * 1024)
+    );
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(200, &body), false)
+        .await;
+    // A report stored before details were capped is clipped on the way out too.
+    sqlx::query(
+        "UPDATE ai_reports SET report = jsonb_set(report, '{llms_txt,checks,0,detail}', to_jsonb(repeat('B', 50000)))",
+    )
+    .execute(app.pool())
+    .await
+    .expect("old detail");
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let from = page.find(r#"id="aia-llms""#).expect("llms card");
+    let to = page.find(r#"id="aia-bots""#).unwrap();
+    let card = &page[from..to];
+    assert!(card.contains("Starts with an H1"), "{card}");
+    assert!(!page.contains(&"A".repeat(201)), "H1 clipped");
+    assert!(!card.contains(&"B".repeat(401)), "detail clipped");
+    assert!(card.contains(&format!("{}…", "B".repeat(399))), "{card}");
+}

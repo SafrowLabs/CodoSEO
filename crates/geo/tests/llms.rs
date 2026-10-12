@@ -441,3 +441,36 @@ fn not_checked_counts_each_link_once_however_it_is_written() {
     let s = assess(&f, false).link_summary;
     assert_eq!((s.checked, s.not_checked), (1, 1), "{s:?}");
 }
+
+#[test]
+fn a_huge_h1_and_section_names_are_capped() {
+    let h1 = "Ü".repeat(100 * 1024);
+    let bare: String = (0..2000)
+        .map(|i| format!("## Section number {i}\n\nprose\n\n"))
+        .collect();
+    let body = format!("# {h1}\n\n> Summary.\n\n## Docs\n\n- [A](/a)\n\n{bare}");
+    let r = assess(&file(&body), false);
+    let title = r.title.as_deref().unwrap();
+    assert!(
+        title.chars().count() <= codoseo_geo::llms::MAX_TITLE,
+        "{}",
+        title.len()
+    );
+    assert!(title.ends_with('…'));
+    for c in &r.checks {
+        assert!(
+            c.detail.chars().count() <= codoseo_geo::llms::MAX_DETAIL,
+            "{:?}: {} chars",
+            c.id,
+            c.detail.chars().count()
+        );
+    }
+    let mut f = file(&body);
+    f.links = vec![LinkStatus {
+        url: format!("https://example.com/{}", "x".repeat(10_000)),
+        status: Some(404),
+        from_crawl: false,
+    }];
+    let r = assess(&f, false);
+    assert!(r.link_summary.failing_urls[0].chars().count() <= 2048);
+}

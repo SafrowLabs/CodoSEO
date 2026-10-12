@@ -44,6 +44,10 @@ pub const MAX_BYTES: usize = 512 * 1024;
 pub const MIN_CHARS: usize = 50;
 /// Links [`parse`] keeps from one file; the rest are ignored. A real llms.txt lists hundreds.
 pub const MAX_LINKS: usize = 10_000;
+/// Characters of the H1 a report keeps: the file is the site's, and its H1 can be any length.
+pub const MAX_TITLE: usize = 200;
+/// Characters of a check's detail a report keeps.
+pub const MAX_DETAIL: usize = 400;
 /// Failing link URLs a report keeps.
 const MAX_FAILING_URLS: usize = 10;
 
@@ -432,7 +436,7 @@ pub struct LlmsTxtReport {
     pub error: Option<String>,
     /// The site serves, or served before this failure, an llms.txt: see [`carry_adoption`].
     pub adopted: bool,
-    /// The file's H1.
+    /// The file's H1, at most [`MAX_TITLE`] characters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// An `## Optional` section lists links agents may skip.
@@ -562,12 +566,26 @@ pub fn assess(fetch: &LlmsTxtFetch, prev_adopted: bool) -> LlmsTxtReport {
     if state != LlmsState::Available {
         return report;
     }
-    let doc = parse(&fetch.body);
+    let mut doc = parse(&fetch.body);
+    doc.title = doc.title.map(|t| clip(&t, MAX_TITLE));
     report.title = doc.title.clone();
     report.optional_section = doc.optional().is_some();
     report.link_summary = link_summary(fetch, listed(fetch, &doc));
     report.checks = checks(fetch, &doc, &report.link_summary);
+    for c in &mut report.checks {
+        c.detail = clip(&c.detail, MAX_DETAIL);
+    }
     report
+}
+
+/// `text` cut to `max` characters, the last one an ellipsis when it was longer.
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 /// How many distinct pages the file links to, as the crawler counts them: each link resolved
@@ -605,7 +623,7 @@ fn link_summary(fetch: &LlmsTxtFetch, listed: usize) -> LinkSummary {
         failing_urls: failing
             .iter()
             .take(MAX_FAILING_URLS)
-            .map(|u| (*u).to_owned())
+            .map(|u| crate::probe::cap_url(u))
             .collect(),
     }
 }
