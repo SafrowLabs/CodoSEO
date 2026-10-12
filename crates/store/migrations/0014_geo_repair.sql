@@ -1,8 +1,7 @@
 -- GEO Phase B3: repair and recheck.
 --
 -- An incident can now be accepted or snoozed by the owner, recover on its own before it is
--- confirmed, and be re-tested on demand or by a follow-up recheck. This migration is the data
--- model only; nothing writes these columns yet.
+-- confirmed, and be re-tested on demand or by a follow-up recheck.
 ALTER TABLE ai_incidents
   ADD COLUMN before JSONB,
   ADD COLUMN accepted_at TIMESTAMPTZ,
@@ -13,8 +12,9 @@ ALTER TABLE ai_incidents
   ADD COLUMN resolved_by TEXT CHECK (resolved_by IN ('crawl', 'recheck', 'intent'));
 
 COMMENT ON COLUMN ai_incidents.before IS
-  'The evidence the incident had before the owner changed anything, kept so a repair can be '
-  'compared with it; NULL until a repair starts.';
+  'What was true before the incident opened, captured when it opens from the newest earlier '
+  'report that judged its kind (codoseo_geo::incident::Before); NULL when there was none (a '
+  'baseline incident) and for incidents an intent change opened.';
 COMMENT ON COLUMN ai_incidents.accepted_at IS
   'When the owner accepted the finding as it is (an intent they chose); NULL if not accepted.';
 COMMENT ON COLUMN ai_incidents.accepted_by IS

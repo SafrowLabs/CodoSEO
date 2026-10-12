@@ -98,8 +98,8 @@ pub struct Incident {
     /// Opened without an alert: part of the site's baseline or of an intent change.
     pub quiet: bool,
     /// What was true before the incident opened (`codoseo_geo::incident::Before`), from the
-    /// newest earlier report that judged its kind; `None` for a baseline incident and those
-    /// opened before it was kept.
+    /// newest earlier report that judged its kind; `None` for a baseline incident, one an intent
+    /// change opened (see [`reevaluate_quietly`]) and those opened before it was kept.
     pub before: Option<Value>,
     /// When the owner accepted the finding as it is, and which account did.
     pub accepted_at: Option<OffsetDateTime>,
@@ -556,6 +556,10 @@ pub async fn open_counts(pool: &PgPool, site_id: Uuid) -> Result<(i64, i64), sql
 /// the intent made moot resolve with `resolution = 'intent'`, and no change rows or alerts are
 /// written: the owner just made the choice. Incidents that stay open keep their `last_seen_*`: no
 /// crawl saw them again. Returns how many were (opened, resolved).
+///
+/// What it opens keeps no `before`: the problem did not appear between two reports, it was there
+/// all along under the old intent, so the earlier report would only show the same state and a
+/// repair has nothing to put back.
 pub async fn reevaluate_quietly(
     pool: &PgPool,
     site_id: Uuid,
