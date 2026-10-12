@@ -27,29 +27,28 @@ use codoseo_core::plan::PlanLimits;
 use codoseo_geo::content::{ContentVerdict, NON_RENDERING_SOURCE, RawContent, ShellSignal};
 use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engines};
 use codoseo_geo::findings::{BotEvidence, Evidence, FindingKind, ProbeEvidence};
-use codoseo_geo::incident::{Before, acceptable};
+use codoseo_geo::incident::acceptable;
 use codoseo_geo::ledger;
 use codoseo_geo::llms::{LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL};
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
     SkipReason, Verdict,
 };
-use codoseo_geo::remedy::{
-    IncidentFacts, Remedy, RemedyContext, agent_prompt, before_text, copy_fix, developer_task,
-    now_text, remedy,
-};
+use codoseo_geo::remedy::{Remedy, agent_prompt, copy_fix, developer_task};
 use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str, slug_str};
 use codoseo_geo::robots::{GroupMatch, MatchedRule, Pair, RobotsAvailability};
 use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
 use codoseo_store::crawls;
 use codoseo_store::geo::{
-    self, Incident, IncidentActionError, IntentError, Recheck, RecheckError, RecheckOrigin,
-    RecheckOutcome, RecheckStatus,
+    self, Incident, IncidentActionError, IntentError, Recheck, RecheckStatus,
 };
 use codoseo_store::sites::Site;
 use time::OffsetDateTime;
 use url::Url;
 
+use crate::ai_incident::{
+    self, Fix, Phase, Refusal, asks_attention, fix as fix_for, last_recheck, phase, snooze_days,
+};
 use crate::auth::{CurrentUser, load_site};
 use crate::error::AppError;
 use crate::fmt;
@@ -85,9 +84,6 @@ pub fn routes() -> Router<AppState> {
             post(unsnooze),
         )
 }
-
-/// The snoozes the card offers, in days.
-const SNOOZE_DAYS: [i64; 3] = [1, 7, 30];
 
 /// Resolved incidents listed under "Recently resolved".
 const RESOLVED_SHOWN: i64 = 10;
@@ -1444,11 +1440,6 @@ fn with_change(mut intent: Intent, change: &IntendedChange) -> Intent {
     intent
 }
 
-/// Whether an open incident counts in the badges: not accepted, and not snoozed until later.
-fn asks_attention(i: &Incident, now: OffsetDateTime) -> bool {
-    i.accepted_at.is_none() && i.snoozed_until.is_none_or(|t| t <= now)
-}
-
 fn grade_class(g: codoseo_geo::findings::Grade) -> &'static str {
     use codoseo_geo::findings::Grade;
     match g {
@@ -1496,34 +1487,15 @@ fn probe_identity(report: &AccessReport, ev: &Evidence) -> ProbeIdentity {
 
 /// `clean`, `still failing`, `inconclusive (why)`, as "Last recheck: …" says it.
 fn recheck_outcome(r: &Recheck) -> Option<String> {
-    let when = r.finished_at.map(fmt::ago).unwrap_or_default();
-    let what = match (r.status, r.outcome) {
-        (RecheckStatus::Done, Some(RecheckOutcome::Clean)) => "clean".to_owned(),
-        (RecheckStatus::Done, Some(RecheckOutcome::StillFailing)) => "still failing".to_owned(),
-        (RecheckStatus::Done, Some(RecheckOutcome::Inconclusive)) => {
-            let notes: Vec<String> = r
-                .observations
-                .as_ref()
-                .and_then(|o| o.get("notes"))
-                .and_then(|n| n.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|n| codoseo_geo::remedy::clean(n, 200))
-                        .collect()
-                })
-                .unwrap_or_default();
-            if notes.is_empty() {
-                "inconclusive".to_owned()
-            } else {
-                format!("inconclusive ({})", notes.join("; "))
-            }
-        }
-        (RecheckStatus::Failed, _) => {
-            "couldn't run; it didn't count toward your daily rechecks".to_owned()
-        }
-        (RecheckStatus::Superseded, _) => "replaced by a crawl, which judges it instead".to_owned(),
-        _ => return None,
+    let last = last_recheck(r)?;
+    let when = last.at.map(fmt::ago).unwrap_or_default();
+    let what = match last.outcome {
+        "clean" => "clean".to_owned(),
+        "still_failing" => "still failing".to_owned(),
+        "inconclusive" if last.notes.is_empty() => "inconclusive".to_owned(),
+        "inconclusive" => format!("inconclusive ({})", last.notes.join("; ")),
+        "failed" => "couldn't run; it didn't count toward your daily rechecks".to_owned(),
+        _ => "replaced by a crawl, which judges it instead".to_owned(),
     };
     Some(if when.is_empty() {
         format!("Last recheck: {what}")
@@ -1534,48 +1506,46 @@ fn recheck_outcome(r: &Recheck) -> Option<String> {
 
 /// A recheck under way, a recovery being verified, or one waiting for the next crawl.
 fn progress(i: &Incident, ev: &Evidence, latest: Option<&Recheck>) -> Option<Progress> {
-    let active =
-        latest.filter(|r| matches!(r.status, RecheckStatus::Queued | RecheckStatus::Running));
-    if i.recovered_at.is_some() && i.verified_at.is_none() {
-        return Some(match active {
-            Some(r) if r.origin == RecheckOrigin::Followup => {
-                let lag = ledger::lag(i.kind, ev);
-                Progress {
-                    text: format!(
-                        "Fix detected · policy restored — verifying until {}",
-                        fmt::datetime(r.due_at)
-                    ),
-                    lag_source: lag.source.map(|href| SourceLink {
-                        label: host_label(href),
-                        href: href.to_owned(),
-                    }),
-                    recovered: true,
-                }
-            }
-            Some(r) => Progress {
+    Some(match phase(i, latest)? {
+        Phase::Verifying { due_at } => {
+            let lag = ledger::lag(i.kind, ev);
+            Progress {
                 text: format!(
-                    "Fix detected · {}",
-                    if r.status == RecheckStatus::Running { "recheck running" } else { "recheck queued" }
+                    "Fix detected · policy restored — verifying until {}",
+                    fmt::datetime(due_at)
                 ),
-                lag_source: None,
+                lag_source: lag.source.map(|href| SourceLink {
+                    label: host_label(href),
+                    href: href.to_owned(),
+                }),
                 recovered: true,
-            },
-            // The follow-up failed, a crawl took over, or three in a row were inconclusive.
-            None => Progress {
-                text: "Waiting for the next crawl · the fix was seen, but its follow-up couldn't confirm it".to_owned(),
-                lag_source: None,
-                recovered: true,
-            },
-        });
-    }
-    active.map(|r| Progress {
-        text: if r.status == RecheckStatus::Running {
-            "Recheck running".to_owned()
-        } else {
-            "Recheck queued · results in a minute or two".to_owned()
+            }
+        }
+        Phase::Rechecking {
+            running,
+            recovered: true,
+        } => Progress {
+            text: format!(
+                "Fix detected · {}",
+                if running { "recheck running" } else { "recheck queued" }
+            ),
+            lag_source: None,
+            recovered: true,
         },
-        lag_source: None,
-        recovered: false,
+        Phase::Rechecking { running, .. } => Progress {
+            text: if running {
+                "Recheck running".to_owned()
+            } else {
+                "Recheck queued · results in a minute or two".to_owned()
+            },
+            lag_source: None,
+            recovered: false,
+        },
+        Phase::Waiting => Progress {
+            text: "Waiting for the next crawl · the fix was seen, but its follow-up couldn't confirm it".to_owned(),
+            lag_source: None,
+            recovered: true,
+        },
     })
 }
 
@@ -1692,38 +1662,12 @@ fn incident_view(
     } else {
         0
     };
-    let before: Option<Before> = i
-        .before
-        .as_ref()
-        .and_then(|b| serde_json::from_value(b.clone()).ok());
-    let ctx = RemedyContext {
-        origin: &site.start_url,
-        report: Some(report),
-        before: before.as_ref(),
-        lag: ledger::lag(i.kind, &ev),
-    };
-    let fix = remedy(i.kind, &i.subject, &ev, &ctx);
-    let before_line = before.as_ref().and_then(|b| before_text(i.kind, b));
-    let now_line = now_text(i.kind, &ev);
-    let facts = IncidentFacts {
-        severity: i.severity,
-        first_seen: fmt::datetime(i.opened_at),
-        last_seen: fmt::datetime(i.last_seen_at),
-        affected: ev
-            .urls
-            .sample
-            .iter()
-            .chain(ev.content.iter().map(|c| &c.url))
-            .chain(ev.probes.iter().flat_map(|p| &p.urls))
-            .fold(Vec::new(), |mut out, u| {
-                if !out.contains(u) {
-                    out.push(u.clone());
-                }
-                out
-            }),
-        before: before_line.clone(),
-        after: Some(now_line.clone()),
-    };
+    let Fix {
+        remedy: fix,
+        facts,
+        before_line,
+        now_line,
+    } = fix_for(&site.start_url, Some(report), i, &ev);
     let shells: Vec<ShellEv> = ev
         .content
         .iter()
@@ -2971,19 +2915,7 @@ async fn recheck_incident(
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
     let limits = PlanLimits::for_plan(user.account.plan);
-    match geo::request_recheck(&state.pool, site.id, id, user.id(), &limits).await {
-        Ok(_) => {}
-        Err(RecheckError::Busy) => {
-            let latest = geo::latest_rechecks(&state.pool, site.id).await?;
-            return Err(AppError::Conflict(match latest.get(&id) {
-                Some(r) if r.origin == RecheckOrigin::Followup => {
-                    format!("Already verifying — due at {}.", fmt::datetime(r.due_at))
-                }
-                _ => "A recheck of this issue is already queued.".to_owned(),
-            }));
-        }
-        Err(e) => return Err(recheck_refused(e, &limits)),
-    }
+    ai_incident::request_recheck(&state.pool, site.id, id, user.id(), &limits).await?;
     respond(
         &state,
         &user,
@@ -2995,56 +2927,20 @@ async fn recheck_incident(
     .await
 }
 
-/// Why a recheck was refused, as the owner reads it.
-fn recheck_refused(e: RecheckError, limits: &PlanLimits) -> AppError {
-    match e {
-        RecheckError::NotFound => AppError::NotFound,
-        RecheckError::Resolved => AppError::Conflict("That issue is already resolved.".to_owned()),
-        RecheckError::Busy => {
-            AppError::Conflict("A recheck of this issue is already queued.".to_owned())
+impl From<Refusal> for AppError {
+    fn from(r: Refusal) -> AppError {
+        match r {
+            Refusal::NotFound => AppError::NotFound,
+            Refusal::Conflict(m) => AppError::Conflict(m),
+            Refusal::Limit(m) => AppError::Limit(m),
+            Refusal::BadRequest(m) => AppError::BadRequest(m),
+            Refusal::Db(e) => e.into(),
         }
-        RecheckError::Cooldown(at) => AppError::Conflict(format!(
-            "Rechecked moments ago. Try again at {}.",
-            fmt::datetime(at)
-        )),
-        RecheckError::LimitReached(Some(at)) => AppError::Limit(format!(
-            "{} per day on your plan — next at {}.",
-            plural(
-                usize::from(limits.ai_rechecks_per_day.unwrap_or(0)),
-                "recheck",
-                "rechecks"
-            ),
-            fmt::datetime(at)
-        )),
-        RecheckError::LimitReached(None) => AppError::Limit(
-            "Your plan has no rechecks. The next crawl will check this issue.".to_owned(),
-        ),
-        RecheckError::CrawlActive => {
-            AppError::Conflict("A crawl is running; it will judge this.".to_owned())
-        }
-        RecheckError::Db(e) => e.into(),
     }
 }
 
-/// Why accepting or snoozing was refused, as the owner reads it.
 fn action_refused(e: IncidentActionError) -> AppError {
-    match e {
-        IncidentActionError::NotFound => AppError::NotFound,
-        IncidentActionError::Resolved => {
-            AppError::Conflict("That issue is already resolved.".to_owned())
-        }
-        IncidentActionError::NotAcceptable(FindingKind::RobotsUnavailable) => AppError::BadRequest(
-            "A failing robots.txt can't be accepted: it can only be snoozed while you fix it."
-                .to_owned(),
-        ),
-        IncidentActionError::NotAcceptable(_) => AppError::BadRequest(
-            "This issue is a choice through your intent: use Mark intended instead.".to_owned(),
-        ),
-        IncidentActionError::SnoozeInPast => {
-            AppError::BadRequest("A snooze has to end in the future.".to_owned())
-        }
-        IncidentActionError::Db(e) => e.into(),
-    }
+    Refusal::from(e).into()
 }
 
 /// "Accept": the incident stays listed under "Accepted" but no longer counts or alerts.
@@ -3091,12 +2987,12 @@ async fn unaccept(
 }
 
 /// The `days` of a snooze form: one of [`SNOOZE_DAYS`].
-fn snooze_days(form: &[(String, String)]) -> Result<i64, AppError> {
-    form.iter()
+fn form_snooze_days(form: &[(String, String)]) -> Result<i64, AppError> {
+    let days = form
+        .iter()
         .find(|(k, _)| k == "days")
-        .and_then(|(_, v)| v.trim().parse::<i64>().ok())
-        .filter(|d| SNOOZE_DAYS.contains(d))
-        .ok_or_else(|| AppError::BadRequest("Snooze for 1, 7 or 30 days.".to_owned()))
+        .and_then(|(_, v)| v.trim().parse::<i64>().ok());
+    Ok(snooze_days(days)?)
 }
 
 /// "Snooze": not counted and no instant alerts for 1, 7 or 30 days; changes are still logged.
@@ -3108,7 +3004,7 @@ async fn snooze(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    let days = snooze_days(&form)?;
+    let days = form_snooze_days(&form)?;
     let until = OffsetDateTime::now_utc() + time::Duration::days(days);
     let until = geo::snooze(&state.pool, site.id, id, until)
         .await

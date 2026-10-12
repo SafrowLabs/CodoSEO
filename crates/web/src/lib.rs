@@ -3,6 +3,7 @@
 
 pub mod abuse;
 pub mod agent;
+pub mod ai_incident;
 pub mod assets;
 pub mod auth;
 pub mod billing;

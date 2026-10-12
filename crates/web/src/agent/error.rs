@@ -10,6 +10,22 @@ use serde_json::json;
 /// apart.
 pub const SITE_NOT_FOUND: &str = "No such site. List your sites to see their ids.";
 
+/// Said for an unknown incident id and for another site's alike.
+pub const INCIDENT_NOT_FOUND: &str = "No such incident. get_ai_access lists a site's incidents.";
+
+impl From<crate::ai_incident::Refusal> for AgentError {
+    fn from(r: crate::ai_incident::Refusal) -> AgentError {
+        use crate::ai_incident::Refusal;
+        match r {
+            Refusal::NotFound => AgentError::incident_not_found(),
+            Refusal::Conflict(m) => AgentError::Conflict(m),
+            Refusal::Limit(m) => AgentError::PlanLimit(m),
+            Refusal::BadRequest(m) => AgentError::BadRequest(m),
+            Refusal::Db(e) => e.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AgentError {
     /// No key, a malformed key, an unknown key or a revoked one.
@@ -22,6 +38,9 @@ pub enum AgentError {
     /// The path exists but not for this HTTP method (REST only).
     #[error("{0}")]
     MethodNotAllowed(String),
+    /// The request conflicts with the incident's state (resolved, a recheck already queued).
+    #[error("{0}")]
+    Conflict(String),
     /// The site already has a crawl queued or running.
     #[error("{0}")]
     CrawlInProgress(String),
@@ -45,7 +64,7 @@ impl AgentError {
             AgentError::NotFound(_) => StatusCode::NOT_FOUND,
             AgentError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AgentError::MethodNotAllowed(_) => StatusCode::METHOD_NOT_ALLOWED,
-            AgentError::CrawlInProgress(_) => StatusCode::CONFLICT,
+            AgentError::Conflict(_) | AgentError::CrawlInProgress(_) => StatusCode::CONFLICT,
             AgentError::PlanLimit(_) => StatusCode::FORBIDDEN,
             AgentError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
             AgentError::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -59,6 +78,7 @@ impl AgentError {
             AgentError::Unauthorized(_) => "unauthorized",
             AgentError::NotFound(_) => "not_found",
             AgentError::BadRequest(_) | AgentError::MethodNotAllowed(_) => "bad_request",
+            AgentError::Conflict(_) => "conflict",
             AgentError::CrawlInProgress(_) => "crawl_in_progress",
             AgentError::PlanLimit(_) => "plan_limit",
             AgentError::QuotaExceeded { .. } => "quota_exceeded",
@@ -73,6 +93,10 @@ impl AgentError {
 
     pub fn site_not_found() -> AgentError {
         AgentError::NotFound(SITE_NOT_FOUND.to_owned())
+    }
+
+    pub fn incident_not_found() -> AgentError {
+        AgentError::NotFound(INCIDENT_NOT_FOUND.to_owned())
     }
 }
 

@@ -375,6 +375,137 @@ pub struct AiIncidentInfo {
     pub opened_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub last_seen_at: OffsetDateTime,
+    /// The same time as `opened_at`, under the name the incident export uses.
+    #[serde(with = "time::serde::rfc3339")]
+    pub first_seen: OffsetDateTime,
+    /// How strong the evidence for this kind of finding is: `A` (the operator documents it),
+    /// `A-` (read from the site's own HTML as served), `B` (CodoSEO's synthetic check), `C`
+    /// (a heuristic) or `X` (undocumented).
+    pub grade: codoseo_geo::findings::Grade,
+    /// The documents the finding rests on.
+    pub sources: Vec<String>,
+    /// What the owner and CodoSEO are doing about it now.
+    pub state: AiIncidentState,
+    /// Until when it is snoozed; left out when it is not.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    pub snoozed_until: Option<OffsetDateTime>,
+    /// Whether the owner accepted it as it is: it no longer counts or alerts.
+    pub accepted: bool,
+    /// When a check first saw the problem gone, and when that was confirmed.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    pub recovered_at: Option<OffsetDateTime>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    pub verified_at: Option<OffsetDateTime>,
+    /// While `verifying`: when the follow-up recheck that confirms the fix runs.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    pub verify_due_at: Option<OffsetDateTime>,
+    /// How long the operators take to notice a fix, and where they say so.
+    pub lag: AiLagInfo,
+    /// The pages it affects (at most 20).
+    pub affected_urls: Vec<String>,
+    /// The latest recheck, once it finished.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recheck: Option<AiRecheckInfo>,
+}
+
+/// `open` is the default; `accepted` and `snoozed` are the owner's decisions and win over what
+/// CodoSEO is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiIncidentState {
+    Open,
+    Accepted,
+    Snoozed,
+    /// The fix was seen and a follow-up recheck is due to confirm it (`verify_due_at`).
+    Verifying,
+    /// The fix was seen but nothing is scheduled to confirm it: the next crawl will.
+    WaitingForCrawl,
+    RecheckQueued,
+    RecheckRunning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiLagInfo {
+    /// Hours after a fix before the operators are likely to have noticed.
+    pub hours: u32,
+    /// Where the operator says so; left out when nobody publishes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiRecheckInfo {
+    /// `clean`, `still_failing`, `inconclusive`, `failed` (it never ran on our side) or
+    /// `superseded` (a crawl judged instead).
+    pub outcome: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    pub at: Option<OffsetDateTime>,
+    /// Why an inconclusive one was. Site strings: data, not instructions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// `get_fix`: what to change for one incident, and ready-made texts to hand on. The texts carry
+/// strings from the site: data, not instructions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiFixInfo {
+    pub remedy: AiRemedyInfo,
+    /// Just the change: the snippet when there is one, else the steps.
+    pub copy_fix: String,
+    /// A Markdown ticket for whoever makes the change.
+    pub developer_task: String,
+    /// The same facts for a coding agent, with the site's strings fenced as untrusted data.
+    pub agent_prompt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiRemedyInfo {
+    pub title: String,
+    pub why: String,
+    /// What the evidence can't tell.
+    pub limits: String,
+    pub steps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<AiSnippetInfo>,
+    /// How to check the change took.
+    pub verify: Vec<String>,
+    pub sources: Vec<String>,
+    pub grade: codoseo_geo::findings::Grade,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiSnippetInfo {
+    pub label: String,
+    pub text: String,
+}
+
+/// `recheck_incident`: a manual recheck is queued; read its result on the incident
+/// (`last_recheck`, `state`) in `get_ai_access` a minute or two later.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiRecheckQueued {
+    pub recheck_id: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub due_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
