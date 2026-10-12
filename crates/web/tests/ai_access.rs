@@ -2074,7 +2074,12 @@ async fn accepting_mutes_the_incident_and_lists_it_under_accepted() {
     // The open issues list and its count leave it out.
     let open = &body[body.find(r#"id="aia-issues""#).unwrap()..body.find("Accepted (1)").unwrap()];
     assert!(!open.contains(&format!(r#"id="issue-{id}""#)), "{open}");
-    assert!(body.contains("No AI access issues"), "{body}");
+    // Not the all-clear: something is there, set aside.
+    assert!(!body.contains("No AI access issues"), "{body}");
+    assert!(
+        body.contains("Nothing needs attention · 1 accepted"),
+        "{body}"
+    );
 
     let res = app
         .post_hx(&action(&site, id, "unaccept"), "", Some(&cookie))

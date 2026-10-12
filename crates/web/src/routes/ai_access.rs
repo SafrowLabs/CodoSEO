@@ -293,7 +293,7 @@ pub struct Overview {
     /// Incidents the owner accepted as they are, listed apart and not counted.
     pub accepted: Vec<IncidentView>,
     /// The empty "Open issues" state: its heading, its text and the mascot's mood.
-    pub clear: (&'static str, &'static str, &'static str),
+    pub clear: (String, &'static str, &'static str),
     /// The synthetic fetch probes of the latest report, or why there are none.
     pub fetch: FetchCheck,
     /// What the important pages hold in their HTML as served.
@@ -685,6 +685,7 @@ async fn render_page(
         .filter(|i| i.severity == Severity::Critical)
         .count();
 
+    let accepted_n = accepted.len();
     let bot_groups = bot_groups(report, &intent);
     let probes_on = geo::get_ai_probes(pool, site.id).await?;
     let view = Overview {
@@ -701,17 +702,24 @@ async fn render_page(
         attention: asking.len(),
         incidents,
         accepted,
-        clear: if report.robots.availability == RobotsAvailability::Unknown
+        clear: if accepted_n > 0 {
+            // Something is there, set aside by the owner: not the all-clear.
+            (
+                format!("Nothing needs attention · {accepted_n} accepted"),
+                "The accepted issues are listed below. They don't count or alert, and a crawl that no longer finds one resolves it.",
+                "idle",
+            )
+        } else if report.robots.availability == RobotsAvailability::Unknown
             && report.html_important() == 0
         {
             (
-                "Nothing to check yet",
+                "Nothing to check yet".to_owned(),
                 "The latest crawl could read neither robots.txt nor an HTML page. Check that the site is up, then run a crawl.",
                 "idle",
             )
         } else {
             (
-                "No AI access issues",
+                "No AI access issues".to_owned(),
                 "Watching robots.txt for every known AI bot, and the page markup each AI engine honours, on every crawl.",
                 "ok",
             )
