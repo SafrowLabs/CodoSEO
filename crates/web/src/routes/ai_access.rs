@@ -2017,6 +2017,8 @@ fn declared_items(d: &Declared) -> Vec<DeclaredItem> {
 pub struct ContentCard {
     /// Set instead of the rows, saying why there are none.
     pub empty: Option<(&'static str, &'static str)>,
+    /// `3 pages · 1 shell`: the pages checked and how many are, or are likely, shells.
+    pub counts: Option<String>,
     pub rows: Vec<ContentRow>,
     pub source: &'static str,
 }
@@ -2031,6 +2033,9 @@ pub struct ContentRow {
     pub verdict: &'static str,
     pub verdict_class: &'static str,
     pub verdict_tip: String,
+    /// For a shell or likely shell, what gave it away in words: `Signals: the app's mount
+    /// element is empty, ...`.
+    pub signals: Option<String>,
 }
 
 /// A yes/no signal cell.
@@ -2113,9 +2118,12 @@ fn content_row(
         }
         ContentVerdict::Present => "Enough text in the HTML as served".to_owned(),
     };
-    if c.verdict.is_shell() && !c.signals.is_empty() {
+    let signals = (c.verdict.is_shell() && !c.signals.is_empty()).then(|| {
         let what: Vec<&str> = c.signals.iter().map(|s| signal_text(*s)).collect();
-        tip.push_str(&format!(": {}", what.join(", ")));
+        what.join(", ")
+    });
+    if let Some(what) = &signals {
+        tip.push_str(&format!(": {what}"));
     }
     Some(ContentRow {
         path: path_of(&u.url),
@@ -2132,12 +2140,14 @@ fn content_row(
         verdict,
         verdict_class,
         verdict_tip: tip,
+        signals: signals.map(|what| format!("Signals: {what}")),
     })
 }
 
 fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
     let empty = |title, text| ContentCard {
         empty: Some((title, text)),
+        counts: None,
         rows: Vec::new(),
         source: NON_RENDERING_SOURCE,
     };
@@ -2153,8 +2163,14 @@ fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
             "This report is from a crawl that did not read what your pages hold in their HTML as served. The next crawl will.",
         );
     };
+    let shells = content.shells().count();
     ContentCard {
         empty: None,
+        counts: Some(format!(
+            "{} · {}",
+            plural(content.pages.len(), "page", "pages"),
+            plural(shells, "shell", "shells")
+        )),
         rows: content
             .pages
             .iter()

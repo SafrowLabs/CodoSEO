@@ -110,7 +110,7 @@
   <section class="card aia-section aia-content" aria-labelledby="aia-content">
     <div class="card-head">
       <h2 class="card-title" id="aia-content">Content in raw HTML</h2>
-      <span class="card-aside">as AI crawlers that don't run JavaScript see it · <span class="aia-grade" title="Evidence grade A-: read from your pages' HTML as served, with a published measurement that these AI crawlers don't run JavaScript.">A-</span></span>
+      <span class="card-aside">{% if let Some(n) = v.content.counts %}{{ n }} · {% endif %}as AI crawlers that don't run JavaScript see it · <span class="aia-grade" title="Evidence grade A-: read from your pages' HTML as served, with a published measurement that these AI crawlers don't run JavaScript.">A-</span></span>
     </div>
     {% if let Some((title, text)) = v.content.empty %}
     <div class="aia-none"><b>{{ title }}</b><p>{{ text }}</p></div>
@@ -126,7 +126,7 @@
         <tbody>
           {% for r in v.content.rows %}
           <tr>
-            <th scope="row" class="aia-bot-cell">{% if let Some(h) = r.href %}<a class="url trunc" href="{{ h }}">{{ r.path }}</a>{% else %}<span class="mono trunc aia-path">{{ r.path }}</span>{% endif %}</th>
+            <th scope="row" class="aia-bot-cell">{% if let Some(h) = r.href %}<a class="url trunc" href="{{ h }}">{{ r.path }}</a>{% else %}<span class="mono trunc aia-path">{{ r.path }}</span>{% endif %}{% if let Some(sig) = r.signals %}<span class="aia-sub aia-signals">{{ sig }}</span>{% endif %}</th>
             <td data-label="Words" class="r num">{{ r.words }}</td>
             {% for t in r.ticks %}<td data-label="{{ t.label }}" class="c"><span class="{% if t.on %}c-ok{% else %}c-ghost{% endif %}" title="{{ t.tip }}" aria-label="{{ t.tip }}">{{ t.text }}</span></td>{% endfor %}
             <td data-label="Internal links" class="r num">{{ r.links }}</td>

@@ -1160,6 +1160,7 @@ body.solo { overflow: auto; }
 .aia-content .card-aside { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .aia-content-table th.c, .aia-content-table td.c { text-align: center; }
 .aia-content-table .aia-bot-cell { min-width: 160px; }
+.aia-content-table .aia-signals { max-width: 36ch; white-space: normal; }
 .aia-llms .card-head .chip { margin-left: 2px; }
 .aia-llms-none { border-top: 0; }
 .aia-llms-facts { display: flex; flex-wrap: wrap; gap: 6px 28px; padding: 12px 18px; margin: 0; font-size: 12.5px; border-bottom: 1px solid var(--line-soft); }

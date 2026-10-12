@@ -1470,9 +1470,16 @@ async fn the_content_card_lists_each_important_page_with_its_verdict() {
         ">Shell</span>",
         ">Present</span>",
         "640",
+        "3 pages · 1 shell",
+        "Signals: the app&#39;s mount element is empty, a noscript notice asks for JavaScript",
     ] {
         assert!(card.contains(needle), "missing {needle:?} in {card}");
     }
+    assert_eq!(
+        card.matches("Signals:").count(),
+        1,
+        "only shell rows: {card}"
+    );
     // The shell page is an incident, graded A-, with its page as evidence.
     let issues = &body[body.find(r#"id="aia-issues""#).unwrap()..from];
     for needle in [
