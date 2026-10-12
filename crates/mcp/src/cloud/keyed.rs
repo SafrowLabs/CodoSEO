@@ -288,7 +288,9 @@ impl<B: CloudBackend> CloudMcp<B> {
             rechecks (and your API calls), and is refused while one is queued, within 10 minutes \
             of the last one, or while a crawl runs. Returns right away with recheck_id and due_at; \
             read the result a minute or two later as the incident's last_recheck and state in \
-            get_ai_access. A fix seen by a recheck is confirmed by a follow-up a day later.",
+            get_ai_access. A fix seen by a recheck is confirmed by a follow-up recheck after the \
+            operators' documented wait: 1 hour for page, fetch, llms.txt and answer findings, 24 \
+            hours for most robots.txt findings, 72 hours when DuckDuckGo is involved.",
         input_schema = schema::<IncidentArgs>(),
         annotations(title = "Recheck an AI access incident", read_only_hint = false, idempotent_hint = false, destructive_hint = false, open_world_hint = true)
     )]

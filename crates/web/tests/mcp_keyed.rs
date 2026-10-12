@@ -340,6 +340,15 @@ async fn with_a_key_the_tool_list_is_exactly_the_keyed_tools() {
         );
     }
     let by_name = |n: &str| tools.iter().find(|t| t["name"] == n).unwrap();
+    // The follow-up waits are ledger::lag's, not one day for everything.
+    let recheck = by_name("recheck_incident")["description"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for needle in ["1 hour", "24 hours", "72 hours", "DuckDuckGo"] {
+        assert!(recheck.contains(needle), "{needle}: {recheck}");
+    }
+    assert!(!recheck.contains("a day later"), "{recheck}");
     let issue = by_name("get_issue_urls")["inputSchema"].clone();
     let required: Vec<&str> = issue["required"]
         .as_array()
