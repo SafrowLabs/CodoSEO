@@ -319,7 +319,7 @@ pub enum LlmsState {
     Unavailable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmsCheckId {
     /// An H1 with the site's name comes first (llmstxt.org); Lighthouse wants an H1 anywhere.
@@ -410,7 +410,7 @@ fn serves_html(fetch: &LlmsTxtFetch) -> bool {
     let body = fetch.body.strip_prefix('\u{feff}').unwrap_or(&fetch.body);
     let start: String = body.trim_start().chars().take(16).collect();
     let start = start.to_ascii_lowercase();
-    if ["<!doctype html", "<html", "<head", "<body", "<!--"]
+    if ["<!doctype html", "<html", "<head", "<body"]
         .iter()
         .any(|p| start.starts_with(p))
     {

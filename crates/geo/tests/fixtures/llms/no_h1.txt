@@ -1,0 +1,4 @@
+## Docs
+
+- [Guide](https://nohead.test/guide.md): How to use the product
+- [API](https://nohead.test/api.md): The REST API

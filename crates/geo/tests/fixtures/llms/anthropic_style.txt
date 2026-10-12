@@ -1,0 +1,31 @@
+# Example Developer Documentation
+
+This file provides an overview of the Example API documentation and developer resources.
+
+## Root URL
+
+Developer console (requires login)
+
+https://console.example.test
+
+## Available languages
+
+- English (en) - 760 pages - /docs - Content included below
+- German (de) - 278 pages - /docs/de - Visit website for content
+
+## English
+
+### Docs home
+
+- [Documentation](https://docs.example.test/en/home.md)
+
+### Messages
+
+- [Overview](https://docs.example.test/en/messages/overview.md) - Messages API
+- [Streaming](https://docs.example.test/en/messages/streaming.md) - Server-sent events
+- [Tool use](https://docs.example.test/en/messages/tools.md) - Let the model call your functions
+
+### API reference
+
+- [Create a message](https://docs.example.test/en/api/messages.md)
+- [Count tokens](https://docs.example.test/en/api/count-tokens.md)

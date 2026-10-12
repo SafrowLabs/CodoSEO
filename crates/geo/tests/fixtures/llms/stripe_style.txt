@@ -1,0 +1,9 @@
+# Payco Documentation
+
+When installing Payco packages, always check the registry for the latest version. See the [versioning guide](https://docs.payco.test/versioning.md) before pinning one.
+
+## Docs
+
+- [Testing](https://docs.payco.test/testing.md): Simulate payments to test your integration.
+- [API Reference](https://docs.payco.test/api.md)
+- [Receive payouts](https://docs.payco.test/payouts.md): Set up your bank account to receive payouts.

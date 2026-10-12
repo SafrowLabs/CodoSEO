@@ -1,0 +1,18 @@
+# Widget Documentation for LLMs
+
+> Widget is a UI framework that uses a compiler to let you write concise components that do minimal work in the browser.
+
+## Documentation Sets
+
+- [Abridged documentation](https://widget.test/llms-medium.txt): A shorter version of the documentation
+- [Complete documentation](https://widget.test/llms-full.txt): The complete documentation including all examples
+
+## Individual Package Documentation
+
+- [Widget documentation](https://widget.test/docs/widget/llms.txt): The developer documentation for Widget.
+- [WidgetKit documentation](https://widget.test/docs/kit/llms.txt): The developer documentation for WidgetKit.
+
+## Notes
+
+- The abridged documentation excludes legacy compatibility notes
+- The complete documentation includes all content from the official documentation

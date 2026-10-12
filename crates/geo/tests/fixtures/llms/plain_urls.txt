@@ -1,0 +1,8 @@
+# Plain Links Co
+
+> We list our pages without Markdown link syntax.
+
+## Pages
+
+- Pricing: https://plain.test/pricing
+- Docs: https://plain.test/docs
