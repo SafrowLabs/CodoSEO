@@ -1302,3 +1302,43 @@ async fn serve_cancels_the_shutdown_token_when_it_begins_shutting_down() {
     let _ = server.await;
     assert!(state.shutdown.is_cancelled());
 }
+
+#[tokio::test]
+async fn an_ai_access_incident_changes_neither_the_rest_nor_the_mcp_health_score() {
+    let f = setup(Plan::Pro).await;
+    let blocked = f.app.site(&f.account, "blocked.example").await;
+    f.app
+        .finished_crawl_with_robots(
+            &blocked,
+            fixture_pages(),
+            (200, "User-agent: OAI-SearchBot\nDisallow: /\n"),
+            Vec::new(),
+        )
+        .await;
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ai_incidents WHERE site_id = $1 AND resolved_at IS NULL",
+    )
+    .bind(blocked.id)
+    .fetch_one(f.app.pool())
+    .await
+    .unwrap();
+    assert!(open > 0, "the blocked site has an AI incident");
+
+    let rpc = f.rpc();
+    let mut scores = Vec::new();
+    for site in [f.site.id, blocked.id] {
+        let mcp = rpc
+            .call_ok("get_site_health", json!({"site_id": site}))
+            .await;
+        let res = rest_get(&f.app, &format!("/api/v1/sites/{site}"), &f.key).await;
+        assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+        let rest: Value = serde_json::from_str(&res.body).unwrap();
+        assert_eq!(
+            mcp["latest_crawl"]["health_score"],
+            rest["latest_crawl"]["health_score"]
+        );
+        scores.push(rest["latest_crawl"]["health_score"].clone());
+    }
+    assert!(scores[0].is_u64(), "{scores:?}");
+    assert_eq!(scores[0], scores[1]);
+}

@@ -673,6 +673,46 @@ mod tests {
         assert_eq!(kinds, ["bots_blocked"], "{section}");
     }
 
+    /// The AI findings the audit saves are not checks: the same pages score the same with a
+    /// robots.txt that shuts an AI bot out and with one that does not.
+    #[tokio::test]
+    async fn ai_findings_do_not_move_the_audit_health_score() {
+        let build = |robots: &'static str| async move {
+            SiteBuilder::new()
+                .robots(200, robots)
+                .html("/", "Home", &["/about"])
+                .html("/about", "About", &[])
+                .start()
+                .await
+        };
+        let open = build("User-agent: *\nAllow: /\n").await;
+        let blocked =
+            build("User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n").await;
+        let (backend, _dir) = backend();
+        let mut scores = Vec::new();
+        let mut finding_counts = Vec::new();
+        for site in [&open, &blocked] {
+            let id = audit_fast(&backend, site.url("/")).await;
+            scores.push(
+                backend
+                    .get_audit(&id)
+                    .await
+                    .unwrap()
+                    .summary
+                    .unwrap()
+                    .health_score,
+            );
+            let section = backend.cache.load(&id).unwrap().ai_access.unwrap();
+            finding_counts.push(section["findings"].as_array().unwrap().len());
+        }
+        assert_eq!(
+            finding_counts,
+            [0, 1],
+            "only the blocked site has an AI finding"
+        );
+        assert_eq!(scores[0], scores[1]);
+    }
+
     /// A `Done` audit must stop being served from the in-memory map once it's cached:
     /// otherwise `progress` never gets cleared (it would still hold the last `Running`
     /// value forever) and the map leaks one entry per audit for the life of the process.

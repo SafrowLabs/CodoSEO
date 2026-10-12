@@ -1448,3 +1448,116 @@ async fn content_and_llms_findings_leave_the_health_score_alone() {
     let d = run_crawl(&db, shell, CrawlTrigger::Manual).await;
     assert_eq!(score(c).await, score(d).await);
 }
+
+/// A one-page client-side shell. With `noisy` the site also trips every AI finding: robots.txt
+/// shuts OAI-SearchBot out, the AI user agents get a Cloudflare challenge, and `/llms.txt` answers
+/// the status in `llms`. Without it the same page is served with none of that.
+async fn leak_site(
+    noisy: bool,
+    llms: std::sync::Arc<std::sync::atomic::AtomicU16>,
+) -> codoseo_testkit::TestServer {
+    use axum::http::{HeaderMap, StatusCode, Uri, header};
+    use axum::response::IntoResponse;
+    use std::sync::atomic::Ordering;
+
+    let router =
+        axum::Router::new().fallback(axum::routing::any(move |uri: Uri, headers: HeaderMap| {
+            let ua = headers
+                .get(header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            let llms = llms.load(Ordering::SeqCst);
+            async move {
+                if noisy && is_ai_user_agent(&ua) {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        [(header::CONTENT_TYPE, "text/html")],
+                        [("cf-mitigated", "challenge")],
+                        "<html><head><title>Just a moment...</title></head></html>",
+                    )
+                        .into_response();
+                }
+                match uri.path() {
+                    "/robots.txt" => (
+                        [(header::CONTENT_TYPE, "text/plain")],
+                        if noisy {
+                            "User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n"
+                        } else {
+                            "User-agent: *\nAllow: /\n"
+                        },
+                    )
+                        .into_response(),
+                    "/llms.txt" if noisy && llms == 200 => (
+                        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                        "# Example\n\n> A small site.\n\n## Pages\n\n- [Home](/): the home page\n",
+                    )
+                        .into_response(),
+                    "/llms.txt" if noisy => StatusCode::from_u16(llms).unwrap().into_response(),
+                    "/" => (
+                        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                        "<!doctype html><html lang=\"en\"><head><title>Home page</title>\
+                         <meta name=\"description\" content=\"A page.\"></head>\
+                         <body><div id=\"root\"></div>\
+                         <noscript>You need to enable JavaScript to run this app.</noscript>\
+                         <script src=\"/static/js/main.js\"></script></body></html>",
+                    )
+                        .into_response(),
+                    _ => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+        }));
+    codoseo_testkit::TestServer::start(router).await
+}
+
+#[tokio::test]
+async fn every_kind_of_ai_finding_together_leaves_the_stored_health_score_alone() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU16, Ordering};
+
+    let db = TestDb::new().await;
+    let llms = Arc::new(AtomicU16::new(200));
+    let quiet = leak_site(false, llms.clone()).await;
+    let noisy = leak_site(true, llms.clone()).await;
+    let a_site = seed_owned_site(&db, quiet.url("/").as_str(), "free").await;
+    let b_site = seed_owned_site(&db, noisy.url("/").as_str(), "free").await;
+
+    // llms.txt is adopted on the first crawl and fails on the second.
+    run_crawl(&db, b_site, CrawlTrigger::Manual).await;
+    llms.store(503, Ordering::SeqCst);
+    let a = run_crawl(&db, a_site, CrawlTrigger::Manual).await;
+    let b = run_crawl(&db, b_site, CrawlTrigger::Manual).await;
+
+    let kinds: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT kind FROM ai_incidents WHERE site_id = $1 AND resolved_at IS NULL \
+         ORDER BY kind",
+    )
+    .bind(b_site)
+    .fetch_all(&db.pool)
+    .await
+    .unwrap();
+    for expected in [
+        "bots_blocked",
+        "content_missing",
+        "fetch_blocked",
+        "llms_txt_unavailable",
+    ] {
+        assert!(
+            kinds.iter().any(|k| k == expected),
+            "{expected} in {kinds:?}"
+        );
+    }
+
+    let score = |crawl: uuid::Uuid| {
+        let pool = db.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<i16>>("SELECT health_score FROM crawls WHERE id = $1")
+                .bind(crawl)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert!(score(a).await.is_some());
+    assert_eq!(score(a).await, score(b).await);
+}
