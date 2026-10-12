@@ -92,6 +92,16 @@ impl Drop for TestDb {
 }
 
 /// The app wired to a fresh database, with a capturing mailer.
+/// What a test crawl read besides its pages, for [`TestApp::finalize_with`]: the robots.txt
+/// (which makes the worker build the AI access report), synthetic fetch probes over that
+/// report, and the `/llms.txt` fetch with whether the site adopted one before.
+#[derive(Default)]
+struct CrawlExtras<'a> {
+    robots: Option<RobotsFile>,
+    probes: Option<&'a dyn Fn(&AccessReport) -> ProbeReport>,
+    llms: Option<(LlmsTxtFetch, bool)>,
+}
+
 pub struct TestApp {
     pub db: TestDb,
     pub state: AppState,
@@ -339,16 +349,12 @@ impl TestApp {
             body: robots.1.to_owned(),
             hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
         };
-        self.finalize_with(
-            crawl_id,
-            pages,
-            changes,
-            StopReason::Completed,
-            Some(robots),
-            None,
-            None,
-        )
-        .await;
+        let extras = CrawlExtras {
+            robots: Some(robots),
+            ..CrawlExtras::default()
+        };
+        self.finalize_with(crawl_id, pages, changes, StopReason::Completed, extras)
+            .await;
         crawl_id
     }
 
@@ -378,16 +384,13 @@ impl TestApp {
             body: robots.1.to_owned(),
             hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
         };
-        self.finalize_with(
-            crawl_id,
-            pages,
-            Vec::new(),
-            StopReason::Completed,
-            Some(robots),
-            None,
-            Some((llms, adopted)),
-        )
-        .await;
+        let extras = CrawlExtras {
+            robots: Some(robots),
+            llms: Some((llms, adopted)),
+            ..CrawlExtras::default()
+        };
+        self.finalize_with(crawl_id, pages, Vec::new(), StopReason::Completed, extras)
+            .await;
         crawl_id
     }
 
@@ -416,16 +419,13 @@ impl TestApp {
             body: robots.1.to_owned(),
             hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
         };
-        self.finalize_with(
-            crawl_id,
-            pages,
-            Vec::new(),
-            StopReason::Completed,
-            Some(robots),
-            Some(probes),
-            None,
-        )
-        .await;
+        let extras = CrawlExtras {
+            robots: Some(robots),
+            probes: Some(probes),
+            ..CrawlExtras::default()
+        };
+        self.finalize_with(crawl_id, pages, Vec::new(), StopReason::Completed, extras)
+            .await;
         crawl_id
     }
 
@@ -439,7 +439,7 @@ impl TestApp {
         changes: Vec<Change>,
         stop: StopReason,
     ) {
-        self.finalize_with(crawl_id, pages, changes, stop, None, None, None)
+        self.finalize_with(crawl_id, pages, changes, stop, CrawlExtras::default())
             .await;
     }
 
@@ -451,10 +451,13 @@ impl TestApp {
         pages: Vec<PageRecord>,
         changes: Vec<Change>,
         stop: StopReason,
-        robots: Option<RobotsFile>,
-        probes: Option<&dyn Fn(&AccessReport) -> ProbeReport>,
-        llms: Option<(LlmsTxtFetch, bool)>,
+        extras: CrawlExtras<'_>,
     ) {
+        let CrawlExtras {
+            robots,
+            probes,
+            llms,
+        } = extras;
         let (site_id, start_url): (Uuid, String) = sqlx::query_as(
             "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
         )
