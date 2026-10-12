@@ -60,6 +60,7 @@ impl World {
             base_url: Url::parse("https://codoseo.test").unwrap(),
             http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
             rankorg_url: None,
+            recheck: codoseo::recheck::RecheckSettings::new(AddressPolicy::AllowPrivate),
         };
         let account: Uuid = sqlx::query_scalar(
             "INSERT INTO accounts (email, email_canonical, plan) VALUES ('owner@example.com', 'owner@example.com', $1::plan) RETURNING id",

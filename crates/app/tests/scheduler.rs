@@ -342,6 +342,54 @@ async fn the_tick_puts_stuck_jobs_back_in_the_queue() {
     assert_eq!(status, "queued");
 }
 
+#[tokio::test]
+async fn a_recheck_whose_worker_died_is_failed_so_its_incident_is_not_left_busy() {
+    let db = TestDb::new().await;
+    let site: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO sites (domain, start_url) VALUES ('r.test', 'https://r.test/') RETURNING id",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    let incident: i64 = sqlx::query_scalar(
+        "INSERT INTO ai_incidents (site_id, kind, subject, severity, title, summary, evidence) \
+         VALUES ($1, 'bots_blocked', 'search', 'critical', 't', 's', '{}') RETURNING id",
+    )
+    .bind(site)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    let recheck: i64 = sqlx::query_scalar(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, status, due_at, started_at) \
+         VALUES ($1, $2, 'manual', 'running', now(), now() - interval '11 minutes') RETURNING id",
+    )
+    .bind(site)
+    .bind(incident)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO jobs (kind, payload, status, claimed_by, claimed_at, max_attempts) \
+         VALUES ('ai_recheck', $1, 'running', 'dead', now() - interval '11 minutes', 1)",
+    )
+    .bind(serde_json::json!({ "recheck_id": recheck }))
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let report = tick(&ctx(&db, Mode::SelfHost), noon()).await;
+    assert_eq!(report.jobs_requeued, 1);
+    assert_eq!(report.rechecks_failed, 1);
+    let (job, row): (String, String) = sqlx::query_as(
+        "SELECT (SELECT status::text FROM jobs WHERE kind = 'ai_recheck'), \
+                (SELECT status FROM ai_rechecks WHERE id = $1)",
+    )
+    .bind(recheck)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!((job.as_str(), row.as_str()), ("failed", "failed"));
+}
+
 // ---- digest and cleanup ------------------------------------------------------------------
 
 #[tokio::test]

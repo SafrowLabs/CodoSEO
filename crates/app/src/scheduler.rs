@@ -192,6 +192,9 @@ pub async fn scheduler_loop(ctx: SchedulerContext, shutdown: CancellationToken) 
 pub struct TickReport {
     /// Stuck `running` jobs put back in the queue.
     pub jobs_requeued: u64,
+    /// AI access rechecks nothing would finish (their job failed or their worker died), failed
+    /// so their incident is not left busy.
+    pub rechecks_failed: u64,
     /// `schedule` crawls queued.
     pub crawls_queued: u64,
     /// Sites given their first slot without a crawl.
@@ -222,6 +225,11 @@ pub async fn tick(ctx: &SchedulerContext, now: Timestamp) -> TickReport {
     {
         Ok(n) => report.jobs_requeued = n,
         Err(e) => report.fail("requeue_stale_jobs", e),
+    }
+    // After the requeue: an `ai_recheck` job has one attempt, so a stale one has just failed.
+    match codoseo_store::geo::fail_orphaned_rechecks(&ctx.pool, STALE_JOB_AFTER).await {
+        Ok(n) => report.rechecks_failed = n,
+        Err(e) => report.fail("fail_orphaned_rechecks", e),
     }
     match schedule_due_sites(&ctx.pool, now).await {
         Ok((queued, initialised)) => {

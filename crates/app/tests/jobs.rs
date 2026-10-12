@@ -26,6 +26,7 @@ fn context(pool: &PgPool) -> (JobContext, Arc<Mutex<Vec<Email>>>) {
         base_url: url::Url::parse("http://localhost:8080").unwrap(),
         http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
         rankorg_url: None,
+        recheck: codoseo::recheck::RecheckSettings::new(AddressPolicy::AllowPrivate),
     };
     (ctx, sent)
 }
@@ -220,28 +221,38 @@ async fn the_loop_stops_promptly_when_idle() {
 }
 
 #[tokio::test]
-async fn an_ai_recheck_job_is_failed_cleanly_until_its_handler_exists() {
+async fn an_ai_recheck_job_for_no_queued_recheck_is_done_and_one_without_an_id_fails() {
     let db = TestDb::new().await;
     let (ctx, _sent) = context(&db.pool);
     let queue = JobQueue::new(db.pool.clone());
-    let id = queue
-        .enqueue_at(
-            JobKind::AiRecheck,
-            json!({"recheck_id": 1}),
-            time::OffsetDateTime::now_utc(),
-            1,
-        )
+    let now = time::OffsetDateTime::now_utc();
+    // No such recheck (or one already run): nothing to do, and the job is done.
+    let unknown = queue
+        .enqueue_at(JobKind::AiRecheck, json!({"recheck_id": 1}), now, 1)
+        .await
+        .unwrap();
+    let broken = queue
+        .enqueue_at(JobKind::AiRecheck, json!({}), now, 1)
         .await
         .unwrap();
     let running = RunningLoop::start(ctx, &db.pool);
-    wait_settled(&db.pool, id).await;
+    wait_settled(&db.pool, unknown).await;
+    wait_settled(&db.pool, broken).await;
     running.stop().await;
-    let (status, error): (String, Option<String>) =
-        sqlx::query_as("SELECT status::text, last_error FROM jobs WHERE id = $1")
+    let status = |id| {
+        let pool = db.pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT status::text, last_error FROM jobs WHERE id = $1",
+            )
             .bind(id)
-            .fetch_one(&db.pool)
+            .fetch_one(&pool)
             .await
-            .unwrap();
-    assert_eq!(status, "failed");
-    assert!(error.unwrap().contains("not implemented"));
+            .unwrap()
+        }
+    };
+    assert_eq!(status(unknown).await.0, "done");
+    let (s, error) = status(broken).await;
+    assert_eq!(s, "failed");
+    assert!(error.unwrap().contains("recheck_id"));
 }

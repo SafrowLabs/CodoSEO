@@ -1,5 +1,5 @@
 //! The job runner: drains the `jobs` table (`send_email`, `send_alert`, `send_digest`,
-//! `cleanup`) beside the crawl loop. One job at a time; a failure or a panic fails only that
+//! `cleanup`, `ai_recheck`) beside the crawl loop. One job at a time; a failure or a panic fails only that
 //! job, which then retries with the queue's backoff.
 
 use std::time::Duration;
@@ -10,6 +10,8 @@ use codoseo_store::jobs::{ClaimedJob, JobKind, JobQueue};
 use codoseo_web::Config;
 use codoseo_web::Mode;
 use codoseo_web::metrics;
+
+use crate::recheck::RecheckSettings;
 use serde::Deserialize;
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
@@ -32,6 +34,8 @@ pub struct JobContext {
     /// Where RankOrg links go; `Some` in the cloud only (self-hosted messages carry no RankOrg
     /// link).
     pub rankorg_url: Option<Url>,
+    /// How AI access rechecks fetch (the same address policy as the crawl worker's).
+    pub recheck: RecheckSettings,
 }
 
 impl JobContext {
@@ -52,6 +56,10 @@ impl JobContext {
                 Mode::Cloud => Some(config.rankorg_url.clone()),
                 Mode::SelfHost => None,
             },
+            recheck: RecheckSettings::from_env(match config.mode {
+                Mode::Cloud => AddressPolicy::Public,
+                Mode::SelfHost => AddressPolicy::AllowPrivate,
+            }),
         }
     }
 }
@@ -130,9 +138,14 @@ pub async fn run_job(ctx: &JobContext, job: ClaimedJob) -> Result<(), String> {
         JobKind::Cleanup => cleanup(ctx).await,
         JobKind::SendAlert => crate::alerts::send_alert(ctx, &job).await,
         JobKind::SendDigest => crate::digest::send_digest(ctx, &job.payload).await,
-        // The row and the job kind exist; the recheck itself arrives with B3.9. Failing keeps
-        // the job visible on the admin page instead of silently dropping it.
-        JobKind::AiRecheck => Err("ai_recheck jobs are not implemented yet".to_owned()),
+        JobKind::AiRecheck => {
+            let id = job
+                .payload
+                .get("recheck_id")
+                .and_then(serde_json::Value::as_i64)
+                .ok_or("ai_recheck payload has no recheck_id")?;
+            crate::recheck::run_recheck(&ctx.pool, &ctx.recheck, id).await
+        }
     }
 }
 

@@ -255,7 +255,10 @@ pub async fn resolve_limits(
 }
 
 /// The plan of the site's account, or `None` for an unclaimed site (a no-signup audit).
-async fn resolve_plan(pool: &PgPool, site_id: uuid::Uuid) -> Result<Option<Plan>, String> {
+pub(crate) async fn resolve_plan(
+    pool: &PgPool,
+    site_id: uuid::Uuid,
+) -> Result<Option<Plan>, String> {
     let plan_text: Option<String> =
         sqlx::query_scalar("SELECT a.plan::text FROM sites s LEFT JOIN accounts a ON a.id = s.account_id WHERE s.id = $1")
             .bind(site_id)
@@ -272,7 +275,7 @@ async fn resolve_plan(pool: &PgPool, site_id: uuid::Uuid) -> Result<Option<Plan>
 }
 
 /// The limits for `plan` (see [`resolve_limits`]).
-fn limits_for(plan: Option<Plan>, crawl_settings: &serde_json::Value) -> PlanLimits {
+pub(crate) fn limits_for(plan: Option<Plan>, crawl_settings: &serde_json::Value) -> PlanLimits {
     let limits = match plan {
         None => PlanLimits::quick_audit(),
         Some(plan) => PlanLimits::for_plan(plan),

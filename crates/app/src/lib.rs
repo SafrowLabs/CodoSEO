@@ -5,6 +5,7 @@ pub mod alerts;
 pub mod cli;
 pub mod digest;
 pub mod jobs;
+pub mod recheck;
 pub mod scheduler;
 pub mod telemetry;
 pub mod worker;

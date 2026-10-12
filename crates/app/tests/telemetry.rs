@@ -140,6 +140,8 @@ fn render_all() -> String {
         m::crawl_finished(false);
         m::pages_crawled(42);
         m::probe_requests(14);
+        m::recheck_requests(3);
+        m::recheck_finished("clean");
         m::worker_memory_budget(1_000_000_000);
         m::db_pool(3, 2);
         m::alert_delivery("slack", true);
@@ -164,6 +166,8 @@ fn every_required_metric_is_rendered_with_its_labels() {
         r#"codoseo_crawls_finished_total{outcome="failed"} 1"#,
         "codoseo_pages_crawled_total 42",
         "codoseo_probe_requests_total 14",
+        "codoseo_recheck_requests_total 3",
+        r#"codoseo_rechecks_total{outcome="clean"} 1"#,
         "codoseo_worker_memory_budget_bytes 1000000000",
         "codoseo_crawls_running 0",
         "codoseo_worker_memory_reserved_bytes 0",
