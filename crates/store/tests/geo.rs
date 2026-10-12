@@ -1436,14 +1436,32 @@ async fn content_crawl(
     shell: bool,
     llms: Option<(LlmsTxtFetch, bool)>,
 ) -> Uuid {
+    content_crawl_with(
+        pool,
+        site,
+        |out| {
+            if shell {
+                for p in &mut out.pages {
+                    p.fields.word_count = 0;
+                    p.fields.raw.mount_empty = true;
+                }
+            }
+        },
+        llms,
+    )
+    .await
+}
+
+/// [`content_crawl`] with its pages shaped by `pages`.
+async fn content_crawl_with(
+    pool: &PgPool,
+    site: Uuid,
+    pages: impl Fn(&mut CrawlOutput),
+    llms: Option<(LlmsTxtFetch, bool)>,
+) -> Uuid {
     let crawl = make_crawl(pool, site, "manual", "running").await;
     let mut out = crawl_of(200, ALLOW_ALL, None);
-    if shell {
-        for p in &mut out.pages {
-            p.fields.word_count = 0;
-            p.fields.raw.mount_empty = true;
-        }
-    }
+    pages(&mut out);
     out.signals.llms_txt = llms.as_ref().map(|(f, _)| f.clone());
     let mut input = input_for(&out);
     if let (Some(report), Some((_, adopted))) = (input.report.llms_txt.as_mut(), llms.as_ref()) {
@@ -1566,4 +1584,38 @@ async fn an_adopted_llms_txt_that_fails_opens_quietly_first_then_announces_diges
     // The planner job is queued for any change; whether it alerts instantly or waits for the
     // digest is the alert rules' decision (it is digest-only: not in DEFAULT_INSTANT).
     assert!(!DEFAULT_INSTANT.contains(&codoseo_core::change::ChangeKind::AiLlmsTxtUnavailable));
+}
+
+#[tokio::test]
+async fn shell_pages_that_fail_one_crawl_keep_content_missing_open_without_a_change() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    content_crawl(&db.pool, site, true, None).await;
+    let open = open_of(&db.pool, site, FindingKind::ContentMissing).await;
+    assert_eq!(open.len(), 1);
+
+    // The home page is fixed; the other shells answer 503 this time, so they are not judged.
+    let failed = content_crawl_with(
+        &db.pool,
+        site,
+        |out| {
+            for p in out.pages.iter_mut().skip(1) {
+                p.status = 503;
+            }
+        },
+        None,
+    )
+    .await;
+    let still = open_of(&db.pool, site, FindingKind::ContentMissing).await;
+    assert_eq!(still.len(), 1, "held, not resolved");
+    assert_eq!(still[0].id, open[0].id);
+    assert!(change_kinds(&db.pool, failed).await.is_empty());
+
+    // Judged and fine: resolved.
+    content_crawl(&db.pool, site, false, None).await;
+    assert!(
+        open_of(&db.pool, site, FindingKind::ContentMissing)
+            .await
+            .is_empty()
+    );
 }

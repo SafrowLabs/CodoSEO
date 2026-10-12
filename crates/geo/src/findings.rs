@@ -1275,6 +1275,88 @@ fn probe_summary(verdict: &Verdict, tokens: &[String], vendor: Option<Vendor>) -
 /// robots.txt and the owner wants. One per site; its members are the pages.
 fn content_missing(report: &AccessReport, intent: &Intent) -> Option<Finding> {
     let content = report.content.as_ref()?;
+    content_finding(
+        report,
+        intent,
+        content.shells().map(ShellPage::of).collect(),
+    )
+}
+
+/// One shell page a `ContentMissing` finding may name: from this run's content report, or held
+/// from the open incident's evidence by [`hold_unjudged_content`].
+struct ShellPage {
+    /// Index into `AccessReport::important`.
+    url: u16,
+    verdict: ContentVerdict,
+    signals: Vec<ShellSignal>,
+    words: u32,
+}
+
+impl ShellPage {
+    fn of(c: &crate::content::RawContent) -> ShellPage {
+        ShellPage {
+            url: c.url,
+            verdict: c.verdict,
+            signals: c.signals.clone(),
+            words: c.words,
+        }
+    }
+}
+
+/// This run's `ContentMissing` finding with the pages it could not judge held back. A page the
+/// open incident names that is still an important page but has no raw content this run (it
+/// answered 5xx, timed out, or was not HTML) says nothing new: it keeps the evidence the incident
+/// last had for it, so one failed fetch neither resolves the incident nor reopens it a crawl
+/// later. A page that is no longer among the important pages leaves the incident: it stopped
+/// being one of the pages this check watches. Held pages still need a wanted non-rendering bot
+/// that robots.txt lets fetch them. The incident resolves once every page it names was judged
+/// `Present` or `Thin`, or left the important pages. `open` is the open incident's evidence as
+/// last written; a report that cannot judge the kind leaves `found` as it is.
+pub fn hold_unjudged_content(
+    report: &AccessReport,
+    intent: &Intent,
+    open: Option<&Evidence>,
+    mut found: Vec<Finding>,
+) -> Vec<Finding> {
+    let (Some(content), Some(before)) = (report.content.as_ref(), open) else {
+        return found;
+    };
+    if !report.has_verdicts() {
+        return found;
+    }
+    let judged: BTreeSet<u16> = content.pages.iter().map(|p| p.url).collect();
+    let held: Vec<ShellPage> = before
+        .content
+        .iter()
+        .filter_map(|c| {
+            let at = report.important.iter().position(|u| u.url == c.url)?;
+            let url = u16::try_from(at).ok()?;
+            (!judged.contains(&url)).then(|| ShellPage {
+                url,
+                verdict: c.verdict,
+                signals: c.signals.clone(),
+                words: c.words,
+            })
+        })
+        .collect();
+    if held.is_empty() {
+        return found;
+    }
+    let mut pages: Vec<ShellPage> = content.shells().map(ShellPage::of).collect();
+    pages.extend(held);
+    pages.sort_by_key(|p| p.url);
+    found.retain(|f| f.kind != FindingKind::ContentMissing);
+    found.extend(content_finding(report, intent, pages));
+    found.sort_by(|a, b| (a.kind, &a.subject).cmp(&(b.kind, &b.subject)));
+    found
+}
+
+/// The `ContentMissing` finding over `shells`, the shell pages in the report's order.
+fn content_finding(
+    report: &AccessReport,
+    intent: &Intent,
+    shells: Vec<ShellPage>,
+) -> Option<Finding> {
     if !report.has_verdicts() {
         return None;
     }
@@ -1285,8 +1367,8 @@ fn content_missing(report: &AccessReport, intent: &Intent) -> Option<Finding> {
         .collect();
     let may_fetch =
         |access: &crate::report::BotAccess, url: u16| !access.blocked.iter().any(|b| b.url == url);
-    let pages: Vec<_> = content
-        .shells()
+    let pages: Vec<ShellPage> = shells
+        .into_iter()
         .filter(|c| readers.iter().any(|(_, a)| may_fetch(a, c.url)))
         .collect();
     if pages.is_empty() {

@@ -1655,3 +1655,107 @@ mod llms_txt {
         assert_eq!(score(with_llms(200, None)), base);
     }
 }
+
+// ---- Holding back pages a run could not judge (B2 review) ------------------------------------
+
+use codoseo_geo::findings::hold_unjudged_content;
+
+/// The `ContentMissing` transitions of `after` against the incident `before` left open.
+fn next_content(before: &[Finding], after: &CrawlOutput) -> Vec<Transition> {
+    let intent = Intent::default();
+    let report = report_for(after);
+    let open: Vec<OpenIncident> = before
+        .iter()
+        .map(|f| OpenIncident {
+            id: 1,
+            kind: f.kind,
+            subject: f.subject.clone(),
+            severity: f.severity,
+            members: f.evidence.members(),
+        })
+        .collect();
+    let found: Vec<Finding> = hold_unjudged_content(
+        &report,
+        &intent,
+        before.first().map(|f| &f.evidence),
+        findings(&report, &intent),
+    )
+    .into_iter()
+    .filter(|f| f.kind == FindingKind::ContentMissing)
+    .collect();
+    reconcile(&open, &found, &evaluated_kinds(&report))
+}
+
+/// `shells(n, home, others)` with `/p{i}` for each `i` in `failed` answering 503.
+fn shells_with_failures(n: u32, home: bool, others: u32, failed: &[u32]) -> CrawlOutput {
+    let mut out = shells(n, home, others);
+    for &i in failed {
+        let p = &mut out.pages[i as usize];
+        p.status = 503;
+        p.fields.word_count = 0;
+        p.fields.raw = RawSignals::default();
+    }
+    out
+}
+
+#[test]
+fn a_shell_page_that_failed_this_run_keeps_the_incident_open() {
+    let before = content_missing(&shells(6, false, 1), &Intent::default());
+    assert_eq!(before.len(), 1);
+    // /p1 answers 503: no raw content to judge, so the incident stays as it was.
+    let t = next_content(&before, &shells_with_failures(6, false, 0, &[1]));
+    let (finding, escalated, widened) = updated(&t);
+    assert!(!escalated && !widened);
+    assert_eq!(finding.evidence.content, before[0].evidence.content);
+    assert_eq!(finding.title, before[0].title);
+}
+
+#[test]
+fn a_held_page_joins_this_runs_shells_and_judged_pages_still_resolve() {
+    let before = content_missing(&shells(6, false, 2), &Intent::default());
+    // /p1 fails and /p2 is fixed: /p1 is held, /p2 leaves.
+    let t = next_content(&before, &shells_with_failures(6, false, 0, &[1]));
+    let (finding, _, widened) = updated(&t);
+    assert!(!widened);
+    let urls: Vec<&str> = finding
+        .evidence
+        .content
+        .iter()
+        .map(|c| c.url.as_str())
+        .collect();
+    assert_eq!(urls, ["https://example.com/p1"]);
+    // /p1 judged fine: resolved.
+    let t = next_content(&before, &shells(6, false, 0));
+    assert!(
+        matches!(t.as_slice(), [Transition::Resolved { .. }]),
+        "{t:#?}"
+    );
+}
+
+#[test]
+fn a_page_no_longer_important_leaves_the_incident() {
+    let before = content_missing(&shells(6, false, 1), &Intent::default());
+    // /p1 is gone from the crawl, so it is not an important page any more.
+    let mut after = shells(6, false, 0);
+    after.pages.remove(1);
+    let t = next_content(&before, &after);
+    assert!(
+        matches!(t.as_slice(), [Transition::Resolved { .. }]),
+        "{t:#?}"
+    );
+}
+
+#[test]
+fn a_held_page_no_wanted_bot_may_fetch_now_is_dropped() {
+    let before = content_missing(&shells(4, false, 1), &Intent::default());
+    let after = with_robots(
+        shells_with_failures(4, false, 0, &[1]),
+        200,
+        "User-agent: *\nDisallow: /p1\n",
+    );
+    let t = next_content(&before, &after);
+    assert!(
+        matches!(t.as_slice(), [Transition::Resolved { .. }]),
+        "{t:#?}"
+    );
+}
