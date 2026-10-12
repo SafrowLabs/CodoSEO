@@ -19,10 +19,10 @@ use codoseo_geo::probe::{ProbeReport, Verdict};
 use codoseo_geo::report::AccessReport;
 use codoseo_geo::{Honours, Intent, Stance, registry};
 use codoseo_mcp::cloud::types::{
-    ActiveCrawl, AiAccessInfo, AiBotInfo, AiEngineInfo, AiIncidentInfo, AiNotProbedInfo,
-    AiProbeBotInfo, AiProbesInfo, AiRobotsInfo, ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued,
-    IssueUrlsPage, PageInfo, PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip,
-    clip_change_text,
+    ActiveCrawl, AiAccessInfo, AiBotInfo, AiContentInfo, AiContentPage, AiEngineInfo,
+    AiIncidentInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo, AiProbesInfo, AiRobotsInfo,
+    ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES,
+    PageInfo, PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
@@ -475,6 +475,8 @@ impl<'a> AgentService<'a> {
                 declared: Default::default(),
                 probes_enabled,
                 probes: None,
+                content: None,
+                llms_txt: None,
             });
         };
         let intent = geo::get_intent(pool, site.id).await?;
@@ -497,6 +499,8 @@ impl<'a> AgentService<'a> {
                 .as_ref()
                 .filter(|_| probes_enabled)
                 .map(|p| ai_probes(p, &intent)),
+            content: ai_content(&report),
+            llms_txt: report.llms_txt.as_ref().map(ai_llms_txt),
             declared: report.declared,
         })
     }
@@ -685,6 +689,57 @@ pub async fn issue_page(
 
 /// Longest incident title or summary the AI access payload carries.
 const MAX_AI_TEXT: usize = 400;
+
+/// The important pages' raw HTML content: shells first, capped.
+fn ai_content(report: &AccessReport) -> Option<AiContentInfo> {
+    let content = report.content.as_ref()?;
+    let mut pages: Vec<AiContentPage> = content
+        .pages
+        .iter()
+        .filter_map(|c| {
+            Some(AiContentPage {
+                url: report.important.get(usize::from(c.url))?.url.clone(),
+                verdict: c.verdict,
+                signals: c.signals.clone(),
+                words: c.words,
+                title: c.title,
+                h1: c.h1,
+                description: c.description,
+                canonical: c.canonical,
+                jsonld: matches!(c.jsonld, codoseo_core::page::JsonLdStatus::Valid(_)),
+                links_internal: c.links_internal,
+            })
+        })
+        .collect();
+    let total = u32::try_from(pages.len()).unwrap_or(u32::MAX);
+    let shells = u32::try_from(content.shells().count()).unwrap_or(u32::MAX);
+    // Stable: shells keep the report's order, as do the rest.
+    pages.sort_by_key(|p| !p.verdict.is_shell());
+    let more = pages.len().saturating_sub(MAX_AI_CONTENT_PAGES);
+    pages.truncate(MAX_AI_CONTENT_PAGES);
+    Some(AiContentInfo {
+        grade: codoseo_geo::findings::Grade::AMinus,
+        pages_checked: total,
+        shells,
+        pages,
+        more: u32::try_from(more).unwrap_or(u32::MAX),
+    })
+}
+
+fn ai_llms_txt(r: &codoseo_geo::llms::LlmsTxtReport) -> AiLlmsTxtInfo {
+    let mut report = r.clone();
+    for c in &mut report.checks {
+        c.detail = clip(&c.detail, MAX_AI_TEXT);
+    }
+    for u in &mut report.link_summary.failing_urls {
+        *u = clip(u, MAX_AI_TEXT);
+    }
+    report.error = report.error.map(|e| clip(&e, MAX_AI_TEXT));
+    AiLlmsTxtInfo {
+        informational: true,
+        report,
+    }
+}
 
 /// One entry per registry bot, with whether robots.txt does the opposite of the owner's intent:
 /// the bot is allowed but some important page is blocked, or it is blocked from the home page
