@@ -27,7 +27,7 @@ use codoseo_geo::Intent;
 use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{
     Evidence, Finding, FindingKind, evaluated_kinds, findings, hold_unjudged_content,
-    hold_unjudged_probes,
+    hold_unjudged_probes, judged_by,
 };
 use codoseo_geo::incident::{OpenIncident, Transition, before_of, reconcile};
 use codoseo_geo::llms::LlmsTxtReport;
@@ -1272,6 +1272,7 @@ pub async fn reevaluate_quietly(
                 resolved_by: "intent",
                 seen: false,
                 befores: HashMap::new(),
+                report: None,
             },
         )
         .await?;
@@ -1398,6 +1399,7 @@ pub(crate) async fn apply_geo(
             resolved_by: "crawl",
             seen: true,
             befores,
+            report: Some(&input.report),
         },
     )
     .await?;
@@ -1485,7 +1487,7 @@ fn reports_to_keep(reports: &[(Uuid, Option<&AccessReport>)]) -> BTreeSet<Uuid> 
 }
 
 /// How [`write_transitions`] treats what it writes.
-struct Mode {
+struct Mode<'a> {
     /// Kinds whose incidents open `quiet`, without a change row.
     quiet: HashSet<FindingKind>,
     /// Whether to return change rows for the transitions.
@@ -1499,6 +1501,9 @@ struct Mode {
     seen: bool,
     /// What was true before each incident that opens, by (kind, subject) ([`before_of`]).
     befores: HashMap<(FindingKind, String), Value>,
+    /// The report the findings come from: an incident whose finding it only held back
+    /// ([`judged_by`]) was not seen by it and keeps a recovery a recheck saw.
+    report: Option<&'a AccessReport>,
 }
 
 /// An open incident as read for reconciling.
@@ -1621,7 +1626,7 @@ async fn write_transitions(
     crawl_id: Uuid,
     transitions: &[Transition],
     open: &[OpenRow],
-    mode: Mode,
+    mode: Mode<'_>,
 ) -> Result<Written, sqlx::Error> {
     let by_id: HashMap<i64, &OpenRow> = open.iter().map(|r| (r.id, r)).collect();
     let mut written = Written::default();
@@ -1682,13 +1687,15 @@ async fn write_transitions(
                 let mut evidence =
                     serde_json::to_value(&finding.evidence).expect("evidence always serializes");
                 strip_nul(&mut evidence);
-                // A crawl that still finds it undoes a recovery a recheck saw.
+                // A crawl that still finds it undoes a recovery a recheck saw; one that only
+                // held it (it could not judge any of its bots or pages) does not.
+                let undo_recovery = mode.seen && mode.report.is_none_or(|r| judged_by(r, finding));
                 sqlx::query(
                     "UPDATE ai_incidents SET severity = $2::severity, title = $3, summary = $4, \
                        evidence = $5, \
                        last_seen_crawl_id = CASE WHEN $7 THEN $6 ELSE last_seen_crawl_id END, \
                        last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END, \
-                       recovered_at = CASE WHEN $7 THEN NULL ELSE recovered_at END, \
+                       recovered_at = CASE WHEN $9 THEN NULL ELSE recovered_at END, \
                        quiet = quiet AND NOT $8 \
                      WHERE id = $1",
                 )
@@ -1700,6 +1707,7 @@ async fn write_transitions(
                 .bind(crawl_id)
                 .bind(mode.seen)
                 .bind(announce)
+                .bind(undo_recovery)
                 .execute(&mut **tx)
                 .await?;
                 if announce {

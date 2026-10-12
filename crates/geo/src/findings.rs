@@ -1187,6 +1187,41 @@ pub fn hold_unjudged_probes(
     found
 }
 
+/// Whether `report` judged any member of `finding` itself, rather than only holding it from the
+/// open incident ([`hold_unjudged_probes`], [`hold_unjudged_content`]). A `FetchBlocked` finding
+/// all of whose bots went unjudged, or a `ContentMissing` finding none of whose pages had raw
+/// content this run, was not seen by the run: it only stands because nothing new was learned.
+/// The other kinds are always judged when they are evaluated.
+pub fn judged_by(report: &AccessReport, finding: &Finding) -> bool {
+    match finding.kind {
+        FindingKind::FetchBlocked => {
+            let Some(probes) = report.probes.as_ref().filter(|p| p.conclusive()) else {
+                return false;
+            };
+            let judged = probes.judged_bots();
+            finding
+                .evidence
+                .probes
+                .iter()
+                .any(|p| judged.iter().any(|j| j.eq_ignore_ascii_case(&p.token)))
+        }
+        FindingKind::ContentMissing => {
+            let Some(content) = report.content.as_ref() else {
+                return false;
+            };
+            finding.evidence.content.iter().any(|c| {
+                report
+                    .important
+                    .iter()
+                    .position(|u| u.url == c.url)
+                    .and_then(|i| u16::try_from(i).ok())
+                    .is_some_and(|i| content.pages.iter().any(|p| p.url == i))
+            })
+        }
+        _ => true,
+    }
+}
+
 /// The start of a `FetchBlocked` title, before the bots' names.
 fn probe_headline(verdict: &Verdict) -> String {
     match verdict {

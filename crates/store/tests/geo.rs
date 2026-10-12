@@ -3106,3 +3106,113 @@ async fn an_intent_change_does_not_reopen_what_a_recheck_verified_fixed() {
     full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
     assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
 }
+
+/// A report like [`probed_crawl`]'s, without a crawl: what a fetch recheck that probed these
+/// bots on the home page would lay over the stored report.
+fn probed_report(verdicts: &[(&str, Verdict)]) -> AccessReport {
+    let out = crawl_of(200, ALLOW_ALL, None);
+    let mut input = input_for(&out);
+    let results: Vec<ProbeResult> = verdicts
+        .iter()
+        .map(|(token, verdict)| ProbeResult {
+            token: (*token).to_owned(),
+            fetch: Some(match verdict {
+                Verdict::Same => probe_fetch(200, "Home", 20_000),
+                _ => probe_fetch(403, "Just a moment...", 4_000),
+            }),
+            verdict: verdict.clone(),
+        })
+        .collect();
+    input.report.probes = Some(ProbeReport {
+        version: 1,
+        synthetic: true,
+        from: "hello@codoseo.com".to_owned(),
+        bots: verdicts.iter().map(|(t, _)| (*t).to_owned()).collect(),
+        skipped_bots: Vec::new(),
+        urls: vec![ProbedUrl {
+            url: 0,
+            baseline: probe_fetch(200, "Home", 20_000),
+            results,
+        }],
+        stop: None,
+        requests: 0,
+    });
+    input.report
+}
+
+#[tokio::test]
+async fn a_crawl_that_could_not_judge_a_recovered_incident_keeps_its_recovery() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+
+    // The manual recheck sees OAI-SearchBot through: recovered, a follow-up queued.
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let clean = probed_report(&[("OAI-SearchBot", Verdict::Same)]);
+    let outcome = geo::apply_recheck(
+        &db.pool,
+        queued.id,
+        &clean,
+        &[FindingKind::FetchBlocked],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::Clean));
+    let followup = rechecks_of(&db.pool, site, id).await.last().unwrap().id;
+
+    // A crawl whose probe of OAI-SearchBot got no verdict holds the incident as it was: it did
+    // not see the problem, so the recovery and its follow-up stand.
+    let unstable = Verdict::Inconclusive {
+        reason: codoseo_geo::probe::InconclusiveReason::Unstable,
+    };
+    probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", unstable),
+            ("PerplexityBot", Verdict::Same),
+        ],
+    )
+    .await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.resolved_at.is_none());
+    assert!(
+        i.recovered_at.is_some(),
+        "a held finding keeps the recovery"
+    );
+
+    let outcome = geo::apply_recheck(
+        &db.pool,
+        followup,
+        &clean,
+        &[FindingKind::FetchBlocked],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::Clean));
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolved_by.as_deref(), Some("recheck"));
+
+    // A crawl that judges it and still sees it does clear a recovery.
+    let (site, id) = {
+        let site = make_site(&db.pool, "two.example").await;
+        probed_crawl(&db.pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+        (site, fetch_blocked_open(&db.pool, site).await[0].id)
+    };
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    probed_crawl(&db.pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.recovered_at.is_none());
+}
