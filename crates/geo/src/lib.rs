@@ -11,6 +11,7 @@ pub mod intent;
 pub mod ledger;
 pub mod llms;
 pub mod probe;
+pub mod recheck;
 pub mod registry;
 pub mod remedy;
 pub mod report;
