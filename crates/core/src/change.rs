@@ -35,7 +35,8 @@ pub enum ChangeKind {
     AiFetchBlocked,
     /// A page's content is missing from its server-rendered HTML, which AI crawlers read.
     AiContentMissing,
-    /// The llms.txt the site adopted stopped serving or lost its links.
+    /// The llms.txt the site adopted stopped serving (5xx, 429 or no answer); with `after`
+    /// `resolved`, it serves again or was removed on purpose.
     AiLlmsTxtUnavailable,
 }
 

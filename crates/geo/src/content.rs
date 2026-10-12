@@ -255,7 +255,7 @@ pub fn content_report(
     let pages: Vec<RawContent> = important
         .iter()
         .enumerate()
-        .filter_map(|(i, imp)| raw_content(i as u16, by_url.get(imp.url.as_str())?))
+        .filter_map(|(i, imp)| raw_content(u16::try_from(i).ok()?, by_url.get(imp.url.as_str())?))
         .collect();
     (!pages.is_empty()).then_some(ContentReport { pages })
 }
