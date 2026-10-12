@@ -14,7 +14,7 @@ use crate::dbenum::enum_slug;
 /// What is instant by default: a key page going noindex, a 4xx/5xx spike, robots.txt changing,
 /// the sitemap losing 10% or more, the site moving, and the AI access incidents that cost
 /// visibility: AI bots blocked (by robots.txt or, in a synthetic fetch, by the server), AI answers
-/// restricted, and one of those resolving.
+/// restricted, content missing from the HTML as served, and one of those resolving.
 pub const DEFAULT_INSTANT: [ChangeKind; 10] = [
     ChangeKind::BecameNoindex,
     ChangeKind::ErrorSpike,

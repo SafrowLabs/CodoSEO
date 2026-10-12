@@ -339,18 +339,7 @@ fn severity_label(s: Severity) -> (&'static str, &'static str) {
 /// The change kinds that alert instantly under the default rules (spec section 10), matching
 /// the alert jobs `finalize` queues. Everything else waits for the Monday digest.
 fn is_instant(kind: ChangeKind) -> bool {
-    matches!(
-        kind,
-        ChangeKind::BecameNoindex
-            | ChangeKind::ErrorSpike
-            | ChangeKind::RobotsTxtChanged
-            | ChangeKind::SitemapShrank
-            | ChangeKind::AiBotBlocked
-            | ChangeKind::AiAnswersRestricted
-            | ChangeKind::AiIssueResolved
-            | ChangeKind::AiFetchBlocked
-            | ChangeKind::AiContentMissing
-    )
+    codoseo_store::alert_rules::DEFAULT_INSTANT.contains(&kind)
 }
 
 fn title(c: &ChangeRow) -> String {
@@ -554,6 +543,20 @@ fn rules() -> Vec<Rule> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instant_kinds_match_the_default_alert_rules() {
+        use codoseo_store::alert_rules::{ALL_KINDS, DEFAULT_INSTANT};
+        for kind in ALL_KINDS {
+            assert_eq!(
+                is_instant(kind),
+                DEFAULT_INSTANT.contains(&kind),
+                "{kind:?}"
+            );
+        }
+        assert!(is_instant(ChangeKind::SiteMoved));
+        assert!(!is_instant(ChangeKind::AiLlmsTxtUnavailable));
+    }
 
     fn point(number: i64, score: i16) -> HealthPoint {
         HealthPoint { number, score }

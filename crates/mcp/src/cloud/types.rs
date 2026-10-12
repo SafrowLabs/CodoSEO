@@ -355,11 +355,11 @@ pub struct AiRobotsInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiIncidentInfo {
     pub id: i64,
-    /// `bots_blocked`, `bots_not_blocked`, `robots_unavailable`, `answers_restricted` or
-    /// `content_missing` (important pages are empty app shells in their HTML as served; evidence
-    /// grade A-), `llms_txt_unavailable` (an llms.txt the site served before now fails;
-    /// informational), `fetch_blocked` (the synthetic fetch check: a firewall or CDN blocks or challenges bots the
-    /// owner wants; evidence grade B).
+    /// One of `bots_blocked`, `bots_not_blocked`, `robots_unavailable`, `answers_restricted`,
+    /// `fetch_blocked` (the synthetic fetch check: a firewall or CDN blocks or challenges bots
+    /// the owner wants; evidence grade B), `content_missing` (important pages are empty app
+    /// shells in their HTML as served; evidence grade A-) or `llms_txt_unavailable` (an llms.txt
+    /// the site served before now fails; informational).
     pub kind: String,
     /// The purpose or directive the incident is about, or for `fetch_blocked` the cause
     /// (`challenge_cloudflare`, `blocked_403`, ...); empty for the robots.txt one.
