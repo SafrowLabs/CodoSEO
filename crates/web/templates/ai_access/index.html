@@ -128,7 +128,7 @@
           <tr>
             <th scope="row" class="aia-bot-cell">{% if let Some(h) = r.href %}<a class="url trunc" href="{{ h }}">{{ r.path }}</a>{% else %}<span class="mono trunc aia-path">{{ r.path }}</span>{% endif %}{% if let Some(sig) = r.signals %}<span class="aia-sub aia-signals">{{ sig }}</span>{% endif %}</th>
             <td data-label="Words" class="r num">{{ r.words }}</td>
-            {% for t in r.ticks %}<td data-label="{{ t.label }}" class="c"><span class="{% if t.on %}c-ok{% else %}c-ghost{% endif %}" title="{{ t.tip }}" aria-label="{{ t.tip }}">{{ t.text }}</span></td>{% endfor %}
+            {% for t in r.ticks %}<td data-label="{{ t.label }}" class="c"><span class="{% if t.on %}c-ok{% else %}c-ghost{% endif %}" title="{{ t.tip }}"><span aria-hidden="true">{{ t.text }}</span><span class="sr-only">{{ t.tip }}</span></span></td>{% endfor %}
             <td data-label="Internal links" class="r num">{{ r.links }}</td>
             <td class="aia-status"><span class="badge {{ r.verdict_class }}" title="{{ r.verdict_tip }}">{{ r.verdict }}</span></td>
           </tr>
@@ -157,7 +157,7 @@
     {% if !v.llms.checks.is_empty() %}
     <div class="rows aia-llms-checks">
       {% for c in v.llms.checks %}
-      <div class="aia-llms-check"><span class="{% if c.ok %}c-ok{% else %}c-warn{% endif %}" aria-label="{% if c.ok %}passes{% else %}does not pass{% endif %}">{% if c.ok %}✓{% else %}✗{% endif %}</span><b>{{ c.label }}</b><span class="aia-ev-detail">{% for s in c.detail %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</span></div>
+      <div class="aia-llms-check"><span class="{% if c.ok %}c-ok{% else %}c-warn{% endif %}"><span aria-hidden="true">{% if c.ok %}✓{% else %}✗{% endif %}</span><span class="sr-only">{% if c.ok %}Passes:{% else %}Does not pass:{% endif %}</span></span><b>{{ c.label }}</b><span class="aia-ev-detail">{% for s in c.detail %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</span></div>
       {% endfor %}
     </div>
     {% endif %}

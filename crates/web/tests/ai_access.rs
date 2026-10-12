@@ -1644,6 +1644,12 @@ async fn a_huge_llms_txt_h1_is_clipped_on_the_card() {
         card.contains("A <code>&#62;</code> summary follows the H1."),
         "{card}"
     );
+    // The tick says what it means in text, not in an aria-label on a plain span.
+    assert!(
+        card.contains(r#"<span class="sr-only">Passes:</span>"#),
+        "{card}"
+    );
+    assert!(!card.contains("aria-label=\"passes\""), "{card}");
     assert!(!page.contains(&"A".repeat(201)), "H1 clipped");
     assert!(!card.contains(&"B".repeat(401)), "detail clipped");
     assert!(card.contains(&format!("{}…", "B".repeat(399))), "{card}");

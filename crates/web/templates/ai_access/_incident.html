@@ -61,7 +61,7 @@
     <span title="{{ i.opened_full }}">Opened {{ i.opened }}</span>
     <span title="{{ i.last_seen_full }}">Last seen {{ i.last_seen }}</span>
     {% if let Some((label, tip)) = i.quiet %}<span class="chip" title="{{ tip }}">{{ label }}</span>{% endif %}
-    <span class="aia-grade{% if i.synthetic %} aia-grade-b{% endif %}" title="{{ i.grade.1 }}" aria-label="{{ i.grade.1 }}">{{ i.grade.0 }}</span>
+    <span class="aia-grade{% if i.synthetic %} aia-grade-b{% endif %}" title="{{ i.grade.1 }}"><span aria-hidden="true">{{ i.grade.0 }}</span><span class="sr-only">{{ i.grade.1 }}</span></span>
     {% if !i.sources.is_empty() %}<span class="aia-sources">Sources: {% for s in i.sources %}<a href="{{ s.href }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
   </div>
 </article>
