@@ -57,6 +57,9 @@ pub fn routes() -> Router<AppState> {
 /// What grade B means, on a synthetic incident's grade.
 const GRADE_B: &str = "Evidence grade B: observed by CodoSEO's synthetic check, compared with CodoSEObot's own fetch and confirmed by a second one. Grade A is what the operator documents.";
 
+/// What grade A- means, on a content incident's grade.
+const GRADE_A_MINUS: &str = "Evidence grade A-: read from your pages' HTML as served, with Vercel and MERJ's published measurement that these AI crawlers don't run JavaScript. Grade A is what the operator documents.";
+
 /// Resolved incidents listed under "Recently resolved".
 const RESOLVED_SHOWN: i64 = 10;
 /// URLs an incident card lists before "+N more".
@@ -1492,6 +1495,8 @@ fn incident_view(
         synthetic,
         grade: if synthetic {
             ("B", GRADE_B)
+        } else if i.kind == FindingKind::ContentMissing {
+            ("A-", GRADE_A_MINUS)
         } else {
             ("A", "Evidence grade A: documented by the operator")
         },

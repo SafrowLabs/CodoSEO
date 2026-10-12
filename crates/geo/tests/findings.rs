@@ -477,7 +477,8 @@ fn evaluated_kinds_follow_what_the_report_can_see() {
             FindingKind::RobotsUnavailable,
             FindingKind::BotsBlocked,
             FindingKind::BotsNotBlocked,
-            FindingKind::AnswersRestricted
+            FindingKind::AnswersRestricted,
+            FindingKind::ContentMissing
         ]
     );
     let down = report_for(&with_robots(site(3, |p| p), 503, ""));
@@ -887,10 +888,7 @@ fn all_inconclusive_probes_do_not_evaluate_the_kind() {
     assert!(!evaluated_kinds(&inconclusive).contains(&FindingKind::FetchBlocked));
     assert!(fetch_blocked(&inconclusive, &Intent::default()).is_empty());
     let fine = probed(3, &[(0, &[("OAI-SearchBot", Verdict::Same)])]);
-    assert_eq!(
-        evaluated_kinds(&fine).last(),
-        Some(&FindingKind::FetchBlocked)
-    );
+    assert!(evaluated_kinds(&fine).contains(&FindingKind::FetchBlocked));
     assert!(fetch_blocked(&fine, &Intent::default()).is_empty());
     // No probes at all: not evaluated either.
     assert!(!evaluated_kinds(&report_for(&site(3, |p| p))).contains(&FindingKind::FetchBlocked));
@@ -1213,4 +1211,275 @@ fn urls_probed_counts_only_pages_the_bots_user_agent_was_sent_to() {
     let f = fetch_blocked(&report, &Intent::default());
     let p = &f[0].evidence.probes[0];
     assert_eq!((p.urls_affected, p.urls_probed), (2, 2));
+}
+
+// ---- Content missing from the HTML as served (B2.5) ------------------------------------------
+
+use codoseo_core::page::{MountPoint, PageRecord, RawSignals};
+use codoseo_geo::content::{ContentVerdict, NON_RENDERING_BOTS, NON_RENDERING_SOURCE, ShellSignal};
+use codoseo_geo::registry::registry;
+
+/// A React shell: no words, an empty `#root`.
+fn shell(mut p: PageRecord) -> PageRecord {
+    p.fields.word_count = 0;
+    p.fields.raw = RawSignals {
+        scripts_external: 1,
+        mount: Some(MountPoint::Root),
+        mount_empty: true,
+        ..RawSignals::default()
+    };
+    p
+}
+
+/// Pages that are shells: `/` when `home`, plus the first `others` of `/p1`, `/p2`...
+fn shells(n: u32, home: bool, others: u32) -> CrawlOutput {
+    let mut pages = vec![if home {
+        shell(page("/", n))
+    } else {
+        page("/", n)
+    }];
+    for i in 1..n {
+        let p = page(&format!("/p{i}"), n - i);
+        pages.push(if i <= others { shell(p) } else { p });
+    }
+    crawl(pages)
+}
+
+fn content_missing(out: &CrawlOutput, intent: &Intent) -> Vec<Finding> {
+    run(out, intent)
+        .into_iter()
+        .filter(|f| f.kind == FindingKind::ContentMissing)
+        .collect()
+}
+
+#[test]
+fn the_non_rendering_bots_are_in_the_registry() {
+    for token in NON_RENDERING_BOTS {
+        assert!(registry().bot(token).is_some(), "{token}");
+    }
+    assert!(NON_RENDERING_SOURCE.starts_with("https://vercel.com/"));
+}
+
+#[test]
+fn a_shell_home_page_is_one_warning_with_grade_a_minus() {
+    let f = content_missing(&shells(5, true, 0), &Intent::default());
+    assert_eq!(f.len(), 1, "{f:#?}");
+    let f = &f[0];
+    println!("{} | {}", f.title, f.summary);
+    assert_eq!(f.subject, "");
+    assert_eq!(f.severity, Severity::Warning);
+    assert_eq!(f.grade, Grade::AMinus);
+    assert_eq!(
+        f.title,
+        "The home page is an empty app shell to AI crawlers that don't run JavaScript"
+    );
+    assert!(
+        f.summary.starts_with("In the HTML as served"),
+        "{}",
+        f.summary
+    );
+    assert!(
+        f.summary
+            .ends_with("prerender the page, so it is in the HTML."),
+        "{}",
+        f.summary
+    );
+    assert!(
+        f.summary.contains("mount element is empty"),
+        "{}",
+        f.summary
+    );
+    // The search and user-fetch bots are wanted by default; GPTBot and ClaudeBot (training) are not.
+    assert!(f.summary.contains("OAI-SearchBot"), "{}", f.summary);
+    assert!(!f.summary.contains("GPTBot"), "{}", f.summary);
+    assert_eq!(f.sources, vec![NON_RENDERING_SOURCE.to_owned()]);
+    let c = &f.evidence.content;
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].url, "https://example.com/");
+    assert_eq!(c[0].verdict, ContentVerdict::Shell);
+    assert_eq!(c[0].signals, [ShellSignal::MountEmpty]);
+    assert_eq!(c[0].words, 0);
+    assert_eq!(f.evidence.urls.total, 1);
+}
+
+#[test]
+fn shells_below_the_home_page_are_a_notice_until_they_are_half() {
+    let few = content_missing(&shells(6, false, 2), &Intent::default());
+    assert_eq!(few.len(), 1);
+    println!("{}", few[0].title);
+    assert_eq!(few[0].severity, Severity::Notice);
+    assert_eq!(
+        few[0].title,
+        "2 important pages are empty app shells to AI crawlers that don't run JavaScript"
+    );
+    let half = content_missing(&shells(6, false, 3), &Intent::default());
+    assert_eq!(half[0].severity, Severity::Warning);
+}
+
+#[test]
+fn a_likely_shell_is_worded_as_likely() {
+    let mut p = page("/", 3);
+    p.fields.word_count = 0;
+    p.fields.raw.scripts_external = 4;
+    let f = content_missing(
+        &crawl(vec![p, page("/a", 2), page("/b", 1)]),
+        &Intent::default(),
+    );
+    assert_eq!(f.len(), 1);
+    assert_eq!(
+        f[0].evidence.content[0].verdict,
+        ContentVerdict::LikelyShell
+    );
+    assert_eq!(
+        f[0].title,
+        "The home page looks like an empty app shell to AI crawlers that don't run JavaScript"
+    );
+}
+
+#[test]
+fn thin_pages_and_present_pages_are_not_findings() {
+    let thin = site(3, |mut p| {
+        p.fields.word_count = 12;
+        p.fields.h1 = vec!["Contact".to_owned()];
+        p
+    });
+    let report = report_for(&thin);
+    assert!(
+        report
+            .content
+            .as_ref()
+            .unwrap()
+            .pages
+            .iter()
+            .all(|c| c.verdict == ContentVerdict::Thin)
+    );
+    assert!(content_missing(&thin, &Intent::default()).is_empty());
+    assert!(content_missing(&site(3, |p| p), &Intent::default()).is_empty());
+}
+
+#[test]
+fn no_finding_when_the_owner_wants_none_of_the_non_rendering_bots() {
+    let out = shells(3, true, 2);
+    let off = intent(r#"{"purposes":{"search":"block","user_fetch":"any"}}"#);
+    assert!(content_missing(&out, &off).is_empty());
+    // Wanting the training bots brings GPTBot and ClaudeBot in.
+    let training =
+        intent(r#"{"purposes":{"search":"block","user_fetch":"any","training":"allow"}}"#);
+    let f = content_missing(&out, &training);
+    assert_eq!(f.len(), 1);
+    assert!(f[0].summary.contains("GPTBot"), "{}", f[0].summary);
+    // Only bots in the non-rendering list count: Googlebot-style renderers say nothing here.
+    let others = intent(
+        r#"{"purposes":{"search":"block","user_fetch":"block"},"bots":{"Applebot":"allow"}}"#,
+    );
+    assert!(content_missing(&out, &others).is_empty());
+}
+
+#[test]
+fn pages_the_wanted_bots_may_not_fetch_are_left_out() {
+    let wanted = [
+        "OAI-SearchBot",
+        "ChatGPT-User",
+        "Claude-SearchBot",
+        "Claude-User",
+        "PerplexityBot",
+        "Perplexity-User",
+    ];
+    // Every wanted non-rendering bot is kept off /p1; the home page and /p2 are still readable.
+    let body: String = wanted
+        .iter()
+        .map(|t| format!("User-agent: {t}\nDisallow: /p1\n\n"))
+        .collect();
+    let out = with_robots(shells(4, true, 2), 200, &body);
+    let f = content_missing(&out, &Intent::default());
+    assert_eq!(f.len(), 1);
+    let urls: Vec<&str> = f[0]
+        .evidence
+        .content
+        .iter()
+        .map(|c| c.url.as_str())
+        .collect();
+    assert_eq!(urls, ["https://example.com/", "https://example.com/p2"]);
+    // One wanted bot that may still fetch /p1 is enough to count it.
+    let some: String = wanted[1..]
+        .iter()
+        .map(|t| format!("User-agent: {t}\nDisallow: /p1\n\n"))
+        .collect();
+    let f = content_missing(
+        &with_robots(shells(4, true, 2), 200, &some),
+        &Intent::default(),
+    );
+    assert_eq!(f[0].evidence.content.len(), 3);
+    // Blocked everywhere: nobody reads the shells, so there is nothing to report.
+    let all = with_robots(shells(4, true, 2), 200, "User-agent: *\nDisallow: /\n");
+    assert!(content_missing(&all, &Intent::default()).is_empty());
+}
+
+#[test]
+fn no_robots_verdicts_means_content_missing_is_not_evaluated() {
+    let down = report_for(&with_robots(shells(3, true, 2), 503, ""));
+    assert!(!evaluated_kinds(&down).contains(&FindingKind::ContentMissing));
+    assert!(
+        findings(&down, &Intent::default())
+            .iter()
+            .all(|f| f.kind != FindingKind::ContentMissing)
+    );
+    // No HTML important page, no content report: not evaluated either.
+    let pdf_only = {
+        let mut p = page("/", 1);
+        p.content_type = Some("application/pdf".to_owned());
+        report_for(&crawl(vec![p]))
+    };
+    assert!(pdf_only.content.is_none());
+    assert!(!evaluated_kinds(&pdf_only).contains(&FindingKind::ContentMissing));
+}
+
+#[test]
+fn more_shell_pages_widen_the_incident() {
+    use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
+    let before = content_missing(&shells(6, false, 1), &Intent::default());
+    let members: Vec<String> = before[0].evidence.members().into_iter().collect();
+    assert_eq!(members, ["url:/p1"]);
+    let open = vec![OpenIncident {
+        id: 1,
+        kind: FindingKind::ContentMissing,
+        subject: String::new(),
+        severity: before[0].severity,
+        members: before[0].evidence.members(),
+    }];
+    let after = content_missing(&shells(6, false, 2), &Intent::default());
+    let t = reconcile(&open, &after, &[FindingKind::ContentMissing]);
+    match t.as_slice() {
+        [Transition::Updated { widened, .. }] => assert!(*widened),
+        other => panic!("one update, got {other:#?}"),
+    }
+    // Fewer pages is not a widening.
+    let t = reconcile(
+        &[OpenIncident {
+            members: after[0].evidence.members(),
+            ..open[0].clone()
+        }],
+        &before,
+        &[FindingKind::ContentMissing],
+    );
+    match t.as_slice() {
+        [Transition::Updated { widened, .. }] => assert!(!*widened),
+        other => panic!("one update, got {other:#?}"),
+    }
+}
+
+#[test]
+fn content_missing_serialises_with_grade_a_minus() {
+    let f = content_missing(&shells(3, true, 0), &Intent::default());
+    let json = serde_json::to_string(&f).expect("json");
+    assert!(json.contains(r#""grade":"A-""#), "{json}");
+    assert!(json.contains(r#""kind":"content_missing""#), "{json}");
+    let back: Vec<Finding> = serde_json::from_str(&json).expect("back");
+    assert_eq!(back, f);
+    assert_eq!(serde_json::to_string(&Grade::AMinus).unwrap(), r#""A-""#);
+    assert_eq!(
+        FindingKind::from_slug("content_missing"),
+        Some(FindingKind::ContentMissing)
+    );
+    assert_eq!(FindingKind::ContentMissing.slug(), "content_missing");
 }

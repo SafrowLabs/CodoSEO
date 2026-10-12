@@ -529,7 +529,8 @@ fn stored(rule: MatchedRule) -> MatchedRule {
     MatchedRule { pattern, ..rule }
 }
 
-fn path_and_query(url: &str) -> String {
+/// The path and query of `url`, or `/` when it doesn't parse.
+pub(crate) fn path_and_query(url: &str) -> String {
     match Url::parse(url) {
         Ok(u) => match u.query() {
             Some(q) => format!("{}?{q}", u.path()),

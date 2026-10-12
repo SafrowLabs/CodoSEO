@@ -776,6 +776,8 @@ fn finding_change(finding: &Finding) -> Change {
         FindingKind::BotsNotBlocked => (ChangeKind::AiBlockNotApplied, "intent: block"),
         FindingKind::AnswersRestricted => (ChangeKind::AiAnswersRestricted, "eligible"),
         FindingKind::FetchBlocked => (ChangeKind::AiFetchBlocked, "reachable"),
+        // Placeholder until its own change kind exists (B2.10).
+        FindingKind::ContentMissing => (ChangeKind::AiFetchBlocked, "content in the HTML"),
     };
     Change {
         kind,

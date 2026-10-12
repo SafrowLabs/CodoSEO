@@ -4,6 +4,8 @@
 //! bots the owner wants are blocked, bots the owner wants blocked still get in, and page markup
 //! that takes pages out of an engine's AI answers. A fifth, grade B, comes from the synthetic fetch
 //! probes: the site's CDN or firewall blocks, challenges or diverts bots it lets in by robots.txt.
+//! A sixth, grade A-, reads the important pages as served: an empty app shell is all that AI
+//! crawlers which don't run JavaScript get.
 //! Severity follows the owner's [`Intent`]: a blocked training bot is not a problem unless the
 //! owner said they want it to crawl.
 
@@ -12,11 +14,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use codoseo_core::check::Severity;
 use serde::{Deserialize, Serialize};
 
+use crate::content::{
+    ContentVerdict, NON_RENDERING_BOTS, NON_RENDERING_SOURCE, SHELL_MAX_WORDS, ShellSignal,
+};
 use crate::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, EngineId, engines};
 use crate::intent::{Intent, Stance};
 use crate::probe::{ProbeFetch, ProbeReport, Vendor, Verdict};
 use crate::registry::{Bot, Honours, Purpose, registry};
-use crate::report::{AccessReport, Reason, slug_str};
+use crate::report::{AccessReport, Reason, path_and_query, slug_str};
 use crate::robots::{GroupMatch, MatchedRule, RobotsAvailability};
 
 /// How many URLs the evidence lists as a sample.
@@ -64,6 +69,8 @@ pub enum FindingKind {
     AnswersRestricted,
     /// Synthetic: a probe with a bot's user agent was blocked, challenged or diverted.
     FetchBlocked,
+    /// Important pages are an empty app shell in the HTML as served.
+    ContentMissing,
 }
 
 impl FindingKind {
@@ -74,6 +81,7 @@ impl FindingKind {
             FindingKind::BotsNotBlocked => "bots_not_blocked",
             FindingKind::AnswersRestricted => "answers_restricted",
             FindingKind::FetchBlocked => "fetch_blocked",
+            FindingKind::ContentMissing => "content_missing",
         }
     }
 
@@ -84,17 +92,22 @@ impl FindingKind {
             FindingKind::BotsNotBlocked,
             FindingKind::AnswersRestricted,
             FindingKind::FetchBlocked,
+            FindingKind::ContentMissing,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
     }
 }
 
-/// Evidence grade: A is what the operator documents; B is what CodoSEO's synthetic check
-/// observed, against its own baseline and confirmed by a second fetch.
+/// Evidence grade: A is what the operator documents; A- is read from the site's own HTML as
+/// served, against a published measurement of how the bots fetch rather than the operators' own
+/// documentation; B is what CodoSEO's synthetic check observed, against its own baseline and
+/// confirmed by a second fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Grade {
     A,
+    #[serde(rename = "A-")]
+    AMinus,
     B,
 }
 
@@ -160,6 +173,17 @@ pub struct ProbeEvidence {
     pub baseline: Option<ProbeFetch>,
 }
 
+/// One important page's part in a `ContentMissing` finding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContentEvidence {
+    pub url: String,
+    pub verdict: ContentVerdict,
+    #[serde(default)]
+    pub signals: Vec<ShellSignal>,
+    /// Words in the HTML as served.
+    pub words: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UrlSample {
     /// Up to ten important URLs.
@@ -185,6 +209,9 @@ pub struct Evidence {
     /// Observed by CodoSEO's synthetic check rather than documented by an operator.
     #[serde(default, skip_serializing_if = "is_false")]
     pub synthetic: bool,
+    /// The shell pages, for `ContentMissing`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<ContentEvidence>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -192,14 +219,20 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl Evidence {
-    /// Who the finding is about: its bots' and probed bots' tokens (lower-cased) and its engines'
-    /// names. An incident whose finding gains a member has widened.
+    /// Who the finding is about: its bots' and probed bots' tokens (lower-cased), its engines'
+    /// names and its shell pages as `url:<path>`. An incident whose finding gains a member has
+    /// widened.
     pub fn members(&self) -> BTreeSet<String> {
         self.bots
             .iter()
             .map(|b| b.token.to_ascii_lowercase())
             .chain(self.probes.iter().map(|p| p.token.to_ascii_lowercase()))
             .chain(self.engines.iter().map(|e| e.name.clone()))
+            .chain(
+                self.content
+                    .iter()
+                    .map(|c| format!("url:{}", path_and_query(&c.url))),
+            )
             .collect()
     }
 }
@@ -234,6 +267,10 @@ pub fn evaluated_kinds(report: &AccessReport) -> Vec<FindingKind> {
     if report.probes.as_ref().is_some_and(ProbeReport::conclusive) {
         kinds.push(FindingKind::FetchBlocked);
     }
+    // Who may read the pages comes from robots.txt, so without verdicts there is nothing to say.
+    if report.content.is_some() && report.has_verdicts() {
+        kinds.push(FindingKind::ContentMissing);
+    }
     kinds
 }
 
@@ -247,6 +284,7 @@ pub fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
         out.extend(bots_blocked(report, intent));
         out.extend(bots_not_blocked(report, intent));
         out.extend(fetch_blocked(report, intent));
+        out.extend(content_missing(report, intent));
     }
     out.extend(answers_restricted(report, intent));
     out.sort_by(|a, b| (a.kind, &a.subject).cmp(&(b.kind, &b.subject)));
@@ -1213,4 +1251,126 @@ fn probe_summary(verdict: &Verdict, tokens: &[String], vendor: Option<Vendor>) -
     format!(
         "A request with {ua}, sent from CodoSEO's address, got {what}, while the same request as CodoSEObot got the normal page. {next} Real bots come from their own addresses and may be treated differently."
     )
+}
+
+// ---- content missing from the HTML as served -------------------------------------------------
+
+/// The `ContentMissing` finding: important pages that are, or are likely, an empty app shell, and
+/// that at least one AI crawler which doesn't run JavaScript ([`NON_RENDERING_BOTS`]) may fetch by
+/// robots.txt and the owner wants. One per site; its members are the pages.
+fn content_missing(report: &AccessReport, intent: &Intent) -> Option<Finding> {
+    let content = report.content.as_ref()?;
+    if !report.has_verdicts() {
+        return None;
+    }
+    let readers: Vec<(&Bot, &crate::report::BotAccess)> = NON_RENDERING_BOTS
+        .iter()
+        .filter_map(|token| Some((registry().bot(token)?, report.bot(token)?)))
+        .filter(|(bot, _)| intent.effective(bot) == Stance::Allow)
+        .collect();
+    let may_fetch =
+        |access: &crate::report::BotAccess, url: u16| !access.blocked.iter().any(|b| b.url == url);
+    let pages: Vec<_> = content
+        .shells()
+        .filter(|c| readers.iter().any(|(_, a)| may_fetch(a, c.url)))
+        .collect();
+    if pages.is_empty() {
+        return None;
+    }
+    let tokens: Vec<String> = readers
+        .iter()
+        .filter(|(_, a)| pages.iter().any(|c| may_fetch(a, c.url)))
+        .map(|(bot, _)| bot.token.clone())
+        .collect();
+
+    let is_home = |i: u16| {
+        report
+            .important
+            .get(usize::from(i))
+            .is_some_and(|u| u.reason == Reason::Home)
+    };
+    let home = pages.iter().any(|c| is_home(c.url));
+    let html = report.html_important();
+    let severity = if home || pages.len() * 2 >= html.max(1) {
+        Severity::Warning
+    } else {
+        Severity::Notice
+    };
+
+    let certain = pages.iter().all(|c| c.verdict == ContentVerdict::Shell);
+    let n = pages.len();
+    let who = "AI crawlers that don't run JavaScript";
+    let title = match (n, home, certain) {
+        (1, true, true) => format!("The home page is an empty app shell to {who}"),
+        (1, true, false) => format!("The home page looks like an empty app shell to {who}"),
+        (1, false, true) => format!("1 important page is an empty app shell to {who}"),
+        (1, false, false) => format!("1 important page looks like an empty app shell to {who}"),
+        (_, _, true) => format!("{n} important pages are empty app shells to {who}"),
+        (_, _, false) => format!("{n} important pages look like empty app shells to {who}"),
+    };
+
+    let mut signals: BTreeSet<ShellSignal> = BTreeSet::new();
+    for c in &pages {
+        signals.extend(c.signals.iter().copied());
+    }
+    let what: Vec<String> = signals
+        .iter()
+        .map(|s| {
+            match s {
+                ShellSignal::MountEmpty => "the app's mount element is empty",
+                ShellSignal::NoscriptJs => "a `<noscript>` notice asks for JavaScript",
+                ShellSignal::ScriptHeavy => "inline script makes up most of the page",
+                ShellSignal::ManyScripts => {
+                    "it loads several scripts but has no H1 and no internal links"
+                }
+            }
+            .to_owned()
+        })
+        .collect();
+    let subject = if n == 1 && home {
+        "the home page has"
+    } else if n == 1 {
+        "this page has"
+    } else {
+        "these pages have"
+    };
+    let mut summary =
+        format!("In the HTML as served, {subject} fewer than {SHELL_MAX_WORDS} words of text");
+    if !what.is_empty() {
+        summary.push_str(&format!(" and {}", join_and(&what)));
+    }
+    summary.push_str(&format!(
+        ". {} {} fetch pages without running JavaScript (Vercel and MERJ measured this in 2024), so {} the page as served, not what a browser shows once its scripts have run. Render the main content on the server, or prerender {}, so it is in the HTML.",
+        join_capped(&tokens),
+        if tokens.len() == 1 { "is one of the AI crawlers that" } else { "are among the AI crawlers that" },
+        if tokens.len() == 1 { "it reads" } else { "they read" },
+        if n == 1 { "the page" } else { "these pages" },
+    ));
+
+    let indexes: BTreeSet<u16> = pages.iter().map(|c| c.url).collect();
+    let evidence = pages
+        .iter()
+        .filter_map(|c| {
+            Some(ContentEvidence {
+                url: report.important.get(usize::from(c.url))?.url.clone(),
+                verdict: c.verdict,
+                signals: c.signals.clone(),
+                words: c.words,
+            })
+        })
+        .collect();
+    Some(Finding {
+        kind: FindingKind::ContentMissing,
+        subject: String::new(),
+        severity,
+        grade: Grade::AMinus,
+        title,
+        summary,
+        evidence: Evidence {
+            urls: sample(report, &indexes),
+            content: evidence,
+            ..Evidence::default()
+        },
+        sources: vec![NON_RENDERING_SOURCE.to_owned()],
+    })
 }
