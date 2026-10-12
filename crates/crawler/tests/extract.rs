@@ -509,6 +509,41 @@ fn mount_points_are_empty_only_without_children_or_text() {
 }
 
 #[test]
+fn void_and_svg_elements_are_not_mount_points() {
+    let mount = |html: &str| {
+        let r = extract_html(html).fields.raw;
+        (r.mount, r.mount_empty)
+    };
+    assert_eq!(
+        mount(r#"<link id="app" rel="stylesheet" href="/a.css"><p>Hello</p>"#),
+        (None, false)
+    );
+    assert_eq!(
+        mount(r#"<img id="root" src="/logo.png"><p>Hello</p>"#),
+        (None, false)
+    );
+    assert_eq!(
+        mount(r#"<svg><symbol id="app" viewBox="0 0 1 1"/></svg><p>Hello</p>"#),
+        (None, false)
+    );
+    assert_eq!(
+        mount(r#"<svg><g id="root"></g></svg><p>Hello</p>"#),
+        (None, false),
+        "SVG content is not an app container"
+    );
+    // A skipped match does not hide the real mount point after it.
+    assert_eq!(
+        mount(r#"<link id="app" rel="stylesheet" href="/a.css"><div id="root"></div>"#),
+        (Some(MountPoint::Root), true)
+    );
+    // Containers other than div that apps mount on still count.
+    assert_eq!(
+        mount(r#"<main id="app"></main>"#),
+        (Some(MountPoint::App), true)
+    );
+}
+
+#[test]
 fn inline_script_bytes_leave_out_json_ld_and_external_scripts_count_module_preloads() {
     let raw = extract_html(
         r#"<link rel="modulepreload" href="/c.js"><link rel="preload" as="script" href="/d.js"><script>var a=1;</script><script src="/a.js"></script><script type="module" src="/b.js"></script><script type="application/ld+json">{"@type":"Thing"}</script><script type="application/json">{"x":1}</script>"#,

@@ -18,7 +18,7 @@
 //! - [`ContentVerdict::Present`]: enough text in the HTML as served.
 //!
 //! The thresholds are the ones the content corpus (`crates/crawler/tests/content_corpus.rs`, 11
-//! framework shells and 13 normal pages) justifies:
+//! framework shells and 15 normal pages) justifies:
 //!
 //! - 50 words: every shell there has 0 words as served, and the shortest real page is a coming-soon
 //!   page with 10, under an H1. Below 50, the shell signals decide; at 50 or more a page is

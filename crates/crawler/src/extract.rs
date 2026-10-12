@@ -389,7 +389,9 @@ fn build_rewriter(
         }))
         .append_element_content_handler(element!(MOUNT_SELECTOR, move |el| {
             let mut st = s_mount.borrow_mut();
-            if st.mount.is_some() {
+            // A void or SVG element with a mount id (`<link id="app">`, `<symbol id="root"/>`)
+            // holds no app; the search goes on for a real one.
+            if st.mount.is_some() || !is_mount_container(el) {
                 return Ok(());
             }
             st.mount = Some(mount_point(el));
@@ -504,6 +506,18 @@ impl SnippetWords {
             }
         }
     }
+}
+
+/// Elements an app mounts into: HTML containers that can hold content. A mount id on anything
+/// else (a `<link>`, an `<img>`, an SVG `<symbol>`) is not an app's mount point.
+const MOUNT_TAGS: [&str; 6] = ["div", "main", "section", "article", "body", "app-root"];
+
+fn is_mount_container(el: &Element<'_, '_>) -> bool {
+    el.namespace_uri() == "http://www.w3.org/1999/xhtml"
+        && el.can_have_content()
+        && MOUNT_TAGS
+            .iter()
+            .any(|t| el.tag_name().eq_ignore_ascii_case(t))
 }
 
 /// Which framework's mount element `el` is (it matched [`MOUNT_SELECTOR`]).

@@ -103,6 +103,16 @@ const FIXTURES: &[(&str, &str, Expect)] = &[
         "Short post with Disqus",
         Expect::Normal,
     ),
+    (
+        "normal_void_mount_ids.html",
+        "Mount ids on a link and an img",
+        Expect::Normal,
+    ),
+    (
+        "normal_svg_sprite.html",
+        "Mount ids on SVG symbols",
+        Expect::Normal,
+    ),
 ];
 
 /// The page record the crawler would build for `body` served at `url` (see `record.rs`).
