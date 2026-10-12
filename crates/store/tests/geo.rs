@@ -1584,6 +1584,19 @@ async fn an_adopted_llms_txt_that_fails_opens_quietly_first_then_announces_diges
     // The planner job is queued for any change; whether it alerts instantly or waits for the
     // digest is the alert rules' decision (it is digest-only: not in DEFAULT_INSTANT).
     assert!(!DEFAULT_INSTANT.contains(&codoseo_core::change::ChangeKind::AiLlmsTxtUnavailable));
+
+    // Served again: the recovery is announced as the same digest-only kind, not as an instant
+    // ai_issue_resolved.
+    let back = content_crawl(&db.pool, site, false, Some((llms_file(), false))).await;
+    let changes = change_kinds(&db.pool, back).await;
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(changes[0].0, "ai_llms_txt_unavailable");
+    let after: String = sqlx::query_scalar("SELECT after_value FROM changes WHERE crawl_id = $1")
+        .bind(back)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, "resolved");
 }
 
 #[tokio::test]

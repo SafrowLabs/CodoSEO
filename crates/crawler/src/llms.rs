@@ -26,7 +26,17 @@ pub(crate) fn llms_url(origin: &Url) -> Option<Url> {
     origin.join(PATH).ok()
 }
 
-/// Fetches `/llms.txt` once, when robots.txt lets us, reading at most [`MAX_BYTES`] of it.
+/// Wait before the retry when the answer gave no `Retry-After`.
+const RETRY_WAIT: Duration = Duration::from_secs(1);
+/// The longest `Retry-After` honoured; a longer one means no retry.
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(5);
+
+/// Fetches `/llms.txt` when robots.txt lets us, reading at most [`MAX_BYTES`] of it.
+///
+/// A 429, a 5xx or no response at all is retried once, after the answer's `Retry-After` (at most
+/// [`MAX_RETRY_WAIT`], else [`RETRY_WAIT`]) and only when that still fits before the deadline: one
+/// blip should not read as a file that stopped serving. The retry's outcome is kept, or the first
+/// one's when the retry could not be made.
 ///
 /// `None` when it was not fetched: robots.txt disallows it, the address is refused, or the
 /// deadline came first (that is our budget, not the site's failure). A request that got no
@@ -43,9 +53,36 @@ pub(crate) async fn fetch_llms_txt(
         return None;
     }
     let url = llms_url(origin)?;
+    let first = fetch_once(fetcher, limiter, &url, deadline).await?;
+    let Some(wait) = first.retry else {
+        return Some(first.fetch);
+    };
+    if wait > MAX_RETRY_WAIT || Instant::now() + wait >= deadline {
+        return Some(first.fetch);
+    }
+    tokio::time::sleep(wait).await;
+    match fetch_once(fetcher, limiter, &url, deadline).await {
+        Some(again) => Some(again.fetch),
+        None => Some(first.fetch),
+    }
+}
+
+/// One request for `/llms.txt`, and how long to wait before retrying it when it failed in a way
+/// worth one retry.
+struct Attempt {
+    fetch: LlmsTxtFetch,
+    retry: Option<Duration>,
+}
+
+async fn fetch_once(
+    fetcher: &Fetcher,
+    limiter: &Limiter,
+    url: &Url,
+    deadline: Instant,
+) -> Option<Attempt> {
     let fetched = timeout_at(deadline, async {
         let _permit = limiter.acquire().await;
-        fetcher.fetch_raw(&url, MAX_BYTES).await
+        fetcher.fetch_raw(url, MAX_BYTES).await
     })
     .await
     .ok()?;
@@ -53,27 +90,39 @@ pub(crate) async fn fetch_llms_txt(
         Ok(res) => res,
         Err(FetchError::Blocked(_)) => return None,
         Err(e) => {
-            return Some(LlmsTxtFetch {
-                error: Some(e.to_string()),
-                ..LlmsTxtFetch::default()
+            let transient = matches!(
+                e,
+                FetchError::Timeout | FetchError::Connect(_) | FetchError::Http(_)
+            );
+            return Some(Attempt {
+                fetch: LlmsTxtFetch {
+                    error: Some(e.to_string()),
+                    ..LlmsTxtFetch::default()
+                },
+                retry: transient.then_some(RETRY_WAIT),
             });
         }
     };
-    limiter.on_response(res.status, retry_after_of(&res.headers));
+    let retry_after = retry_after_of(&res.headers);
+    limiter.on_response(res.status, retry_after);
     let ok = (200..300).contains(&res.status);
+    let retry = (res.status == 429 || res.status >= 500).then(|| retry_after.unwrap_or(RETRY_WAIT));
     let body = match res.body {
         Some(body) if ok => String::from_utf8_lossy(&body).into_owned(),
         _ => String::new(),
     };
-    Some(LlmsTxtFetch {
-        status: res.status,
-        error: None,
-        content_type: res.content_type,
-        bytes: res.size_bytes,
-        truncated: res.truncated,
-        body,
-        links: Vec::new(),
-        external_unchecked: 0,
+    Some(Attempt {
+        fetch: LlmsTxtFetch {
+            status: res.status,
+            error: None,
+            content_type: res.content_type,
+            bytes: res.size_bytes,
+            truncated: res.truncated,
+            body,
+            links: Vec::new(),
+            external_unchecked: 0,
+        },
+        retry,
     })
 }
 

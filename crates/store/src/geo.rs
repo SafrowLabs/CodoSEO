@@ -780,7 +780,7 @@ async fn write_transitions(
                     && !row.quiet
                 {
                     changes.push(Change {
-                        kind: ChangeKind::AiIssueResolved,
+                        kind: resolved_kind(row.kind),
                         severity: Severity::Notice,
                         url: None,
                         before: truncate(&row.title),
@@ -791,6 +791,18 @@ async fn write_transitions(
         }
     }
     Ok(changes)
+}
+
+/// The change kind that announces an incident of `kind` is gone. Most use `ai_issue_resolved`,
+/// which alerts at once by default. `llms_txt_unavailable` opens as a digest-only kind, so its
+/// recovery is a change of that same kind (after: `resolved`): it reaches people by the same rule
+/// the failure did, and nobody is alerted at once about something they were only told in a
+/// digest.
+fn resolved_kind(kind: FindingKind) -> ChangeKind {
+    match kind {
+        FindingKind::LlmsTxtUnavailable => ChangeKind::AiLlmsTxtUnavailable,
+        _ => ChangeKind::AiIssueResolved,
+    }
 }
 
 /// The change row for an incident that opened, got worse or widened. `before` is what was

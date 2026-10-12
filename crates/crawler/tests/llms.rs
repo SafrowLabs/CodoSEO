@@ -206,6 +206,81 @@ async fn a_server_error_keeps_its_status() {
     let f = run(cfg(site.url("/"))).await;
     assert_eq!((f.status, f.error.as_deref()), (503, None));
     assert_eq!(state_of(&f), LlmsState::Unavailable);
+    assert_eq!(site.path_hits("/llms.txt"), 2, "retried once");
+}
+
+#[tokio::test]
+async fn one_server_error_is_retried_and_the_file_read() {
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/llms.txt",
+            Page::sequence(vec![Page::status(503, "busy"), text(&llms_with(&[]))]),
+        )
+        .start()
+        .await;
+    let f = run(cfg(site.url("/"))).await;
+    assert_eq!(f.status, 200);
+    assert_eq!(state_of(&f), LlmsState::Available);
+    assert_eq!(site.path_hits("/llms.txt"), 2);
+}
+
+#[tokio::test]
+async fn a_429_is_retried_after_its_retry_after() {
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/llms.txt",
+            Page::sequence(vec![
+                Page::status(429, "slow down").header("retry-after", "1"),
+                text(&llms_with(&[])),
+            ]),
+        )
+        .start()
+        .await;
+    let f = run(cfg(site.url("/"))).await;
+    assert_eq!(f.status, 200);
+    assert_eq!(site.path_hits("/llms.txt"), 2);
+}
+
+#[tokio::test]
+async fn a_retry_after_past_the_cap_is_not_waited_for() {
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/llms.txt",
+            Page::sequence(vec![
+                Page::status(429, "slow down").header("retry-after", "3600"),
+                text(&llms_with(&[])),
+            ]),
+        )
+        .start()
+        .await;
+    let started = Instant::now();
+    let f = run(cfg(site.url("/"))).await;
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(f.status, 429);
+    assert_eq!(site.path_hits("/llms.txt"), 1);
+}
+
+#[tokio::test]
+async fn a_timeout_is_retried_once() {
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/llms.txt",
+            Page::sequence(vec![
+                text(&llms_with(&[])).delayed(Duration::from_secs(5)),
+                text(&llms_with(&[])),
+            ]),
+        )
+        .start()
+        .await;
+    let mut c = cfg(site.url("/"));
+    c.limits.request_timeout = Duration::from_millis(300);
+    let f = run(c).await;
+    assert_eq!(f.status, 200);
+    assert_eq!(site.path_hits("/llms.txt"), 2);
 }
 
 #[tokio::test]

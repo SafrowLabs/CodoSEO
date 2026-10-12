@@ -413,7 +413,9 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
         ChangeKind::AiAnswersRestricted if value == "eligible" => {
             "Eligible for AI answers".to_owned()
         }
-        ChangeKind::AiIssueResolved if value == "resolved" => "Resolved".to_owned(),
+        ChangeKind::AiIssueResolved | ChangeKind::AiLlmsTxtUnavailable if value == "resolved" => {
+            "Resolved".to_owned()
+        }
         ChangeKind::AiPreferencesChanged if value == "none" => "none declared".to_owned(),
         ChangeKind::AiFetchBlocked if value == "reachable" => "AI bots got through".to_owned(),
         ChangeKind::AiContentMissing if value == "content in the HTML" => {

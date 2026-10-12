@@ -145,7 +145,7 @@ cargo test -p codoseo-crawler --test content_corpus -- --nocapture
 | 2xx that serves an HTML page | **No llms.txt (soft 404)**: a web page where the file should be is the site's catch-all, so it is read like a 404 (Lighthouse takes a 2xx at face value) |
 | 429, 5xx, another unexpected status, or no response at all | **Unavailable** |
 
-The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowed `/llms.txt` is not fetched), and read up to 512 KiB. It is not fetched for the instant audits.
+The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowed `/llms.txt` is not fetched), and read up to 512 KiB. A 429, a 5xx or no answer is retried once, after the server's `Retry-After` (up to 5 seconds; a longer one is not waited for) or a second, so one blip doesn't read as a file that stopped serving. It is not fetched for the instant audits.
 
 **The checks** on an available file. The format follows llmstxt.org; the last two Lighthouse-style rules are kept as they are in its audit:
 
@@ -160,7 +160,7 @@ The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowe
 
 **Link checks.** Links to pages the crawl already fetched use that status. Other links on your own site get one request each after the crawl, with robots.txt applied, up to a cap that depends on the plan: **Free 5, Pro, Agency and self-hosted 20**. Links to other sites are not checked; the card counts them and the ones past the cap as not checked.
 
-**The incident.** The one finding is `llms_txt_unavailable`, a Warning (grade A), and only after the site had adopted llms.txt, that is, an earlier report served the file and it now answers 5xx or 429 or not at all. A 404 or a soft 404 is a removal, not a failure, and a site that never had one gets nothing. The change kind `ai_llms_txt_unavailable` goes in the Monday digest, not in an instant alert.
+**The incident.** The one finding is `llms_txt_unavailable`, a Warning (grade A), and only after the site had adopted llms.txt, that is, an earlier report served the file and it now answers 5xx or 429 or not at all. A 404 or a soft 404 is a removal, not a failure, and a site that never had one gets nothing. The change kind `ai_llms_txt_unavailable` goes in the Monday digest, not in an instant alert. When the file serves again (or answers 404 because you removed it), the recovery is announced as an `ai_llms_txt_unavailable` change too, with "Resolved" as its new value, not as `ai_issue_resolved`: it follows the same alert rule as the failure, so you are never told at once about something you were only told in a digest.
 
 ## What is not checked yet
 
@@ -207,7 +207,7 @@ The web app turns findings into incidents that open when a crawl first sees a pr
 | `ai_fetch_blocked` | The synthetic fetch check saw a bot you want challenged, blocked, redirected, rate limited or served a different page, while CodoSEObot got the normal one |
 | `ai_content_missing` | Important pages are empty app shells in their HTML as served, to the AI crawlers that don't run JavaScript |
 | `ai_llms_txt_unavailable` | A `/llms.txt` the site served before now fails (5xx, 429 or no answer) |
-| `ai_issue_resolved` | An AI access incident is gone |
+| `ai_issue_resolved` | An AI access incident is gone (except `llms_txt_unavailable`, whose recovery is an `ai_llms_txt_unavailable` change) |
 | `ai_preferences_changed` | Your declared Content-Signal, Content-Usage or TDM preferences changed |
 
 They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them. By default `ai_bot_blocked`, `ai_answers_restricted`, `ai_fetch_blocked`, `ai_content_missing` and `ai_issue_resolved` alert at once; the other three (`ai_block_not_applied`, `ai_preferences_changed`, `ai_llms_txt_unavailable`) wait for the Monday digest. An alert whose changes are all AI access ones links to the AI access screen. A crawl that failed on robots.txt is not a finished crawl, so its incident shows on the AI access screen and in alerts, not on the changes page.
