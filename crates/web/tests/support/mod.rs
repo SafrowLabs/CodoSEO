@@ -642,3 +642,56 @@ pub fn page(domain: &str, path: &str) -> PageRecord {
     p.key_hash = p.compute_key_hash();
     p
 }
+
+/// What the worker would store after a crawl with synthetic fetch probes on two pages: OAI-SearchBot
+/// challenged by Cloudflare on both, PerplexityBot refused with a 403 on the second, ChatGPT-User
+/// kept out of the first by robots.txt and the same as CodoSEObot on the second.
+pub fn probe_report() -> serde_json::Value {
+    let baseline = serde_json::json!({"status": 200, "html": true, "bytes": 5000, "title": "Home"});
+    let same = serde_json::json!({"status": 200, "html": true, "bytes": 5000, "title": "Home"});
+    let challenge = serde_json::json!({
+        "status": 403, "html": true, "bytes": 900, "title": "Just a moment...",
+        "challenge": {"vendor": "cloudflare", "signal": "cf-mitigated: challenge"}
+    });
+    let cf = serde_json::json!({"kind": "challenged", "vendor": "cloudflare"});
+    serde_json::json!({
+        "version": 1,
+        "synthetic": true,
+        "from": "hello@codoseo.com",
+        "bots": ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot"],
+        "skipped_bots": [
+            {"token": "Claude-SearchBot", "reason": "no_user_agent"},
+            {"token": "Googlebot", "reason": "verified_search_engine"}
+        ],
+        "urls": [
+            {"url": 0, "baseline": baseline, "results": [
+                {"token": "OAI-SearchBot", "fetch": challenge, "verdict": cf},
+                {"token": "ChatGPT-User", "verdict": {"kind": "skipped_robots"}},
+                {"token": "PerplexityBot", "fetch": same, "verdict": {"kind": "same"}}
+            ]},
+            {"url": 1, "baseline": baseline, "results": [
+                {"token": "OAI-SearchBot", "fetch": challenge, "verdict": cf},
+                {"token": "ChatGPT-User", "fetch": same, "verdict": {"kind": "same"}},
+                {"token": "PerplexityBot", "fetch": {"status": 403, "bytes": 120},
+                 "verdict": {"kind": "blocked", "status": 403}}
+            ]}
+        ],
+        "requests": 8
+    })
+}
+
+/// Puts [`probe_report`] into the site's stored reports and reconciles, so the `fetch_blocked`
+/// incidents open (quietly, as on the first crawl with probes).
+pub async fn store_probes(app: &TestApp, site: &Site) {
+    sqlx::query(
+        "UPDATE ai_reports SET report = jsonb_set(report, '{probes}', $2) WHERE site_id = $1",
+    )
+    .bind(site.id)
+    .bind(probe_report())
+    .execute(app.pool())
+    .await
+    .unwrap();
+    codoseo_store::geo::reevaluate_quietly(app.pool(), site.id)
+        .await
+        .unwrap();
+}

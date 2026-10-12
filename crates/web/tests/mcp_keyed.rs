@@ -1,5 +1,5 @@
 //! M8 T3: the cloud MCP server at `/mcp` with an API key, driven in-process over HTTP JSON-RPC
-//! (initialize, tools/list, tools/call) through the real app: the seven keyed tools, their normal
+//! (initialize, tools/list, tools/call) through the real app: the keyed tools, their normal
 //! paths against fixture crawls (the same JSON as REST), the account boundary, the daily quota,
 //! and who counts as a keyed caller. One test also connects a real rmcp client over TCP.
 
@@ -15,7 +15,7 @@ use codoseo_store::api_keys::{self, CreateKeyOutcome};
 use codoseo_store::sites::Site;
 use codoseo_web::agent::keys;
 use serde_json::{Value, json};
-use support::{TestApp, TestResponse, cloud_config, page};
+use support::{TestApp, TestResponse, cloud_config, page, store_probes};
 use tower::ServiceExt;
 use url::Url;
 use uuid::Uuid;
@@ -143,6 +143,13 @@ impl<'a> Rpc<'a> {
         (result["isError"].as_bool().unwrap_or(false), text)
     }
 
+    /// A failed tool call's message.
+    async fn call_err(&self, name: &str, args: Value) -> String {
+        let (is_error, text) = self.call(name, args).await;
+        assert!(is_error, "{name} should have failed: {text}");
+        text
+    }
+
     /// A successful tool call's JSON.
     async fn call_ok(&self, name: &str, args: Value) -> Value {
         let (is_error, text) = self.call(name, args).await;
@@ -251,20 +258,36 @@ async fn setup(plan: Plan) -> Fixture {
     }
 }
 
-const KEYED_TOOLS: [&str; 7] = [
+const KEYED_TOOLS: [&str; 13] = [
+    "accept_incident",
     "get_ai_access",
     "get_changes",
+    "get_fix",
     "get_issue_urls",
     "get_page",
     "get_site_health",
     "list_sites",
+    "recheck_incident",
     "run_crawl",
+    "snooze_incident",
+    "unaccept_incident",
+    "unsnooze_incident",
+];
+
+/// The tools that change something, and whether repeating one changes nothing more.
+const WRITING_TOOLS: [(&str, bool); 6] = [
+    ("run_crawl", false),
+    ("recheck_incident", false),
+    ("snooze_incident", true),
+    ("unsnooze_incident", true),
+    ("accept_incident", true),
+    ("unaccept_incident", true),
 ];
 
 // ---- the tool list ----
 
 #[tokio::test]
-async fn with_a_key_the_tool_list_is_exactly_the_seven_keyed_tools() {
+async fn with_a_key_the_tool_list_is_exactly_the_keyed_tools() {
     let f = setup(Plan::Pro).await;
     let init = f.rpc().initialize().await;
     assert_eq!(init["protocolVersion"], PROTOCOL);
@@ -287,15 +310,25 @@ async fn with_a_key_the_tool_list_is_exactly_the_seven_keyed_tools() {
         assert_eq!(t["inputSchema"]["type"], "object", "{name}");
         let hints = &t["annotations"];
         assert!(hints["title"].is_string(), "{name}: {hints}");
-        assert_eq!(hints["openWorldHint"], false, "{name}");
+        // Only the recheck reaches out to the site.
+        assert_eq!(hints["openWorldHint"], name == "recheck_incident", "{name}");
         assert_eq!(hints["destructiveHint"], false, "{name}");
-        let read_only = name != "run_crawl";
-        assert_eq!(hints["readOnlyHint"], read_only, "{name}");
-        assert_eq!(hints["idempotentHint"], read_only, "{name}");
+        let writing = WRITING_TOOLS.iter().find(|(n, _)| *n == name);
+        assert_eq!(hints["readOnlyHint"], writing.is_none(), "{name}");
+        assert_eq!(
+            hints["idempotentHint"],
+            writing.is_none_or(|(_, i)| *i),
+            "{name}"
+        );
         // What crawled sites wrote is data, and the tools that return it say so.
         let returns_crawled = matches!(
             name,
-            "get_issue_urls" | "get_page" | "get_changes" | "get_site_health" | "get_ai_access"
+            "get_issue_urls"
+                | "get_page"
+                | "get_changes"
+                | "get_site_health"
+                | "get_ai_access"
+                | "get_fix"
         );
         assert_eq!(
             t["description"]
@@ -334,6 +367,45 @@ async fn with_a_key_the_tool_list_is_exactly_the_seven_keyed_tools() {
         by_name("get_page")["inputSchema"]["required"],
         json!(["site_id", "url"])
     );
+    for name in [
+        "get_fix",
+        "recheck_incident",
+        "unsnooze_incident",
+        "accept_incident",
+        "unaccept_incident",
+    ] {
+        assert_eq!(
+            by_name(name)["inputSchema"]["required"],
+            json!(["site_id", "incident_id"]),
+            "{name}"
+        );
+        assert_eq!(
+            by_name(name)["inputSchema"]["properties"]["incident_id"]["type"],
+            "integer",
+            "{name}"
+        );
+    }
+    let snooze = &by_name("snooze_incident")["inputSchema"];
+    assert_eq!(
+        snooze["required"],
+        json!(["site_id", "incident_id", "days"])
+    );
+    assert!(
+        snooze["properties"]["days"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("1, 7 or 30")
+    );
+    // The instructions point an agent at the repair tools.
+    let instructions = f.rpc().initialize().await["instructions"].clone();
+    for tool in [
+        "get_fix",
+        "recheck_incident",
+        "snooze_incident",
+        "accept_incident",
+    ] {
+        assert!(instructions.as_str().unwrap().contains(tool), "{tool}");
+    }
 }
 
 #[tokio::test]
@@ -544,6 +616,192 @@ async fn get_ai_access_matches_rest_and_says_when_there_is_no_report() {
     assert_eq!(oai["home_allowed"], false);
     assert_eq!(oai["conflicts"], true);
     assert_eq!(full["engines"].as_array().unwrap().len(), 10);
+}
+
+/// A site with a `bots_blocked` incident (robots.txt) and `fetch_blocked` ones (probes); the
+/// ids of one of each.
+async fn with_incidents(f: &Fixture) -> (i64, i64) {
+    f.app
+        .finished_crawl_with_robots(
+            &f.site,
+            fixture_pages(),
+            (
+                200,
+                "User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n",
+            ),
+            Vec::new(),
+        )
+        .await;
+    store_probes(&f.app, &f.site).await;
+    let mut ids = Vec::new();
+    for kind in ["bots_blocked", "fetch_blocked"] {
+        ids.push(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM ai_incidents WHERE site_id = $1 AND kind = $2 ORDER BY id LIMIT 1",
+            )
+            .bind(f.site.id)
+            .bind(kind)
+            .fetch_one(f.app.pool())
+            .await
+            .unwrap(),
+        );
+    }
+    (ids[0], ids[1])
+}
+
+#[tokio::test]
+async fn get_fix_matches_rest_and_the_incidents_carry_what_the_fix_needs() {
+    let f = setup(Plan::Pro).await;
+    let (blocked, fetch) = with_incidents(&f).await;
+    let site = f.site.id;
+    for id in [blocked, fetch] {
+        let tool = f
+            .rpc()
+            .call_ok("get_fix", json!({"site_id": site, "incident_id": id}))
+            .await;
+        let res = rest_get(
+            &f.app,
+            &format!("/api/v1/sites/{site}/ai-access/incidents/{id}/fix"),
+            &f.key,
+        )
+        .await;
+        assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+        assert_eq!(tool, serde_json::from_str::<Value>(&res.body).unwrap());
+        assert!(
+            tool["remedy"]["steps"]
+                .as_array()
+                .is_some_and(|s| !s.is_empty())
+        );
+        assert!(
+            tool["agent_prompt"]
+                .as_str()
+                .unwrap()
+                .contains("UNTRUSTED SITE DATA")
+        );
+    }
+    let access = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    let incident = access["open_incidents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == fetch)
+        .unwrap();
+    assert_eq!(incident["grade"], "B");
+    assert_eq!(incident["state"], "open");
+    // Typed, as the wire says it.
+    let _: AiIncidentInfo = serde_json::from_value(incident.clone()).unwrap();
+    let fix = f
+        .rpc()
+        .call_ok("get_fix", json!({"site_id": site, "incident_id": fetch}))
+        .await;
+    let _: AiFixInfo = serde_json::from_value(fix).unwrap();
+}
+
+#[tokio::test]
+async fn the_repair_tools_round_trip_and_each_call_is_counted() {
+    let f = setup(Plan::Pro).await;
+    let (_, fetch) = with_incidents(&f).await;
+    let site = f.site.id;
+    let args = json!({"site_id": site, "incident_id": fetch});
+    let state = |v: &Value| v["state"].as_str().unwrap().to_owned();
+    let before = calls_today(&f.app, &f.account).await;
+
+    let v = f
+        .rpc()
+        .call_ok(
+            "snooze_incident",
+            json!({"site_id": site, "incident_id": fetch, "days": 7}),
+        )
+        .await;
+    assert_eq!(state(&v), "snoozed");
+    assert!(v["snoozed_until"].is_string());
+    assert_eq!(
+        state(&f.rpc().call_ok("unsnooze_incident", args.clone()).await),
+        "open"
+    );
+    let v = f.rpc().call_ok("accept_incident", args.clone()).await;
+    assert_eq!(
+        (state(&v), v["accepted"].as_bool()),
+        ("accepted".to_owned(), Some(true))
+    );
+    assert_eq!(
+        state(&f.rpc().call_ok("unaccept_incident", args.clone()).await),
+        "open"
+    );
+
+    let queued = f.rpc().call_ok("recheck_incident", args.clone()).await;
+    assert!(queued["recheck_id"].is_i64() || queued["recheck_id"].is_u64());
+    assert!(queued["due_at"].is_string());
+    let access = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    let now = access["open_incidents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == fetch)
+        .unwrap();
+    assert_eq!(now["state"], "recheck_queued");
+    assert_eq!(calls_today(&f.app, &f.account).await - before, 6);
+    // A second one is refused with the web app's words.
+    let e = f.rpc().call_err("recheck_incident", args).await;
+    assert_eq!(e, "A recheck of this issue is already queued.");
+}
+
+#[tokio::test]
+async fn the_repair_tools_refuse_in_the_same_words_as_rest() {
+    let f = setup(Plan::Pro).await;
+    let (blocked, fetch) = with_incidents(&f).await;
+    let site = f.site.id;
+    let rpc = f.rpc();
+    let e = rpc
+        .call_err(
+            "snooze_incident",
+            json!({"site_id": site, "incident_id": fetch, "days": 5}),
+        )
+        .await;
+    assert_eq!(e, "Snooze for 1, 7 or 30 days.");
+    let e = rpc
+        .call_err(
+            "accept_incident",
+            json!({"site_id": site, "incident_id": blocked}),
+        )
+        .await;
+    assert_eq!(
+        e,
+        "This issue is a choice through your intent: use Mark intended instead."
+    );
+    let e = rpc
+        .call_err("get_fix", json!({"site_id": site, "incident_id": 999_999}))
+        .await;
+    assert!(e.starts_with("No such incident"), "{e}");
+    // Another account's site is no site; a string where a number belongs is a counted bad call.
+    let (other, _) = f.app.login("other@example.com").await;
+    let (other_key, _) = make_key(&f.app, &other).await;
+    let theirs = Rpc::new(&f.app, Some(&other_key));
+    let e = theirs
+        .call_err(
+            "recheck_incident",
+            json!({"site_id": site, "incident_id": fetch}),
+        )
+        .await;
+    assert!(e.starts_with("No such site"), "{e}");
+    let before = calls_today(&f.app, &f.account).await;
+    let e = rpc
+        .call_err("get_fix", json!({"site_id": site, "incident_id": "abc"}))
+        .await;
+    assert!(e.contains("not valid"), "{e}");
+    assert_eq!(calls_today(&f.app, &f.account).await - before, 1);
+    // Nothing changed.
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_rechecks")
+        .fetch_one(f.app.pool())
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
 }
 
 #[tokio::test]
@@ -847,7 +1105,7 @@ async fn over_quota_is_a_tool_error_with_rests_words_and_costs_nothing() {
     let (is_error, again) = rpc.call("get_site_health", json!({})).await;
     assert!(is_error);
     assert_eq!(again, text);
-    assert_eq!(rpc.tools().await.len(), 7);
+    assert_eq!(rpc.tools().await.len(), KEYED_TOOLS.len());
     assert_eq!(calls_today(&f.app, &f.account).await, 100);
 }
 
@@ -876,7 +1134,7 @@ async fn self_hosted_serves_keyed_tools_without_a_limit() {
         ..Rpc::new(&app, Some(&key))
     };
     rpc.initialize().await;
-    assert_eq!(rpc.tools().await.len(), 7);
+    assert_eq!(rpc.tools().await.len(), KEYED_TOOLS.len());
     let sites = rpc.call_ok("list_sites", json!({})).await;
     assert_eq!(sites[0]["id"], site.id.to_string());
     assert_eq!(calls_today(&app, &account).await, 1_000_001);
@@ -1083,7 +1341,8 @@ async fn a_real_mcp_client_lists_and_calls_tools_with_a_key_over_tcp() {
 // ---- review fixes ----
 
 use codoseo_mcp::cloud::types::{
-    AiAccessInfo, ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
+    AiAccessInfo, AiFixInfo, AiIncidentInfo, AiRecheckQueued, ChangesPage, CrawlQueued,
+    IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
 };
 use codoseo_mcp::cloud::types::{AuditIssueUrls, MonitoringRequested, QuickAuditState};
 use codoseo_mcp::cloud::{AnonBackend, CloudBackend, CloudMcp};
@@ -1137,6 +1396,50 @@ impl CloudBackend for Faulty {
         unimplemented!()
     }
     async fn run_crawl(&self, _: &ApiCaller, _: &str) -> Result<CrawlQueued, String> {
+        unimplemented!()
+    }
+    async fn incident_fix(&self, _: &ApiCaller, _: &str, _: i64) -> Result<AiFixInfo, String> {
+        unimplemented!()
+    }
+    async fn recheck_incident(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: i64,
+    ) -> Result<AiRecheckQueued, String> {
+        unimplemented!()
+    }
+    async fn snooze_incident(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: i64,
+        _: i64,
+    ) -> Result<AiIncidentInfo, String> {
+        unimplemented!()
+    }
+    async fn unsnooze_incident(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: i64,
+    ) -> Result<AiIncidentInfo, String> {
+        unimplemented!()
+    }
+    async fn accept_incident(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: i64,
+    ) -> Result<AiIncidentInfo, String> {
+        unimplemented!()
+    }
+    async fn unaccept_incident(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: i64,
+    ) -> Result<AiIncidentInfo, String> {
         unimplemented!()
     }
     async fn reject(&self, _: &ApiCaller, _: String) -> Result<std::convert::Infallible, String> {
@@ -1193,7 +1496,7 @@ async fn a_panicking_tool_answers_with_a_generic_error_at_once() {
     assert!(body["error"].is_object(), "{}", res.body);
     assert!(!res.body.contains("secret internal detail"), "{}", res.body);
     // The server still answers afterwards.
-    assert_eq!(rpc.tools().await.len(), 7);
+    assert_eq!(rpc.tools().await.len(), KEYED_TOOLS.len());
 }
 
 #[tokio::test]
@@ -1226,7 +1529,7 @@ async fn self_hosted_accepts_any_host_with_a_valid_key() {
             host,
             ..Rpc::new(&app, Some(&key))
         };
-        assert_eq!(rpc.tools().await.len(), 7, "{host}");
+        assert_eq!(rpc.tools().await.len(), KEYED_TOOLS.len(), "{host}");
     }
     // And without a key it is still a 401.
     let rpc = Rpc {
