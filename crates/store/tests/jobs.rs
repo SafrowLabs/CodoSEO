@@ -230,3 +230,58 @@ async fn a_worker_that_lost_its_job_cannot_complete_or_retry_it() {
     assert!(!queue.retry(id, "worker-b", "again").await.unwrap());
     assert_eq!(job_state(&db, id).await.0, "done");
 }
+
+#[tokio::test]
+async fn enqueue_at_holds_the_job_until_run_after_and_keeps_its_attempt_budget() {
+    let db = TestDb::new().await;
+    let queue = JobQueue::new(db.pool.clone());
+    let due = OffsetDateTime::now_utc() + time::Duration::minutes(10);
+
+    let id = queue
+        .enqueue_at(JobKind::AiRecheck, json!({"recheck_id": 7}), due, 2)
+        .await
+        .expect("enqueue_at");
+    let (run_after, max_attempts, status): (OffsetDateTime, i16, String) =
+        sqlx::query_as("SELECT run_after, max_attempts, status::text FROM jobs WHERE id = $1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert!((run_after - due).abs() < time::Duration::milliseconds(5));
+    assert_eq!((max_attempts, status.as_str()), (2, "queued"));
+    assert!(queue.claim("worker-a").await.unwrap().is_none());
+
+    sqlx::query("UPDATE jobs SET run_after = now() - interval '1 second' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let claimed = queue.claim("worker-a").await.unwrap().expect("now due");
+    assert_eq!(claimed.id, id);
+    assert_eq!(claimed.kind, JobKind::AiRecheck);
+    assert_eq!(claimed.payload["recheck_id"], 7);
+    assert_eq!(claimed.max_attempts, 2);
+}
+
+#[tokio::test]
+async fn every_job_kind_round_trips_through_the_database() {
+    let db = TestDb::new().await;
+    let queue = JobQueue::new(db.pool.clone());
+    for kind in [
+        JobKind::SendAlert,
+        JobKind::SendDigest,
+        JobKind::SendEmail,
+        JobKind::Cleanup,
+        JobKind::AiRecheck,
+    ] {
+        let id = queue.enqueue(kind, json!({})).await.unwrap();
+        let (stored, slug): (JobKind, String) =
+            sqlx::query_as("SELECT kind, kind::text FROM jobs WHERE id = $1")
+                .bind(id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, kind);
+        assert_eq!(slug, kind.slug());
+    }
+}

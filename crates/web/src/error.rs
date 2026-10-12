@@ -27,6 +27,13 @@ pub enum AppError {
     /// A plan limit was reached (sites, manual crawls).
     #[error("{0}")]
     Limit(String),
+    /// An action on an AI access incident its state refuses (resolved, cooling down, a crawl
+    /// running): a 409 that is not something already in progress.
+    #[error("{0}")]
+    Refused(String),
+    /// No AI access incident with that id on the site.
+    #[error("no such issue")]
+    IncidentNotFound,
     /// Postgres is unreachable.
     #[error("database unavailable")]
     Unavailable,
@@ -50,6 +57,13 @@ impl AppError {
             AppError::Forbidden(m) => (StatusCode::FORBIDDEN, "Not allowed", m.clone()),
             AppError::Conflict(m) => (StatusCode::CONFLICT, "Already in progress", m.clone()),
             AppError::Limit(m) => (StatusCode::FORBIDDEN, "Plan limit reached", m.clone()),
+            AppError::Refused(m) => (StatusCode::CONFLICT, "Can't do that right now", m.clone()),
+            AppError::IncidentNotFound => (
+                StatusCode::NOT_FOUND,
+                "Issue not found",
+                "That AI access issue doesn't exist on this site. Reload the page to see the current list."
+                    .to_owned(),
+            ),
             AppError::Unavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "We'll be right back",

@@ -145,21 +145,41 @@ pub(super) fn findings(audit: &Audit) -> Vec<(Severity, Vec<Finding<'_>>)> {
         .collect()
 }
 
-/// The AI-access findings saved in the audit as `(severity, title)`, most severe first. `None`
-/// when the audit has no AI-access section at all (saved by an older version).
-pub(super) fn ai_access_findings(audit: &Audit) -> Option<Vec<(Severity, String)>> {
+/// One AI-access finding of a saved audit, with the first step of its remedy.
+pub(super) struct AiRow {
+    pub(super) severity: Severity,
+    pub(super) title: String,
+    /// The first step of the finding's remedy; none for an audit saved before remedies existed.
+    pub(super) fix: Option<String>,
+}
+
+/// The AI-access findings saved in the audit, most severe first. `None` when the audit has no
+/// AI-access section at all (saved by an older version).
+pub(super) fn ai_access_findings(audit: &Audit) -> Option<Vec<AiRow>> {
     let section = audit.ai_access.as_ref()?;
-    let mut rows: Vec<(Severity, String)> = section
+    let remedies = section.get("remedies").and_then(|r| r.as_array());
+    let mut rows: Vec<AiRow> = section
         .get("findings")
         .and_then(|f| f.as_array())
         .into_iter()
         .flatten()
         .filter_map(|f| {
             let severity = serde_json::from_value(f.get("severity")?.clone()).ok()?;
-            Some((severity, f.get("title")?.as_str()?.to_owned()))
+            // A remedy answers the finding of its kind and subject.
+            let fix = remedies
+                .into_iter()
+                .flatten()
+                .find(|r| r.get("kind") == f.get("kind") && r.get("subject") == f.get("subject"))
+                .and_then(|r| r.get("steps")?.as_array()?.first()?.as_str())
+                .map(str::to_owned);
+            Some(AiRow {
+                severity,
+                title: f.get("title")?.as_str()?.to_owned(),
+                fix,
+            })
         })
         .collect();
-    rows.sort_by_key(|(severity, _)| *severity);
+    rows.sort_by_key(|r| r.severity);
     Some(rows)
 }
 
@@ -568,5 +588,87 @@ mod tests {
         assert_eq!(one_line("a \n  b\u{1b}c"), "a bc");
         assert_eq!(one_line(""), "(none)");
         assert_eq!(one_line("\u{1b}"), "(none)");
+    }
+
+    fn audit_with(ai_access: Option<serde_json::Value>) -> Audit {
+        use codoseo_core::audit::AUDIT_FORMAT_VERSION;
+        use codoseo_core::report::{CrawlReport, CrawlSummary};
+        use codoseo_core::snapshot::Snapshot;
+        let url = Url::parse("https://example.com/").unwrap();
+        Audit {
+            format_version: AUDIT_FORMAT_VERSION,
+            tool_version: "0.0.1".to_owned(),
+            created_at: 0,
+            duration_ms: 0,
+            start_url: url.clone(),
+            report: CrawlReport {
+                health_score: 100,
+                checks_passed: 1,
+                checks_total: 1,
+                counts: Vec::new(),
+                inlink_samples: Vec::new(),
+                summary: CrawlSummary::default(),
+            },
+            snapshot: Snapshot {
+                origin: url,
+                stop: codoseo_core::output::StopReason::Completed,
+                pages: Vec::new(),
+                robots: None,
+                sitemap: Default::default(),
+            },
+            ai_access,
+        }
+    }
+
+    fn section(step: Option<&str>) -> serde_json::Value {
+        let remedies = step.map_or_else(Vec::new, |s| {
+            vec![serde_json::json!({
+                "kind": "bots_blocked", "subject": "search", "fix": "x", "steps": [s, "second"],
+                "verify": [], "grade": "A", "sources": []
+            })]
+        });
+        serde_json::json!({
+            "report": {},
+            "findings": [
+                {"kind": "bots_blocked", "subject": "search", "severity": "critical", "title": "Search bots are blocked"},
+                {"kind": "llms_txt_unavailable", "subject": "", "severity": "notice", "title": "llms.txt is gone"}
+            ],
+            "remedies": remedies
+        })
+    }
+
+    #[test]
+    fn a_fix_line_follows_each_ai_finding_that_has_a_remedy_and_is_escaped_like_other_cells() {
+        let audit = audit_with(Some(section(Some("Edit a|b\\c\u{1b}[31m"))));
+        let mut md = Vec::new();
+        markdown::crawl(&mut md, &audit).unwrap();
+        let md = String::from_utf8(md).unwrap();
+        assert!(
+            md.contains("- **Critical:** Search bots are blocked\n  - Fix: Edit a\\|b\\\\c[31m\n"),
+            "{md}"
+        );
+        // Only the first step, and only for the finding the remedy answers.
+        assert!(!md.contains("second"), "{md}");
+        assert_eq!(md.matches("Fix:").count(), 1, "{md}");
+
+        let mut table_out = Vec::new();
+        table::crawl(&mut table_out, &audit).unwrap();
+        let table_out = String::from_utf8(table_out).unwrap();
+        assert!(
+            table_out.contains(
+                "  Critical  Search bots are blocked\n            Fix: Edit a|b\\c[31m\n"
+            ),
+            "{table_out}"
+        );
+    }
+
+    #[test]
+    fn audits_saved_without_remedies_print_no_fix_line() {
+        let audit = audit_with(Some(section(None)));
+        let mut md = Vec::new();
+        markdown::crawl(&mut md, &audit).unwrap();
+        let md = String::from_utf8(md).unwrap();
+        assert!(md.contains("Search bots are blocked"), "{md}");
+        assert!(!md.contains("Fix:"), "{md}");
     }
 }

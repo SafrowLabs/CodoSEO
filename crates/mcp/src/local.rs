@@ -341,7 +341,9 @@ impl Backend for LocalBackend {
         let found = findings(&probed.report, &codoseo_geo::Intent::default())
             .into_iter()
             .filter(|f| f.kind == FindingKind::FetchBlocked)
-            .collect();
+            .collect::<Vec<_>>();
+        let remedies =
+            codoseo_geo::remedy::finding_remedies(probed.page_url(), &probed.report, &found);
         let page = probed.page_url().to_owned();
         Ok(AiProbeReport {
             summary: probe_summary(&page, probed.probes()),
@@ -354,6 +356,7 @@ impl Backend for LocalBackend {
                 .map(|u| u.url.clone())
                 .collect(),
             findings: found,
+            remedies,
         })
     }
 
@@ -671,6 +674,56 @@ mod tests {
             .filter_map(|f| f["kind"].as_str())
             .collect();
         assert_eq!(kinds, ["bots_blocked"], "{section}");
+        // The cached audit has the fix for each finding, as `codoseo crawl` writes it.
+        let remedies = section["remedies"].as_array().expect("remedies");
+        assert_eq!(remedies.len(), 1);
+        assert_eq!(remedies[0]["kind"], "bots_blocked");
+        assert!(
+            remedies[0]["fix"]
+                .as_str()
+                .unwrap()
+                .contains("OAI-SearchBot")
+        );
+    }
+
+    /// The AI findings the audit saves are not checks: the same pages score the same with a
+    /// robots.txt that shuts an AI bot out and with one that does not.
+    #[tokio::test]
+    async fn ai_findings_do_not_move_the_audit_health_score() {
+        let build = |robots: &'static str| async move {
+            SiteBuilder::new()
+                .robots(200, robots)
+                .html("/", "Home", &["/about"])
+                .html("/about", "About", &[])
+                .start()
+                .await
+        };
+        let open = build("User-agent: *\nAllow: /\n").await;
+        let blocked =
+            build("User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n").await;
+        let (backend, _dir) = backend();
+        let mut scores = Vec::new();
+        let mut finding_counts = Vec::new();
+        for site in [&open, &blocked] {
+            let id = audit_fast(&backend, site.url("/")).await;
+            scores.push(
+                backend
+                    .get_audit(&id)
+                    .await
+                    .unwrap()
+                    .summary
+                    .unwrap()
+                    .health_score,
+            );
+            let section = backend.cache.load(&id).unwrap().ai_access.unwrap();
+            finding_counts.push(section["findings"].as_array().unwrap().len());
+        }
+        assert_eq!(
+            finding_counts,
+            [0, 1],
+            "only the blocked site has an AI finding"
+        );
+        assert_eq!(scores[0], scores[1]);
     }
 
     /// A `Done` audit must stop being served from the in-memory map once it's cached:

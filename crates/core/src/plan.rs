@@ -48,6 +48,9 @@ pub struct PlanLimits {
     pub probe_max_requests: u16,
     /// Links from the site's `llms.txt` that get a status check of their own per crawl.
     pub llms_link_checks: u16,
+    /// Manual AI access rechecks an account may ask for in 24 hours (follow-ups the system
+    /// queues don't count); `None` means unlimited.
+    pub ai_rechecks_per_day: Option<u16>,
 }
 
 const HOUR: u64 = 3600;
@@ -68,6 +71,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(45),
                 probe_max_requests: 30,
                 llms_link_checks: 5,
+                ai_rechecks_per_day: Some(3),
             },
             Plan::Pro => PlanLimits {
                 max_sites: Some(5),
@@ -82,6 +86,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(90),
                 probe_max_requests: 70,
                 llms_link_checks: 20,
+                ai_rechecks_per_day: Some(20),
             },
             Plan::Agency => PlanLimits {
                 max_sites: Some(25),
@@ -96,6 +101,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(120),
                 probe_max_requests: 120,
                 llms_link_checks: 20,
+                ai_rechecks_per_day: Some(60),
             },
             // No plan caps, but finite defaults so a calendar or faceted search
             // can't crawl forever. Self-hosters can raise them in config.
@@ -113,6 +119,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(180),
                 probe_max_requests: 160,
                 llms_link_checks: 20,
+                ai_rechecks_per_day: None,
             },
         }
     }
@@ -134,6 +141,7 @@ impl PlanLimits {
             probe_max_requests: 0,
             // No site signals, so no llms.txt.
             llms_link_checks: 0,
+            ai_rechecks_per_day: Some(0),
         }
     }
 }

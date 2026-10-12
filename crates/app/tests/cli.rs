@@ -851,8 +851,16 @@ fn crawl_reports_ai_access_in_every_format_and_old_audits_still_diff() {
     let table = run(["crawl", url.as_str(), "--rps", "50"]);
     assert!(table.contains("\nAI access\n"), "{table}");
     assert!(table.contains("OAI-SearchBot"), "{table}");
+    // Each AI finding says how to fix it, on the line under it.
+    let lines: Vec<&str> = table.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains("OAI-SearchBot") || l.contains("blocked"))
+        .expect("a finding line");
+    assert!(lines[at + 1].trim_start().starts_with("Fix: "), "{table}");
     let md = run(["crawl", url.as_str(), "--rps", "50", "--format", "md"]);
     assert!(md.contains("## AI access"), "{md}");
+    assert!(md.contains("\n  - Fix: "), "{md}");
 
     let dir = tempfile::tempdir().expect("a temp dir");
     let new = dir.path().join("new.json");
@@ -870,6 +878,19 @@ fn crawl_reports_ai_access_in_every_format_and_old_audits_still_diff() {
             .is_some_and(|f| !f.is_empty())
     );
     assert_eq!(value["format_version"], 1);
+    // One remedy per finding, from the same templates the web app uses (no incident, so no
+    // before), with the grade and sources of the finding.
+    let findings = value["ai_access"]["findings"].as_array().expect("findings");
+    let remedies = value["ai_access"]["remedies"].as_array().expect("remedies");
+    assert_eq!(remedies.len(), findings.len());
+    let r = &remedies[0];
+    assert_eq!(r["kind"], findings[0]["kind"]);
+    assert_eq!(r["subject"], findings[0]["subject"]);
+    assert_eq!(r["grade"], findings[0]["grade"]);
+    assert_eq!(r["sources"], findings[0]["sources"]);
+    for key in ["fix", "steps", "verify"] {
+        assert!(!r[key].is_null(), "{key} in {r}");
+    }
 
     // An audit saved before the field existed loads, and diffs against one that has it.
     value.as_object_mut().expect("object").remove("ai_access");
@@ -959,6 +980,7 @@ fn probe_table_shows_the_synthetic_banner_and_each_bots_result() {
     assert!(pplx.contains("403"), "{pplx}");
     assert!(table.contains("Findings"), "{table}");
     assert!(table.contains("(synthetic check)"), "{table}");
+    assert!(table.contains("Fix: "), "{table}");
     assert!(table.contains("hello@codoseo.com"), "{table}");
 }
 
@@ -994,6 +1016,11 @@ fn probe_json_is_the_probe_report_plus_findings() {
             .as_str()
             .is_some_and(|t| t.ends_with("(synthetic check)"))
     );
+    let remedies = json["remedies"].as_array().expect("remedies");
+    assert_eq!(remedies.len(), 1);
+    assert_eq!(remedies[0]["kind"], "fetch_blocked");
+    assert_eq!(remedies[0]["grade"], "B");
+    assert!(!remedies[0]["steps"].as_array().unwrap().is_empty());
 }
 
 #[test]

@@ -558,7 +558,7 @@ pub(crate) fn path_and_query(url: &str) -> String {
 
 /// One bot's verdicts on the important `paths`. The rules that block go into the report's `pool`
 /// once, however many bots and URLs they block.
-fn bot_access(
+pub(crate) fn bot_access(
     robots: &RobotsTxt,
     agent: &AgentRules,
     token: &str,

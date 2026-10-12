@@ -11,6 +11,7 @@ pub mod llms;
 pub mod politeness;
 pub mod preflight;
 pub mod probe;
+pub mod recheck;
 pub(crate) mod record;
 pub mod robots;
 pub mod scope;

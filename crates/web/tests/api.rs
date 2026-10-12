@@ -21,7 +21,7 @@ use codoseo_store::api_keys::{self, CreateKeyOutcome};
 use codoseo_store::sites::Site;
 use codoseo_web::agent::keys;
 use serde_json::Value;
-use support::{TestApp, TestResponse, cloud_config, page};
+use support::{TestApp, TestResponse, cloud_config, page, store_probes};
 use url::Url;
 use uuid::Uuid;
 
@@ -683,59 +683,6 @@ async fn ai_access_is_empty_before_a_report_then_summarises_bots_engines_and_inc
     assert!(incidents[0].get("evidence").is_none());
 }
 
-/// What the worker would store after a crawl with synthetic fetch probes on two pages: OAI-SearchBot
-/// challenged by Cloudflare on both, PerplexityBot refused with a 403 on the second, ChatGPT-User
-/// kept out of the first by robots.txt and the same as CodoSEObot on the second.
-fn probe_report() -> Value {
-    let baseline = serde_json::json!({"status": 200, "html": true, "bytes": 5000, "title": "Home"});
-    let same = serde_json::json!({"status": 200, "html": true, "bytes": 5000, "title": "Home"});
-    let challenge = serde_json::json!({
-        "status": 403, "html": true, "bytes": 900, "title": "Just a moment...",
-        "challenge": {"vendor": "cloudflare", "signal": "cf-mitigated: challenge"}
-    });
-    let cf = serde_json::json!({"kind": "challenged", "vendor": "cloudflare"});
-    serde_json::json!({
-        "version": 1,
-        "synthetic": true,
-        "from": "hello@codoseo.com",
-        "bots": ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot"],
-        "skipped_bots": [
-            {"token": "Claude-SearchBot", "reason": "no_user_agent"},
-            {"token": "Googlebot", "reason": "verified_search_engine"}
-        ],
-        "urls": [
-            {"url": 0, "baseline": baseline, "results": [
-                {"token": "OAI-SearchBot", "fetch": challenge, "verdict": cf},
-                {"token": "ChatGPT-User", "verdict": {"kind": "skipped_robots"}},
-                {"token": "PerplexityBot", "fetch": same, "verdict": {"kind": "same"}}
-            ]},
-            {"url": 1, "baseline": baseline, "results": [
-                {"token": "OAI-SearchBot", "fetch": challenge, "verdict": cf},
-                {"token": "ChatGPT-User", "fetch": same, "verdict": {"kind": "same"}},
-                {"token": "PerplexityBot", "fetch": {"status": 403, "bytes": 120},
-                 "verdict": {"kind": "blocked", "status": 403}}
-            ]}
-        ],
-        "requests": 8
-    })
-}
-
-/// Puts [`probe_report`] into the site's stored reports and reconciles, so the `fetch_blocked`
-/// incidents open (quietly, as on the first crawl with probes).
-async fn store_probes(app: &TestApp, site: &Site) {
-    sqlx::query(
-        "UPDATE ai_reports SET report = jsonb_set(report, '{probes}', $2) WHERE site_id = $1",
-    )
-    .bind(site.id)
-    .bind(probe_report())
-    .execute(app.pool())
-    .await
-    .unwrap();
-    codoseo_store::geo::reevaluate_quietly(app.pool(), site.id)
-        .await
-        .unwrap();
-}
-
 #[tokio::test]
 async fn ai_access_shows_the_synthetic_fetch_check_and_its_incidents() {
     let f = setup(Plan::Pro).await;
@@ -1376,4 +1323,460 @@ async fn ai_access_says_why_llms_txt_was_not_fetched() {
     let skipped = json(&get(&f.app, &path, &f.key).await);
     assert_eq!(skipped["llms_txt_skipped"], "robots_disallowed");
     assert!(skipped.get("llms_txt").is_none(), "{skipped}");
+}
+
+// ---- AI access incidents: state, fix and repair actions (B3.11) ----
+
+const BLOCKED_ROBOTS: &str = "User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n";
+
+/// A site with a `bots_blocked` incident (robots.txt) and the `fetch_blocked` ones (probes).
+/// Returns the ids of one of each.
+async fn with_incidents(plan: Plan) -> (Fixture, i64, i64) {
+    let f = setup(plan).await;
+    f.app
+        .finished_crawl_with_robots(&f.site, fixture_pages(), (200, BLOCKED_ROBOTS), Vec::new())
+        .await;
+    store_probes(&f.app, &f.site).await;
+    let id = |kind: &'static str| {
+        let pool = f.app.pool().clone();
+        let site = f.site.id;
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM ai_incidents WHERE site_id = $1 AND kind = $2 ORDER BY id LIMIT 1",
+            )
+            .bind(site)
+            .bind(kind)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let (blocked, fetch) = (id("bots_blocked").await, id("fetch_blocked").await);
+    (f, blocked, fetch)
+}
+
+async fn send_json(
+    app: &TestApp,
+    method: Method,
+    path: &str,
+    key: &str,
+    body: Option<&str>,
+) -> TestResponse {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::AUTHORIZATION, format!("Bearer {key}"));
+    if body.is_some() {
+        b = b.header(header::CONTENT_TYPE, "application/json");
+    }
+    app.send(b.body(Body::from(body.unwrap_or("").to_owned())).unwrap())
+        .await
+}
+
+fn incident_path(f: &Fixture, id: i64, tail: &str) -> String {
+    format!(
+        "/api/v1/sites/{}/ai-access/incidents/{id}/{tail}",
+        f.site.id
+    )
+}
+
+async fn incident_json(f: &Fixture, id: i64) -> Value {
+    let v = json(
+        &get(
+            &f.app,
+            &format!("/api/v1/sites/{}/ai-access", f.site.id),
+            &f.key,
+        )
+        .await,
+    );
+    v["open_incidents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == id)
+        .unwrap_or_else(|| panic!("incident {id} in {v}"))
+        .clone()
+}
+
+#[tokio::test]
+async fn incidents_carry_grade_sources_state_lag_and_affected_urls() {
+    let (f, blocked, fetch) = with_incidents(Plan::Pro).await;
+    let i = incident_json(&f, fetch).await;
+    assert_eq!(i["grade"], "B");
+    assert!(
+        i["sources"].as_array().is_some_and(|s| !s.is_empty()),
+        "{i}"
+    );
+    assert_eq!(i["state"], "open");
+    assert_eq!(i["accepted"], false);
+    assert_eq!(i["first_seen"], i["opened_at"]);
+    assert!(i["lag"]["hours"].is_u64(), "{i}");
+    assert!(
+        i["affected_urls"].as_array().is_some_and(|u| !u.is_empty()),
+        "{i}"
+    );
+    for absent in [
+        "snoozed_until",
+        "recovered_at",
+        "verified_at",
+        "verify_due_at",
+        "last_recheck",
+    ] {
+        assert!(i.get(absent).is_none(), "{absent} in {i}");
+    }
+    assert_eq!(incident_json(&f, blocked).await["grade"], "A");
+}
+
+#[tokio::test]
+async fn the_fix_is_the_remedy_and_the_three_ready_made_texts() {
+    let (f, blocked, fetch) = with_incidents(Plan::Pro).await;
+    let res = get(&f.app, &incident_path(&f, blocked, "fix"), &f.key).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    let v = json(&res);
+    let r = &v["remedy"];
+    for key in [
+        "title", "why", "limits", "steps", "verify", "sources", "grade",
+    ] {
+        assert!(!r[key].is_null(), "{key} in {r}");
+    }
+    assert!(!r["steps"].as_array().unwrap().is_empty());
+    assert!(
+        r["snippet"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("OAI-SearchBot"),
+        "{r}"
+    );
+    assert_eq!(v["copy_fix"], r["snippet"]["text"]);
+    assert!(v["developer_task"].as_str().unwrap().starts_with("## "));
+    let prompt = v["agent_prompt"].as_str().unwrap();
+    assert!(prompt.contains("BEGIN UNTRUSTED SITE DATA"), "{prompt}");
+    // A fix without a snippet has none, and copy_fix is the steps.
+    let other = json(&get(&f.app, &incident_path(&f, fetch, "fix"), &f.key).await);
+    if other["remedy"].get("snippet").is_none() {
+        assert_eq!(
+            other["copy_fix"].as_str().unwrap(),
+            other["remedy"]["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+}
+
+#[tokio::test]
+async fn snoozing_and_accepting_move_the_incident_through_its_states() {
+    let (f, blocked, fetch) = with_incidents(Plan::Pro).await;
+    let snooze = incident_path(&f, fetch, "snooze");
+    let res = send_json(
+        &f.app,
+        Method::POST,
+        &snooze,
+        &f.key,
+        Some(r#"{"days": 7}"#),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let v = json(&res);
+    assert_eq!(v["state"], "snoozed");
+    assert!(v["snoozed_until"].is_string());
+    assert_eq!(incident_json(&f, fetch).await["state"], "snoozed");
+    let res = send_json(&f.app, Method::DELETE, &snooze, &f.key, None).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(json(&res)["state"], "open");
+
+    let accept = incident_path(&f, fetch, "accept");
+    let v = json(&send_json(&f.app, Method::POST, &accept, &f.key, None).await);
+    assert_eq!(
+        (v["state"].as_str(), v["accepted"].as_bool()),
+        (Some("accepted"), Some(true))
+    );
+    // Accepted wins over snoozed.
+    send_json(&f.app, Method::POST, &snooze, &f.key, Some(r#"{"days":1}"#)).await;
+    assert_eq!(incident_json(&f, fetch).await["state"], "accepted");
+    let v = json(&send_json(&f.app, Method::DELETE, &accept, &f.key, None).await);
+    assert_eq!(v["state"], "snoozed");
+
+    // Bot kinds go through the intent: the same message as the web app.
+    let res = send_json(
+        &f.app,
+        Method::POST,
+        &incident_path(&f, blocked, "accept"),
+        &f.key,
+        None,
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        json(&res)["error"]["message"],
+        "This issue is a choice through your intent: use Mark intended instead."
+    );
+}
+
+#[tokio::test]
+async fn a_snooze_is_one_of_the_three_choices_and_every_attempt_is_metered() {
+    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    let path = incident_path(&f, fetch, "snooze");
+    let mut left = 2000;
+    for body in [
+        Some(r#"{"days": 5}"#),
+        Some(r#"{"days": 0}"#),
+        Some(r#"{"days": "7"}"#),
+        Some(r#"{"days": 90}"#),
+        Some("{}"),
+        Some("not json"),
+        None,
+    ] {
+        let res = send_json(&f.app, Method::POST, &path, &f.key, body).await;
+        left -= 1;
+        assert_eq!(
+            res.status,
+            StatusCode::BAD_REQUEST,
+            "{body:?}: {}",
+            res.body
+        );
+        assert_eq!(
+            res.header("x-ratelimit-remaining"),
+            Some(left.to_string().as_str())
+        );
+        assert_eq!(error_code(&res), "bad_request");
+    }
+    let res = send_json(&f.app, Method::POST, &path, &f.key, Some(r#"{"days": 5}"#)).await;
+    assert_eq!(
+        json(&res)["error"]["message"],
+        "Snooze for 1, 7 or 30 days."
+    );
+    for days in [1, 7, 30] {
+        let body = format!(r#"{{"days": {days}}}"#);
+        let res = send_json(&f.app, Method::POST, &path, &f.key, Some(&body)).await;
+        assert_eq!(res.status, StatusCode::OK, "{days}: {}", res.body);
+    }
+}
+
+#[tokio::test]
+async fn a_recheck_is_queued_with_202_and_refused_while_one_is_queued() {
+    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    let path = incident_path(&f, fetch, "recheck");
+    let res = post(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::ACCEPTED, "{}", res.body);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    let v = json(&res);
+    assert!(v["recheck_id"].is_i64() || v["recheck_id"].is_u64(), "{v}");
+    assert!(v["due_at"].is_string());
+    assert_eq!(incident_json(&f, fetch).await["state"], "recheck_queued");
+    let res = post(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&res), "conflict");
+    assert_eq!(
+        json(&res)["error"]["message"],
+        "A recheck of this issue is already queued."
+    );
+}
+
+#[tokio::test]
+async fn a_recheck_past_the_plans_daily_allowance_is_a_plan_limit() {
+    let (f, blocked, fetch) = with_incidents(Plan::Free).await;
+    for _ in 0..3 {
+        sqlx::query(
+            "INSERT INTO ai_rechecks (site_id, incident_id, origin, requested_by, status, outcome, due_at, created_at, finished_at) \
+             VALUES ($1, $2, 'manual', $3, 'done', 'still_failing', now(), now() - interval '1 hour', now())",
+        )
+        .bind(f.site.id)
+        .bind(blocked)
+        .bind(f.account.id)
+        .execute(f.app.pool())
+        .await
+        .unwrap();
+    }
+    let res = post(&f.app, &incident_path(&f, fetch, "recheck"), &f.key).await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN, "{}", res.body);
+    assert_eq!(error_code(&res), "plan_limit");
+    let m = json(&res)["error"]["message"].as_str().unwrap().to_owned();
+    assert!(
+        m.starts_with("3 rechecks per day on your plan — next at "),
+        "{m}"
+    );
+    // The finished ones show as the incident's last recheck.
+    let i = incident_json(&f, blocked).await;
+    assert_eq!(i["last_recheck"]["outcome"], "still_failing");
+    assert!(i["last_recheck"]["at"].is_string());
+}
+
+#[tokio::test]
+async fn a_recovered_incident_says_it_is_being_verified_until_a_time() {
+    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(fetch)
+        .execute(f.app.pool())
+        .await
+        .unwrap();
+    // No follow-up: waiting for the crawl.
+    assert_eq!(incident_json(&f, fetch).await["state"], "waiting_for_crawl");
+    sqlx::query(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
+         VALUES ($1, $2, 'followup', now() + interval '24 hours')",
+    )
+    .bind(f.site.id)
+    .bind(fetch)
+    .execute(f.app.pool())
+    .await
+    .unwrap();
+    let i = incident_json(&f, fetch).await;
+    assert_eq!(i["state"], "verifying");
+    assert!(i["verify_due_at"].is_string());
+    assert!(i["recovered_at"].is_string());
+    let res = post(&f.app, &incident_path(&f, fetch, "recheck"), &f.key).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert!(
+        json(&res)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Already verifying — due at")
+    );
+}
+
+#[tokio::test]
+async fn repair_actions_on_another_accounts_incident_are_a_404() {
+    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    let (other, _) = f.app.login("other@example.com").await;
+    let (other_key, _) = make_key(&f.app, &other).await;
+    let theirs = f.app.site(&other, "other.example").await;
+    f.app
+        .finished_crawl(&theirs, vec![page("other.example", "/")], vec![])
+        .await;
+    let base = |site: Uuid, id: i64| format!("/api/v1/sites/{site}/ai-access/incidents/{id}");
+    let mine = f.site.id;
+    for (method, tail, body) in [
+        (Method::GET, "fix", None),
+        (Method::POST, "recheck", None),
+        (Method::POST, "snooze", Some(r#"{"days":7}"#)),
+        (Method::DELETE, "snooze", None),
+        (Method::POST, "accept", None),
+        (Method::DELETE, "accept", None),
+    ] {
+        // Their key on my site: no such site.
+        let path = format!("{}/{tail}", base(mine, fetch));
+        let res = send_json(&f.app, method.clone(), &path, &other_key, body).await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{method} {path}");
+        // Their key on their site with my incident's id: no such incident.
+        let path = format!("{}/{tail}", base(theirs.id, fetch));
+        let res = send_json(&f.app, method.clone(), &path, &other_key, body).await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{method} {path}");
+        assert_eq!(error_code(&res), "not_found");
+        // A garbled id is the same.
+        let path = format!("{}/{tail}", base(theirs.id, 0).replace("/0", "/abc"));
+        let res = send_json(&f.app, method.clone(), &path, &other_key, body).await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{method} {path}");
+    }
+    // Nothing of mine changed.
+    let i = incident_json(&f, fetch).await;
+    assert_eq!(i["state"], "open");
+    let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_rechecks")
+        .fetch_one(f.app.pool())
+        .await
+        .unwrap();
+    assert_eq!(queued, 0);
+}
+
+#[tokio::test]
+async fn repair_calls_count_against_the_quota_and_stop_at_the_limit() {
+    let (f, _, fetch) = with_incidents(Plan::Free).await;
+    let res = get(&f.app, &incident_path(&f, fetch, "fix"), &f.key).await;
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("99"));
+    let res = send_json(
+        &f.app,
+        Method::POST,
+        &incident_path(&f, fetch, "accept"),
+        &f.key,
+        None,
+    )
+    .await;
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("98"));
+    set_calls_today(&f.app, &f.account, 100).await;
+    let res = get(&f.app, &incident_path(&f, fetch, "fix"), &f.key).await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    let res = send_json(
+        &f.app,
+        Method::DELETE,
+        &incident_path(&f, fetch, "accept"),
+        &f.key,
+        None,
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    // The refused DELETE did nothing.
+    let accepted: bool =
+        sqlx::query_scalar("SELECT accepted_at IS NOT NULL FROM ai_incidents WHERE id = $1")
+            .bind(fetch)
+            .fetch_one(f.app.pool())
+            .await
+            .unwrap();
+    assert!(accepted);
+}
+
+// ---- AI access incident export (B3.14) ----
+
+#[tokio::test]
+async fn the_incident_export_is_json_by_default_or_csv_and_is_metered() {
+    let (f, blocked, _) = with_incidents(Plan::Pro).await;
+    sqlx::query("UPDATE ai_incidents SET title = '=1+1' WHERE id = $1")
+        .bind(blocked)
+        .execute(f.app.pool())
+        .await
+        .unwrap();
+    let path = format!("/api/v1/sites/{}/ai-access/incidents", f.site.id);
+
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    let rows = json(&res);
+    let rows = rows.as_array().unwrap();
+    assert!(rows.len() >= 2, "{rows:?}");
+    assert_eq!(rows[0]["kind"], "bots_blocked");
+    assert_eq!(rows[0]["state"], "open");
+    assert!(rows[0]["sources"].is_array());
+    // JSON keeps the title as it is.
+    assert_eq!(rows[0]["title"], "=1+1");
+    let explicit = get(&f.app, &format!("{path}?format=json"), &f.key).await;
+    assert_eq!(explicit.body, res.body);
+
+    let res = get(&f.app, &format!("{path}?format=csv"), &f.key).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1997"));
+    assert_eq!(res.header("content-type"), Some("text/csv; charset=utf-8"));
+    let mut lines = res.body.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "kind,subject,severity,grade,title,state,first_seen,last_seen,resolved_at,resolved_by,verified_at,affected_urls,sources"
+    );
+    // The formula is neutralised in the file, and only there.
+    assert!(lines.next().unwrap().contains(",'=1+1,"), "{}", res.body);
+}
+
+#[tokio::test]
+async fn an_unknown_export_format_is_a_counted_400_and_another_accounts_site_is_a_404() {
+    let (f, _, _) = with_incidents(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access/incidents", f.site.id);
+    let res = get(&f.app, &format!("{path}?format=xml"), &f.key).await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    assert_eq!(
+        json(&res)["error"]["message"],
+        "format must be csv or json."
+    );
+
+    let (other, _) = f.app.login("other@example.com").await;
+    let (other_key, _) = make_key(&f.app, &other).await;
+    for format in ["json", "csv"] {
+        let res = get(&f.app, &format!("{path}?format={format}"), &other_key).await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{format}");
+        assert_eq!(error_code(&res), "not_found");
+    }
+    set_calls_today(&f.app, &f.account, 2000).await;
+    let res = get(&f.app, &path, &f.key).await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
 }

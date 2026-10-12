@@ -5,6 +5,12 @@
 //! is a problem or a choice. `/ai-access/intent` edits the intent; "Mark intended" on an incident
 //! changes it just enough for that finding to become a choice. Both re-evaluate the latest report
 //! quietly: the owner made the change, so nobody is alerted.
+//!
+//! Each open incident's card carries its repair: the remedy ([`codoseo_geo::remedy`]) with three
+//! copy buttons (the change, a ticket, a coding-agent prompt), what was true before, and the
+//! owner's actions: recheck now, accept (muted, listed under "Accepted"), snooze for 1, 7 or 30
+//! days. A recheck never opens an incident; a fix it sees is verified by a follow-up once the
+//! operators' lag has passed.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,25 +23,32 @@ use axum::{Form, Router};
 use codoseo_core::check::Severity;
 use codoseo_core::output::LlmsSkip;
 use codoseo_core::page::JsonLdStatus;
+use codoseo_core::plan::PlanLimits;
 use codoseo_geo::content::{ContentVerdict, NON_RENDERING_SOURCE, RawContent, ShellSignal};
 use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engines};
-use codoseo_geo::findings::{
-    BotEvidence, Evidence, FindingKind, ProbeEvidence, ROBOTS_DOC, VENDOR_DOCS,
-};
-use codoseo_geo::llms::{LIGHTHOUSE_DOC, LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL};
+use codoseo_geo::findings::{BotEvidence, Evidence, FindingKind, ProbeEvidence};
+use codoseo_geo::incident::acceptable;
+use codoseo_geo::ledger;
+use codoseo_geo::llms::{LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL};
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
     SkipReason, Verdict,
 };
+use codoseo_geo::remedy::{Remedy, agent_prompt, copy_fix, developer_task};
 use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str, slug_str};
 use codoseo_geo::robots::{GroupMatch, MatchedRule, Pair, RobotsAvailability};
 use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
 use codoseo_store::crawls;
-use codoseo_store::geo::{self, Incident, IntentError};
+use codoseo_store::geo::{
+    self, Incident, IncidentActionError, IntentError, Recheck, RecheckFailure, RecheckStatus,
+};
 use codoseo_store::sites::Site;
 use time::OffsetDateTime;
 use url::Url;
 
+use crate::ai_incident::{
+    self, Fix, Phase, Refusal, asks_attention, fix as fix_for, last_recheck, phase, snooze_days,
+};
 use crate::auth::{CurrentUser, load_site};
 use crate::error::AppError;
 use crate::fmt;
@@ -56,15 +69,21 @@ pub fn routes() -> Router<AppState> {
             "/s/{site}/ai-access/incidents/{id}/intended",
             post(mark_intended),
         )
+        .route(
+            "/s/{site}/ai-access/incidents/{id}/recheck",
+            post(recheck_incident),
+        )
+        .route("/s/{site}/ai-access/incidents/{id}/accept", post(accept))
+        .route(
+            "/s/{site}/ai-access/incidents/{id}/unaccept",
+            post(unaccept),
+        )
+        .route("/s/{site}/ai-access/incidents/{id}/snooze", post(snooze))
+        .route(
+            "/s/{site}/ai-access/incidents/{id}/unsnooze",
+            post(unsnooze),
+        )
 }
-
-/// What grade B means, on a synthetic incident's grade.
-const GRADE_B: &str = "Evidence grade B: observed by CodoSEO's synthetic check, compared with CodoSEObot's own fetch and confirmed by a second one. Grade A is what the operator documents.";
-
-/// What grade A means on an llms.txt incident.
-const GRADE_A_LLMS: &str = "Evidence grade A: what your /llms.txt answered, judged by Lighthouse's documented llms.txt check. llms.txt is informational and never affects your score.";
-/// What grade A- means, on a content incident's grade.
-const GRADE_A_MINUS: &str = "Evidence grade A-: read from your pages' HTML as served, with Vercel and MERJ's published measurement that these AI crawlers don't run JavaScript. Grade A is what the operator documents.";
 
 /// Resolved incidents listed under "Recently resolved".
 const RESOLVED_SHOWN: i64 = 10;
@@ -269,8 +288,12 @@ pub struct Overview {
     pub failed: Option<String>,
     pub tiles: Vec<Tile>,
     pub incidents: Vec<IncidentView>,
+    /// Open issues that still ask for attention: neither accepted nor snoozed.
+    pub attention: usize,
+    /// Incidents the owner accepted as they are, listed apart and not counted.
+    pub accepted: Vec<IncidentView>,
     /// The empty "Open issues" state: its heading, its text and the mascot's mood.
-    pub clear: (&'static str, &'static str, &'static str),
+    pub clear: (String, &'static str, &'static str),
     /// The synthetic fetch probes of the latest report, or why there are none.
     pub fetch: FetchCheck,
     /// What the important pages hold in their HTML as served.
@@ -362,8 +385,10 @@ pub struct IncidentView {
     pub severity_label: &'static str,
     /// Observed by CodoSEO's synthetic fetch check rather than documented by an operator.
     pub synthetic: bool,
-    /// The evidence grade's letter and what it means.
+    /// The evidence grade's letter and what it means, from the ledger.
     pub grade: (&'static str, &'static str),
+    /// The grade's badge class.
+    pub grade_class: &'static str,
     pub title: String,
     pub summary: Vec<Seg>,
     pub opened: String,
@@ -385,10 +410,67 @@ pub struct IncidentView {
     pub shells_more: usize,
     /// What `/llms.txt` answered, for an `llms_txt_unavailable` incident.
     pub llms_line: Option<String>,
-    /// robots.txt lines that would apply the owner's block.
-    pub fix: Option<String>,
+    /// How to fix it.
+    pub remedy: RemedyView,
+    /// The remedy's renderings for the three copy buttons (escaped in the attribute by askama).
+    pub copy_fix: String,
+    pub copy_task: String,
+    pub copy_prompt: String,
+    /// What was true before the incident opened, what to call the now line ("Now", or "At last
+    /// crawl" while a fix is being verified), and the now line.
+    pub before_after: Option<(String, &'static str, String)>,
+    /// For a synthetic fetch incident: who the probes claimed to be.
+    pub probe: Option<ProbeIdentity>,
+    /// Accepted, Snoozed until …, or Open.
+    pub chips: Vec<StateChip>,
+    /// A recheck under way, a fix being verified, or waiting for the next crawl.
+    pub progress: Option<Progress>,
+    /// What the last finished recheck found.
+    pub last_recheck: Option<String>,
+    /// "Recheck now" is offered (none queued or running).
+    pub can_recheck: bool,
     /// The confirmation for "Mark intended"; `None` when the finding can't be a choice.
     pub intend: Option<String>,
+    /// "Accept" is offered (no intent path, and the kind can be accepted).
+    pub accept: bool,
+    pub accepted: bool,
+    /// Snoozed until then: "Unsnooze" instead of "Snooze".
+    pub snoozed: bool,
+    /// Why there is no Accept or Mark intended, for a kind that can only be snoozed.
+    pub snooze_only: Option<&'static str>,
+    /// Open the "How to fix" details: it asks for attention.
+    pub remedy_open: bool,
+}
+
+pub struct RemedyView {
+    pub why: Vec<Seg>,
+    pub limits: String,
+    pub steps: Vec<Vec<Seg>>,
+    /// The snippet's label and text.
+    pub snippet: Option<(String, String)>,
+    pub verify: Vec<Vec<Seg>>,
+}
+
+pub struct ProbeIdentity {
+    /// Each probed bot and the user agent its probes sent.
+    pub agents: Vec<(String, String)>,
+    /// The `From` header they carried.
+    pub from: String,
+}
+
+pub struct StateChip {
+    pub label: String,
+    pub class: &'static str,
+    pub tip: String,
+}
+
+pub struct Progress {
+    pub text: String,
+    /// Where the verification wait comes from: a link to the operator's documentation, or
+    /// `None` for CodoSEO's own undocumented default.
+    pub lag_source: Option<SourceLink>,
+    /// A recovery is being verified or awaited (the honest line is stressed).
+    pub recovered: bool,
 }
 
 /// The "Fetch check" section: what the synthetic probes with each AI bot's user agent got.
@@ -581,19 +663,29 @@ async fn render_page(
     // When each stored report was written, to tell a first check from an intent change.
     let reported = geo::report_times(pool, site.id).await?;
 
+    let rechecks = geo::latest_rechecks(pool, site.id).await?;
+    let now = OffsetDateTime::now_utc();
+
     let report = &latest.report;
-    let incidents: Vec<IncidentView> = open
-        .iter()
-        .map(|i| {
-            let report_at = i.opened_crawl_id.and_then(|id| reported.get(&id).copied());
-            incident_view(site, &base, report, i, report_at)
-        })
-        .collect();
-    let critical = open
+    let (mut incidents, mut accepted) = (Vec::new(), Vec::new());
+    for i in &open {
+        let report_at = i.opened_crawl_id.and_then(|id| reported.get(&id).copied());
+        let view = incident_view(site, &base, report, i, report_at, rechecks.get(&i.id), now);
+        if i.accepted_at.is_some() {
+            accepted.push(view);
+        } else {
+            incidents.push(view);
+        }
+    }
+    // Counted as the sidebar counts them (`geo::open_counts`): accepted and snoozed ones are the
+    // owner's decision already.
+    let asking: Vec<&Incident> = open.iter().filter(|i| asks_attention(i, now)).collect();
+    let critical = asking
         .iter()
         .filter(|i| i.severity == Severity::Critical)
         .count();
 
+    let accepted_n = accepted.len();
     let bot_groups = bot_groups(report, &intent);
     let probes_on = geo::get_ai_probes(pool, site.id).await?;
     let view = Overview {
@@ -606,19 +698,28 @@ async fn render_page(
         failed: (latest.crawl_status != "done").then(|| {
             "The latest crawl couldn't read any pages, so only robots.txt was checked. The rest is from what that crawl could see.".to_owned()
         }),
-        tiles: tiles(report, &intent, open.len(), critical),
+        tiles: tiles(report, &intent, asking.len(), critical),
+        attention: asking.len(),
         incidents,
-        clear: if report.robots.availability == RobotsAvailability::Unknown
+        accepted,
+        clear: if accepted_n > 0 {
+            // Something is there, set aside by the owner: not the all-clear.
+            (
+                format!("Nothing needs attention · {accepted_n} accepted"),
+                "The accepted issues are listed below. They don't count or alert, and a crawl that no longer finds one resolves it.",
+                "idle",
+            )
+        } else if report.robots.availability == RobotsAvailability::Unknown
             && report.html_important() == 0
         {
             (
-                "Nothing to check yet",
+                "Nothing to check yet".to_owned(),
                 "The latest crawl could read neither robots.txt nor an HTML page. Check that the site is up, then run a crawl.",
                 "idle",
             )
         } else {
             (
-                "No AI access issues",
+                "No AI access issues".to_owned(),
                 "Watching robots.txt for every known AI bot, and the page markup each AI engine honours, on every crawl.",
                 "ok",
             )
@@ -1206,48 +1307,7 @@ fn summary_segments(s: &str) -> Vec<Seg> {
 }
 
 fn sources(kind: FindingKind, ev: &Evidence) -> Vec<SourceLink> {
-    let mut urls: Vec<String> = Vec::new();
-    let mut push = |u: &str| {
-        if !urls.iter().any(|x| x == u) {
-            urls.push(u.to_owned());
-        }
-    };
-    if kind == FindingKind::RobotsUnavailable {
-        push(ROBOTS_DOC);
-    }
-    if kind == FindingKind::ContentMissing {
-        push(NON_RENDERING_SOURCE);
-    }
-    if kind == FindingKind::LlmsTxtUnavailable {
-        push(LLMS_SPEC_URL);
-        push(LIGHTHOUSE_DOC);
-    }
-    for b in &ev.bots {
-        if let Some(bot) = registry().bot(&b.token) {
-            push(&bot.source_url);
-        }
-    }
-    for e in &ev.engines {
-        if let Some(engine) = engines().iter().find(|x| x.id == e.engine) {
-            push(engine.source_url);
-        }
-    }
-    for p in &ev.probes {
-        if let Some(bot) = registry().bot(&p.token) {
-            push(&bot.source_url);
-        }
-    }
-    let vendors: BTreeSet<&str> = ev
-        .probes
-        .iter()
-        .filter_map(|p| p.vendor)
-        .map(|v| v.slug())
-        .collect();
-    for (vendor, url) in VENDOR_DOCS {
-        if vendors.contains(vendor.slug()) {
-            push(url);
-        }
-    }
+    let urls = ledger::finding_sources(kind, ev);
     // Two pages on one host (Cloudflare's AI Crawl Control and bots docs) read by their path.
     let hosts: Vec<String> = urls.iter().map(|u| host_label(u)).collect();
     urls.iter()
@@ -1389,12 +1449,126 @@ fn with_change(mut intent: Intent, change: &IntendedChange) -> Intent {
     intent
 }
 
+fn grade_class(g: codoseo_geo::findings::Grade) -> &'static str {
+    use codoseo_geo::findings::Grade;
+    match g {
+        Grade::A | Grade::AMinus => "",
+        Grade::B => " aia-grade-b",
+        Grade::C | Grade::X => " aia-grade-c",
+    }
+}
+
+fn remedy_view(r: &Remedy) -> RemedyView {
+    RemedyView {
+        why: summary_segments(&r.why),
+        limits: r.limits.clone(),
+        steps: r.steps.iter().map(|s| summary_segments(s)).collect(),
+        snippet: r
+            .snippet
+            .as_ref()
+            .map(|s| (s.label.clone(), s.text.clone())),
+        verify: r.verify.iter().map(|s| summary_segments(s)).collect(),
+    }
+}
+
+/// The user agent each probed bot's requests sent, as the registry documents it, and the `From`
+/// address they carried (the report's, else CodoSEO's default).
+fn probe_identity(report: &AccessReport, ev: &Evidence) -> ProbeIdentity {
+    ProbeIdentity {
+        agents: ev
+            .probes
+            .iter()
+            .map(|p| {
+                let ua = registry()
+                    .bot(&p.token)
+                    .and_then(|b| b.user_agent.clone())
+                    .unwrap_or_else(|| "its documented user agent".to_owned());
+                (p.token.clone(), ua)
+            })
+            .collect(),
+        from: report
+            .probes
+            .as_ref()
+            .map(|p| p.from.clone())
+            .unwrap_or_else(|| codoseo_core::crawl::PROBE_FROM.to_owned()),
+    }
+}
+
+/// `clean`, `still failing`, `inconclusive (why)`, as "Last recheck: …" says it.
+fn recheck_outcome(r: &Recheck) -> Option<String> {
+    let last = last_recheck(r)?;
+    let when = last.at.map(fmt::ago).unwrap_or_default();
+    let what = match last.outcome {
+        "clean" => "clean".to_owned(),
+        "still_failing" => "still failing".to_owned(),
+        "inconclusive" if last.notes.is_empty() => "inconclusive".to_owned(),
+        "inconclusive" => format!("inconclusive ({})", last.notes.join("; ")),
+        "failed" if r.failure == Some(RecheckFailure::Site) => {
+            "the site didn't answer; it counted toward your daily rechecks".to_owned()
+        }
+        "failed" => "couldn't run; it didn't count toward your daily rechecks".to_owned(),
+        _ => "replaced by a crawl, which judges it instead".to_owned(),
+    };
+    Some(if when.is_empty() {
+        format!("Last recheck: {what}")
+    } else {
+        format!("Last recheck: {what} · {when}")
+    })
+}
+
+/// A recheck under way, a recovery being verified, or one waiting for the next crawl.
+fn progress(i: &Incident, ev: &Evidence, latest: Option<&Recheck>) -> Option<Progress> {
+    Some(match phase(i, latest)? {
+        Phase::Verifying { due_at } => {
+            let lag = ledger::lag(i.kind, ev);
+            Progress {
+                text: format!(
+                    "Fix detected · policy restored — verifying until {}",
+                    fmt::until(due_at)
+                ),
+                lag_source: lag.source.map(|href| SourceLink {
+                    label: host_label(href),
+                    href: href.to_owned(),
+                }),
+                recovered: true,
+            }
+        }
+        Phase::Rechecking {
+            running,
+            recovered: true,
+        } => Progress {
+            text: format!(
+                "Fix detected · {}",
+                if running { "recheck running" } else { "recheck queued" }
+            ),
+            lag_source: None,
+            recovered: true,
+        },
+        Phase::Rechecking { running, .. } => Progress {
+            text: if running {
+                "Recheck running".to_owned()
+            } else {
+                "Recheck queued · results in a minute or two".to_owned()
+            },
+            lag_source: None,
+            recovered: false,
+        },
+        Phase::Waiting => Progress {
+            text: "Waiting for the next crawl · the fix was seen, but its follow-up couldn't confirm it".to_owned(),
+            lag_source: None,
+            recovered: true,
+        },
+    })
+}
+
 fn incident_view(
     site: &Site,
     base: &str,
     report: &AccessReport,
     i: &Incident,
     report_at: Option<OffsetDateTime>,
+    latest: Option<&Recheck>,
+    now: OffsetDateTime,
 ) -> IncidentView {
     let ev: Evidence = serde_json::from_value(i.evidence.clone()).unwrap_or_default();
     let (severity, severity_label) = severity_view(i.severity);
@@ -1500,15 +1674,13 @@ fn incident_view(
     } else {
         0
     };
-    let fix = (i.kind == FindingKind::BotsNotBlocked && !ev.bots.is_empty()).then(|| {
-        let mut lines: Vec<String> = ev
-            .bots
-            .iter()
-            .map(|b| format!("User-agent: {}", b.token))
-            .collect();
-        lines.push("Disallow: /".to_owned());
-        lines.join("\n")
-    });
+    let Fix {
+        remedy: fix,
+        facts,
+        before_line,
+        now_line,
+        now_label,
+    } = fix_for(&site.start_url, Some(report), i, &ev);
     let shells: Vec<ShellEv> = ev
         .content
         .iter()
@@ -1552,20 +1724,46 @@ fn incident_view(
         ),
     });
     let synthetic = ev.synthetic || i.kind == FindingKind::FetchBlocked;
+    let entry = ledger::for_kind(i.kind);
+    let accepted = i.accepted_at.is_some();
+    let snoozed_until = i.snoozed_until.filter(|t| *t > now);
+    let mut chips = Vec::new();
+    if let Some(at) = i.accepted_at {
+        chips.push(StateChip {
+            label: "Accepted".to_owned(),
+            class: "",
+            tip: format!(
+                "Accepted {}: it no longer counts or alerts, and a crawl that no longer finds it still resolves it",
+                fmt::datetime(at)
+            ),
+        });
+    }
+    if let Some(until) = snoozed_until {
+        chips.push(StateChip {
+            label: format!("Snoozed until {}", fmt::until(until)),
+            class: "",
+            tip: "Not counted and no instant alerts until then; changes are still logged"
+                .to_owned(),
+        });
+    }
+    let progress = progress(i, &ev, latest);
+    if chips.is_empty() && progress.is_none() {
+        chips.push(StateChip {
+            label: "Open".to_owned(),
+            class: "",
+            tip: "Found by the latest check that could see it".to_owned(),
+        });
+    }
+    let busy =
+        latest.is_some_and(|r| matches!(r.status, RecheckStatus::Queued | RecheckStatus::Running));
+    let intend = intended_change(i.kind, &i.subject, &ev).map(|c| intend_confirm(i.kind, &c));
     IncidentView {
         id: i.id,
         severity,
         severity_label,
         synthetic,
-        grade: if synthetic {
-            ("B", GRADE_B)
-        } else if i.kind == FindingKind::ContentMissing {
-            ("A-", GRADE_A_MINUS)
-        } else if i.kind == FindingKind::LlmsTxtUnavailable {
-            ("A", GRADE_A_LLMS)
-        } else {
-            ("A", "Evidence grade A: documented by the operator")
-        },
+        grade: (entry.grade.label(), entry.explain),
+        grade_class: grade_class(entry.grade),
         title: i.title.clone(),
         summary: summary_segments(&i.summary),
         opened: fmt::ago(i.opened_at),
@@ -1593,8 +1791,25 @@ fn incident_view(
                 (None, None) => "GET /llms.txt → no answer".to_owned(),
             }
         }),
-        fix,
-        intend: intended_change(i.kind, &i.subject, &ev).map(|c| intend_confirm(i.kind, &c)),
+        remedy: remedy_view(&fix),
+        copy_fix: copy_fix(&fix),
+        copy_task: developer_task(&fix, &facts),
+        copy_prompt: agent_prompt(&fix, &facts),
+        before_after: before_line.map(|b| (b, now_label, now_line)),
+        probe: (i.kind == FindingKind::FetchBlocked && !ev.probes.is_empty())
+            .then(|| probe_identity(report, &ev)),
+        chips,
+        last_recheck: latest.and_then(recheck_outcome),
+        can_recheck: !busy,
+        accept: intend.is_none() && acceptable(i.kind) && !accepted,
+        intend: intend.filter(|_| !accepted),
+        accepted,
+        snoozed: snoozed_until.is_some(),
+        snooze_only: (i.kind == FindingKind::RobotsUnavailable).then_some(
+            "A failing robots.txt can't be accepted: bots that follow Google's rules stay out of the whole site until it answers. Snooze it while you fix it.",
+        ),
+        remedy_open: !accepted && snoozed_until.is_none() && progress.is_none(),
+        progress,
     }
 }
 
@@ -2030,6 +2245,8 @@ pub struct ContentCard {
     pub counts: Option<String>,
     pub rows: Vec<ContentRow>,
     pub source: &'static str,
+    /// The content verdicts' evidence grade and what it means.
+    pub grade: (&'static str, &'static str),
 }
 
 /// One important page's facts from its HTML as served.
@@ -2154,11 +2371,14 @@ fn content_row(
 }
 
 fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
+    let entry = ledger::entry("content_verdict").expect("the ledger grades content verdicts");
+    let grade = (entry.grade.label(), entry.explain);
     let empty = |title, text| ContentCard {
         empty: Some((title, text)),
         counts: None,
         rows: Vec::new(),
         source: NON_RENDERING_SOURCE,
+        grade,
     };
     if report.html_important() == 0 {
         return empty(
@@ -2186,6 +2406,7 @@ fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
             .filter_map(|c| content_row(site, base, report, c))
             .collect(),
         source: NON_RENDERING_SOURCE,
+        grade,
     }
 }
 
@@ -2695,6 +2916,136 @@ async fn mark_intended(
     .await
 }
 
+// ---- repair actions --------------------------------------------------------------------------
+
+/// "Recheck now": queues a manual recheck of the incident, against the daily allowance of the
+/// site owner's plan (the site belongs to the signed-in account: [`load_site`]).
+async fn recheck_incident(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path((site, id)): Path<(String, i64)>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    let limits = PlanLimits::for_plan(user.account.plan);
+    ai_incident::request_recheck(&state.pool, site.id, id, user.id(), &limits).await?;
+    respond(
+        &state,
+        &user,
+        &site,
+        hx,
+        "Recheck queued · results in a minute or two",
+        "hx-replace-url",
+    )
+    .await
+}
+
+impl From<Refusal> for AppError {
+    fn from(r: Refusal) -> AppError {
+        match r {
+            Refusal::NotFound => AppError::IncidentNotFound,
+            Refusal::Conflict(m) => AppError::Refused(m),
+            Refusal::Limit(m) => AppError::Limit(m),
+            Refusal::BadRequest(m) => AppError::BadRequest(m),
+            Refusal::Db(e) => e.into(),
+        }
+    }
+}
+
+fn action_refused(e: IncidentActionError) -> AppError {
+    Refusal::from(e).into()
+}
+
+/// "Accept": the incident stays listed under "Accepted" but no longer counts or alerts.
+async fn accept(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path((site, id)): Path<(String, i64)>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    geo::accept(&state.pool, site.id, id, user.id())
+        .await
+        .map_err(action_refused)?;
+    respond(
+        &state,
+        &user,
+        &site,
+        hx,
+        "Accepted · it no longer counts or alerts",
+        "hx-replace-url",
+    )
+    .await
+}
+
+async fn unaccept(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path((site, id)): Path<(String, i64)>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    geo::unaccept(&state.pool, site.id, id)
+        .await
+        .map_err(action_refused)?;
+    respond(
+        &state,
+        &user,
+        &site,
+        hx,
+        "No longer accepted · it counts and alerts again",
+        "hx-replace-url",
+    )
+    .await
+}
+
+/// The `days` of a snooze form: one of [`SNOOZE_DAYS`].
+fn form_snooze_days(form: &[(String, String)]) -> Result<i64, AppError> {
+    let days = form
+        .iter()
+        .find(|(k, _)| k == "days")
+        .and_then(|(_, v)| v.trim().parse::<i64>().ok());
+    Ok(snooze_days(days)?)
+}
+
+/// "Snooze": not counted and no instant alerts for 1, 7 or 30 days; changes are still logged.
+async fn snooze(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path((site, id)): Path<(String, i64)>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    let days = form_snooze_days(&form)?;
+    let until = OffsetDateTime::now_utc() + time::Duration::days(days);
+    let until = geo::snooze(&state.pool, site.id, id, until)
+        .await
+        .map_err(action_refused)?;
+    respond(
+        &state,
+        &user,
+        &site,
+        hx,
+        &format!("Snoozed until {}", fmt::until(until)),
+        "hx-replace-url",
+    )
+    .await
+}
+
+async fn unsnooze(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path((site, id)): Path<(String, i64)>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    geo::unsnooze(&state.pool, site.id, id)
+        .await
+        .map_err(action_refused)?;
+    respond(&state, &user, &site, hx, "Snooze ended", "hx-replace-url").await
+}
+
 /// Saves the intent and re-evaluates the latest report quietly. Returns what happened to the
 /// open issues, as the toast says it.
 async fn apply_intent(state: &AppState, site: &Site, intent: &Intent) -> Result<String, AppError> {
@@ -2749,6 +3100,36 @@ async fn respond(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn failed_recheck(failure: Option<RecheckFailure>) -> Recheck {
+        let now = OffsetDateTime::now_utc();
+        Recheck {
+            id: 1,
+            site_id: uuid::Uuid::nil(),
+            incident_id: 1,
+            origin: geo::RecheckOrigin::Manual,
+            requested_by: None,
+            status: RecheckStatus::Failed,
+            due_at: now,
+            started_at: Some(now),
+            finished_at: Some(now),
+            outcome: None,
+            failure,
+            observations: None,
+            created_at: now,
+        }
+    }
+
+    #[test]
+    fn a_failed_recheck_says_whether_it_used_the_allowance() {
+        let site = recheck_outcome(&failed_recheck(Some(RecheckFailure::Site))).unwrap();
+        assert!(site.contains("the site didn't answer"), "{site}");
+        assert!(site.contains("counted toward"), "{site}");
+        for f in [Some(RecheckFailure::Ours), None] {
+            let ours = recheck_outcome(&failed_recheck(f)).unwrap();
+            assert!(ours.contains("didn't count toward"), "{ours}");
+        }
+    }
 
     fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
         v.iter()

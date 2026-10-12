@@ -162,4 +162,7 @@ async fn the_jobs_table_has_the_indexes_the_scheduler_reads() {
     let running = def("jobs_running_idx");
     assert!(running.contains("claimed_at"), "{running}");
     assert!(running.contains("running"), "{running}");
+    // The orphaned-recheck sweep finds each recheck's job by its payload.
+    let recheck = def("jobs_recheck_id_idx");
+    assert!(recheck.contains("recheck_id"), "{recheck}");
 }

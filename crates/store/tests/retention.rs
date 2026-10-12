@@ -520,3 +520,75 @@ async fn a_failed_crawls_changes_follow_the_plans_history_window() {
     let again = retention::run(&db.pool, None).await.expect("run retention");
     assert_eq!(again.crawls_trimmed, 0);
 }
+
+/// `n` finished rechecks of the incident created `hours_ago`, oldest first; returns their ids.
+async fn seed_rechecks(
+    pool: &PgPool,
+    site_id: Uuid,
+    incident: i64,
+    n: usize,
+    hours_ago: i32,
+) -> Vec<i64> {
+    let mut ids = Vec::new();
+    for _ in 0..n {
+        ids.push(
+            sqlx::query_scalar(
+                "INSERT INTO ai_rechecks (site_id, incident_id, origin, status, outcome, due_at, \
+                   created_at, finished_at) \
+                 VALUES ($1, $2, 'manual', 'done', 'still_failing', now(), \
+                   now() - make_interval(hours => $3), now() - make_interval(hours => $3)) \
+                 RETURNING id",
+            )
+            .bind(site_id)
+            .bind(incident)
+            .bind(hours_ago)
+            .fetch_one(pool)
+            .await
+            .unwrap(),
+        );
+    }
+    ids
+}
+
+async fn recheck_ids(pool: &PgPool, incident: i64) -> Vec<i64> {
+    sqlx::query_scalar("SELECT id FROM ai_rechecks WHERE incident_id = $1 ORDER BY id")
+        .bind(incident)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_open_incidents_rechecks_are_pruned_to_the_newest_twenty() {
+    let db = TestDb::new().await;
+    let pro = seed_account(&db.pool, "pro").await;
+    let site = seed_site(&db.pool, Some(pro), 0.0).await;
+    let open = seed_incident(&db.pool, site, "a", None).await;
+    let old = seed_rechecks(&db.pool, site, open, 25, 48).await;
+    let queued: i64 = sqlx::query_scalar(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at, created_at) \
+         VALUES ($1, $2, 'followup', now() + interval '1 day', now() - interval '3 days') \
+         RETURNING id",
+    )
+    .bind(site)
+    .bind(open)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    // Another incident whose rechecks are all within the last day: the daily allowance still
+    // counts them, so none goes.
+    let busy = seed_incident(&db.pool, site, "b", None).await;
+    let recent = seed_rechecks(&db.pool, site, busy, 25, 1).await;
+
+    let report = retention::run(&db.pool, None).await.expect("run retention");
+    assert_eq!(report.ai_rechecks_pruned, 5);
+    let mut kept = old[5..].to_vec();
+    kept.push(queued);
+    kept.sort_unstable();
+    assert_eq!(
+        recheck_ids(&db.pool, open).await,
+        kept,
+        "the newest 20 and the queued one"
+    );
+    assert_eq!(recheck_ids(&db.pool, busy).await, recent);
+}

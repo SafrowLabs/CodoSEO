@@ -10,7 +10,8 @@
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{FromRequestParts, Path, Query, State};
+use axum::body::Bytes;
+use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -21,6 +22,7 @@ use serde::Serialize;
 use crate::agent::auth::ApiCaller;
 use crate::agent::error::AgentError;
 use crate::agent::service::{AgentService, Reply};
+use crate::ai_incident;
 use crate::metrics::{self, Surface, Tier};
 use crate::state::AppState;
 
@@ -35,6 +37,23 @@ pub fn routes() -> Router<AppState> {
         .route("/sites/{site}/page", get(page))
         .route("/sites/{site}/changes", get(changes))
         .route("/sites/{site}/ai-access", get(ai_access))
+        .route("/sites/{site}/ai-access/incidents", get(incident_export))
+        .route(
+            "/sites/{site}/ai-access/incidents/{id}/fix",
+            get(incident_fix),
+        )
+        .route(
+            "/sites/{site}/ai-access/incidents/{id}/recheck",
+            post(recheck_incident),
+        )
+        .route(
+            "/sites/{site}/ai-access/incidents/{id}/snooze",
+            post(snooze_incident).delete(unsnooze_incident),
+        )
+        .route(
+            "/sites/{site}/ai-access/incidents/{id}/accept",
+            post(accept_incident).delete(unaccept_incident),
+        )
         .route("/sites/{site}/crawls", post(run_crawl))
         .route("/usage", get(usage))
         .fallback(unknown)
@@ -86,8 +105,19 @@ async fn counted<Q, T: Serialize, F: Future<Output = Reply<T>>>(
     }
 }
 
-/// The reply as a response: the body, or the JSON error, with the rate-limit headers.
+/// The reply as a JSON response: the body, or the JSON error, with the rate-limit headers.
 fn respond<T: Serialize>(status: StatusCode, reply: Reply<T>) -> Response {
+    respond_with(status, reply, |status, value| {
+        (status, Json(value)).into_response()
+    })
+}
+
+/// [`respond`] with another body: `render` makes the success response.
+fn respond_with<T>(
+    status: StatusCode,
+    reply: Reply<T>,
+    render: impl FnOnce(StatusCode, T) -> Response,
+) -> Response {
     metrics::api_request(
         Surface::Rest,
         Tier::Key,
@@ -97,7 +127,7 @@ fn respond<T: Serialize>(status: StatusCode, reply: Reply<T>) -> Response {
             .map_or_else(AgentError::code, |_| "ok"),
     );
     let mut res = match reply.outcome {
-        Ok(value) => (status, Json(value)).into_response(),
+        Ok(value) => render(status, value),
         Err(e) => e.into_response(),
     };
     let h = res.headers_mut();
@@ -200,6 +230,171 @@ async fn ai_access(
         StatusCode::OK,
         AgentService::new(&state).ai_access(&caller, &site).await,
     )
+}
+
+/// An incident id from the path. One that isn't a number matches no incident: the same 404.
+fn incident_id(raw: &str) -> i64 {
+    raw.trim().parse().unwrap_or(-1)
+}
+
+async fn incident_fix(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path((site, id)): Path<(String, String)>,
+) -> Response {
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .incident_fix(&caller, &site, incident_id(&id))
+            .await,
+    )
+}
+
+async fn recheck_incident(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path((site, id)): Path<(String, String)>,
+) -> Response {
+    respond(
+        StatusCode::ACCEPTED,
+        AgentService::new(&state)
+            .recheck_incident(&caller, &site, incident_id(&id))
+            .await,
+    )
+}
+
+/// A JSON request body, parsed but not yet judged, like [`ApiQuery`]: one that doesn't parse
+/// still costs a call. An empty body is `{}`.
+struct ApiBody<T>(Result<T, AgentError>);
+
+impl<T: serde::de::DeserializeOwned> FromRequest<AppState> for ApiBody<T> {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request(req: Request, state: &AppState) -> Result<ApiBody<T>, Self::Rejection> {
+        let bytes = Bytes::from_request(req, state).await.unwrap_or_default();
+        let bytes = if bytes.iter().all(u8::is_ascii_whitespace) {
+            Bytes::from_static(b"{}")
+        } else {
+            bytes
+        };
+        Ok(ApiBody(serde_json::from_slice(&bytes).map_err(|_| {
+            AgentError::BadRequest("The body must be JSON like {\"days\": 7}.".to_owned())
+        })))
+    }
+}
+
+#[derive(Deserialize)]
+struct SnoozeBody {
+    /// Anything but a whole number is refused with the same message as a wrong number.
+    days: Option<serde_json::Value>,
+}
+
+async fn snooze_incident(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path((site, id)): Path<(String, String)>,
+    body: ApiBody<SnoozeBody>,
+) -> Response {
+    let service = AgentService::new(&state);
+    let (svc, who, site) = (&service, &caller, &site);
+    counted(&service, &caller, ApiQuery(body.0), move |b| async move {
+        let days = b.days.and_then(|d| d.as_i64());
+        svc.snooze_incident(who, site, incident_id(&id), days).await
+    })
+    .await
+}
+
+async fn unsnooze_incident(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path((site, id)): Path<(String, String)>,
+) -> Response {
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .unsnooze_incident(&caller, &site, incident_id(&id))
+            .await,
+    )
+}
+
+async fn accept_incident(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path((site, id)): Path<(String, String)>,
+) -> Response {
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .accept_incident(&caller, &site, incident_id(&id))
+            .await,
+    )
+}
+
+async fn unaccept_incident(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path((site, id)): Path<(String, String)>,
+) -> Response {
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .unaccept_incident(&caller, &site, incident_id(&id))
+            .await,
+    )
+}
+
+#[derive(Deserialize)]
+struct ExportQuery {
+    format: Option<String>,
+}
+
+/// The incident export, as JSON (default) or CSV; the same rows as the app's download.
+async fn incident_export(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+    q: ApiQuery<ExportQuery>,
+) -> Response {
+    let service = AgentService::new(&state);
+    let format = match q.0 {
+        Ok(q) => match q.format.as_deref().map(str::trim) {
+            None | Some("") | Some("json") => Ok(false),
+            Some("csv") => Ok(true),
+            Some(_) => Err(AgentError::BadRequest(
+                "format must be csv or json.".to_owned(),
+            )),
+        },
+        Err(e) => Err(e),
+    };
+    match format {
+        Err(e) => respond(
+            StatusCode::OK,
+            service
+                .refuse::<Vec<ai_incident::IncidentRecord>>(&caller, e)
+                .await,
+        ),
+        Ok(csv) => respond_with(
+            StatusCode::OK,
+            service.incident_export(&caller, &site).await,
+            move |status, records| {
+                if !csv {
+                    return (status, Json(records)).into_response();
+                }
+                match ai_incident::to_csv(&records, super::export::text) {
+                    Ok(body) => (
+                        status,
+                        [(
+                            header::CONTENT_TYPE,
+                            HeaderValue::from_static("text/csv; charset=utf-8"),
+                        )],
+                        body,
+                    )
+                        .into_response(),
+                    Err(e) => AgentError::Internal(e).into_response(),
+                }
+            },
+        ),
+    }
 }
 
 async fn run_crawl(

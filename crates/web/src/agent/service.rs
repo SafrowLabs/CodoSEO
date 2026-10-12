@@ -19,17 +19,18 @@ use codoseo_geo::probe::{ProbeReport, Verdict};
 use codoseo_geo::report::AccessReport;
 use codoseo_geo::{Honours, Intent, Stance, registry};
 use codoseo_mcp::cloud::types::{
-    ActiveCrawl, AiAccessInfo, AiBotInfo, AiContentInfo, AiContentPage, AiEngineInfo,
-    AiIncidentInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo, AiProbesInfo, AiRobotsInfo,
-    ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES,
-    PageInfo, PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
+    ActiveCrawl, AiAccessInfo, AiBotInfo, AiContentInfo, AiContentPage, AiEngineInfo, AiFixInfo,
+    AiIncidentInfo, AiLagInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo, AiProbesInfo,
+    AiRecheckInfo, AiRecheckQueued, AiRemedyInfo, AiRobotsInfo, AiSnippetInfo, ChangeInfo,
+    ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES, PageInfo,
+    PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
 use codoseo_store::api_keys::{self, Charge};
 use codoseo_store::crawls::{self, Crawl, CrawlStatus, ManualOutcome, ManualWindow};
 use codoseo_store::explorer::{self, PageFilter};
-use codoseo_store::geo;
+use codoseo_store::geo::{self, Incident, Recheck};
 use codoseo_store::reports;
 use codoseo_store::sites::{self, Site};
 use sqlx::PgPool;
@@ -39,6 +40,7 @@ use uuid::Uuid;
 
 use super::auth::ApiCaller;
 use super::error::AgentError;
+use crate::ai_incident::{self, IncidentRecord, Phase};
 use crate::crawl_policy::{limit_message, manual_priority};
 use crate::state::AppState;
 
@@ -173,6 +175,130 @@ impl<'a> AgentService<'a> {
     pub async fn ai_access(&self, caller: &ApiCaller, site: &str) -> Reply<AiAccessInfo> {
         self.metered(caller, self.ai_access_work(caller, site))
             .await
+    }
+
+    /// The site's open AI access incidents and those resolved in the last 90 days, one record
+    /// each: what the incident export has.
+    pub async fn incident_export(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+    ) -> Reply<Vec<IncidentRecord>> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            Ok(
+                ai_incident::export_records(&self.state.pool, site.id, OffsetDateTime::now_utc())
+                    .await?,
+            )
+        })
+        .await
+    }
+
+    /// What to change for one incident, and the texts to hand to whoever changes it.
+    pub async fn incident_fix(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        incident: i64,
+    ) -> Reply<AiFixInfo> {
+        self.metered(caller, self.incident_fix_work(caller, site, incident))
+            .await
+    }
+
+    /// Queues a recheck of one incident like the Recheck now button: the site owner's plan's
+    /// daily allowance, one at a time per incident.
+    pub async fn recheck_incident(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        incident: i64,
+    ) -> Reply<AiRecheckQueued> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            let limits = PlanLimits::for_plan(caller.account.plan);
+            let q = ai_incident::request_recheck(
+                &self.state.pool,
+                site.id,
+                incident,
+                caller.account.id,
+                &limits,
+            )
+            .await?;
+            Ok(AiRecheckQueued {
+                recheck_id: q.id,
+                due_at: q.due_at,
+            })
+        })
+        .await
+    }
+
+    /// Snoozes an incident for 1, 7 or 30 days. Answers with the incident as it is now.
+    pub async fn snooze_incident(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        incident: i64,
+        days: Option<i64>,
+    ) -> Reply<AiIncidentInfo> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            let days = ai_incident::snooze_days(days)?;
+            let until = OffsetDateTime::now_utc() + time::Duration::days(days);
+            geo::snooze(&self.state.pool, site.id, incident, until)
+                .await
+                .map_err(ai_incident::Refusal::from)?;
+            self.incident_now(site.id, incident).await
+        })
+        .await
+    }
+
+    pub async fn unsnooze_incident(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        incident: i64,
+    ) -> Reply<AiIncidentInfo> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            geo::unsnooze(&self.state.pool, site.id, incident)
+                .await
+                .map_err(ai_incident::Refusal::from)?;
+            self.incident_now(site.id, incident).await
+        })
+        .await
+    }
+
+    /// Accepts an incident as it is: it stays listed but no longer counts or alerts.
+    pub async fn accept_incident(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        incident: i64,
+    ) -> Reply<AiIncidentInfo> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            geo::accept(&self.state.pool, site.id, incident, caller.account.id)
+                .await
+                .map_err(ai_incident::Refusal::from)?;
+            self.incident_now(site.id, incident).await
+        })
+        .await
+    }
+
+    pub async fn unaccept_incident(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        incident: i64,
+    ) -> Reply<AiIncidentInfo> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            geo::unaccept(&self.state.pool, site.id, incident)
+                .await
+                .map_err(ai_incident::Refusal::from)?;
+            self.incident_now(site.id, incident).await
+        })
+        .await
     }
 
     /// Queues a manual crawl exactly as the Run crawl button does: the plan's allowance and
@@ -438,6 +564,55 @@ impl<'a> AgentService<'a> {
         Ok(out)
     }
 
+    /// One incident of the site as it is now, after an action on it.
+    async fn incident_now(&self, site_id: Uuid, id: i64) -> Result<AiIncidentInfo, AgentError> {
+        let pool = &self.state.pool;
+        let i = geo::incident(pool, site_id, id)
+            .await?
+            .ok_or_else(AgentError::incident_not_found)?;
+        let rechecks = geo::latest_rechecks(pool, site_id).await?;
+        Ok(incident_info(
+            i,
+            rechecks.get(&id),
+            OffsetDateTime::now_utc(),
+        ))
+    }
+
+    async fn incident_fix_work(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        id: i64,
+    ) -> Result<AiFixInfo, AgentError> {
+        let pool = &self.state.pool;
+        let site = self.site(caller, site).await?;
+        let i = geo::incident(pool, site.id, id)
+            .await?
+            .ok_or_else(AgentError::incident_not_found)?;
+        let latest = geo::latest_report(pool, site.id).await?;
+        let ev = serde_json::from_value(i.evidence.clone()).unwrap_or_default();
+        let fix = ai_incident::fix(&site.start_url, latest.as_ref().map(|l| &l.report), &i, &ev);
+        let r = &fix.remedy;
+        Ok(AiFixInfo {
+            copy_fix: codoseo_geo::remedy::copy_fix(r),
+            developer_task: codoseo_geo::remedy::developer_task(r, &fix.facts),
+            agent_prompt: codoseo_geo::remedy::agent_prompt(r, &fix.facts),
+            remedy: AiRemedyInfo {
+                title: r.title.clone(),
+                why: r.why.clone(),
+                limits: r.limits.clone(),
+                steps: r.steps.clone(),
+                snippet: r.snippet.as_ref().map(|s| AiSnippetInfo {
+                    label: s.label.clone(),
+                    text: s.text.clone(),
+                }),
+                verify: r.verify.clone(),
+                sources: r.sources.clone(),
+                grade: r.grade,
+            },
+        })
+    }
+
     async fn ai_access_work(
         &self,
         caller: &ApiCaller,
@@ -446,17 +621,13 @@ impl<'a> AgentService<'a> {
         let pool = &self.state.pool;
         let site = self.site(caller, site).await?;
         let open = geo::open_incidents(pool, site.id).await?;
+        let rechecks = geo::latest_rechecks(pool, site.id).await?;
+        let now = OffsetDateTime::now_utc();
         let open_incidents = open
             .into_iter()
-            .map(|i| AiIncidentInfo {
-                id: i.id,
-                kind: i.kind.slug().to_owned(),
-                subject: i.subject,
-                severity: i.severity,
-                title: clip(&i.title, MAX_AI_TEXT),
-                summary: clip(&i.summary, MAX_AI_TEXT),
-                opened_at: i.opened_at,
-                last_seen_at: i.last_seen_at,
+            .map(|i| {
+                let latest = rechecks.get(&i.id);
+                incident_info(i, latest, now)
             })
             .collect();
         let probes_enabled = geo::get_ai_probes(pool, site.id).await?;
@@ -553,6 +724,58 @@ impl<'a> AgentService<'a> {
         }
     }
 }
+
+/// An incident as the API and the MCP tools show it.
+fn incident_info(i: Incident, latest: Option<&Recheck>, now: OffsetDateTime) -> AiIncidentInfo {
+    let ev: codoseo_geo::findings::Evidence =
+        serde_json::from_value(i.evidence.clone()).unwrap_or_default();
+    let phase = ai_incident::phase(&i, latest);
+    let snoozed_until = i.snoozed_until.filter(|t| *t > now);
+    let accepted = i.accepted_at.is_some();
+    let state = ai_incident::state(&i, latest, now);
+    let lag = codoseo_geo::ledger::lag(i.kind, &ev);
+    AiIncidentInfo {
+        id: i.id,
+        kind: i.kind.slug().to_owned(),
+        severity: i.severity,
+        title: clip(&i.title, MAX_AI_TEXT),
+        summary: clip(&i.summary, MAX_AI_TEXT),
+        opened_at: i.opened_at,
+        last_seen_at: i.last_seen_at,
+        first_seen: i.opened_at,
+        grade: codoseo_geo::ledger::for_kind(i.kind).grade,
+        sources: codoseo_geo::ledger::finding_sources(i.kind, &ev),
+        state,
+        snoozed_until,
+        accepted,
+        recovered_at: i.recovered_at,
+        verified_at: i.verified_at,
+        verify_due_at: match phase {
+            Some(Phase::Verifying { due_at }) => Some(due_at),
+            _ => None,
+        },
+        lag: AiLagInfo {
+            hours: lag.hours,
+            source: lag.source.map(str::to_owned),
+        },
+        affected_urls: ai_incident::affected_urls(&ev)
+            .into_iter()
+            .take(MAX_AFFECTED_URLS)
+            .map(|u| clip(&u, MAX_AI_TEXT))
+            .collect(),
+        last_recheck: latest
+            .and_then(ai_incident::last_recheck)
+            .map(|r| AiRecheckInfo {
+                outcome: r.outcome.to_owned(),
+                at: r.at,
+                notes: r.notes,
+            }),
+        subject: i.subject,
+    }
+}
+
+/// Affected URLs listed per incident.
+const MAX_AFFECTED_URLS: usize = 20;
 
 /// How many rows a list call returns: `limit` if given, at most [`MAX_LIMIT`], at least 1.
 pub fn clamp_limit(limit: Option<u32>) -> u32 {

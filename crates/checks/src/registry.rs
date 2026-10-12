@@ -361,3 +361,21 @@ pub static CHECKS: [CheckDef; 44] = [
 pub fn def(id: CheckId) -> &'static CheckDef {
     &CHECKS[id as usize]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The health score reads only check counts, so a check named for AI access would be a way
+    /// for those findings to move it. They live in `ai_incidents` and change rows instead.
+    #[test]
+    fn no_check_is_an_ai_access_or_llms_check() {
+        for id in CheckId::ALL {
+            let slug = id.slug();
+            assert!(
+                !slug.starts_with("ai_") && !slug.starts_with("llms"),
+                "{slug} would feed AI access findings into the health score"
+            );
+        }
+    }
+}

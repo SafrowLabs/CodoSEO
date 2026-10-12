@@ -34,7 +34,8 @@ use serde::de::DeserializeOwned;
 
 use super::anon::AnonBackend;
 use super::types::{
-    AiAccessInfo, ChangesPage, CrawlQueued, IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
+    AiAccessInfo, AiFixInfo, AiIncidentInfo, AiRecheckQueued, ChangesPage, CrawlQueued,
+    IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
 };
 
 /// Who is calling, as the HTTP layer resolved it for one request. The web crate inserts one into
@@ -107,6 +108,49 @@ pub trait CloudBackend: Send + Sync + 'static {
         who: &Self::Keyed,
         site_id: &str,
     ) -> impl Future<Output = Result<CrawlQueued, String>> + Send;
+
+    fn incident_fix(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+        incident_id: i64,
+    ) -> impl Future<Output = Result<AiFixInfo, String>> + Send;
+
+    fn recheck_incident(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+        incident_id: i64,
+    ) -> impl Future<Output = Result<AiRecheckQueued, String>> + Send;
+
+    fn snooze_incident(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+        incident_id: i64,
+        days: i64,
+    ) -> impl Future<Output = Result<AiIncidentInfo, String>> + Send;
+
+    fn unsnooze_incident(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+        incident_id: i64,
+    ) -> impl Future<Output = Result<AiIncidentInfo, String>> + Send;
+
+    fn accept_incident(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+        incident_id: i64,
+    ) -> impl Future<Output = Result<AiIncidentInfo, String>> + Send;
+
+    fn unaccept_incident(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+        incident_id: i64,
+    ) -> impl Future<Output = Result<AiIncidentInfo, String>> + Send;
 
     /// Counts one call for a tool call whose arguments were unusable (not even the right JSON
     /// shape), like any other call, and gives back what to tell the agent: `message`, or the
@@ -230,7 +274,11 @@ impl<B: AnonBackend> ServerHandler for CloudMcp<B> {
                 "CodoSEO monitors websites and checks them for SEO problems. With an API key \
                  (header \"Authorization: Bearer <key>\", created under Settings > API keys) \
                  these tools read your monitored sites: list_sites, then get_site_health, \
-                 get_issue_urls, get_page, get_changes, get_ai_access and run_crawl. Each tool call counts \
+                 get_issue_urls, get_page, get_changes, get_ai_access and run_crawl. To repair an AI \
+                 access incident from get_ai_access: get_fix gives the change to make and texts \
+                 to hand on, recheck_incident checks it again once the change is live, and \
+                 snooze_incident or accept_incident (undone by unsnooze_incident and \
+                 unaccept_incident) set it aside. Each tool call counts \
                  against your daily API allowance. When connected without a key, the tools are \
                  instead a free quick audit of any public site (quick_audit, get_audit, \
                  get_issue_urls) and start_monitoring. The same data is available as a REST API \

@@ -48,6 +48,26 @@ pub fn datetime(at: OffsetDateTime) -> String {
     format!("{}, {:02}:{:02} UTC", date(at), at.hour(), at.minute())
 }
 
+/// [`datetime`], with the year when it is not this year's (`Jan 3 2027, 14:05 UTC`): for the
+/// times a snooze or a verification ends, which can fall in the next year.
+pub fn until(at: OffsetDateTime) -> String {
+    until_from(at, OffsetDateTime::now_utc())
+}
+
+pub fn until_from(at: OffsetDateTime, now: OffsetDateTime) -> String {
+    if at.year() == now.year() {
+        datetime(at)
+    } else {
+        format!(
+            "{} {}, {:02}:{:02} UTC",
+            date(at),
+            at.year(),
+            at.hour(),
+            at.minute()
+        )
+    }
+}
+
 /// `42s`, `1m 42s`, `2h 05m`
 pub fn duration(d: Duration) -> String {
     let s = d.whole_seconds().max(0);
@@ -104,6 +124,15 @@ mod tests {
         assert_eq!(ago_from(now - Duration::hours(3), now), "3h ago");
         assert_eq!(ago_from(now - Duration::days(2), now), "2d ago");
         assert!(ago_from(now - Duration::days(30), now).contains(' '));
+    }
+
+    #[test]
+    fn an_end_time_names_its_year_when_it_is_not_this_one() {
+        let now = time::macros::datetime!(2026-12-20 10:00 UTC);
+        let soon = time::macros::datetime!(2026-12-27 09:05 UTC);
+        let next = time::macros::datetime!(2027-01-03 14:05 UTC);
+        assert_eq!(until_from(soon, now), "Dec 27, 09:05 UTC");
+        assert_eq!(until_from(next, now), "Jan 3 2027, 14:05 UTC");
     }
 
     #[test]

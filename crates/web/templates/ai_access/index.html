@@ -21,6 +21,8 @@
     <h1>AI access</h1>
     <span class="grow"></span>
     <span class="aia-checked" title="{{ v.checked_full }}">Last checked {{ v.checked }} · <a href="{{ base }}/crawls">{{ v.crawl_label }}</a></span>
+    <a class="btn btn-sm" href="{{ base }}/ai-access/incidents.csv" hx-boost="false" download title="Open issues and those resolved in the last 90 days"><svg class="icon"><use href="#i-download"/></svg>Issues CSV</a>
+    <a class="btn btn-sm" href="{{ base }}/ai-access/incidents.json" hx-boost="false" download title="Open issues and those resolved in the last 90 days">JSON</a>
     <a class="btn btn-sm" href="{{ base }}/ai-access/intent"><svg class="icon"><use href="#i-settings"/></svg>Edit intent</a>
   </div>
   <p class="page-sub">Can AI assistants and search engines reach, read and quote your site?</p>
@@ -37,7 +39,7 @@
   </div>
 
   <section class="aia-section" aria-labelledby="aia-issues">
-    <div class="aia-section-head"><h2 id="aia-issues">Open issues</h2><span class="chip">{{ v.incidents.len() }}</span></div>
+    <div class="aia-section-head"><h2 id="aia-issues">Open issues</h2><span class="chip" title="Accepted and snoozed issues aren't counted">{{ v.attention }}</span></div>
     {% if v.incidents.is_empty() %}
     <div class="card">
       <div class="empty aia-clear">
@@ -50,6 +52,14 @@
     <div class="stack aia-issues">
       {% for i in v.incidents %}{% include "ai_access/_incident.html" %}{% endfor %}
     </div>
+    {% endif %}
+    {% if !v.accepted.is_empty() %}
+    <details class="aia-accepted">
+      <summary><svg class="icon chev"><use href="#i-chev"/></svg>Accepted ({{ v.accepted.len() }})<span class="aia-accepted-note">Muted: not counted, no alerts. A crawl that no longer finds one still closes it.</span></summary>
+      <div class="stack aia-issues">
+        {% for i in v.accepted %}{% include "ai_access/_incident.html" %}{% endfor %}
+      </div>
+    </details>
     {% endif %}
   </section>
 
@@ -110,7 +120,7 @@
   <section class="card aia-section aia-content" aria-labelledby="aia-content">
     <div class="card-head">
       <h2 class="card-title" id="aia-content">Content in raw HTML</h2>
-      <span class="card-aside">{% if let Some(n) = v.content.counts %}{{ n }} · {% endif %}as AI crawlers that don't run JavaScript see it · <span class="aia-grade" title="Evidence grade A-: read from your pages' HTML as served, with a published measurement that these AI crawlers don't run JavaScript.">A-</span></span>
+      <span class="card-aside">{% if let Some(n) = v.content.counts %}{{ n }} · {% endif %}as AI crawlers that don't run JavaScript see it · <span class="aia-grade" title="{{ v.content.grade.1 }}">{{ v.content.grade.0 }}</span></span>
     </div>
     {% if let Some((title, text)) = v.content.empty %}
     <div class="aia-none"><b>{{ title }}</b><p>{{ text }}</p></div>

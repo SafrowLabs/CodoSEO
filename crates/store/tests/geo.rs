@@ -14,7 +14,9 @@ use codoseo_core::report::{CrawlReport, CrawlSummary};
 use codoseo_core::url::url_hash;
 use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{FindingKind, evaluated_kinds};
+use codoseo_geo::incident::Before;
 use codoseo_geo::report::{build_report, important_urls};
+use codoseo_geo::robots::GroupMatch;
 use codoseo_geo::{Intent, Purpose, Stance};
 use codoseo_store::alert_rules::{self, ALL_KINDS, DEFAULT_INSTANT};
 use codoseo_store::finalize::finalize;
@@ -265,6 +267,44 @@ async fn blocking_a_search_bot_opens_an_incident_and_removing_the_rule_resolves_
             .map(|i| i.id),
         Some(resolved[0].id)
     );
+}
+
+#[tokio::test]
+async fn an_incident_opened_by_a_later_crawl_keeps_what_the_earlier_report_held() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    let before: Before =
+        serde_json::from_value(open[0].before.clone().expect("before stored")).unwrap();
+    assert_eq!(before.bots.len(), 1);
+    let bot = &before.bots[0];
+    assert_eq!(bot.token, "OAI-SearchBot");
+    assert_eq!(bot.group, GroupMatch::Wildcard);
+    // The home page was allowed by `User-agent: *` / `Allow: /` on line 2.
+    assert_eq!(bot.paths[0].path, "/");
+    assert!(bot.paths[0].allowed);
+    assert_eq!(
+        bot.paths[0].rule.as_ref().map(|r| (r.line, r.allow)),
+        Some((2, true))
+    );
+    assert!(bot.paths.iter().all(|p| p.allowed));
+
+    // The next crawl updates the incident and leaves `before` as it was.
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let again = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(again[0].before, open[0].before);
+}
+
+#[tokio::test]
+async fn a_baseline_incident_has_nothing_before_it() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open[0].before, None);
 }
 
 #[tokio::test]
@@ -1630,5 +1670,1874 @@ async fn shell_pages_that_fail_one_crawl_keep_content_missing_open_without_a_cha
         open_of(&db.pool, site, FindingKind::ContentMissing)
             .await
             .is_empty()
+    );
+}
+
+const BLOCK_OAI_TXT: &str = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n";
+
+/// A site with one open incident.
+async fn site_with_incident(pool: &PgPool) -> (Uuid, i64) {
+    let site = make_site(pool, "example.com").await;
+    full_crawl(pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(pool, site, 200, BLOCK_OAI_TXT, None).await;
+    let open = geo::open_incidents(pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    (site, open[0].id)
+}
+
+#[tokio::test]
+async fn a_new_incident_has_none_of_the_repair_fields() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    // Only `before` is written when it opens: what the earlier crawl saw.
+    assert!(i.before.is_some());
+    assert_eq!(i.accepted_at, None);
+    assert_eq!(i.accepted_by, None);
+    assert_eq!(i.snoozed_until, None);
+    assert_eq!(i.recovered_at, None);
+    assert_eq!(i.verified_at, None);
+    assert_eq!(i.resolved_by, None);
+}
+
+#[tokio::test]
+async fn the_repair_fields_of_an_incident_round_trip() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (email, email_canonical) VALUES ('o@example.com', 'o@example.com') \
+         RETURNING id",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE ai_incidents SET before = '{\"rule\": \"Disallow: /\"}', accepted_at = now(), \
+         accepted_by = $2, snoozed_until = now() + interval '1 day', recovered_at = now(), \
+         verified_at = now(), resolved_by = 'recheck' WHERE id = $1",
+    )
+    .bind(id)
+    .bind(account)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.before, Some(serde_json::json!({"rule": "Disallow: /"})));
+    assert!(i.accepted_at.is_some());
+    assert_eq!(i.accepted_by, Some(account));
+    assert!(i.snoozed_until.is_some());
+    assert!(i.recovered_at.is_some());
+    assert!(i.verified_at.is_some());
+    assert_eq!(i.resolved_by.as_deref(), Some("recheck"));
+    // The listings read the same columns.
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open[0].resolved_by.as_deref(), Some("recheck"));
+
+    // Deleting the account clears the reference but keeps the incident.
+    sqlx::query("DELETE FROM accounts WHERE id = $1")
+        .bind(account)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.accepted_by, None);
+    assert!(i.accepted_at.is_some());
+}
+
+#[tokio::test]
+async fn resolved_by_only_takes_the_three_known_values() {
+    let db = TestDb::new().await;
+    let (_, id) = site_with_incident(&db.pool).await;
+    for ok in ["crawl", "recheck", "intent"] {
+        sqlx::query("UPDATE ai_incidents SET resolved_by = $2 WHERE id = $1")
+            .bind(id)
+            .bind(ok)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+    }
+    let bad = sqlx::query("UPDATE ai_incidents SET resolved_by = 'magic' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await;
+    assert!(bad.is_err());
+}
+
+async fn insert_recheck(pool: &PgPool, site: Uuid, incident: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
+         VALUES ($1, $2, 'followup', now() + interval '10 minutes') RETURNING id",
+    )
+    .bind(site)
+    .bind(incident)
+    .fetch_one(pool)
+    .await
+}
+
+#[tokio::test]
+async fn a_recheck_row_loads_with_its_defaults_and_values() {
+    use geo::{RecheckOrigin, RecheckOutcome, RecheckStatus};
+
+    let db = TestDb::new().await;
+    let (site, incident) = site_with_incident(&db.pool).await;
+    let id = insert_recheck(&db.pool, site, incident).await.unwrap();
+    let r = geo::recheck(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!((r.site_id, r.incident_id), (site, incident));
+    assert_eq!(r.origin, RecheckOrigin::Followup);
+    assert_eq!(r.status, RecheckStatus::Queued);
+    assert_eq!(
+        (r.requested_by, r.outcome, r.observations),
+        (None, None, None)
+    );
+    assert!(r.started_at.is_none() && r.finished_at.is_none());
+    assert!(r.due_at > r.created_at);
+    assert!(
+        geo::recheck(&db.pool, Uuid::new_v4(), id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    sqlx::query(
+        "UPDATE ai_rechecks SET status = 'done', outcome = 'still_failing', \
+         observations = '{\"probes\": []}', started_at = now(), finished_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let r = geo::recheck(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(r.status, RecheckStatus::Done);
+    assert_eq!(r.outcome, Some(RecheckOutcome::StillFailing));
+    assert_eq!(r.observations, Some(serde_json::json!({"probes": []})));
+}
+
+#[tokio::test]
+async fn only_one_recheck_per_incident_is_queued_or_running() {
+    let db = TestDb::new().await;
+    let (site, incident) = site_with_incident(&db.pool).await;
+    let first = insert_recheck(&db.pool, site, incident).await.unwrap();
+    assert!(insert_recheck(&db.pool, site, incident).await.is_err());
+    sqlx::query("UPDATE ai_rechecks SET status = 'running' WHERE id = $1")
+        .bind(first)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert!(insert_recheck(&db.pool, site, incident).await.is_err());
+    // Once it is over, another can be queued.
+    sqlx::query("UPDATE ai_rechecks SET status = 'superseded' WHERE id = $1")
+        .bind(first)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    insert_recheck(&db.pool, site, incident).await.unwrap();
+}
+
+#[tokio::test]
+async fn recheck_values_are_checked_and_go_with_their_incident_and_site() {
+    let db = TestDb::new().await;
+    let (site, incident) = site_with_incident(&db.pool).await;
+    for (column, bad) in [
+        ("origin", "robot"),
+        ("status", "waiting"),
+        ("outcome", "fine"),
+    ] {
+        let id = insert_recheck(&db.pool, site, incident).await;
+        let id = match id {
+            Ok(id) => id,
+            Err(_) => {
+                sqlx::query("DELETE FROM ai_rechecks")
+                    .execute(&db.pool)
+                    .await
+                    .unwrap();
+                insert_recheck(&db.pool, site, incident).await.unwrap()
+            }
+        };
+        let bad = sqlx::query(&format!(
+            "UPDATE ai_rechecks SET {column} = $2 WHERE id = $1"
+        ))
+        .bind(id)
+        .bind(bad)
+        .execute(&db.pool)
+        .await;
+        assert!(bad.is_err(), "{column} accepted a bad value");
+    }
+    sqlx::query("DELETE FROM ai_incidents WHERE id = $1")
+        .bind(incident)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_rechecks")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "deleting the incident deletes its rechecks");
+
+    let (site2, incident2) = {
+        let site = make_site(&db.pool, "other.example").await;
+        full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+        full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+        (
+            site,
+            geo::open_incidents(&db.pool, site).await.unwrap()[0].id,
+        )
+    };
+    insert_recheck(&db.pool, site2, incident2).await.unwrap();
+    sqlx::query("DELETE FROM sites WHERE id = $1")
+        .bind(site2)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_rechecks")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "deleting the site deletes its rechecks");
+}
+
+// ---- Accept and snooze (B3.6) ------------------------------------------------------------------
+
+use codoseo_store::geo::IncidentActionError;
+use time::{Duration as TimeDuration, OffsetDateTime};
+
+async fn make_account(pool: &PgPool, email: &str) -> Uuid {
+    sqlx::query_scalar("INSERT INTO accounts (email, email_canonical) VALUES ($1, $1) RETURNING id")
+        .bind(email)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// The crawl's change rows as (kind, alerted).
+async fn changes_alerted(pool: &PgPool, crawl: Uuid) -> Vec<(String, bool)> {
+    sqlx::query_as(
+        "SELECT kind::text, alerted_at IS NOT NULL FROM changes WHERE crawl_id = $1 ORDER BY id",
+    )
+    .bind(crawl)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// A site whose one open incident is a quiet `fetch_blocked` for OAI-SearchBot.
+async fn site_with_fetch_blocked(pool: &PgPool) -> (Uuid, i64) {
+    let site = make_site(pool, "example.com").await;
+    probed_crawl(pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+    let open = fetch_blocked_open(pool, site).await;
+    assert_eq!(open.len(), 1);
+    (site, open[0].id)
+}
+
+#[tokio::test]
+async fn an_accepted_incident_stays_listed_but_is_not_counted_and_writes_no_changes() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 0));
+
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.accepted_at.is_some());
+    assert_eq!(i.accepted_by, Some(owner));
+    let accepted_at = i.accepted_at;
+    // Accepting again keeps the first time.
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+    assert_eq!(
+        geo::incident(&db.pool, site, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .accepted_at,
+        accepted_at
+    );
+    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
+
+    // Widened: same incident, no change row, no alert job, still quiet.
+    let widened = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    let open = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].id, id);
+    assert!(open[0].evidence["probes"].as_array().unwrap().len() == 2);
+    assert!(change_kinds(&db.pool, widened).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, widened).await, 0);
+
+    // Resolved by a crawl: resolved quietly, by the crawl.
+    let clear = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", Verdict::Same),
+            ("Claude-SearchBot", Verdict::Same),
+        ],
+    )
+    .await;
+    assert!(fetch_blocked_open(&db.pool, site).await.is_empty());
+    assert!(change_kinds(&db.pool, clear).await.is_empty());
+    let r = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(r.resolution.as_deref(), Some("fixed"));
+    assert_eq!(r.resolved_by.as_deref(), Some("crawl"));
+}
+
+#[tokio::test]
+async fn unaccepting_makes_the_incident_count_and_announce_again() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+    geo::unaccept(&db.pool, site, id).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!((i.accepted_at, i.accepted_by), (None, None));
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 0));
+    let widened = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    assert_eq!(
+        changes_alerted(&db.pool, widened).await,
+        vec![("ai_fetch_blocked".to_owned(), false)]
+    );
+}
+
+#[tokio::test]
+async fn only_kinds_without_an_intent_path_can_be_accepted() {
+    let db = TestDb::new().await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    // bots_blocked: "Mark intended" is its path.
+    let (site, id) = site_with_incident(&db.pool).await;
+    assert!(matches!(
+        geo::accept(&db.pool, site, id, owner).await,
+        Err(IncidentActionError::NotAcceptable(FindingKind::BotsBlocked))
+    ));
+    // robots_unavailable: snooze only.
+    let crawl = full_crawl(&db.pool, site, 503, "", None).await;
+    let robots = open_of(&db.pool, site, FindingKind::RobotsUnavailable).await;
+    assert_eq!(robots.len(), 1, "{crawl}");
+    assert!(matches!(
+        geo::accept(&db.pool, site, robots[0].id, owner).await,
+        Err(IncidentActionError::NotAcceptable(
+            FindingKind::RobotsUnavailable
+        ))
+    ));
+    let until = OffsetDateTime::now_utc() + TimeDuration::days(2);
+    geo::snooze(&db.pool, site, robots[0].id, until)
+        .await
+        .unwrap();
+    assert!(
+        geo::incident(&db.pool, site, robots[0].id)
+            .await
+            .unwrap()
+            .unwrap()
+            .accepted_at
+            .is_none()
+    );
+    // Another site's id, an unknown id.
+    let other = make_site(&db.pool, "other.example").await;
+    assert!(matches!(
+        geo::snooze(&db.pool, other, robots[0].id, until).await,
+        Err(IncidentActionError::NotFound)
+    ));
+    assert!(matches!(
+        geo::unaccept(&db.pool, site, 999_999).await,
+        Err(IncidentActionError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn a_resolved_incident_can_be_neither_accepted_nor_snoozed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    probed_crawl(&db.pool, site, &[("OAI-SearchBot", Verdict::Same)]).await;
+    let until = OffsetDateTime::now_utc() + TimeDuration::days(2);
+    assert!(matches!(
+        geo::accept(&db.pool, site, id, owner).await,
+        Err(IncidentActionError::Resolved)
+    ));
+    assert!(matches!(
+        geo::snooze(&db.pool, site, id, until).await,
+        Err(IncidentActionError::Resolved)
+    ));
+    assert!(matches!(
+        geo::unsnooze(&db.pool, site, id).await,
+        Err(IncidentActionError::Resolved)
+    ));
+}
+
+#[tokio::test]
+async fn a_snooze_must_end_in_the_future_and_lasts_at_most_90_days() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let past = OffsetDateTime::now_utc() - TimeDuration::minutes(1);
+    assert!(matches!(
+        geo::snooze(&db.pool, site, id, past).await,
+        Err(IncidentActionError::SnoozeInPast)
+    ));
+    let far = OffsetDateTime::now_utc() + TimeDuration::days(400);
+    let until = geo::snooze(&db.pool, site, id, far).await.unwrap();
+    assert!(until <= OffsetDateTime::now_utc() + TimeDuration::days(90));
+    assert!(until > OffsetDateTime::now_utc() + TimeDuration::days(89));
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.snoozed_until, Some(until));
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
+
+    geo::unsnooze(&db.pool, site, id).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.snoozed_until, None);
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 1));
+}
+
+#[tokio::test]
+async fn a_snoozed_incident_still_writes_its_changes_but_alerts_nobody() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let until = OffsetDateTime::now_utc() + TimeDuration::days(7);
+    geo::snooze(&db.pool, site, id, until).await.unwrap();
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
+
+    // Escalated while snoozed: the change is on record (changes page, digest) but already
+    // marked alerted, so no instant alert goes out.
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), true)]
+    );
+    assert!(
+        alert_rules::unalerted_changes(&db.pool, worse)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 0);
+    assert!(
+        !quiet_of(&db.pool, site, "bots_blocked").await,
+        "announced on the record"
+    );
+
+    // Resolved while snoozed: the same.
+    let fixed = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, fixed).await,
+        vec![("ai_issue_resolved".to_owned(), true)]
+    );
+    assert_eq!(alert_jobs(&db.pool, fixed).await, 0);
+}
+
+#[tokio::test]
+async fn an_expired_snooze_alerts_again() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    geo::snooze(
+        &db.pool,
+        site,
+        id,
+        OffsetDateTime::now_utc() + TimeDuration::days(1),
+    )
+    .await
+    .unwrap();
+    // Time passes.
+    sqlx::query(
+        "UPDATE ai_incidents SET snoozed_until = now() - interval '1 minute' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 0));
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), false)]
+    );
+    assert_eq!(
+        alert_rules::unalerted_changes(&db.pool, worse)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 1);
+}
+
+#[tokio::test]
+async fn a_crawl_that_still_finds_the_problem_clears_its_recovery() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.recovered_at, None);
+    assert!(i.resolved_at.is_none());
+}
+
+#[tokio::test]
+async fn resolved_by_says_whether_a_crawl_or_the_intent_resolved_it() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolved_by.as_deref(), Some("crawl"));
+
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let intent = Intent {
+        bots: [("OAI-SearchBot".to_owned(), Stance::Any)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    geo::reevaluate_quietly(&db.pool, site).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolution.as_deref(), Some("intent"));
+    assert_eq!(i.resolved_by.as_deref(), Some("intent"));
+}
+
+// ---- Rechecks (B3.8) ---------------------------------------------------------------------------
+
+use codoseo_core::plan::{Plan, PlanLimits};
+use codoseo_geo::recheck::{self as rc, Observations};
+use codoseo_geo::report::AccessReport;
+use codoseo_store::geo::{RecheckError, RecheckOrigin, RecheckOutcome, RecheckStatus};
+
+fn limits_with(cap: Option<u16>) -> PlanLimits {
+    PlanLimits {
+        ai_rechecks_per_day: cap,
+        ..PlanLimits::for_plan(Plan::Pro)
+    }
+}
+
+/// What a recheck of the incident would conclude if robots.txt now read `robots_body`: the
+/// stored report with it laid over, and the kinds it judged.
+async fn rechecked_robots(
+    pool: &PgPool,
+    site: Uuid,
+    incident: i64,
+    robots_body: &str,
+) -> (AccessReport, Vec<FindingKind>) {
+    let i = geo::incident(pool, site, incident).await.unwrap().unwrap();
+    let stored = geo::latest_report(pool, site)
+        .await
+        .unwrap()
+        .unwrap()
+        .report;
+    let ev = serde_json::from_value(i.evidence).unwrap();
+    let plan = rc::plan(i.kind, &i.subject, &ev, &stored, 3);
+    let obs = Observations {
+        robots: Some(RobotsFile {
+            status: 200,
+            body: robots_body.to_owned(),
+            hash: 3,
+        }),
+        ..Observations::default()
+    };
+    rc::overlay(&stored, &obs, &plan)
+}
+
+/// The site's rechecks of the incident, oldest first.
+async fn rechecks_of(pool: &PgPool, site: Uuid, incident: i64) -> Vec<geo::Recheck> {
+    let ids: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM ai_rechecks WHERE incident_id = $1 ORDER BY id")
+            .bind(incident)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let mut out = Vec::new();
+    for id in ids {
+        out.push(geo::recheck(pool, site, id).await.unwrap().unwrap());
+    }
+    out
+}
+
+/// The `ai_recheck` jobs as (recheck_id, run_after, max_attempts).
+async fn recheck_jobs(pool: &PgPool) -> Vec<(i64, OffsetDateTime, i16)> {
+    sqlx::query_as(
+        "SELECT (payload->>'recheck_id')::bigint, run_after, max_attempts FROM jobs \
+         WHERE kind = 'ai_recheck' ORDER BY run_after",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// Asks for a manual recheck and applies a clean robots.txt to it: the incident recovers and a
+/// follow-up is queued. Returns the follow-up's id.
+async fn recover(pool: &PgPool, site: Uuid, incident: i64, owner: Uuid) -> i64 {
+    let queued = geo::request_recheck(pool, site, incident, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(pool, queued.id).await.unwrap().unwrap();
+    let (report, kinds) = rechecked_robots(pool, site, incident, ALLOW_ALL).await;
+    let outcome = geo::apply_recheck(pool, queued.id, &report, &kinds, None)
+        .await
+        .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::Clean));
+    let all = rechecks_of(pool, site, incident).await;
+    let followup = all.last().unwrap();
+    assert_eq!(followup.origin, RecheckOrigin::Followup);
+    assert_eq!(followup.status, RecheckStatus::Queued);
+    followup.id
+}
+
+#[tokio::test]
+async fn a_recheck_is_queued_once_with_its_job() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(3)))
+        .await
+        .unwrap();
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.origin, RecheckOrigin::Manual);
+    assert_eq!(r.status, RecheckStatus::Queued);
+    assert_eq!(r.requested_by, Some(owner));
+    assert_eq!(r.due_at, queued.due_at);
+    assert_eq!(
+        recheck_jobs(&db.pool).await,
+        vec![(queued.id, queued.due_at, 1)]
+    );
+
+    let started = geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(started.status, RecheckStatus::Running);
+    assert!(started.started_at.is_some());
+    assert!(
+        geo::start_recheck(&db.pool, queued.id)
+            .await
+            .unwrap()
+            .is_none(),
+        "only a queued recheck starts"
+    );
+}
+
+#[tokio::test]
+async fn a_repair_is_resolved_in_two_steps_by_rechecks() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let opened_by = geo::incident(&db.pool, site, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .opened_crawl_id
+        .unwrap();
+    let alerts_before = alert_jobs(&db.pool, opened_by).await;
+
+    // Step one: the manual recheck sees it fixed. Recovered, not resolved.
+    let followup = recover(&db.pool, site, id, owner).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.recovered_at.is_some());
+    assert!(i.resolved_at.is_none());
+    let manual = &rechecks_of(&db.pool, site, id).await[0];
+    assert_eq!(manual.status, RecheckStatus::Done);
+    assert_eq!(manual.outcome, Some(RecheckOutcome::Clean));
+    assert!(manual.finished_at.is_some());
+    // The follow-up waits for OpenAI's 24 hours.
+    let f = geo::recheck(&db.pool, site, followup)
+        .await
+        .unwrap()
+        .unwrap();
+    let wait = f.due_at - f.created_at;
+    assert!(
+        wait >= TimeDuration::hours(24) && wait < TimeDuration::hours(25),
+        "{wait}"
+    );
+    assert_eq!(f.requested_by, None);
+    let jobs = recheck_jobs(&db.pool).await;
+    assert_eq!(jobs.last().unwrap(), &(followup, f.due_at, 1));
+    // Nothing announced yet.
+    assert_eq!(change_kinds(&db.pool, opened_by).await.len(), 1);
+
+    // Step two: the follow-up still sees it fixed. Resolved by the recheck, and announced.
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    let outcome = geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+        .await
+        .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::Clean));
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.resolved_at.is_some());
+    assert!(i.verified_at.is_some());
+    assert_eq!(i.resolution.as_deref(), Some("fixed"));
+    assert_eq!(i.resolved_by.as_deref(), Some("recheck"));
+    assert_eq!(
+        changes_alerted(&db.pool, opened_by).await,
+        vec![
+            ("ai_bot_blocked".to_owned(), false),
+            ("ai_issue_resolved".to_owned(), false)
+        ]
+    );
+    assert_eq!(alert_jobs(&db.pool, opened_by).await, alerts_before + 1);
+    let f = geo::recheck(&db.pool, site, followup)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (f.status, f.outcome),
+        (RecheckStatus::Done, Some(RecheckOutcome::Clean))
+    );
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn a_crawl_that_still_finds_it_makes_the_follow_up_a_no_op() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let followup = recover(&db.pool, site, id, owner).await;
+
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    assert_eq!(
+        geo::incident(&db.pool, site, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .recovered_at,
+        None
+    );
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    let outcome = geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+        .await
+        .unwrap();
+    assert_eq!(outcome, None);
+    let f = geo::recheck(&db.pool, site, followup)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(f.status, RecheckStatus::Superseded);
+    assert_eq!(f.outcome, None);
+    assert!(f.finished_at.is_some());
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.resolved_at.is_none());
+
+    // And a follow-up for an incident a crawl resolved meanwhile is a no-op too.
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let followup = recover(&db.pool, site, id, owner).await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    assert_eq!(
+        geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+            .await
+            .unwrap(),
+        None
+    );
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolved_by.as_deref(), Some("crawl"));
+}
+
+#[tokio::test]
+async fn a_recheck_that_still_sees_it_refreshes_the_incident_but_keeps_its_crawl() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let (crawl_before, seen_before) = last_seen(&db.pool, site, "bots_blocked").await;
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, BLOCK_OAI_TXT).await;
+    let outcome = geo::apply_recheck(
+        &db.pool,
+        queued.id,
+        &report,
+        &kinds,
+        Some(&serde_json::json!({"robots": 200})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::StillFailing));
+    let (crawl_after, seen_after) = last_seen(&db.pool, site, "bots_blocked").await;
+    assert_eq!(crawl_after, crawl_before);
+    assert!(seen_after > seen_before);
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.recovered_at, None);
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.observations, Some(serde_json::json!({"robots": 200})));
+    // No follow-up for something still failing.
+    assert_eq!(rechecks_of(&db.pool, site, id).await.len(), 1);
+}
+
+#[tokio::test]
+async fn an_inconclusive_recheck_changes_nothing() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let before = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    let (report, _) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    let outcome = geo::apply_recheck(&db.pool, queued.id, &report, &[], None)
+        .await
+        .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::Inconclusive));
+    let after = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(after.last_seen_at, before.last_seen_at);
+    assert_eq!(after.recovered_at, None);
+    assert!(after.resolved_at.is_none());
+    assert_eq!(rechecks_of(&db.pool, site, id).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_recheck_never_opens_an_incident() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    // robots.txt now also blocks ChatGPT-User: a user_fetch finding no incident has.
+    let both = format!("{BLOCK_OAI_TXT}\nUser-agent: ChatGPT-User\nDisallow: /\n");
+    let (report, _) = rechecked_robots(&db.pool, site, id, &both).await;
+    let found = codoseo_geo::findings::findings(&report, &Intent::default());
+    assert!(
+        found
+            .iter()
+            .any(|f| f.kind == FindingKind::BotsBlocked && f.subject == "user_fetch")
+    );
+    let outcome = geo::apply_recheck(
+        &db.pool,
+        queued.id,
+        &report,
+        &[FindingKind::BotsBlocked, FindingKind::RobotsUnavailable],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::StillFailing));
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].id, id);
+}
+
+#[tokio::test]
+async fn a_quiet_incidents_verified_resolution_writes_no_change() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    assert!(quiet_of(&db.pool, site, "bots_blocked").await);
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let followup = recover(&db.pool, site, id, owner).await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+        .await
+        .unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolved_by.as_deref(), Some("recheck"));
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM changes WHERE site_id = $1")
+        .bind(site)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(total, 0);
+}
+
+#[tokio::test]
+async fn a_snoozed_incidents_verified_resolution_is_recorded_already_alerted() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let opened_by = geo::incident(&db.pool, site, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .opened_crawl_id
+        .unwrap();
+    let alerts_before = alert_jobs(&db.pool, opened_by).await;
+    geo::snooze(
+        &db.pool,
+        site,
+        id,
+        OffsetDateTime::now_utc() + TimeDuration::days(3),
+    )
+    .await
+    .unwrap();
+    let followup = recover(&db.pool, site, id, owner).await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        changes_alerted(&db.pool, opened_by).await,
+        vec![
+            ("ai_bot_blocked".to_owned(), false),
+            ("ai_issue_resolved".to_owned(), true)
+        ]
+    );
+    assert_eq!(alert_jobs(&db.pool, opened_by).await, alerts_before);
+}
+
+#[tokio::test]
+async fn a_recheck_is_refused_while_busy_cooling_down_crawling_or_over_the_cap() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let one = limits_with(Some(1));
+
+    // Unknown, another site's, resolved.
+    let other = make_site(&db.pool, "other.example").await;
+    assert!(matches!(
+        geo::request_recheck(&db.pool, other, id, owner, &one).await,
+        Err(RecheckError::NotFound)
+    ));
+
+    let first = geo::request_recheck(&db.pool, site, id, owner, &one)
+        .await
+        .unwrap();
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(None)).await,
+        Err(RecheckError::Busy)
+    ));
+    // Done, but asked for a minute ago.
+    sqlx::query(
+        "UPDATE ai_rechecks SET status = 'done', created_at = now() - interval '1 minute' \
+         WHERE id = $1",
+    )
+    .bind(first.id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    match geo::request_recheck(&db.pool, site, id, owner, &limits_with(None)).await {
+        Err(RecheckError::Cooldown(until)) => {
+            let left = until - OffsetDateTime::now_utc();
+            assert!(
+                left > TimeDuration::minutes(8) && left <= TimeDuration::minutes(9),
+                "{left}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    // Eleven minutes on: no cooldown, but one a day is used up until a day after the first.
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '11 minutes' WHERE id = $1")
+        .bind(first.id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    match geo::request_recheck(&db.pool, site, id, owner, &one).await {
+        Err(RecheckError::LimitReached(Some(frees_at))) => {
+            let left = frees_at - OffsetDateTime::now_utc();
+            assert!(
+                left > TimeDuration::hours(23) && left < TimeDuration::hours(24),
+                "{left}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(0))).await,
+        Err(RecheckError::LimitReached(None))
+    ));
+    geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(2)))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET status = 'done', created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    // A crawl queued for the site: it will tell soon enough.
+    let crawl = make_crawl(&db.pool, site, "manual", "queued").await;
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(None)).await,
+        Err(RecheckError::CrawlActive)
+    ));
+    sqlx::query("UPDATE crawls SET status = 'failed' WHERE id = $1")
+        .bind(crawl)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(None)).await,
+        Err(RecheckError::Resolved)
+    ));
+}
+
+#[tokio::test]
+async fn follow_ups_do_not_count_toward_the_daily_cap() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    for _ in 0..3 {
+        sqlx::query(
+            "INSERT INTO ai_rechecks (site_id, incident_id, origin, status, due_at, created_at) \
+             VALUES ($1, $2, 'followup', 'done', now(), now() - interval '1 hour')",
+        )
+        .bind(site)
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+    // Manual ones older than a day don't count either.
+    sqlx::query(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, status, due_at, created_at) \
+         VALUES ($1, $2, 'manual', 'done', now(), now() - interval '25 hours')",
+    )
+    .bind(site)
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(1)))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn superseded_and_failed_rechecks_do_not_use_the_daily_allowance() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    // A crawl took one over, another never ran on our side: neither costs the owner a slot.
+    for status in ["superseded", "failed"] {
+        sqlx::query(
+            "INSERT INTO ai_rechecks (site_id, incident_id, origin, status, due_at, created_at) \
+             VALUES ($1, $2, 'manual', $3, now(), now() - interval '1 hour')",
+        )
+        .bind(site)
+        .bind(id)
+        .bind(status)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+    geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(1)))
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE ai_rechecks SET created_at = now() - interval '11 minutes' WHERE status = 'queued'",
+    )
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET status = 'done' WHERE status = 'queued'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    // The one that ran does count.
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(1))).await,
+        Err(RecheckError::LimitReached(Some(_)))
+    ));
+}
+
+#[tokio::test]
+async fn a_superseded_recheck_still_cools_down() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(5)))
+        .await
+        .unwrap();
+    assert!(geo::supersede_recheck(&db.pool, queued.id).await.unwrap());
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(5))).await,
+        Err(RecheckError::Cooldown(_))
+    ));
+}
+
+#[tokio::test]
+async fn the_latest_recheck_of_each_open_incident_is_listed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    assert!(
+        geo::latest_rechecks(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let first = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::fail_recheck(&db.pool, first.id, geo::RecheckFailure::Ours)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '11 minutes'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let second = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    let latest = geo::latest_rechecks(&db.pool, site).await.unwrap();
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[&id].id, second.id);
+    assert_eq!(latest[&id].status, RecheckStatus::Queued);
+    // Another site sees none of them.
+    let other = make_site(&db.pool, "other.example").await;
+    assert!(
+        geo::latest_rechecks(&db.pool, other)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn the_daily_cap_counts_every_site_of_the_account() {
+    let db = TestDb::new().await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let (a, ia) = site_with_incident(&db.pool).await;
+    let b = make_site(&db.pool, "other.example").await;
+    full_crawl(&db.pool, b, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, b, 200, BLOCK_OAI_TXT, None).await;
+    let ib = geo::open_incidents(&db.pool, b).await.unwrap()[0].id;
+    sqlx::query("UPDATE sites SET account_id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    geo::request_recheck(&db.pool, a, ia, owner, &limits_with(Some(1)))
+        .await
+        .unwrap();
+    assert!(matches!(
+        geo::request_recheck(&db.pool, b, ib, owner, &limits_with(Some(1))).await,
+        Err(RecheckError::LimitReached(Some(_)))
+    ));
+}
+
+#[tokio::test]
+async fn a_failed_recheck_is_marked_and_frees_the_incident() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, queued.id).await.unwrap();
+    assert!(
+        geo::fail_recheck(&db.pool, queued.id, geo::RecheckFailure::Ours)
+            .await
+            .unwrap()
+    );
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.status, RecheckStatus::Failed);
+    assert!(r.finished_at.is_some());
+    assert!(
+        !geo::fail_recheck(&db.pool, queued.id, geo::RecheckFailure::Ours)
+            .await
+            .unwrap()
+    );
+    // Not busy any more (the cooldown still applies).
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(None)).await,
+        Err(RecheckError::Cooldown(_))
+    ));
+}
+
+#[tokio::test]
+async fn an_inconclusive_follow_up_queues_the_next_six_hours_on_three_times_in_a_row() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let mut followup = recover(&db.pool, site, id, owner).await;
+    let (report, _) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+
+    for round in 1..=geo::MAX_INCONCLUSIVE_FOLLOWUPS {
+        geo::start_recheck(&db.pool, followup)
+            .await
+            .unwrap()
+            .unwrap();
+        let outcome = geo::apply_recheck(&db.pool, followup, &report, &[], None)
+            .await
+            .unwrap();
+        assert_eq!(outcome, Some(RecheckOutcome::Inconclusive));
+        let all = rechecks_of(&db.pool, site, id).await;
+        let last = all.last().unwrap();
+        if round < geo::MAX_INCONCLUSIVE_FOLLOWUPS {
+            assert_ne!(last.id, followup, "round {round} queues another");
+            assert_eq!(last.origin, RecheckOrigin::Followup);
+            assert_eq!(last.status, RecheckStatus::Queued);
+            let wait = last.due_at - last.created_at;
+            assert!(
+                wait >= TimeDuration::hours(6) && wait < TimeDuration::hours(7),
+                "{wait}"
+            );
+            assert!(
+                recheck_jobs(&db.pool)
+                    .await
+                    .contains(&(last.id, last.due_at, 1))
+            );
+            followup = last.id;
+        } else {
+            assert_eq!(last.id, followup, "the third in a row queues none");
+        }
+    }
+    // One manual, three follow-ups; the incident stays recovered for the next crawl.
+    assert_eq!(rechecks_of(&db.pool, site, id).await.len(), 4);
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.recovered_at.is_some());
+    assert!(i.resolved_at.is_none());
+}
+
+#[tokio::test]
+async fn a_superseded_recheck_is_finished_and_frees_the_incident() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(geo::supersede_recheck(&db.pool, queued.id).await.unwrap());
+    assert!(!geo::supersede_recheck(&db.pool, queued.id).await.unwrap());
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.status, RecheckStatus::Superseded);
+    assert_eq!(r.outcome, None);
+    assert!(r.finished_at.is_some());
+}
+
+#[tokio::test]
+async fn rechecks_nothing_will_finish_are_failed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let ten_minutes = std::time::Duration::from_secs(600);
+
+    // Queued with its job queued: left alone.
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        0
+    );
+    // Running, its job running, started a minute ago: left alone.
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("UPDATE jobs SET status = 'running', claimed_at = now() WHERE kind = 'ai_recheck'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        0
+    );
+    // Its worker died: the job failed (one attempt) and the row would stay running forever.
+    sqlx::query("UPDATE jobs SET status = 'failed' WHERE kind = 'ai_recheck'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        1
+    );
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.status, RecheckStatus::Failed);
+    assert!(r.finished_at.is_some());
+
+    // Running far past the runner's time limit, whatever its job says.
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let second = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, second.id)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET started_at = now() - interval '11 minutes' WHERE id = $1")
+        .bind(second.id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        1
+    );
+    // Not busy any more.
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+}
+
+// ---- B3 review ---------------------------------------------------------------------------------
+
+/// Applies a manual recheck that read `robots_body` and returns its outcome.
+async fn manual_recheck(
+    pool: &PgPool,
+    site: Uuid,
+    incident: i64,
+    owner: Uuid,
+    robots_body: &str,
+) -> Option<RecheckOutcome> {
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(pool)
+        .await
+        .unwrap();
+    let queued = geo::request_recheck(pool, site, incident, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(pool, queued.id).await.unwrap().unwrap();
+    let (report, kinds) = rechecked_robots(pool, site, incident, robots_body).await;
+    geo::apply_recheck(pool, queued.id, &report, &kinds, None)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_recheck_that_sees_it_worse_leaves_the_escalation_to_the_next_crawl() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let before = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(before.len(), 1);
+    let id = before[0].id;
+
+    // The recheck sees the whole site blocked now: still failing, but it changes neither the
+    // stored severity nor the evidence.
+    let outcome = manual_recheck(&db.pool, site, id, owner, BLOCK_OAI).await;
+    assert_eq!(outcome, Some(RecheckOutcome::StillFailing));
+    let after = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(after.severity, before[0].severity);
+    assert_eq!(after.evidence, before[0].evidence);
+    assert_eq!(after.title, before[0].title);
+
+    // The next crawl sees it worse and announces it.
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), false)]
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 1);
+}
+
+#[tokio::test]
+async fn an_intent_change_does_not_reopen_what_a_recheck_verified_fixed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let followup = recover(&db.pool, site, id, owner).await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+        .await
+        .unwrap();
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // An unrelated intent change: the newest report still holds the block the rechecks saw
+    // fixed, but it is older than that verdict.
+    let intent = Intent {
+        bots: [("PerplexityBot".to_owned(), Stance::Any)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    assert_eq!(
+        geo::reevaluate_quietly(&db.pool, site).await.unwrap(),
+        (0, 0)
+    );
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // A crawl that sees it again does reopen it.
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+}
+
+/// A report like [`probed_crawl`]'s, without a crawl: what a fetch recheck that probed these
+/// bots on the home page would lay over the stored report.
+fn probed_report(verdicts: &[(&str, Verdict)]) -> AccessReport {
+    let out = crawl_of(200, ALLOW_ALL, None);
+    let mut input = input_for(&out);
+    let results: Vec<ProbeResult> = verdicts
+        .iter()
+        .map(|(token, verdict)| ProbeResult {
+            token: (*token).to_owned(),
+            fetch: Some(match verdict {
+                Verdict::Same => probe_fetch(200, "Home", 20_000),
+                _ => probe_fetch(403, "Just a moment...", 4_000),
+            }),
+            verdict: verdict.clone(),
+        })
+        .collect();
+    input.report.probes = Some(ProbeReport {
+        version: 1,
+        synthetic: true,
+        from: "hello@codoseo.com".to_owned(),
+        bots: verdicts.iter().map(|(t, _)| (*t).to_owned()).collect(),
+        skipped_bots: Vec::new(),
+        urls: vec![ProbedUrl {
+            url: 0,
+            baseline: probe_fetch(200, "Home", 20_000),
+            results,
+        }],
+        stop: None,
+        requests: 0,
+    });
+    input.report
+}
+
+#[tokio::test]
+async fn a_crawl_that_could_not_judge_a_recovered_incident_keeps_its_recovery() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+
+    // The manual recheck sees OAI-SearchBot through: recovered, a follow-up queued.
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let clean = probed_report(&[("OAI-SearchBot", Verdict::Same)]);
+    let outcome = geo::apply_recheck(
+        &db.pool,
+        queued.id,
+        &clean,
+        &[FindingKind::FetchBlocked],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::Clean));
+    let followup = rechecks_of(&db.pool, site, id).await.last().unwrap().id;
+
+    // A crawl whose probe of OAI-SearchBot got no verdict holds the incident as it was: it did
+    // not see the problem, so the recovery and its follow-up stand.
+    let unstable = Verdict::Inconclusive {
+        reason: codoseo_geo::probe::InconclusiveReason::Unstable,
+    };
+    probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", unstable),
+            ("PerplexityBot", Verdict::Same),
+        ],
+    )
+    .await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.resolved_at.is_none());
+    assert!(
+        i.recovered_at.is_some(),
+        "a held finding keeps the recovery"
+    );
+
+    let outcome = geo::apply_recheck(
+        &db.pool,
+        followup,
+        &clean,
+        &[FindingKind::FetchBlocked],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::Clean));
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolved_by.as_deref(), Some("recheck"));
+
+    // A crawl that judges it and still sees it does clear a recovery.
+    let (site, id) = {
+        let site = make_site(&db.pool, "two.example").await;
+        probed_crawl(&db.pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+        (site, fetch_blocked_open(&db.pool, site).await[0].id)
+    };
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    probed_crawl(&db.pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.recovered_at.is_none());
+}
+
+#[tokio::test]
+async fn a_recheck_applied_while_a_crawl_is_under_way_leaves_the_incident_to_it() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let opened_by = geo::incident(&db.pool, site, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .opened_crawl_id
+        .unwrap();
+    let followup = recover(&db.pool, site, id, owner).await;
+    let recovered_at = geo::incident(&db.pool, site, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .recovered_at;
+
+    // A crawl started while the follow-up ran: the follow-up resolves nothing (the crawl, which
+    // may have read the site before the fix, judges it) and is queued again for later.
+    let crawl = make_crawl(&db.pool, site, "manual", "running").await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    assert_eq!(
+        geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+            .await
+            .unwrap(),
+        None
+    );
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.resolved_at.is_none());
+    assert_eq!(i.recovered_at, recovered_at);
+    assert_eq!(
+        change_kinds(&db.pool, opened_by).await.len(),
+        1,
+        "nothing announced"
+    );
+    let all = rechecks_of(&db.pool, site, id).await;
+    let f = all.iter().find(|r| r.id == followup).unwrap();
+    assert_eq!(f.status, RecheckStatus::Superseded);
+    let next = all.last().unwrap();
+    assert_ne!(next.id, followup);
+    assert_eq!(
+        (next.origin, next.status),
+        (RecheckOrigin::Followup, RecheckStatus::Queued)
+    );
+    let wait = next.due_at - next.created_at;
+    assert!(
+        wait >= TimeDuration::hours(i64::from(geo::FOLLOWUP_RETRY_HOURS))
+            && wait < TimeDuration::hours(i64::from(geo::FOLLOWUP_RETRY_HOURS) + 1),
+        "{wait}"
+    );
+    assert!(recheck_jobs(&db.pool).await.iter().any(|j| j.0 == next.id));
+
+    // The runner superseding a follow-up (a crawl was under way when it was due) re-queues it
+    // too, a bounded number of times in a row (the first superseded one counts).
+    let mut current = next.id;
+    for _ in 2..geo::MAX_INCONCLUSIVE_FOLLOWUPS {
+        assert!(geo::supersede_recheck(&db.pool, current).await.unwrap());
+        let last = rechecks_of(&db.pool, site, id)
+            .await
+            .last()
+            .unwrap()
+            .clone();
+        assert_eq!(last.status, RecheckStatus::Queued);
+        assert_ne!(last.id, current);
+        current = last.id;
+    }
+    assert!(geo::supersede_recheck(&db.pool, current).await.unwrap());
+    let last = rechecks_of(&db.pool, site, id)
+        .await
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(last.id, current, "no more after the bound");
+    assert_eq!(last.status, RecheckStatus::Superseded);
+
+    // A manual recheck applied while a crawl runs is superseded and queues nothing.
+    sqlx::query("UPDATE ai_incidents SET recovered_at = NULL WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE crawls SET status = 'failed' WHERE id = $1")
+        .bind(crawl)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    make_crawl(&db.pool, site, "schedule", "queued").await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    assert_eq!(
+        geo::apply_recheck(&db.pool, queued.id, &report, &kinds, None)
+            .await
+            .unwrap(),
+        None
+    );
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.status, RecheckStatus::Superseded);
+    assert_eq!(
+        rechecks_of(&db.pool, site, id).await.last().unwrap().id,
+        queued.id
+    );
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.recovered_at, None);
+}
+
+#[tokio::test]
+async fn an_accepted_incident_that_gets_worse_is_no_longer_accepted_and_alerts() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let before = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+
+    // Wider at the same severity: still accepted, still muted.
+    let wider = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.accepted_at.is_some());
+    assert_eq!(i.severity, before.severity);
+    assert!(change_kinds(&db.pool, wider).await.is_empty());
+
+    // Worse: what was accepted is not what is there now. (Accepted while it was a notice.)
+    sqlx::query("UPDATE ai_incidents SET severity = 'notice' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let worse = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!((i.accepted_at, i.accepted_by), (None, None));
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_fetch_blocked".to_owned(), false)]
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 1);
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap().0, 1);
+}
+
+#[tokio::test]
+async fn a_snoozed_incident_that_got_worse_alerts_once_when_the_snooze_ends() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    geo::snooze(
+        &db.pool,
+        site,
+        id,
+        OffsetDateTime::now_utc() + TimeDuration::days(7),
+    )
+    .await
+    .unwrap();
+
+    // Worse while snoozed: recorded, muted.
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), true)]
+    );
+    // Still snoozed: the next crawl says nothing.
+    let same = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(change_kinds(&db.pool, same).await.is_empty());
+
+    // The snooze ends: the first crawl after it alerts about the worse state, once.
+    sqlx::query(
+        "UPDATE ai_incidents SET snoozed_until = now() - interval '1 minute' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let after = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, after).await,
+        vec![("ai_bot_blocked".to_owned(), false)]
+    );
+    assert_eq!(alert_jobs(&db.pool, after).await, 1);
+    let again = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(change_kinds(&db.pool, again).await.is_empty(), "only once");
+
+    // A snooze with no escalation ends silently.
+    geo::snooze(
+        &db.pool,
+        site,
+        id,
+        OffsetDateTime::now_utc() + TimeDuration::days(1),
+    )
+    .await
+    .unwrap();
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    sqlx::query(
+        "UPDATE ai_incidents SET snoozed_until = now() - interval '1 minute' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let quiet_end = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(change_kinds(&db.pool, quiet_end).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_recheck_the_site_did_not_answer_uses_the_allowance() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let one = limits_with(Some(1));
+    // Failed on our side: free.
+    let first = geo::request_recheck(&db.pool, site, id, owner, &one)
+        .await
+        .unwrap();
+    assert!(
+        geo::fail_recheck(&db.pool, first.id, geo::RecheckFailure::Ours)
+            .await
+            .unwrap()
+    );
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    // The site did not answer: it asked the site, so it counts.
+    let second = geo::request_recheck(&db.pool, site, id, owner, &one)
+        .await
+        .unwrap();
+    assert!(
+        geo::fail_recheck(&db.pool, second.id, geo::RecheckFailure::Site)
+            .await
+            .unwrap()
+    );
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &one).await,
+        Err(RecheckError::LimitReached(Some(_)))
+    ));
+}
+
+#[tokio::test]
+async fn a_robots_txt_that_still_does_not_answer_is_still_failing() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 503, "", None).await;
+    let robots = open_of(&db.pool, site, FindingKind::RobotsUnavailable).await;
+    let id = robots[0].id;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = geo::apply_recheck_unanswered(
+        &db.pool,
+        queued.id,
+        Some(&serde_json::json!({"robots": {"error": "timed out"}})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::StillFailing));
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (r.status, r.outcome),
+        (RecheckStatus::Done, Some(RecheckOutcome::StillFailing))
+    );
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.last_seen_at > robots[0].last_seen_at);
+    assert!(i.resolved_at.is_none());
+
+    // For any other kind an unanswered robots.txt judges nothing: that is a failure.
+    let (other, oid) = site_with_incident(&db.pool).await;
+    let queued = geo::request_recheck(&db.pool, other, oid, owner, &limits_with(None))
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::apply_recheck_unanswered(&db.pool, queued.id, None)
+            .await
+            .unwrap(),
+        Some(RecheckOutcome::Inconclusive)
     );
 }

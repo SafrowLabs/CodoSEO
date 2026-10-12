@@ -21,9 +21,11 @@ pub const SCHEDULER_LAST_TICK_TIMESTAMP_SECONDS: &str =
     "codoseo_scheduler_last_tick_timestamp_seconds";
 pub const JOBS_FAILED_TOTAL: &str = "codoseo_jobs_failed_total";
 pub const PROBE_REQUESTS_TOTAL: &str = "codoseo_probe_requests_total";
+pub const RECHECK_REQUESTS_TOTAL: &str = "codoseo_recheck_requests_total";
+pub const RECHECKS_TOTAL: &str = "codoseo_rechecks_total";
 
 /// Every metric name, for the tests and the docs.
-pub const ALL: [&str; 12] = [
+pub const ALL: [&str; 14] = [
     CRAWL_QUEUE_WAIT_SECONDS,
     CRAWLS_RUNNING,
     CRAWLS_FINISHED_TOTAL,
@@ -36,6 +38,8 @@ pub const ALL: [&str; 12] = [
     SCHEDULER_LAST_TICK_TIMESTAMP_SECONDS,
     JOBS_FAILED_TOTAL,
     PROBE_REQUESTS_TOTAL,
+    RECHECK_REQUESTS_TOTAL,
+    RECHECKS_TOTAL,
 ];
 
 /// Crawl priorities run 0 (most urgent) to 5; the label is the lane.
@@ -43,7 +47,21 @@ pub const LANES: [&str; 6] = ["0", "1", "2", "3", "4", "5"];
 /// The alert channel kinds (`ChannelKind::as_str`).
 pub const CHANNELS: [&str; 4] = ["email", "slack", "discord", "webhook"];
 /// The job kinds (`JobKind::slug`).
-pub const JOB_KINDS: [&str; 4] = ["send_alert", "send_digest", "send_email", "cleanup"];
+pub const JOB_KINDS: [&str; 5] = [
+    "send_alert",
+    "send_digest",
+    "send_email",
+    "cleanup",
+    "ai_recheck",
+];
+/// How an AI access recheck run ended (`ai_rechecks.outcome`, or its status when it has none).
+pub const RECHECK_OUTCOMES: [&str; 5] = [
+    "clean",
+    "still_failing",
+    "inconclusive",
+    "superseded",
+    "failed",
+];
 /// What `api_requests_total`'s `result` is: `ok`, an [`AgentError::code`](crate::agent::error::AgentError::code) or `error`.
 pub const API_RESULTS: [&str; 10] = [
     "ok",
@@ -138,10 +156,23 @@ pub fn register() {
         "Requests sent by synthetic AI-agent fetch probes (baselines, retries and confirmations included)"
     );
 
+    describe_counter!(
+        RECHECK_REQUESTS_TOTAL,
+        "Requests sent as CodoSEObot by AI access rechecks (robots.txt, pages, llms.txt); their probes count in codoseo_probe_requests_total"
+    );
+    describe_counter!(
+        RECHECKS_TOTAL,
+        "AI access recheck runs, by outcome (clean, still_failing, inconclusive, superseded, failed)"
+    );
+
     gauge!(CRAWLS_RUNNING).set(0.0);
     gauge!(WORKER_MEMORY_RESERVED_BYTES).set(0.0);
     counter!(PAGES_CRAWLED_TOTAL).absolute(0);
     counter!(PROBE_REQUESTS_TOTAL).absolute(0);
+    counter!(RECHECK_REQUESTS_TOTAL).absolute(0);
+    for outcome in RECHECK_OUTCOMES {
+        counter!(RECHECKS_TOTAL, "outcome" => outcome).absolute(0);
+    }
     for outcome in ["completed", "failed"] {
         counter!(CRAWLS_FINISHED_TOTAL, "outcome" => outcome).absolute(0);
     }
@@ -205,9 +236,20 @@ pub fn pages_crawled(pages: u64) {
     counter!(PAGES_CRAWLED_TOTAL).increment(pages);
 }
 
-/// A synthetic probe run after a crawl sent `requests` requests.
+/// A synthetic probe run (after a crawl, or for a recheck) sent `requests` requests.
 pub fn probe_requests(requests: u64) {
     counter!(PROBE_REQUESTS_TOTAL).increment(requests);
+}
+
+/// An AI access recheck sent `requests` requests as CodoSEObot (its probes are counted by
+/// [`probe_requests`]).
+pub fn recheck_requests(requests: u64) {
+    counter!(RECHECK_REQUESTS_TOTAL).increment(requests);
+}
+
+/// An AI access recheck run ended with `outcome`, one of [`RECHECK_OUTCOMES`].
+pub fn recheck_finished(outcome: &'static str) {
+    counter!(RECHECKS_TOTAL, "outcome" => outcome).increment(1);
 }
 
 pub fn worker_memory_budget(bytes: u64) {

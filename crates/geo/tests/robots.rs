@@ -324,3 +324,15 @@ fn declared_lines_copy_a_few_agents_and_pairs_and_no_control_characters() {
     assert_eq!(usage.pairs[0].value, "n[0m");
     assert_eq!(usage.pairs[1].value.chars().count(), 512);
 }
+
+#[test]
+fn percent_encoded_star_and_dollar_match_themselves_literally() {
+    // RFC 9309 2.2.3: a pattern matches a literal `*` or `$` in the path through %2A and %24.
+    let file = "User-agent: *\nDisallow: /\nAllow: /a%2Ab%24$\n";
+    assert!(allowed(file, "GPTBot", "/a*b$"));
+    assert!(!allowed(file, "GPTBot", "/axyzb$"));
+    assert!(!allowed(file, "GPTBot", "/a*b$/more"));
+    let lower = "User-agent: *\nDisallow: /x%2a\n";
+    assert!(!allowed(lower, "GPTBot", "/x*"));
+    assert!(allowed(lower, "GPTBot", "/xy"));
+}

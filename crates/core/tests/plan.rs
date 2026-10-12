@@ -92,3 +92,25 @@ fn synthetic_probe_caps_match_the_b1_table() {
         assert_eq!(limits.probe_max_requests, max_requests);
     }
 }
+
+#[test]
+fn manual_ai_rechecks_per_day_follow_the_plan() {
+    assert_eq!(
+        PlanLimits::for_plan(Plan::Free).ai_rechecks_per_day,
+        Some(3)
+    );
+    assert_eq!(
+        PlanLimits::for_plan(Plan::Pro).ai_rechecks_per_day,
+        Some(20)
+    );
+    assert_eq!(
+        PlanLimits::for_plan(Plan::Agency).ai_rechecks_per_day,
+        Some(60)
+    );
+    assert_eq!(
+        PlanLimits::for_plan(Plan::SelfHosted).ai_rechecks_per_day,
+        None
+    );
+    // A no-signup audit has no incidents to recheck.
+    assert_eq!(PlanLimits::quick_audit().ai_rechecks_per_day, Some(0));
+}

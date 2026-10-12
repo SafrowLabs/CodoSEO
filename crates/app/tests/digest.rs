@@ -55,6 +55,7 @@ impl World {
             base_url: Url::parse("https://codoseo.test").unwrap(),
             http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
             rankorg_url,
+            recheck: codoseo::recheck::RecheckSettings::new(AddressPolicy::AllowPrivate),
         };
         let account = sqlx::query_scalar(
             "INSERT INTO accounts (email, email_canonical, timezone) \

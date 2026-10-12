@@ -23,12 +23,95 @@ use sqlx::PgPool;
 use time::{Date, OffsetDateTime};
 use uuid::Uuid;
 
+use crate::ai_incident;
 use crate::auth::{CurrentUser, load_site};
 use crate::error::AppError;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/s/{site}/export.csv", get(export))
+    Router::new()
+        .route("/s/{site}/export.csv", get(export))
+        .route("/s/{site}/ai-access/incidents.csv", get(incidents_csv))
+        .route("/s/{site}/ai-access/incidents.json", get(incidents_json))
+}
+
+/// `/s/{site}/ai-access/incidents.csv`: the site's open AI access incidents and those resolved
+/// in the last 90 days, one row each ([`ai_incident::EXPORT_COLUMNS`]).
+async fn incidents_csv(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    let (site, records) = incident_records(&state, &user, &site).await?;
+    let body = ai_incident::to_csv(&records, text).map_err(AppError::Internal)?;
+    attachment(
+        "text/csv; charset=utf-8",
+        &incident_file_name(&site.domain, "csv"),
+        body,
+    )
+}
+
+/// The same incidents as a JSON array; `affected_urls` and `sources` are arrays there.
+async fn incidents_json(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    let (site, records) = incident_records(&state, &user, &site).await?;
+    let body = serde_json::to_string(&records).map_err(AppError::internal)?;
+    attachment(
+        "application/json",
+        &incident_file_name(&site.domain, "json"),
+        body,
+    )
+}
+
+async fn incident_records(
+    state: &AppState,
+    user: &CurrentUser,
+    site: &str,
+) -> Result<(codoseo_store::sites::Site, Vec<ai_incident::IncidentRecord>), AppError> {
+    let site = load_site(state, user, crate::routes::audit::site_id(site)?).await?;
+    let records =
+        ai_incident::export_records(&state.pool, site.id, OffsetDateTime::now_utc()).await?;
+    Ok((site, records))
+}
+
+/// `example.com-ai-access-incidents-2026-10-12.csv`
+fn incident_file_name(domain: &str, ext: &str) -> String {
+    let day = OffsetDateTime::now_utc().date();
+    let safe: String = domain
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!(
+        "{safe}-ai-access-incidents-{:04}-{:02}-{:02}.{ext}",
+        day.year(),
+        u8::from(day.month()),
+        day.day()
+    )
+}
+
+fn attachment(content_type: &'static str, file: &str, body: String) -> Result<Response, AppError> {
+    let disposition = format!("attachment; filename=\"{file}\"");
+    Ok((
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
+            (
+                header::CONTENT_DISPOSITION,
+                HeaderValue::from_str(&disposition).map_err(AppError::internal)?,
+            ),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 /// Rows per database read and per body chunk.
@@ -244,7 +327,7 @@ fn record(r: &ExportRow) -> [String; 22] {
 
 /// A crawled text cell. Text a spreadsheet would run as a formula (starting with `=`, `+`,
 /// `-`, `@`, a tab or a CR) gets a leading `'`, since crawled pages are untrusted input.
-fn text(value: Option<&str>) -> String {
+pub(crate) fn text(value: Option<&str>) -> String {
     let value = value.unwrap_or_default();
     if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
         format!("'{value}")

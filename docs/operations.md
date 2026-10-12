@@ -29,7 +29,9 @@ Set `CODOSEO_METRICS_BIND` (for example `0.0.0.0:9090`) on a `web`, `worker` or 
 | `codoseo_crawls_running` | gauge | none | Crawls this process is running now. |
 | `codoseo_crawls_finished_total` | counter | `outcome` = `completed`, `failed` | Crawl runs that ended. A failed first attempt is retried. |
 | `codoseo_pages_crawled_total` | counter | none | Pages fetched by crawls. |
-| `codoseo_probe_requests_total` | counter | none | Requests sent by the synthetic AI-agent fetch probes after monitored crawls, baselines, retries and confirmations included. |
+| `codoseo_probe_requests_total` | counter | none | Requests sent by the synthetic AI-agent fetch probes after monitored crawls and in AI access rechecks, baselines, retries and confirmations included. |
+| `codoseo_recheck_requests_total` | counter | none | Requests sent as CodoSEObot by AI access rechecks: robots.txt, the pages refetched and `/llms.txt`, redirect hops included. Their probes count in `codoseo_probe_requests_total`. |
+| `codoseo_rechecks_total` | counter | `outcome` = `clean`, `still_failing`, `inconclusive`, `superseded`, `failed` | AI access recheck runs, by how they ended. |
 | `codoseo_worker_memory_budget_bytes` | gauge | none | The worker's crawl memory budget (70% of its cgroup limit). Appears once a worker has set it. |
 | `codoseo_worker_memory_reserved_bytes` | gauge | none | Memory reserved by running crawls. |
 | `codoseo_db_pool_connections` | gauge | `state` = `idle`, `active` | Database pool connections, sampled. |
@@ -48,7 +50,7 @@ Useful alerts:
 
 ## Scheduler heartbeat
 
-The scheduler ticks once a minute: it enqueues due crawls, runs the daily cleanup and sends inactivity emails. After each successful tick it records a heartbeat in the database and, if `SCHEDULER_HEARTBEAT_URL` is set, sends a GET to that URL. Point that at a dead-man's-switch monitor (a heartbeat check in your uptime tool) that alerts when pings stop. The `web` and `all` roles run the scheduler; set `CODOSEO_SCHEDULER=off` to stop a given process from running it.
+The scheduler ticks once a minute: it requeues jobs whose worker stopped, fails AI access rechecks nothing will finish (one running for over 10 minutes, or whose job is gone, so an incident is never left "rechecking"; they count as `failed` in `codoseo_rechecks_total` and not against the daily rechecks), enqueues due crawls, runs the daily cleanup and sends inactivity emails. After each successful tick it records a heartbeat in the database and, if `SCHEDULER_HEARTBEAT_URL` is set, sends a GET to that URL. Point that at a dead-man's-switch monitor (a heartbeat check in your uptime tool) that alerts when pings stop. The `web` and `all` roles run the scheduler; set `CODOSEO_SCHEDULER=off` to stop a given process from running it.
 
 ## Backups
 

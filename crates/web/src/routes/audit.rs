@@ -14,11 +14,13 @@ use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::output::StopReason;
 use codoseo_core::report::CrawlSummary;
 use codoseo_store::crawls::{self, Crawl, CrawlStatus, StoredSummary};
+use codoseo_store::geo;
 use codoseo_store::reports::{self, ResponseBuckets};
 use codoseo_store::sites::Site;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::ai_incident;
 use crate::auth::{CurrentUser, load_site};
 use crate::error::AppError;
 use crate::fmt;
@@ -93,6 +95,27 @@ pub struct DoneAudit {
     pub times: Vec<HBar>,
     /// `avg 182 ms`
     pub times_aside: String,
+    /// The AI access panel; none before the site's first AI access report.
+    pub ai: Option<AiPanel>,
+}
+
+/// The overview's AI access panel: next to the health score, never part of it.
+pub struct AiPanel {
+    /// Nothing open, accepted or snoozed.
+    pub clear: bool,
+    /// Open, accepted and snoozed, each with its counts by severity.
+    pub rows: Vec<AiPanelRow>,
+    /// `Weakest evidence: B`, over the open incidents.
+    pub weakest: Option<String>,
+    /// `2 fixes being verified`
+    pub verifying: Option<String>,
+}
+
+pub struct AiPanelRow {
+    pub label: &'static str,
+    pub total: u32,
+    /// `(badge class, text)`, most severe first, only the severities that have any.
+    pub chips: Vec<(&'static str, String)>,
 }
 
 pub struct Kpi {
@@ -334,7 +357,53 @@ async fn done_audit(state: &AppState, site: &Site, crawl: &Crawl) -> Result<Done
         depth: depth_bars(&summary),
         times: time_bars(&times),
         times_aside: format!("avg {} ms", fmt::thousands(summary.avg_response_ms)),
+        ai: ai_panel(pool, site).await?,
     })
+}
+
+/// The AI access panel, from the site's incidents. Left out until there is a report: before it
+/// there is nothing to say, and the screen has its own empty state.
+async fn ai_panel(pool: &sqlx::PgPool, site: &Site) -> Result<Option<AiPanel>, AppError> {
+    if !geo::has_report(pool, site.id).await? {
+        return Ok(None);
+    }
+    let open = geo::open_incidents(pool, site.id).await?;
+    let latest = geo::latest_rechecks(pool, site.id).await?;
+    let c = ai_incident::panel_counts(&open, &latest, time::OffsetDateTime::now_utc());
+    Ok(Some(ai_panel_view(&c)))
+}
+
+fn ai_panel_view(c: &ai_incident::PanelCounts) -> AiPanel {
+    let row = |label, n: ai_incident::BySeverity| AiPanelRow {
+        label,
+        total: n.total(),
+        chips: [
+            ("sev-critical", n.critical, "critical"),
+            ("sev-warning", n.warning, "warning"),
+            ("sev-notice", n.notice, "notice"),
+        ]
+        .into_iter()
+        .filter(|(_, count, _)| *count > 0)
+        .map(|(class, count, name)| (class, format!("{count} {name}")))
+        .collect(),
+    };
+    let rows = vec![
+        row("Open", c.open),
+        row("Accepted", c.accepted),
+        row("Snoozed", c.snoozed),
+    ];
+    AiPanel {
+        clear: rows.iter().all(|r| r.total == 0),
+        rows,
+        weakest: c
+            .weakest_grade
+            .map(|g| format!("Weakest evidence: {}", g.label())),
+        verifying: match c.verifying {
+            0 => None,
+            1 => Some("1 fix being verified".to_owned()),
+            n => Some(format!("{n} fixes being verified")),
+        },
+    }
 }
 
 fn part(count: impl ToString, text: String, unit: &str) -> KpiPart {

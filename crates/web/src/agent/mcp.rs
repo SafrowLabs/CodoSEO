@@ -7,8 +7,9 @@
 use std::convert::Infallible;
 
 use codoseo_mcp::cloud::types::{
-    AiAccessInfo, AuditIssueUrls, ChangesPage, CrawlQueued, IssueUrlsPage, MonitoringRequested,
-    PageInfo, QuickAuditState, SiteHealth, SiteInfo,
+    AiAccessInfo, AiFixInfo, AiIncidentInfo, AiRecheckQueued, AuditIssueUrls, ChangesPage,
+    CrawlQueued, IssueUrlsPage, MonitoringRequested, PageInfo, QuickAuditState, SiteHealth,
+    SiteInfo,
 };
 use codoseo_mcp::cloud::{AnonBackend, CloudBackend};
 
@@ -112,6 +113,81 @@ impl CloudBackend for AgentBackend {
 
     async fn run_crawl(&self, who: &ApiCaller, site_id: &str) -> Result<CrawlQueued, String> {
         outcome(self.service().run_crawl(who, site_id).await)
+    }
+
+    async fn incident_fix(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        incident_id: i64,
+    ) -> Result<AiFixInfo, String> {
+        outcome(self.service().incident_fix(who, site_id, incident_id).await)
+    }
+
+    async fn recheck_incident(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        incident_id: i64,
+    ) -> Result<AiRecheckQueued, String> {
+        outcome(
+            self.service()
+                .recheck_incident(who, site_id, incident_id)
+                .await,
+        )
+    }
+
+    async fn snooze_incident(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        incident_id: i64,
+        days: i64,
+    ) -> Result<AiIncidentInfo, String> {
+        outcome(
+            self.service()
+                .snooze_incident(who, site_id, incident_id, Some(days))
+                .await,
+        )
+    }
+
+    async fn unsnooze_incident(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        incident_id: i64,
+    ) -> Result<AiIncidentInfo, String> {
+        outcome(
+            self.service()
+                .unsnooze_incident(who, site_id, incident_id)
+                .await,
+        )
+    }
+
+    async fn accept_incident(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        incident_id: i64,
+    ) -> Result<AiIncidentInfo, String> {
+        outcome(
+            self.service()
+                .accept_incident(who, site_id, incident_id)
+                .await,
+        )
+    }
+
+    async fn unaccept_incident(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        incident_id: i64,
+    ) -> Result<AiIncidentInfo, String> {
+        outcome(
+            self.service()
+                .unaccept_incident(who, site_id, incident_id)
+                .await,
+        )
     }
 
     async fn reject(&self, who: &ApiCaller, message: String) -> Result<Infallible, String> {

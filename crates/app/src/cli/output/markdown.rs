@@ -62,8 +62,16 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
         if rows.is_empty() {
             writeln!(w, "No AI access issues")?;
         }
-        for (severity, title) in rows {
-            writeln!(w, "- **{}:** {}", severity_label(severity), md_cell(&title))?;
+        for row in rows {
+            writeln!(
+                w,
+                "- **{}:** {}",
+                severity_label(row.severity),
+                md_cell(&row.title)
+            )?;
+            if let Some(fix) = &row.fix {
+                writeln!(w, "  - Fix: {}", md_cell(fix))?;
+            }
         }
     }
     writeln!(w, "\n## Summary\n")?;
@@ -148,6 +156,9 @@ pub(super) fn probe(w: &mut impl Write, out: &ProbeOutput) -> std::io::Result<()
             severity_label(f.severity),
             md_cell(&f.title)
         )?;
+        if let Some(fix) = out.fix_for(f) {
+            writeln!(w, "  - Fix: {}", md_cell(fix))?;
+        }
     }
     Ok(())
 }

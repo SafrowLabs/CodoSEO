@@ -13,11 +13,10 @@ use codoseo_core::output::{Progress, StopReason};
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::crawl;
 use codoseo_crawler::probe::{ProbeConfig, probe_from_env, run_probes};
-use codoseo_geo::findings::findings;
+use codoseo_geo::assess_with_defaults;
 use codoseo_geo::probe::plan_probes;
 use codoseo_geo::report::{build_report, important_urls};
 use codoseo_geo::robots::RobotsTxt;
-use codoseo_geo::{Intent, assess_with_defaults};
 use url::Url;
 
 use super::output::write_crawl;
@@ -179,8 +178,7 @@ async fn assess_with_probes(out: &CrawlOutput) -> serde_json::Value {
         cfg.from = probe_from_env();
         access.probes = Some(run_probes(cfg).await);
     }
-    let found = findings(&access, &Intent::default());
-    serde_json::json!({ "report": access, "findings": found })
+    codoseo_geo::section(out.origin.as_str(), &access)
 }
 
 /// Why the crawl never got going, for the stop reasons that mean it could not run.

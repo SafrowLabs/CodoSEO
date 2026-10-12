@@ -480,3 +480,33 @@ fn the_audit_section_is_the_report_and_its_findings_under_the_default_intent() {
         [FindingKind::BotsBlocked]
     );
 }
+
+#[test]
+fn the_audit_section_carries_one_remedy_per_finding_for_a_local_run() {
+    let out = with_robots(
+        site(3, |p| p),
+        200,
+        "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n",
+    );
+    let section = assess_with_defaults(&out);
+    let found: Vec<Finding> = serde_json::from_value(section["findings"].clone()).unwrap();
+    let remedies = section["remedies"].as_array().expect("remedies");
+    assert_eq!(remedies.len(), found.len());
+    let r = &remedies[0];
+    assert_eq!(r["kind"], "bots_blocked");
+    assert_eq!(r["subject"], found[0].subject.as_str());
+    assert_eq!(r["grade"], found[0].grade.label());
+    assert!(r["fix"].as_str().unwrap().contains("OAI-SearchBot"), "{r}");
+    assert!(!r["steps"].as_array().unwrap().is_empty());
+    assert!(!r["verify"].as_array().unwrap().is_empty());
+    assert!(!r["sources"].as_array().unwrap().is_empty());
+    // A local run has no earlier report to compare with.
+    assert!(r.get("before").is_none());
+    // A clean site has none.
+    let clean = assess_with_defaults(&with_robots(
+        site(3, |p| p),
+        200,
+        "User-agent: *\nAllow: /\n",
+    ));
+    assert_eq!(clean["remedies"], serde_json::json!([]));
+}
