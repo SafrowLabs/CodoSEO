@@ -15,6 +15,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
 use codoseo_core::check::Severity;
+use codoseo_core::output::LlmsSkip;
 use codoseo_core::page::JsonLdStatus;
 use codoseo_geo::content::{ContentVerdict, NON_RENDERING_SOURCE, RawContent, ShellSignal};
 use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engines};
@@ -629,7 +630,7 @@ async fn render_page(
             state.config.probe_urls_for(user.account.plan) > 0,
         ),
         content: content_card(site, &base, report),
-        llms: llms_card(report.llms_txt.as_ref()),
+        llms: llms_card(report.llms_txt.as_ref(), report.llms_txt_skipped),
         robots_callout: robots_callout(report),
         robots_aside: robots_aside(report),
         bot_attention: bot_groups
@@ -2185,7 +2186,7 @@ pub struct LlmsCheckRow {
     pub detail: String,
 }
 
-fn llms_card(report: Option<&LlmsTxtReport>) -> LlmsCard {
+fn llms_card(report: Option<&LlmsTxtReport>, skipped: Option<LlmsSkip>) -> LlmsCard {
     let mut card = LlmsCard {
         none: None,
         state: "",
@@ -2198,10 +2199,24 @@ fn llms_card(report: Option<&LlmsTxtReport>) -> LlmsCard {
         spec: LLMS_SPEC_URL,
     };
     let Some(r) = report else {
-        card.none = Some((
-            "Not checked in this report",
-            "Reports from before llms.txt was read, and crawls that skip site signals, leave it out.".to_owned(),
-        ));
+        card.none = Some(match skipped {
+            Some(LlmsSkip::RobotsDisallowed) => (
+                "Not checked",
+                "robots.txt disallows /llms.txt (or where it redirects) for CodoSEObot, so it was not fetched.".to_owned(),
+            ),
+            Some(LlmsSkip::Refused) => (
+                "Not checked",
+                "/llms.txt (or where it redirects) is an address CodoSEO may not request, so it was not fetched.".to_owned(),
+            ),
+            Some(LlmsSkip::Deadline) => (
+                "Not checked in this report",
+                "The crawl ran out of time before /llms.txt was fetched. The next crawl will try again.".to_owned(),
+            ),
+            None => (
+                "Not checked in this report",
+                "Reports from before llms.txt was read, and crawls that skip site signals, leave it out.".to_owned(),
+            ),
+        });
         return card;
     };
     match r.state {

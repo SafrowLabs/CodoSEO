@@ -177,6 +177,22 @@ pub struct SiteSignals {
     /// stopped early or ran out of time). A fetch that got no response is `Some`, with status 0.
     #[serde(default)]
     pub llms_txt: Option<LlmsTxtFetch>,
+    /// Why `/llms.txt` was not fetched, when the crawl meant to and didn't; `None` when it was
+    /// fetched, site signals were off, the crawl stopped before it (and in older crawls).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt_skipped: Option<LlmsSkip>,
+}
+
+/// Why a crawl did not fetch `/llms.txt`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmsSkip {
+    /// robots.txt disallows CodoSEObot on `/llms.txt`, or on where it redirects.
+    RobotsDisallowed,
+    /// The address (or a redirect's) is one CodoSEO may not request.
+    Refused,
+    /// The crawl's time ran out first.
+    Deadline,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

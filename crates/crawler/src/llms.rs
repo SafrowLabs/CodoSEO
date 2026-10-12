@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use codoseo_core::output::{LinkStatus, LlmsTxtFetch};
+use codoseo_core::output::{LinkStatus, LlmsSkip, LlmsTxtFetch};
 use codoseo_core::page::PageRecord;
 use codoseo_core::url::{normalize, url_hash};
 use codoseo_geo::llms::{LlmsState, MAX_BYTES, links, parse, state_of};
@@ -40,32 +40,33 @@ const MAX_RETRY_WAIT: Duration = Duration::from_secs(5);
 /// blip should not read as a file that stopped serving. The retry's outcome is kept, or the first
 /// one's when the retry could not be made.
 ///
-/// `None` when it was not fetched: robots.txt disallows it, the address is refused, or the
-/// deadline came first (that is our budget, not the site's failure). A request that got no
-/// response of its own (a timeout, a refused connection, a broken redirect) is kept as status 0
-/// with `error`, so a file that stopped answering can be told apart from one never asked for.
+/// `Err` with the reason when it was not fetched: robots.txt disallows it (or a redirect's
+/// target), the address is refused, or the deadline came first (that is our budget, not the
+/// site's failure). A request that got no response of its own (a timeout, a refused connection, a
+/// broken redirect) is kept as status 0 with `error`, so a file that stopped answering can be
+/// told apart from one never asked for.
 pub(crate) async fn fetch_llms_txt(
     fetcher: &Fetcher,
     limiter: &Limiter,
     origin: &Url,
     rules: &RobotsRules,
     deadline: Instant,
-) -> Option<LlmsTxtFetch> {
+) -> Result<LlmsTxtFetch, LlmsSkip> {
     if !rules.allowed(PATH) {
-        return None;
+        return Err(LlmsSkip::RobotsDisallowed);
     }
-    let url = llms_url(origin)?;
+    let url = llms_url(origin).ok_or(LlmsSkip::Refused)?;
     let first = fetch_once(fetcher, limiter, &url, rules, deadline).await?;
     let Some(wait) = first.retry else {
-        return Some(first.fetch);
+        return Ok(first.fetch);
     };
     if wait > MAX_RETRY_WAIT || Instant::now() + wait >= deadline {
-        return Some(first.fetch);
+        return Ok(first.fetch);
     }
     tokio::time::sleep(wait).await;
     match fetch_once(fetcher, limiter, &url, rules, deadline).await {
-        Some(again) => Some(again.fetch),
-        None => Some(first.fetch),
+        Ok(again) => Ok(again.fetch),
+        Err(_) => Ok(first.fetch),
     }
 }
 
@@ -80,7 +81,7 @@ struct Attempt {
 const MAX_HOPS: usize = 5;
 
 /// Fetches `url`, following redirects one hop at a time so that robots.txt is applied to each:
-/// the site's rules on its own origin, the target's own robots.txt on another. `None` when a hop
+/// the site's rules on its own origin, the target's own robots.txt on another. `Err` when a hop
 /// is disallowed, an address is refused, or the deadline came first.
 async fn fetch_once(
     fetcher: &Fetcher,
@@ -88,7 +89,7 @@ async fn fetch_once(
     url: &Url,
     rules: &RobotsRules,
     deadline: Instant,
-) -> Option<Attempt> {
+) -> Result<Attempt, LlmsSkip> {
     let failed = |e: FetchError| {
         let transient = matches!(
             e,
@@ -112,8 +113,8 @@ async fn fetch_once(
             };
             let res = match fetched {
                 Ok(res) => res,
-                Err(FetchError::Blocked(_)) => return None,
-                Err(e) => return Some(failed(e)),
+                Err(FetchError::Blocked(_)) => return Err(LlmsSkip::Refused),
+                Err(e) => return Ok(failed(e)),
             };
             let retry_after = retry_after_of(&res.headers);
             limiter.on_response(res.status, retry_after);
@@ -126,14 +127,14 @@ async fn fetch_once(
                     .ok()
                     .filter(|u| matches!(u.scheme(), "http" | "https"))
                 else {
-                    return Some(failed(FetchError::InvalidRedirect { location }));
+                    return Ok(failed(FetchError::InvalidRedirect { location }));
                 };
                 hops += 1;
                 if hops > MAX_HOPS {
-                    return Some(failed(FetchError::TooManyRedirects { chain: Vec::new() }));
+                    return Ok(failed(FetchError::TooManyRedirects { chain: Vec::new() }));
                 }
                 if !may_follow(fetcher, limiter, url, rules, &next).await {
-                    return None;
+                    return Err(LlmsSkip::RobotsDisallowed);
                 }
                 current = next;
                 continue;
@@ -145,7 +146,7 @@ async fn fetch_once(
                 Some(body) if ok => String::from_utf8_lossy(&body).into_owned(),
                 _ => String::new(),
             };
-            return Some(Attempt {
+            return Ok(Attempt {
                 fetch: LlmsTxtFetch {
                     status: res.status,
                     error: None,
@@ -162,8 +163,7 @@ async fn fetch_once(
         }
     })
     .await
-    .ok()
-    .flatten()
+    .unwrap_or(Err(LlmsSkip::Deadline))
 }
 
 /// Whether robots.txt lets CodoSEObot follow a redirect to `next`: the site's `rules` on the
@@ -334,8 +334,13 @@ pub async fn check_llms_txt(
     );
     let mut fetch = fetch_llms_txt(&fetcher, &limiter, &origin, &rules, until)
         .await
-        .ok_or_else(|| {
-            "/llms.txt was not fetched: the address is refused or the time ran out".to_owned()
+        .map_err(|skip| match skip {
+            LlmsSkip::RobotsDisallowed => {
+                "robots.txt disallows CodoSEObot on /llms.txt, so it is not fetched; nothing was checked"
+                    .to_owned()
+            }
+            LlmsSkip::Refused => "/llms.txt was not fetched: the address is refused".to_owned(),
+            LlmsSkip::Deadline => "/llms.txt was not fetched: the time ran out".to_owned(),
         })?;
     check_links(
         &mut fetch,

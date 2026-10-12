@@ -1515,6 +1515,31 @@ async fn the_content_card_says_why_it_has_no_rows() {
 }
 
 #[tokio::test]
+async fn an_llms_txt_robots_txt_disallows_says_so() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    sqlx::query(
+        "UPDATE ai_reports SET report = (report - 'llms_txt') || '{\"llms_txt_skipped\":\"robots_disallowed\"}'",
+    )
+    .execute(app.pool())
+    .await
+    .expect("skip");
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let from = body.find(r#"id="aia-llms""#).expect("llms card");
+    let to = body.find(r#"id="aia-bots""#).unwrap();
+    let card = &body[from..to];
+    assert!(
+        card.contains("robots.txt disallows /llms.txt (or where it redirects) for CodoSEObot"),
+        "{card}"
+    );
+    assert!(
+        !card.contains("Reports from before llms.txt was read"),
+        "{card}"
+    );
+}
+
+#[tokio::test]
 async fn a_missing_llms_txt_is_a_neutral_line_without_warning_styles() {
     for fetch in [
         llms_fetch(404, ""),

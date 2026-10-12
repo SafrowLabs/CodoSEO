@@ -112,6 +112,10 @@ async fn robots_disallow_means_no_request() {
         .await;
     let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
     assert_eq!(out.signals.llms_txt, None);
+    assert_eq!(
+        out.signals.llms_txt_skipped,
+        Some(codoseo_core::output::LlmsSkip::RobotsDisallowed)
+    );
     assert_eq!(site.path_hits("/llms.txt"), 0);
 }
 
@@ -144,6 +148,10 @@ async fn nothing_is_fetched_when_site_signals_are_off() {
     };
     let out = crawl(c, |_| {}).await.unwrap();
     assert_eq!(out.signals.llms_txt, None);
+    assert_eq!(
+        out.signals.llms_txt_skipped, None,
+        "not meant to be fetched"
+    );
     assert_eq!(site.path_hits("/llms.txt"), 0);
 }
 
@@ -421,6 +429,10 @@ async fn a_redirect_to_a_path_robots_disallows_is_not_followed() {
         .await;
     let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
     assert_eq!(out.signals.llms_txt, None);
+    assert_eq!(
+        out.signals.llms_txt_skipped,
+        Some(codoseo_core::output::LlmsSkip::RobotsDisallowed)
+    );
     assert_eq!(site.path_hits("/llms.txt"), 1);
     assert_eq!(site.path_hits("/private/llms.txt"), 0);
 }

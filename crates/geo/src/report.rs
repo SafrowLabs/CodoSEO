@@ -9,7 +9,7 @@ use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 use codoseo_core::crawl::RobotsFile;
-use codoseo_core::output::{CrawlOutput, WellKnownFile};
+use codoseo_core::output::{CrawlOutput, LlmsSkip, WellKnownFile};
 use codoseo_core::page::PageRecord;
 use codoseo_core::url::url_hash;
 use serde::{Deserialize, Serialize};
@@ -307,6 +307,10 @@ pub struct AccessReport {
     /// ([`crate::llms::carry_adoption`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llms_txt: Option<LlmsTxtReport>,
+    /// Why the crawl did not fetch `/llms.txt` when it meant to (robots.txt disallows it, the
+    /// address is refused, the time ran out); `None` otherwise and in older reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt_skipped: Option<LlmsSkip>,
 }
 
 impl EngineAccess {
@@ -520,6 +524,7 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
             .llms_txt
             .as_ref()
             .map(|f| llms::assess(f, false)),
+        llms_txt_skipped: out.signals.llms_txt_skipped,
     }
 }
 

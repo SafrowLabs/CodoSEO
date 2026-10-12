@@ -145,7 +145,7 @@ cargo test -p codoseo-crawler --test content_corpus -- --nocapture
 | 2xx that serves an HTML page | **No llms.txt (soft 404)**: a web page where the file should be is the site's catch-all, so it is read like a 404 (Lighthouse takes a 2xx at face value) |
 | 429, 5xx, another unexpected status, or no response at all | **Unavailable** |
 
-The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowed `/llms.txt` is not fetched), and read up to 512 KiB. A redirect is followed only where robots.txt allows the target: your robots.txt on your own site, the other site's own robots.txt off it. A 429, a 5xx or no answer is retried once, after the server's `Retry-After` (up to 5 seconds; a longer one is not waited for) or a second, so one blip doesn't read as a file that stopped serving. It is not fetched for the instant audits.
+The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowed `/llms.txt` is not fetched, and the card says robots.txt keeps CodoSEObot off it), and read up to 512 KiB. A redirect is followed only where robots.txt allows the target: your robots.txt on your own site, the other site's own robots.txt off it. A 429, a 5xx or no answer is retried once, after the server's `Retry-After` (up to 5 seconds; a longer one is not waited for) or a second, so one blip doesn't read as a file that stopped serving. It is not fetched for the instant audits.
 
 **The checks** on an available file. The format follows llmstxt.org; the last two Lighthouse-style rules are kept as they are in its audit:
 

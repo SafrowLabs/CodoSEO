@@ -94,7 +94,10 @@ pub async fn crawl_shared(
             .await
             .ok()
             .flatten();
-        signals.llms_txt = fetch_llms_txt(&fetcher, &limiter, &origin, &rules, deadline).await;
+        match fetch_llms_txt(&fetcher, &limiter, &origin, &rules, deadline).await {
+            Ok(f) => signals.llms_txt = Some(f),
+            Err(skip) => signals.llms_txt_skipped = Some(skip),
+        }
     }
 
     let mut run = Run::new(&cfg, &origin, rules, &sitemap_urls, started);
