@@ -65,7 +65,44 @@ fn the_threshold_table() {
     use ContentVerdict::*;
     let cases: Vec<(&str, PageRecord, ContentVerdict)> = vec![
         ("no words, empty mount", raw(0, mount_empty()), Shell),
-        ("49 words, noscript notice", raw(49, noscript()), Shell),
+        // A notice alone is a comments or form embed on a short page, not a shell.
+        ("49 words, noscript notice", raw(49, noscript()), Thin),
+        (
+            "noscript notice and a mount element",
+            raw(
+                10,
+                RawSignals {
+                    mount: Some(MountPoint::App),
+                    ..noscript()
+                },
+            ),
+            Shell,
+        ),
+        (
+            "noscript notice and 60% inline script",
+            raw(
+                10,
+                RawSignals {
+                    script_bytes: 600,
+                    ..noscript()
+                },
+            ),
+            Shell,
+        ),
+        (
+            "noscript notice and 3 external scripts, with a link",
+            with_internal_links(
+                raw(
+                    10,
+                    RawSignals {
+                        scripts_external: 3,
+                        ..noscript()
+                    },
+                ),
+                2,
+            ),
+            Shell,
+        ),
         // Disqus's "Please enable JavaScript to view the comments" under a short post.
         (
             "noscript notice under an H1",

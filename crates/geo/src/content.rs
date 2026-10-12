@@ -7,7 +7,8 @@
 //! rendering:
 //!
 //! - [`ContentVerdict::Shell`]: under [`SHELL_MAX_WORDS`] words, and the app's mount element is
-//!   empty or, on a page without an H1, a `<noscript>` notice asks for JavaScript.
+//!   empty or, on a page without an H1, a `<noscript>` notice asks for JavaScript and the page
+//!   also has a mount element or is made of scripts (as for `LikelyShell` below).
 //! - [`ContentVerdict::LikelyShell`]: under [`SHELL_MAX_WORDS`] words, no H1, no internal links,
 //!   and scripts make up the page: inline script is at least [`SCRIPT_SHARE_PERCENT`] of its bytes,
 //!   or it loads at least [`MIN_EXTERNAL_SCRIPTS`] external scripts (`<script src>` and
@@ -18,14 +19,16 @@
 //! - [`ContentVerdict::Present`]: enough text in the HTML as served.
 //!
 //! The thresholds are the ones the content corpus (`crates/crawler/tests/content_corpus.rs`, 11
-//! framework shells and 15 normal pages) justifies:
+//! framework shells and 16 normal pages) justifies:
 //!
 //! - 50 words: every shell there has 0 words as served, and the shortest real page is a coming-soon
 //!   page with 10, under an H1. Below 50, the shell signals decide; at 50 or more a page is
 //!   `Present` whatever its scripts (Shopify's product page has 65 words and 45% inline script).
-//! - A noscript notice counts only without an H1: Disqus's "Please enable JavaScript to view the
-//!   comments" sits under a short post with an H1 and 31 words, which is not a shell. Every
-//!   framework shell with a notice (Create React App, Vue CLI, Angular) also has an empty mount.
+//! - A noscript notice counts only without an H1 and with a second signal: Disqus's "Please
+//!   enable JavaScript to view the comments" sits under a short post with an H1 and 31 words, and
+//!   under a short note with only an H2 and 22 words; neither is a shell, and neither has a mount
+//!   element or many scripts. Every framework shell with a notice (Create React App, Vue CLI,
+//!   Angular) also has an empty mount.
 //! - 60% inline script: never decisive in the corpus. Next.js's app-router bailout shell is at 33%
 //!   and Gatsby's client-only route at 18%, both caught by their external scripts; an image-only
 //!   landing page with Google and Meta tags is at 37%; a server-rendered Next.js page at 55%.
@@ -108,12 +111,13 @@ pub fn classify(page: &PageRecord) -> ContentVerdict {
     }
     let raw = &page.fields.raw;
     let no_h1 = page.fields.h1.is_empty();
-    if raw.mount_empty || (raw.noscript_js && no_h1) {
+    let scripted =
+        script_share(page) >= SCRIPT_SHARE_PERCENT || raw.scripts_external >= MIN_EXTERNAL_SCRIPTS;
+    // A noscript notice needs a second signal: alone it is a comments or form embed.
+    if raw.mount_empty || (raw.noscript_js && no_h1 && (raw.mount.is_some() || scripted)) {
         return ContentVerdict::Shell;
     }
     let bare = no_h1 && page.outlinks_internal == 0;
-    let scripted =
-        script_share(page) >= SCRIPT_SHARE_PERCENT || raw.scripts_external >= MIN_EXTERNAL_SCRIPTS;
     if bare && scripted {
         ContentVerdict::LikelyShell
     } else {

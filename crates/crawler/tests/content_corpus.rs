@@ -104,6 +104,11 @@ const FIXTURES: &[(&str, &str, Expect)] = &[
         Expect::Normal,
     ),
     (
+        "normal_short_h2_disqus.html",
+        "Short h2 note with Disqus",
+        Expect::Normal,
+    ),
+    (
         "normal_void_mount_ids.html",
         "Mount ids on a link and an img",
         Expect::Normal,
