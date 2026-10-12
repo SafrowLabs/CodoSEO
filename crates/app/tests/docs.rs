@@ -63,3 +63,29 @@ fn the_fetch_check_section_shows_its_screenshots() {
         "{links:?}"
     );
 }
+
+#[test]
+fn the_api_and_mcp_docs_list_every_ai_change_kind() {
+    use codoseo_core::change::ChangeKind;
+    let ai = [
+        ChangeKind::AiBotBlocked,
+        ChangeKind::AiAnswersRestricted,
+        ChangeKind::AiBlockNotApplied,
+        ChangeKind::AiIssueResolved,
+        ChangeKind::AiPreferencesChanged,
+        ChangeKind::AiFetchBlocked,
+        ChangeKind::AiContentMissing,
+        ChangeKind::AiLlmsTxtUnavailable,
+    ];
+    for doc in ["mcp.md", "api.md", "ai-access.md"] {
+        let text = std::fs::read_to_string(docs().join(doc)).expect("a doc");
+        for kind in ai {
+            assert!(kind.is_ai());
+            assert!(
+                text.contains(&format!("`{}`", kind.slug())),
+                "{doc} does not list `{}`",
+                kind.slug()
+            );
+        }
+    }
+}
