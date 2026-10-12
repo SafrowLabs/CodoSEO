@@ -69,6 +69,15 @@ fn quick_audit_is_100_pages_in_2_minutes_and_nothing_else() {
 }
 
 #[test]
+fn llms_txt_link_checks_are_5_on_free_and_20_elsewhere() {
+    assert_eq!(PlanLimits::quick_audit().llms_link_checks, 0);
+    assert_eq!(PlanLimits::for_plan(Plan::Free).llms_link_checks, 5);
+    for plan in [Plan::Pro, Plan::Agency, Plan::SelfHosted] {
+        assert_eq!(PlanLimits::for_plan(plan).llms_link_checks, 20);
+    }
+}
+
+#[test]
 fn synthetic_probe_caps_match_the_b1_table() {
     let secs = Duration::from_secs;
     for (limits, urls, budget, max_requests) in [

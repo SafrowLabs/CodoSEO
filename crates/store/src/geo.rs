@@ -23,6 +23,7 @@ use codoseo_geo::findings::{
     Evidence, Finding, FindingKind, evaluated_kinds, findings, hold_unjudged_probes,
 };
 use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
+use codoseo_geo::llms::LlmsTxtReport;
 use codoseo_geo::report::{AccessReport, Declared};
 use codoseo_geo::robots::Pair;
 use serde_json::Value;
@@ -253,6 +254,24 @@ where
             })
         }),
     )
+}
+
+/// The `llms_txt` part of the site's newest stored report that has one. A crawl that did not
+/// fetch the file (or a failed one) stores a report without it, so this is not simply the latest
+/// report's: it is what adoption is carried from ([`codoseo_geo::llms::carry_adoption`]).
+pub async fn latest_llms_txt(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<LlmsTxtReport>, sqlx::Error> {
+    let value: Option<Value> = sqlx::query_scalar(
+        "SELECT report->'llms_txt' FROM ai_reports \
+         WHERE site_id = $1 AND jsonb_typeof(report->'llms_txt') = 'object' \
+         ORDER BY created_at DESC, crawl_id DESC LIMIT 1",
+    )
+    .bind(site_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
 }
 
 /// Whether the site has any stored report (without reading it).

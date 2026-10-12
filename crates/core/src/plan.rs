@@ -46,6 +46,8 @@ pub struct PlanLimits {
     pub probe_budget: Duration,
     /// Requests for one probe run, baseline, retries and confirmations included.
     pub probe_max_requests: u16,
+    /// Links from the site's `llms.txt` that get a status check of their own per crawl.
+    pub llms_link_checks: u16,
 }
 
 const HOUR: u64 = 3600;
@@ -65,6 +67,7 @@ impl PlanLimits {
                 probe_urls: 1,
                 probe_budget: Duration::from_secs(45),
                 probe_max_requests: 30,
+                llms_link_checks: 5,
             },
             Plan::Pro => PlanLimits {
                 max_sites: Some(5),
@@ -78,6 +81,7 @@ impl PlanLimits {
                 probe_urls: 3,
                 probe_budget: Duration::from_secs(90),
                 probe_max_requests: 70,
+                llms_link_checks: 20,
             },
             Plan::Agency => PlanLimits {
                 max_sites: Some(25),
@@ -91,6 +95,7 @@ impl PlanLimits {
                 probe_urls: 5,
                 probe_budget: Duration::from_secs(120),
                 probe_max_requests: 120,
+                llms_link_checks: 20,
             },
             // No plan caps, but finite defaults so a calendar or faceted search
             // can't crawl forever. Self-hosters can raise them in config.
@@ -107,6 +112,7 @@ impl PlanLimits {
                 probe_urls: 5,
                 probe_budget: Duration::from_secs(180),
                 probe_max_requests: 160,
+                llms_link_checks: 20,
             },
         }
     }
@@ -126,6 +132,8 @@ impl PlanLimits {
             probe_urls: 0,
             probe_budget: Duration::ZERO,
             probe_max_requests: 0,
+            // No site signals, so no llms.txt.
+            llms_link_checks: 0,
         }
     }
 }
