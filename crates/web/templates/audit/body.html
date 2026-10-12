@@ -56,7 +56,7 @@
           {% if ai.clear %}
           <div style="display:flex;align-items:center;gap:10px"><span class="badge t-ok"><svg class="icon" style="width:13px;height:13px"><use href="#i-check"/></svg>No issues</span>Nothing open, accepted or snoozed.</div>
           {% else %}
-          <div class="legend">
+          <div class="legend legend-rows">
             {% for r in ai.rows %}
             <div><span class="k">{{ r.label }}</span><span class="mono num">{{ r.total }}</span>{% for c in r.chips %}<span class="badge {{ c.0 }}">{{ c.1 }}</span>{% endfor %}</div>
             {% endfor %}

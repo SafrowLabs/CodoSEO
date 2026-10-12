@@ -664,6 +664,9 @@ a.row-item:hover .go { opacity: 1; transform: none; }
 .legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 14px; font-size: 13px; }
 .legend > div { display: flex; align-items: center; gap: 8px; }
 .legend .k { flex: 1; color: var(--ink-3); }
+.legend-rows { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
+.legend-rows > div { flex-wrap: wrap; }
+.legend-rows .k { min-width: 4.5em; }
 .vbars { display: flex; align-items: flex-end; gap: 8px; height: 120px; margin-top: 16px; }
 .vbars > div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
 .vbars .v { font: 10.5px var(--mono); color: var(--muted-2); }
