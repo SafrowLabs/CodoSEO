@@ -247,9 +247,10 @@ pub(super) const PROBE_CAVEAT: &str = "Requests sent from this machine with each
     user agent and compared with CodoSEObot's. Real bots come from their own addresses and may be \
     treated differently.";
 
-/// Said first wherever llms.txt results are shown.
-pub(super) const LLMS_BANNER: &str = "INFORMATIONAL · NOT SCORED. llms.txt is optional: nothing \
-    depends on it, and it never affects a health score.";
+/// Said first wherever llms.txt results are shown, after an "Informational · not scored" label
+/// each format sets in its own style.
+pub(super) const LLMS_BANNER: &str =
+    "llms.txt is optional: nothing depends on it, and it never affects a health score.";
 
 /// Said under the raw HTML content block.
 pub(super) const RAW_NOTE: &str = "Read from the HTML as served, before JavaScript runs. AI \
@@ -512,6 +513,54 @@ mod tests {
         );
         assert_eq!(clean("tab\there\nline\r"), "tabhereline");
         assert_eq!(clean("Zürich → 東京 \u{a0}ok"), "Zürich → 東京 \u{a0}ok");
+    }
+
+    fn llms_out(summary: &str) -> LlmsOutput {
+        let fetch = codoseo_core::output::LlmsTxtFetch {
+            status: 404,
+            ..Default::default()
+        };
+        LlmsOutput {
+            url: "https://example.com/llms.txt".to_owned(),
+            informational: true,
+            summary: summary.to_owned(),
+            report: codoseo_geo::llms::assess(&fetch, false),
+        }
+    }
+
+    #[test]
+    fn the_llms_banner_says_informational_once_in_each_format() {
+        let out = llms_out("No llms.txt.");
+        let mut table_out = Vec::new();
+        table::llms(&mut table_out, &out).unwrap();
+        let table_out = String::from_utf8(table_out).unwrap();
+        assert!(
+            table_out.starts_with(
+                "INFORMATIONAL · NOT SCORED. llms.txt is optional: nothing depends on it, and it never affects a health score.\n"
+            ),
+            "{table_out}"
+        );
+        assert_eq!(table_out.to_lowercase().matches("not scored").count(), 1);
+        let mut md = Vec::new();
+        markdown::llms(&mut md, &out).unwrap();
+        let md = String::from_utf8(md).unwrap();
+        assert!(
+            md.contains(
+                "\n> **Informational · not scored.** llms.txt is optional: nothing depends on it, and it never affects a health score.\n"
+            ),
+            "{md}"
+        );
+        assert_eq!(md.to_lowercase().matches("not scored").count(), 1, "{md}");
+    }
+
+    #[test]
+    fn the_llms_table_cleans_its_summary() {
+        let out = llms_out("/llms.txt could not be fetched (\u{1b}[31mred).");
+        let mut table_out = Vec::new();
+        table::llms(&mut table_out, &out).unwrap();
+        let table_out = String::from_utf8(table_out).unwrap();
+        assert!(!table_out.contains('\u{1b}'), "{table_out:?}");
+        assert!(table_out.contains("([31mred)."), "{table_out}");
     }
 
     #[test]

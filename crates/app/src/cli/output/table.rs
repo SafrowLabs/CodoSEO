@@ -69,7 +69,7 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
 }
 
 pub(super) fn llms(w: &mut impl Write, out: &LlmsOutput) -> std::io::Result<()> {
-    writeln!(w, "{LLMS_BANNER}\n")?;
+    writeln!(w, "INFORMATIONAL · NOT SCORED. {LLMS_BANNER}\n")?;
     write_pairs(w, "", &llms_facts(out))?;
     if !out.report.checks.is_empty() {
         writeln!(w, "\nChecks")?;
@@ -96,7 +96,7 @@ pub(super) fn llms(w: &mut impl Write, out: &LlmsOutput) -> std::io::Result<()> 
             writeln!(w, "  {}", clean(u))?;
         }
     }
-    writeln!(w, "\n{}", out.summary)?;
+    writeln!(w, "\n{}", clean(&out.summary))?;
     Ok(())
 }
 
