@@ -1,5 +1,6 @@
 //! `/llms.txt`: one fetch after preflight, and a bounded check of the links it lists once the
-//! crawl is over. Both go through the crawl's limiter, keep to robots.txt and stop at the
+//! crawl is over. Both go through the crawl's limiter, keep to robots.txt (on every redirect hop:
+//! link checks follow none, the file's fetch checks each) and stop at the
 //! deadline.
 //!
 //! The file is informational ([`codoseo_geo::llms`]): nothing here can stop or slow the crawl
@@ -12,6 +13,7 @@ use codoseo_core::output::{LinkStatus, LlmsTxtFetch};
 use codoseo_core::page::PageRecord;
 use codoseo_core::url::{normalize, url_hash};
 use codoseo_geo::llms::{LlmsState, MAX_BYTES, links, parse, state_of};
+use reqwest::header::LOCATION;
 use tokio::time::{Instant, timeout_at};
 use url::Url;
 
@@ -53,7 +55,7 @@ pub(crate) async fn fetch_llms_txt(
         return None;
     }
     let url = llms_url(origin)?;
-    let first = fetch_once(fetcher, limiter, &url, deadline).await?;
+    let first = fetch_once(fetcher, limiter, &url, rules, deadline).await?;
     let Some(wait) = first.retry else {
         return Some(first.fetch);
     };
@@ -61,70 +63,127 @@ pub(crate) async fn fetch_llms_txt(
         return Some(first.fetch);
     }
     tokio::time::sleep(wait).await;
-    match fetch_once(fetcher, limiter, &url, deadline).await {
+    match fetch_once(fetcher, limiter, &url, rules, deadline).await {
         Some(again) => Some(again.fetch),
         None => Some(first.fetch),
     }
 }
 
-/// One request for `/llms.txt`, and how long to wait before retrying it when it failed in a way
+/// One fetch of `/llms.txt`, and how long to wait before retrying it when it failed in a way
 /// worth one retry.
 struct Attempt {
     fetch: LlmsTxtFetch,
     retry: Option<Duration>,
 }
 
+/// Redirects followed on the way to the file.
+const MAX_HOPS: usize = 5;
+
+/// Fetches `url`, following redirects one hop at a time so that robots.txt is applied to each:
+/// the site's rules on its own origin, the target's own robots.txt on another. `None` when a hop
+/// is disallowed, an address is refused, or the deadline came first.
 async fn fetch_once(
     fetcher: &Fetcher,
     limiter: &Limiter,
     url: &Url,
+    rules: &RobotsRules,
     deadline: Instant,
 ) -> Option<Attempt> {
-    let fetched = timeout_at(deadline, async {
-        let _permit = limiter.acquire().await;
-        fetcher.fetch_raw(url, MAX_BYTES).await
-    })
-    .await
-    .ok()?;
-    let res = match fetched {
-        Ok(res) => res,
-        Err(FetchError::Blocked(_)) => return None,
-        Err(e) => {
-            let transient = matches!(
-                e,
-                FetchError::Timeout | FetchError::Connect(_) | FetchError::Http(_)
-            );
-            return Some(Attempt {
-                fetch: LlmsTxtFetch {
-                    error: Some(e.to_string()),
-                    ..LlmsTxtFetch::default()
-                },
-                retry: transient.then_some(RETRY_WAIT),
-            });
+    let failed = |e: FetchError| {
+        let transient = matches!(
+            e,
+            FetchError::Timeout | FetchError::Connect(_) | FetchError::Http(_)
+        );
+        Attempt {
+            fetch: LlmsTxtFetch {
+                error: Some(e.to_string()),
+                ..LlmsTxtFetch::default()
+            },
+            retry: transient.then_some(RETRY_WAIT),
         }
     };
-    let retry_after = retry_after_of(&res.headers);
-    limiter.on_response(res.status, retry_after);
-    let ok = (200..300).contains(&res.status);
-    let retry = (res.status == 429 || res.status >= 500).then(|| retry_after.unwrap_or(RETRY_WAIT));
-    let body = match res.body {
-        Some(body) if ok => String::from_utf8_lossy(&body).into_owned(),
-        _ => String::new(),
-    };
-    Some(Attempt {
-        fetch: LlmsTxtFetch {
-            status: res.status,
-            error: None,
-            content_type: res.content_type,
-            bytes: res.size_bytes,
-            truncated: res.truncated,
-            body,
-            final_url: Some(res.final_url.to_string()),
-            links: Vec::new(),
-            external_unchecked: 0,
-        },
-        retry,
+    timeout_at(deadline, async {
+        let mut current = url.clone();
+        let mut hops = 0;
+        loop {
+            let fetched = {
+                let _permit = limiter.acquire().await;
+                fetcher.fetch_raw_once(&current, MAX_BYTES).await
+            };
+            let res = match fetched {
+                Ok(res) => res,
+                Err(FetchError::Blocked(_)) => return None,
+                Err(e) => return Some(failed(e)),
+            };
+            let retry_after = retry_after_of(&res.headers);
+            limiter.on_response(res.status, retry_after);
+            if (300..400).contains(&res.status)
+                && let Some(location) = res.headers.get(LOCATION)
+            {
+                let location = String::from_utf8_lossy(location.as_bytes()).into_owned();
+                let Some(next) = current
+                    .join(&location)
+                    .ok()
+                    .filter(|u| matches!(u.scheme(), "http" | "https"))
+                else {
+                    return Some(failed(FetchError::InvalidRedirect { location }));
+                };
+                hops += 1;
+                if hops > MAX_HOPS {
+                    return Some(failed(FetchError::TooManyRedirects { chain: Vec::new() }));
+                }
+                if !may_follow(fetcher, limiter, url, rules, &next).await {
+                    return None;
+                }
+                current = next;
+                continue;
+            }
+            let ok = (200..300).contains(&res.status);
+            let retry =
+                (res.status == 429 || res.status >= 500).then(|| retry_after.unwrap_or(RETRY_WAIT));
+            let body = match res.body {
+                Some(body) if ok => String::from_utf8_lossy(&body).into_owned(),
+                _ => String::new(),
+            };
+            return Some(Attempt {
+                fetch: LlmsTxtFetch {
+                    status: res.status,
+                    error: None,
+                    content_type: res.content_type,
+                    bytes: res.size_bytes,
+                    truncated: res.truncated,
+                    body,
+                    final_url: Some(res.final_url.to_string()),
+                    links: Vec::new(),
+                    external_unchecked: 0,
+                },
+                retry,
+            });
+        }
     })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Whether robots.txt lets CodoSEObot follow a redirect to `next`: the site's `rules` on the
+/// origin of `start`, else the robots.txt of `next`'s own origin (one more request; one that
+/// can't be read means no).
+async fn may_follow(
+    fetcher: &Fetcher,
+    limiter: &Limiter,
+    start: &Url,
+    rules: &RobotsRules,
+    next: &Url,
+) -> bool {
+    if next.origin() == start.origin() {
+        return rules.allowed(next.as_str());
+    }
+    let _permit = limiter.acquire().await;
+    match crate::robots::fetch_robots(fetcher, next).await {
+        Ok((theirs, _)) => theirs.allowed(next.as_str()),
+        Err(_) => false,
+    }
 }
 
 /// Who may be asked about a link and how.
@@ -206,8 +265,9 @@ pub(crate) async fn check_links(llms: &mut LlmsTxtFetch, pages: &[PageRecord], c
         let until = c.deadline.min(Instant::now() + c.timeout);
         let res = timeout_at(until, async {
             let _permit = c.limiter.acquire().await;
-            // The status is all we need: no body is kept.
-            c.fetcher.fetch_raw(&url, 0).await
+            // The status is all we need: no body is kept. A redirect is not followed (its target
+            // may be one robots.txt disallows) and counts as resolved, as in Lighthouse.
+            c.fetcher.fetch_raw_once(&url, 0).await
         })
         .await;
         let status = match res {

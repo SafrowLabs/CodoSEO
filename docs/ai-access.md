@@ -145,7 +145,7 @@ cargo test -p codoseo-crawler --test content_corpus -- --nocapture
 | 2xx that serves an HTML page | **No llms.txt (soft 404)**: a web page where the file should be is the site's catch-all, so it is read like a 404 (Lighthouse takes a 2xx at face value) |
 | 429, 5xx, another unexpected status, or no response at all | **Unavailable** |
 
-The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowed `/llms.txt` is not fetched), and read up to 512 KiB. A 429, a 5xx or no answer is retried once, after the server's `Retry-After` (up to 5 seconds; a longer one is not waited for) or a second, so one blip doesn't read as a file that stopped serving. It is not fetched for the instant audits.
+The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowed `/llms.txt` is not fetched), and read up to 512 KiB. A redirect is followed only where robots.txt allows the target: your robots.txt on your own site, the other site's own robots.txt off it. A 429, a 5xx or no answer is retried once, after the server's `Retry-After` (up to 5 seconds; a longer one is not waited for) or a second, so one blip doesn't read as a file that stopped serving. It is not fetched for the instant audits.
 
 **The checks** on an available file. The format follows llmstxt.org; the last two Lighthouse-style rules are kept as they are in its audit:
 
@@ -158,7 +158,7 @@ The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowe
 - Served as `text/plain` or `text/markdown`.
 - Links resolve: every link that was checked answered 2xx or 3xx.
 
-**Link checks.** Links to pages the crawl already fetched use that status. Other links on your own site get one request each after the crawl, with robots.txt applied, up to a cap that depends on the plan: **Free 5, Pro, Agency and self-hosted 20**. Links to other sites are not checked; the card counts them and the ones past the cap as not checked.
+**Link checks.** Links to pages the crawl already fetched use that status. Other links on your own site get one request each after the crawl, with robots.txt applied and redirects not followed (a redirect counts as resolving), up to a cap that depends on the plan: **Free 5, Pro, Agency and self-hosted 20**. Links to other sites are not checked; the card counts them and the ones past the cap as not checked.
 
 **The incident.** The one finding is `llms_txt_unavailable`, a Warning (grade A), and only after the site had adopted llms.txt, that is, an earlier report served the file and it now answers 5xx or 429 or not at all. A 404 or a soft 404 is a removal, not a failure, and a site that never had one gets nothing. The change kind `ai_llms_txt_unavailable` goes in the Monday digest, not in an instant alert. When the file serves again (or answers 404 because you removed it), the recovery is announced as an `ai_llms_txt_unavailable` change too, with "Resolved" as its new value, not as `ai_issue_resolved`: it follows the same alert rule as the failure, so you are never told at once about something you were only told in a digest.
 

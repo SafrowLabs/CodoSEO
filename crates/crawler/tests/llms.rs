@@ -409,3 +409,55 @@ async fn links_relative_to_a_file_on_another_origin_are_not_checked() {
     assert_eq!(site.path_hits("/intro.md") + site.path_hits("/guide.md"), 0);
     assert_eq!(docs.path_hits("/intro.md") + docs.path_hits("/guide.md"), 0);
 }
+
+#[tokio::test]
+async fn a_redirect_to_a_path_robots_disallows_is_not_followed() {
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: *\nDisallow: /private/\n")
+        .html("/", "Home", &[])
+        .page("/llms.txt", Page::redirect(301, "/private/llms.txt"))
+        .page("/private/llms.txt", text(&llms_with(&[])))
+        .start()
+        .await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+    assert_eq!(out.signals.llms_txt, None);
+    assert_eq!(site.path_hits("/llms.txt"), 1);
+    assert_eq!(site.path_hits("/private/llms.txt"), 0);
+}
+
+#[tokio::test]
+async fn a_redirect_to_another_origin_keeps_to_that_origins_robots_txt() {
+    let docs = SiteBuilder::new()
+        .robots(200, "User-agent: *\nDisallow: /\n")
+        .page("/llms.txt", text(&llms_with(&[])))
+        .start()
+        .await;
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/llms.txt",
+            Page::redirect(301, docs.url("/llms.txt").as_str()),
+        )
+        .start()
+        .await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+    assert_eq!(out.signals.llms_txt, None);
+    assert_eq!(docs.path_hits("/llms.txt"), 0);
+    assert_eq!(docs.path_hits("/robots.txt"), 1);
+}
+
+#[tokio::test]
+async fn link_checks_do_not_follow_redirects_and_count_them_as_resolved() {
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: *\nDisallow: /private/\n")
+        .html("/", "Home", &[])
+        .page("/moved", Page::redirect(301, "/private/target"))
+        .html("/private/target", "Private", &[])
+        .page("/llms.txt", text(&llms_with(&["/moved"])))
+        .start()
+        .await;
+    let f = run(cfg(site.url("/"))).await;
+    assert_eq!(status_of(&f, "/moved").unwrap().status, Some(301));
+    assert_eq!(site.path_hits("/private/target"), 0);
+    assert_eq!(codoseo_geo::llms::assess(&f, false).link_summary.failing, 0);
+}
