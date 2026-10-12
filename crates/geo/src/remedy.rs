@@ -134,7 +134,7 @@ pub fn clean(s: &str, max: usize) -> String {
 
 /// Zero-width and bidirectional formatting characters, which can hide or reorder text.
 fn is_format(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
 fn path_of(url: &str) -> String {
@@ -334,9 +334,11 @@ struct BotPlan {
     restored: Option<bool>,
 }
 
-/// An `Allow` line that matches exactly one path: never a bare `Allow: /`.
+/// An `Allow` line that matches exactly one path: never a bare `Allow: /`. A `*` or `$` in the
+/// path is percent-encoded so it matches itself rather than acting as a wildcard or an end
+/// anchor (RFC 9309 2.2.3).
 fn allow_line(path: &str) -> String {
-    let p = path.trim_end_matches('$');
+    let p = path.replace('*', "%2A").replace('$', "%24");
     format!("Allow: {p}$")
 }
 
@@ -1357,4 +1359,25 @@ pub fn agent_prompt(r: &Remedy, f: &IncidentFacts) -> String {
         out.push_str(&format!("Sources: {}\n", r.sources.join(", ")));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_allow_line_matches_a_star_or_dollar_in_the_path_literally() {
+        assert_eq!(allow_line("/a"), "Allow: /a$");
+        assert_eq!(allow_line("/a*b$"), "Allow: /a%2Ab%24$");
+        let robots = crate::robots::RobotsTxt::parse(
+            format!("User-agent: *\nDisallow: /\n{}\n", allow_line("/a*b$")).as_bytes(),
+        );
+        assert!(robots.verdict("GPTBot", "/a*b$").allowed);
+        assert!(!robots.verdict("GPTBot", "/aXb").allowed);
+    }
+
+    #[test]
+    fn line_and_paragraph_separators_are_cleaned() {
+        assert_eq!(clean("a\u{2028}b\u{2029}c", 10), "abc");
+    }
 }

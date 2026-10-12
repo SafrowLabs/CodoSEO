@@ -69,7 +69,15 @@ impl Rule {
             Some(body) => (body, true),
             None => (normalised.as_str(), false),
         };
-        let mut parts: Vec<String> = body.split('*').map(str::to_owned).collect();
+        // `%2A` and `%24` stand for a literal `*` and `$` (RFC 9309 2.2.3).
+        let mut parts: Vec<String> = body
+            .split('*')
+            .map(|p| {
+                p.replace("%2A", "*")
+                    .replace("%2a", "*")
+                    .replace("%24", "$")
+            })
+            .collect();
         // Runs of `*` match the same as one; dropping the empty pieces keeps a hostile
         // `*****…` pattern from costing a step per star on every verdict.
         let last = parts.len() - 1;
