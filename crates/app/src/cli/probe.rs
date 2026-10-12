@@ -10,6 +10,7 @@ use codoseo_crawler::probe::{DEFAULT_MIN_GAP, PAGE_PROBE_DEADLINE, probe_from_en
 use codoseo_geo::Intent;
 use codoseo_geo::findings::{Finding, FindingKind, findings};
 use codoseo_geo::probe::ProbeReport;
+use codoseo_geo::remedy::{FindingRemedy, finding_remedies};
 use serde::Serialize;
 use url::Url;
 
@@ -46,6 +47,19 @@ pub struct ProbeOutput {
     /// The pages `report.urls[].url` points at.
     pub pages: Vec<String>,
     pub findings: Vec<Finding>,
+    /// One remedy per finding: the change, how to verify it, the grade and the sources.
+    pub remedies: Vec<FindingRemedy>,
+}
+
+impl ProbeOutput {
+    /// The first step of the remedy of `finding`, for the one-line "Fix:" under it.
+    pub fn fix_for(&self, finding: &Finding) -> Option<&str> {
+        self.remedies
+            .iter()
+            .find(|r| r.kind == finding.kind && r.subject == finding.subject)
+            .and_then(|r| r.steps.first())
+            .map(String::as_str)
+    }
 }
 
 pub async fn run(args: ProbeArgs) -> Outcome {
@@ -63,7 +77,8 @@ pub async fn run(args: ProbeArgs) -> Outcome {
     let found = findings(&probed.report, &Intent::default())
         .into_iter()
         .filter(|f| f.kind == FindingKind::FetchBlocked)
-        .collect();
+        .collect::<Vec<Finding>>();
+    let remedies = finding_remedies(probed.page_url(), &probed.report, &found);
     let output = ProbeOutput {
         url: probed.page_url().to_owned(),
         report: probed.probes().clone(),
@@ -74,6 +89,7 @@ pub async fn run(args: ProbeArgs) -> Outcome {
             .map(|u| u.url.clone())
             .collect(),
         findings: found,
+        remedies,
     };
     let mut w = std::io::stdout().lock();
     write_probe(&mut w, args.format, &output)?;

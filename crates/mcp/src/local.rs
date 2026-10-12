@@ -341,7 +341,9 @@ impl Backend for LocalBackend {
         let found = findings(&probed.report, &codoseo_geo::Intent::default())
             .into_iter()
             .filter(|f| f.kind == FindingKind::FetchBlocked)
-            .collect();
+            .collect::<Vec<_>>();
+        let remedies =
+            codoseo_geo::remedy::finding_remedies(probed.page_url(), &probed.report, &found);
         let page = probed.page_url().to_owned();
         Ok(AiProbeReport {
             summary: probe_summary(&page, probed.probes()),
@@ -354,6 +356,7 @@ impl Backend for LocalBackend {
                 .map(|u| u.url.clone())
                 .collect(),
             findings: found,
+            remedies,
         })
     }
 
@@ -671,6 +674,16 @@ mod tests {
             .filter_map(|f| f["kind"].as_str())
             .collect();
         assert_eq!(kinds, ["bots_blocked"], "{section}");
+        // The cached audit has the fix for each finding, as `codoseo crawl` writes it.
+        let remedies = section["remedies"].as_array().expect("remedies");
+        assert_eq!(remedies.len(), 1);
+        assert_eq!(remedies[0]["kind"], "bots_blocked");
+        assert!(
+            remedies[0]["fix"]
+                .as_str()
+                .unwrap()
+                .contains("OAI-SearchBot")
+        );
     }
 
     /// The AI findings the audit saves are not checks: the same pages score the same with a

@@ -13,12 +13,12 @@
 //! control characters and backticks go, and it is cut to a fixed length.
 
 use codoseo_core::check::Severity;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::content::{ContentVerdict, NON_RENDERING_BOTS};
 use crate::eligibility::{CauseSource, DirectiveSlug, Effect};
-use crate::findings::{Evidence, FindingKind, Grade, ROBOTS_DOC};
+use crate::findings::{Evidence, Finding, FindingKind, Grade, ROBOTS_DOC};
 use crate::incident::{Before, BotBefore};
 use crate::ledger::{Lag, VENDOR_DOCS, finding_sources, for_kind};
 use crate::probe::{Vendor, Verdict};
@@ -1160,6 +1160,52 @@ pub fn now_text(kind: FindingKind, ev: &Evidence) -> String {
             None => "llms.txt gives no answer".to_owned(),
         },
     }
+}
+
+// ---- local runs ------------------------------------------------------------------------------
+
+/// A finding's remedy for a run with no incidents to keep (`codoseo crawl`, the local MCP
+/// tools): the change, how to verify it and what it rests on. There is no before: no earlier
+/// report to compare with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindingRemedy {
+    pub kind: FindingKind,
+    pub subject: String,
+    /// Just the change: the snippet when there is one, else the steps ([`copy_fix`]).
+    pub fix: String,
+    pub steps: Vec<String>,
+    pub verify: Vec<String>,
+    pub grade: Grade,
+    pub sources: Vec<String>,
+}
+
+/// The remedy of each of `findings` for the site at `origin`, in their order.
+pub fn finding_remedies(
+    origin: &str,
+    report: &AccessReport,
+    findings: &[Finding],
+) -> Vec<FindingRemedy> {
+    findings
+        .iter()
+        .map(|f| {
+            let ctx = RemedyContext {
+                origin,
+                report: Some(report),
+                before: None,
+                lag: crate::ledger::lag(f.kind, &f.evidence),
+            };
+            let r = remedy(f.kind, &f.subject, &f.evidence, &ctx);
+            FindingRemedy {
+                kind: f.kind,
+                subject: f.subject.clone(),
+                fix: copy_fix(&r),
+                steps: r.steps,
+                verify: r.verify,
+                grade: r.grade,
+                sources: r.sources,
+            }
+        })
+        .collect()
 }
 
 // ---- renderings ------------------------------------------------------------------------------
