@@ -97,6 +97,13 @@ Most AI crawlers fetch a page's HTML and read it as it is: they don't run its Ja
 
 It costs no extra requests: the crawler already fetched these pages, and the verdict is drawn from what it read.
 
+<table>
+  <tr>
+    <td width="50%"><a href="images/ai-access/ai-access-content-light.png"><img src="images/ai-access/ai-access-content-light.png" alt="The Content in raw HTML card and a content_missing incident, with the llms.txt card below"></a><br>An incident for two shell pages, the <b>Content in raw HTML</b> card and the <b>llms.txt</b> card</td>
+    <td width="50%"><a href="images/ai-access/ai-access-content-dark.png"><img src="images/ai-access/ai-access-content-dark.png" alt="The same, dark theme"></a><br>The same, dark theme</td>
+  </tr>
+</table>
+
 **The verdicts.**
 
 | Verdict | Means |
@@ -121,6 +128,13 @@ cargo test -p codoseo-crawler --test content_corpus -- --nocapture
 ## llms.txt
 
 `/llms.txt` is an optional, proposed file at the root of a site: a Markdown index of what an AI agent should read ([llmstxt.org](https://llmstxt.org/)). CodoSEO reports whether you serve one and how it holds up. It is **informational**: it is never scored, never part of the health score and never Critical, and a site without one has nothing to fix.
+
+<table>
+  <tr>
+    <td width="50%"><a href="images/ai-access/ai-access-llms-light.png"><img src="images/ai-access/ai-access-llms-light.png" alt="The llms.txt card for a file with one failing link"></a><br>An available file with one failing link</td>
+    <td width="50%"><a href="images/ai-access/ai-access-llms-absent-light.png"><img src="images/ai-access/ai-access-llms-absent-light.png" alt="The llms.txt card for a site without one"></a><br>A site without one: nothing to fix</td>
+  </tr>
+</table>
 
 **Status handling follows Lighthouse's `llms-txt` audit** ([documentation](https://developer.chrome.com/docs/lighthouse/agentic-browsing/llms-txt)):
 
@@ -332,6 +346,10 @@ The response also has `content` (the [raw HTML content](#content-in-raw-html) of
   <tr>
     <td width="50%"><a href="images/ai-access/ai-access-light.png"><img src="images/ai-access/ai-access-light.png" alt="The AI access screen, light theme"></a><br>The AI access screen</td>
     <td width="50%"><a href="images/ai-access/ai-access-dark.png"><img src="images/ai-access/ai-access-dark.png" alt="The AI access screen, dark theme"></a><br>The same, dark theme</td>
+  </tr>
+  <tr>
+    <td><a href="images/ai-access/ai-access-content-mobile.png"><img src="images/ai-access/ai-access-content-mobile.png" alt="Content in raw HTML and llms.txt on a phone"></a><br>Content and llms.txt on a phone</td>
+    <td><a href="images/ai-access/ai-access-probes-clear-light.png"><img src="images/ai-access/ai-access-probes-clear-light.png" alt="The Fetch check with every probe clear"></a><br>The Fetch check with every probe clear</td>
   </tr>
   <tr>
     <td><a href="images/ai-access/intent-light.png"><img src="images/ai-access/intent-light.png" alt="The intent form"></a><br>The intent form</td>
