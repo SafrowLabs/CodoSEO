@@ -917,14 +917,16 @@ pub async fn fail_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
     Ok(done.rows_affected() > 0)
 }
 
-/// How long after an inconclusive follow-up recheck the next one is due, in hours.
+/// How long after an inconclusive or superseded follow-up recheck the next one is due, in hours.
 pub const FOLLOWUP_RETRY_HOURS: i32 = 6;
-/// Inconclusive follow-ups in a row (since the manual recheck that queued the first) after which
-/// no other is queued: the incident stays recovered and the next crawl judges it.
+/// Follow-ups in a row that were inconclusive or superseded by a crawl (since the manual recheck
+/// that queued the first) after which no other is queued: the incident stays recovered and the
+/// next crawl judges it.
 pub const MAX_INCONCLUSIVE_FOLLOWUPS: i64 = 3;
 
-/// After an inconclusive follow-up: queues the next one [`FOLLOWUP_RETRY_HOURS`] on, with its
-/// job, unless [`MAX_INCONCLUSIVE_FOLLOWUPS`] were inconclusive in a row. Returns its id.
+/// After a follow-up that was inconclusive, or superseded by a crawl under way: queues the next
+/// one [`FOLLOWUP_RETRY_HOURS`] on, with its job, unless [`MAX_INCONCLUSIVE_FOLLOWUPS`] in a row
+/// ended so. Returns its id.
 async fn retry_followup(
     tx: &mut Transaction<'_, Postgres>,
     site_id: Uuid,
@@ -932,7 +934,8 @@ async fn retry_followup(
 ) -> Result<Option<i64>, sqlx::Error> {
     let in_a_row: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM ai_rechecks \
-         WHERE incident_id = $1 AND origin = 'followup' AND outcome = 'inconclusive' \
+         WHERE incident_id = $1 AND origin = 'followup' \
+           AND (outcome = 'inconclusive' OR status = 'superseded') \
            AND id > COALESCE((SELECT max(id) FROM ai_rechecks \
                               WHERE incident_id = $1 AND origin = 'manual'), 0)",
     )
@@ -963,18 +966,61 @@ async fn retry_followup(
     Ok(Some(id))
 }
 
-/// Marks a queued or running recheck superseded (a crawl of the site is under way and will
-/// judge the incident). Returns whether it did.
-pub async fn supersede_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
-    let done = sqlx::query(
+/// Whether a crawl of the site is queued or running.
+async fn crawl_active(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM crawls \
+         WHERE site_id = $1 AND status IN ('queued', 'running'))",
+    )
+    .bind(site_id)
+    .fetch_one(&mut **tx)
+    .await
+}
+
+/// Marks the queued or running recheck `id` superseded in `tx`. A follow-up whose incident is
+/// still open and recovered is queued again ([`retry_followup`]): the crawl that took over may
+/// not judge it (it only held the finding, or failed), and the incident must not stay
+/// recovered for good. Returns whether it was superseded.
+async fn supersede_in(tx: &mut Transaction<'_, Postgres>, id: i64) -> Result<bool, sqlx::Error> {
+    let row: Option<(Uuid, i64, String)> = sqlx::query_as(
         "UPDATE ai_rechecks SET status = 'superseded', finished_at = now(), \
            started_at = COALESCE(started_at, now()) \
-         WHERE id = $1 AND status IN ('queued', 'running')",
+         WHERE id = $1 AND status IN ('queued', 'running') \
+         RETURNING site_id, incident_id, origin",
     )
     .bind(id)
-    .execute(pool)
+    .fetch_optional(&mut **tx)
     .await?;
-    Ok(done.rows_affected() > 0)
+    let Some((site_id, incident_id, origin)) = row else {
+        return Ok(false);
+    };
+    if origin == RecheckOrigin::Followup.slug() {
+        let recovered: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM ai_incidents WHERE id = $1 \
+               AND resolved_at IS NULL AND recovered_at IS NOT NULL)",
+        )
+        .bind(incident_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if recovered {
+            retry_followup(tx, site_id, incident_id).await?;
+        }
+    }
+    Ok(true)
+}
+
+/// Marks a queued or running recheck superseded (a crawl of the site is under way and will
+/// judge the incident, or the incident is resolved). A follow-up of a still-recovered incident
+/// is queued again [`FOLLOWUP_RETRY_HOURS`] on, at most [`MAX_INCONCLUSIVE_FOLLOWUPS`] in a row.
+/// Returns whether it was superseded.
+pub async fn supersede_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let done = supersede_in(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(done)
 }
 
 /// Fails the rechecks nothing will finish, so an incident is never left busy: those `running`
@@ -1020,7 +1066,9 @@ pub async fn fail_orphaned_rechecks(
 ///   (already alerted while snoozed): `clean`.
 ///
 /// A follow-up for an incident that is resolved, or whose recovery a crawl undid meanwhile, does
-/// nothing and is marked `superseded`, as is a recheck for an incident resolved meanwhile.
+/// nothing and is marked `superseded`, as is a recheck for an incident resolved meanwhile and
+/// one applied while a crawl of the site is queued or running (the crawl judges the incident; a
+/// follow-up is then queued again, [`supersede_recheck`]).
 /// Returns `None` then, and for a recheck that already finished. `observations` (what the
 /// recheck saw, as JSON) is kept on the recheck.
 pub async fn apply_recheck(
@@ -1079,6 +1127,14 @@ pub async fn apply_recheck(
         ),
         None => None,
     };
+    // A crawl queued or running will judge the incident from what it reads, perhaps before
+    // the fix: resolving it now could see that crawl reopen it and alert twice. The crawl
+    // decides; a follow-up is queued again for when it is done.
+    if incident.is_some() && crawl_active(&mut tx, site_id).await? {
+        supersede_in(&mut tx, recheck_id).await?;
+        tx.commit().await?;
+        return Ok(None);
+    }
     let (Some(row), Some((recovered_at, last_seen_crawl))) = (incident, recovery) else {
         finish(RecheckStatus::Superseded, None)
             .execute(&mut *tx)

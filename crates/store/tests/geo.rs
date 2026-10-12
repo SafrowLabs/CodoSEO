@@ -3216,3 +3216,118 @@ async fn a_crawl_that_could_not_judge_a_recovered_incident_keeps_its_recovery() 
     let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
     assert!(i.recovered_at.is_none());
 }
+
+#[tokio::test]
+async fn a_recheck_applied_while_a_crawl_is_under_way_leaves_the_incident_to_it() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let opened_by = geo::incident(&db.pool, site, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .opened_crawl_id
+        .unwrap();
+    let followup = recover(&db.pool, site, id, owner).await;
+    let recovered_at = geo::incident(&db.pool, site, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .recovered_at;
+
+    // A crawl started while the follow-up ran: the follow-up resolves nothing (the crawl, which
+    // may have read the site before the fix, judges it) and is queued again for later.
+    let crawl = make_crawl(&db.pool, site, "manual", "running").await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    assert_eq!(
+        geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+            .await
+            .unwrap(),
+        None
+    );
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.resolved_at.is_none());
+    assert_eq!(i.recovered_at, recovered_at);
+    assert_eq!(
+        change_kinds(&db.pool, opened_by).await.len(),
+        1,
+        "nothing announced"
+    );
+    let all = rechecks_of(&db.pool, site, id).await;
+    let f = all.iter().find(|r| r.id == followup).unwrap();
+    assert_eq!(f.status, RecheckStatus::Superseded);
+    let next = all.last().unwrap();
+    assert_ne!(next.id, followup);
+    assert_eq!(
+        (next.origin, next.status),
+        (RecheckOrigin::Followup, RecheckStatus::Queued)
+    );
+    let wait = next.due_at - next.created_at;
+    assert!(
+        wait >= TimeDuration::hours(i64::from(geo::FOLLOWUP_RETRY_HOURS))
+            && wait < TimeDuration::hours(i64::from(geo::FOLLOWUP_RETRY_HOURS) + 1),
+        "{wait}"
+    );
+    assert!(recheck_jobs(&db.pool).await.iter().any(|j| j.0 == next.id));
+
+    // The runner superseding a follow-up (a crawl was under way when it was due) re-queues it
+    // too, a bounded number of times in a row (the first superseded one counts).
+    let mut current = next.id;
+    for _ in 2..geo::MAX_INCONCLUSIVE_FOLLOWUPS {
+        assert!(geo::supersede_recheck(&db.pool, current).await.unwrap());
+        let last = rechecks_of(&db.pool, site, id)
+            .await
+            .last()
+            .unwrap()
+            .clone();
+        assert_eq!(last.status, RecheckStatus::Queued);
+        assert_ne!(last.id, current);
+        current = last.id;
+    }
+    assert!(geo::supersede_recheck(&db.pool, current).await.unwrap());
+    let last = rechecks_of(&db.pool, site, id)
+        .await
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(last.id, current, "no more after the bound");
+    assert_eq!(last.status, RecheckStatus::Superseded);
+
+    // A manual recheck applied while a crawl runs is superseded and queues nothing.
+    sqlx::query("UPDATE ai_incidents SET recovered_at = NULL WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE crawls SET status = 'failed' WHERE id = $1")
+        .bind(crawl)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    make_crawl(&db.pool, site, "schedule", "queued").await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    assert_eq!(
+        geo::apply_recheck(&db.pool, queued.id, &report, &kinds, None)
+            .await
+            .unwrap(),
+        None
+    );
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.status, RecheckStatus::Superseded);
+    assert_eq!(
+        rechecks_of(&db.pool, site, id).await.last().unwrap().id,
+        queued.id
+    );
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.recovered_at, None);
+}
