@@ -1,8 +1,9 @@
 //! Whether an important page's content is in its HTML as served, or only appears once its
 //! JavaScript runs.
 //!
-//! Most AI crawlers fetch the HTML and read it as it is: they don't run scripts, so a client-side
-//! app's empty shell is all they get. [`classify`] reads the raw-HTML signals the extractor keeps
+//! GPTBot, ClaudeBot and PerplexityBot fetch the HTML and read it as it is (measured by Vercel and
+//! MERJ, [`NON_RENDERING_SOURCE`]): they don't run scripts, so a client-side app's empty shell is
+//! all they get. [`classify`] reads the raw-HTML signals the extractor keeps
 //! ([`RawSignals`](codoseo_core::page::RawSignals)) and never claims what a page looks like after
 //! rendering:
 //!
@@ -68,6 +69,10 @@ pub const NON_RENDERING_BOTS: [&str; 8] = [
     "PerplexityBot",
     "Perplexity-User",
 ];
+/// The crawlers Vercel and MERJ measured ([`NON_RENDERING_SOURCE`]): the measurement is cited
+/// for these alone. The other [`NON_RENDERING_BOTS`] are their operators' search and
+/// user-triggered fetchers.
+pub const MEASURED_BOTS: [&str; 3] = ["GPTBot", "ClaudeBot", "PerplexityBot"];
 /// Vercel and MERJ, "The rise of the AI crawler" (2024): none of the major AI crawlers measured
 /// render JavaScript.
 pub const NON_RENDERING_SOURCE: &str = "https://vercel.com/blog/the-rise-of-the-ai-crawler";

@@ -1273,17 +1273,30 @@ fn a_shell_home_page_is_one_warning_with_grade_a_minus() {
         f.title,
         "The home page is an empty app shell to AI crawlers that don't run JavaScript"
     );
+    // The remedy comes first, so a clipped summary keeps it.
     assert!(
-        f.summary.starts_with("In the HTML as served"),
+        f.summary.starts_with(
+            "Render the main content on the server, or prerender the page, so it is in the HTML. In the HTML as served"
+        ),
+        "{}",
+        f.summary
+    );
+    // The measurement is cited for the crawler it measured, not for the other fetchers.
+    assert!(
+        f.summary.contains(
+            "Vercel and MERJ measured in 2024 that PerplexityBot doesn't run JavaScript."
+        ),
         "{}",
         f.summary
     );
     assert!(
-        f.summary
-            .ends_with("prerender the page, so it is in the HTML."),
+        f.summary.contains(
+            "OAI-SearchBot, ChatGPT-User, Claude-SearchBot and 2 more come from the same operators as the crawlers they measured"
+        ),
         "{}",
         f.summary
     );
+    assert!(!f.summary.contains("that OAI-SearchBot"), "{}", f.summary);
     assert!(
         f.summary.contains("mount element is empty"),
         "{}",
@@ -1291,7 +1304,7 @@ fn a_shell_home_page_is_one_warning_with_grade_a_minus() {
     );
     // The search and user-fetch bots are wanted by default; GPTBot and ClaudeBot (training) are not.
     assert!(f.summary.contains("OAI-SearchBot"), "{}", f.summary);
-    assert!(!f.summary.contains("GPTBot"), "{}", f.summary);
+    assert!(!f.summary.contains("that GPTBot"), "{}", f.summary);
     assert_eq!(f.sources, vec![NON_RENDERING_SOURCE.to_owned()]);
     let c = &f.evidence.content;
     assert_eq!(c.len(), 1);
@@ -1367,7 +1380,17 @@ fn no_finding_when_the_owner_wants_none_of_the_non_rendering_bots() {
         intent(r#"{"purposes":{"search":"block","user_fetch":"any","training":"allow"}}"#);
     let f = content_missing(&out, &training);
     assert_eq!(f.len(), 1);
-    assert!(f[0].summary.contains("GPTBot"), "{}", f[0].summary);
+    assert!(
+        f[0].summary
+            .contains("measured in 2024 that GPTBot and ClaudeBot don't run JavaScript."),
+        "{}",
+        f[0].summary
+    );
+    assert!(
+        !f[0].summary.contains("from the same operators"),
+        "{}",
+        f[0].summary
+    );
     // Only bots in the non-rendering list count: Googlebot-style renderers say nothing here.
     let others = intent(
         r#"{"purposes":{"search":"block","user_fetch":"block"},"bots":{"Applebot":"allow"}}"#,
@@ -1562,6 +1585,14 @@ mod llms_txt {
         assert_eq!(f.title, "llms.txt returns HTTP 503");
         assert_eq!(f.evidence.llms_status, Some(503));
         assert!(f.summary.contains("informational"), "{}", f.summary);
+        // The remedy first: API and MCP clients clip summaries.
+        assert!(
+            f.summary.starts_with(
+                "Make /llms.txt answer 200 again, or 404 if you removed it on purpose."
+            ),
+            "{}",
+            f.summary
+        );
         assert!(f.evidence.members().is_empty());
         assert!(f.sources.iter().any(|s| s.contains("llmstxt.org")));
         assert!(f.sources.iter().any(|s| s.contains("lighthouse")));

@@ -17,7 +17,8 @@ use codoseo_core::check::Severity;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{
-    ContentVerdict, NON_RENDERING_BOTS, NON_RENDERING_SOURCE, SHELL_MAX_WORDS, ShellSignal,
+    ContentVerdict, MEASURED_BOTS, NON_RENDERING_BOTS, NON_RENDERING_SOURCE, SHELL_MAX_WORDS,
+    ShellSignal,
 };
 use crate::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, EngineId, engines};
 use crate::intent::{Intent, Stance};
@@ -1431,18 +1432,43 @@ fn content_finding(
     } else {
         "these pages have"
     };
-    let mut summary =
-        format!("In the HTML as served, {subject} fewer than {SHELL_MAX_WORDS} words of text");
+    // The remedy first: API and MCP clients clip summaries.
+    let mut summary = format!(
+        "Render the main content on the server, or prerender {}, so it is in the HTML. In the HTML as served, {subject} fewer than {SHELL_MAX_WORDS} words of text",
+        if n == 1 { "the page" } else { "these pages" },
+    );
     if !what.is_empty() {
         summary.push_str(&format!(" and {}", join_and(&what)));
     }
-    summary.push_str(&format!(
-        ". {} {} fetch pages without running JavaScript (Vercel and MERJ measured this in 2024), so {} the page as served, not what a browser shows once its scripts have run. Render the main content on the server, or prerender {}, so it is in the HTML.",
-        join_capped(&tokens),
-        if tokens.len() == 1 { "is one of the AI crawlers that" } else { "are among the AI crawlers that" },
-        if tokens.len() == 1 { "it reads" } else { "they read" },
-        if n == 1 { "the page" } else { "these pages" },
-    ));
+    summary.push('.');
+    // The measurement is cited only for the crawlers it measured; the others are their
+    // operators' other fetchers.
+    let (measured, others): (Vec<String>, Vec<String>) = tokens
+        .iter()
+        .cloned()
+        .partition(|t| MEASURED_BOTS.contains(&t.as_str()));
+    if !measured.is_empty() {
+        summary.push_str(&format!(
+            " Vercel and MERJ measured in 2024 that {} {} run JavaScript.",
+            join_and(&measured),
+            if measured.len() == 1 {
+                "doesn't"
+            } else {
+                "don't"
+            },
+        ));
+    }
+    if !others.is_empty() {
+        summary.push_str(&format!(
+            " {} {} from the same operators as the crawlers they measured (GPTBot, ClaudeBot and PerplexityBot) and {} expected to fetch the same way.",
+            join_capped(&others),
+            if others.len() == 1 { "comes" } else { "come" },
+            if others.len() == 1 { "is" } else { "are" },
+        ));
+    }
+    summary.push_str(
+        " A bot that doesn't run JavaScript reads the page as served, not what a browser shows once its scripts have run.",
+    );
 
     let indexes: BTreeSet<u16> = pages.iter().map(|c| c.url).collect();
     let evidence = pages
@@ -1510,7 +1536,7 @@ fn llms_txt_unavailable(report: &AccessReport) -> Option<Finding> {
         grade: Grade::A,
         title,
         summary: format!(
-            "Your site served /llms.txt before, and it {what}, so AI agents that look for it get nothing. Lighthouse counts this as a failed llms.txt check. Make /llms.txt answer 200 again, or 404 if you removed it on purpose. llms.txt is informational: it does not affect your health score or how search engines crawl the site."
+            "Make /llms.txt answer 200 again, or 404 if you removed it on purpose. Your site served it before, and it {what}, so AI agents that look for it get nothing; Lighthouse counts this as a failed llms.txt check. llms.txt is informational: it does not affect your health score or how search engines crawl the site."
         ),
         evidence: Evidence {
             llms_status: status,

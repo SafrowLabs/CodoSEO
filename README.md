@@ -14,7 +14,7 @@ CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in R
 - **A web app** with scheduled crawls, a URL explorer, change tracking and email, Slack, Discord and webhook alerts. Self-host it with Docker, or use the hosted version at [codoseo.com](https://codoseo.com).
 - **A REST API and a hosted MCP server** at codoseo.com for your monitored sites.
 
-It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. A synthetic fetch check requests a few pages with the AI bots' documented user agents to catch a CDN or firewall that turns them away. It also checks that your important pages' content is in their HTML as served, since most AI crawlers don't run JavaScript, and reports on your `/llms.txt` (informational, never scored). See [docs/ai-access.md](docs/ai-access.md).
+It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. A synthetic fetch check requests a few pages with the AI bots' documented user agents to catch a CDN or firewall that turns them away. It also checks that your important pages' content is in their HTML as served, since GPTBot, ClaudeBot and PerplexityBot don't run JavaScript (Vercel and MERJ, 2024), and reports on your `/llms.txt` (informational, never scored). See [docs/ai-access.md](docs/ai-access.md).
 
 ![The AI access screen](docs/images/ai-access/ai-access-hero.png)
 
