@@ -24,6 +24,7 @@
 use std::collections::HashSet;
 
 use codoseo_core::output::LlmsTxtFetch;
+use codoseo_core::url::normalize;
 use serde::{Deserialize, Serialize};
 
 /// The llms.txt proposal.
@@ -564,9 +565,29 @@ pub fn assess(fetch: &LlmsTxtFetch, prev_adopted: bool) -> LlmsTxtReport {
     let doc = parse(&fetch.body);
     report.title = doc.title.clone();
     report.optional_section = doc.optional().is_some();
-    report.link_summary = link_summary(fetch, links(&doc).len());
+    report.link_summary = link_summary(fetch, listed(fetch, &doc));
     report.checks = checks(fetch, &doc, &report.link_summary);
     report
+}
+
+/// How many distinct pages the file links to, as the crawler counts them: each link resolved
+/// against the file's final URL and normalized, so `/a`, `a` and `https://site/a` are one. Without
+/// a final URL (older fetches) the links are counted as written.
+fn listed(fetch: &LlmsTxtFetch, doc: &LlmsDoc) -> usize {
+    let hrefs = links(doc);
+    let Some(base) = fetch
+        .final_url
+        .as_deref()
+        .and_then(|u| url::Url::parse(u).ok())
+    else {
+        return hrefs.len();
+    };
+    hrefs
+        .iter()
+        .filter_map(|h| normalize(&base, h))
+        .map(|u| u.to_string())
+        .collect::<HashSet<_>>()
+        .len()
 }
 
 fn link_summary(fetch: &LlmsTxtFetch, listed: usize) -> LinkSummary {

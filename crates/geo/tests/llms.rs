@@ -424,3 +424,20 @@ fn hostile_bodies_parse_in_linear_time() {
     assert_eq!(doc.urls.len(), codoseo_geo::llms::MAX_LINKS);
     assert_eq!(links(&doc), vec!["/x".to_owned()]);
 }
+
+#[test]
+fn not_checked_counts_each_link_once_however_it_is_written() {
+    // "/a", "a" and the absolute URL are the same page once resolved against the file's URL;
+    // "/b#x" is "/b".
+    let mut f = file(
+        "# T\n\n## Docs\n\n- [A](/a)\n- [A again](https://example.com/a)\n- [B](/b)\n- [B part](/b#x)\n- [a](a)\n",
+    );
+    f.final_url = Some("https://example.com/llms.txt".to_owned());
+    f.links = vec![LinkStatus {
+        url: "https://example.com/a".to_owned(),
+        status: Some(200),
+        from_crawl: true,
+    }];
+    let s = assess(&f, false).link_summary;
+    assert_eq!((s.checked, s.not_checked), (1, 1), "{s:?}");
+}

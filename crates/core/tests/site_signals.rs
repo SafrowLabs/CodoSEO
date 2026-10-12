@@ -21,6 +21,7 @@ fn llms_txt_round_trips_and_fills_defaults() {
             bytes: 12,
             truncated: false,
             body: "# Site".into(),
+            final_url: Some("https://example.com/llms.txt".into()),
             links: vec![LinkStatus {
                 url: "https://example.com/a".into(),
                 status: None,

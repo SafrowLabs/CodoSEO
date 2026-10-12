@@ -119,6 +119,7 @@ async fn fetch_once(
             bytes: res.size_bytes,
             truncated: res.truncated,
             body,
+            final_url: Some(res.final_url.to_string()),
             links: Vec::new(),
             external_unchecked: 0,
         },
@@ -141,7 +142,8 @@ pub(crate) struct LinkCheck<'a> {
     pub may_request: bool,
 }
 
-/// Fills `llms.links` and `llms.external_unchecked` for a file that was served.
+/// Fills `llms.links` and `llms.external_unchecked` for a file that was served. Relative links
+/// resolve against the file's final URL (after redirects).
 ///
 /// Links on the site's origin that the crawl recorded take its status, with no request
 /// (`from_crawl`). Others on the origin are requested, in file order, up to `max_requests`, when
@@ -151,7 +153,14 @@ pub(crate) async fn check_links(llms: &mut LlmsTxtFetch, pages: &[PageRecord], c
     if state_of(llms) != LlmsState::Available {
         return;
     }
-    let Some(base) = llms_url(c.origin) else {
+    // Relative links resolve against where the file was served from, after redirects. Links that
+    // land on another origin are counted, not checked: only the site's robots.txt was read.
+    let Some(base) = llms
+        .final_url
+        .as_deref()
+        .and_then(|u| Url::parse(u).ok())
+        .or_else(|| llms_url(c.origin))
+    else {
         return;
     };
     let crawled: HashMap<u64, Option<u16>> = pages

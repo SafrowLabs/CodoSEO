@@ -138,6 +138,10 @@ pub struct LlmsTxtFetch {
     /// Empty unless the status was 2xx.
     #[serde(default)]
     pub body: String,
+    /// The URL the file was served from after redirects; relative links resolve against it.
+    /// `None` without a response (and in older reports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_url: Option<String>,
     /// Checked links from the file, in file order.
     #[serde(default)]
     pub links: Vec<LinkStatus>,

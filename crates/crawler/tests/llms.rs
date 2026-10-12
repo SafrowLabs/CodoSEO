@@ -358,3 +358,54 @@ async fn a_large_file_is_cut_at_512_kib() {
     assert_eq!(f.body.len(), MAX_BYTES);
     assert_eq!(f.bytes, total);
 }
+
+#[tokio::test]
+async fn relative_links_resolve_against_the_file_after_a_same_origin_redirect() {
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page("/llms.txt", Page::redirect(301, "/docs/llms.txt"))
+        .page("/docs/llms.txt", text(&llms_with(&["intro.md", "/top.md"])))
+        .page("/docs/intro.md", text("# Intro"))
+        .page("/top.md", text("# Top"))
+        .start()
+        .await;
+    let f = run(cfg(site.url("/"))).await;
+    assert_eq!(f.status, 200);
+    assert_eq!(
+        f.final_url.as_deref(),
+        Some(site.url("/docs/llms.txt").as_str())
+    );
+    let intro = status_of(&f, "/docs/intro.md").expect("resolved against /docs/llms.txt");
+    assert_eq!(intro.status, Some(200));
+    assert_eq!(site.path_hits("/docs/intro.md"), 1);
+    assert_eq!(site.path_hits("/intro.md"), 0);
+    assert_eq!(status_of(&f, "/top.md").unwrap().status, Some(200));
+}
+
+#[tokio::test]
+async fn links_relative_to_a_file_on_another_origin_are_not_checked() {
+    let docs = SiteBuilder::new()
+        .page("/llms.txt", text(&llms_with(&["intro.md", "/guide.md"])))
+        .page("/intro.md", text("# Intro"))
+        .page("/guide.md", text("# Guide"))
+        .start()
+        .await;
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/llms.txt",
+            Page::redirect(301, docs.url("/llms.txt").as_str()),
+        )
+        .html("/intro.md", "Wrong intro", &[])
+        .html("/guide.md", "Wrong guide", &[])
+        .start()
+        .await;
+    let f = run(cfg(site.url("/"))).await;
+    assert_eq!(f.status, 200);
+    assert_eq!(f.final_url.as_deref(), Some(docs.url("/llms.txt").as_str()));
+    // They live on the docs origin, whose robots.txt the crawl did not read: counted, not checked.
+    assert!(f.links.is_empty(), "{:?}", f.links);
+    assert_eq!(f.external_unchecked, 2);
+    assert_eq!(site.path_hits("/intro.md") + site.path_hits("/guide.md"), 0);
+    assert_eq!(docs.path_hits("/intro.md") + docs.path_hits("/guide.md"), 0);
+}
