@@ -40,6 +40,7 @@
       <span class="aia-ev-detail">{{ c.detail }}</span>
       {% endfor %}
     </div>
+    {% if i.shells_more > 0 %}<div class="aia-urls"><span class="faint">+{{ i.shells_more }} more</span></div>{% endif %}
     {% endif %}
     {% if let Some(fix) = i.fix %}
     <div class="aia-fix">

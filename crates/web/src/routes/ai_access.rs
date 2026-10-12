@@ -381,6 +381,8 @@ pub struct IncidentView {
     pub urls_more: u32,
     /// The shell pages of a `content_missing` incident, one line each.
     pub shells: Vec<ShellEv>,
+    /// Shell pages past the ones shown.
+    pub shells_more: usize,
     /// What `/llms.txt` answered, for an `llms_txt_unavailable` incident.
     pub llms_line: Option<String>,
     /// robots.txt lines that would apply the owner's block.
@@ -1481,17 +1483,23 @@ fn incident_view(
             }
         })
         .collect();
+    // A content incident's pages are in its shells grid; listing them again is noise.
     let urls: Vec<UrlLink> = ev
         .urls
         .sample
         .iter()
+        .filter(|_| ev.content.is_empty())
         .take(URLS_SHOWN)
         .map(|u| UrlLink {
             path: path_of(u),
             href: explorer_href(site, base, u),
         })
         .collect();
-    let urls_more = ev.urls.total.saturating_sub(urls.len() as u32);
+    let urls_more = if ev.content.is_empty() {
+        ev.urls.total.saturating_sub(urls.len() as u32)
+    } else {
+        0
+    };
     let fix = (i.kind == FindingKind::BotsNotBlocked && !ev.bots.is_empty()).then(|| {
         let mut lines: Vec<String> = ev
             .bots
@@ -1573,6 +1581,7 @@ fn incident_view(
         engines: engines_ev,
         urls,
         urls_more,
+        shells_more: ev.content.len().saturating_sub(shells.len()),
         shells,
         llms_line: (i.kind == FindingKind::LlmsTxtUnavailable).then(|| {
             match (

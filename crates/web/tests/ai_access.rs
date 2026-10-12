@@ -1725,3 +1725,28 @@ async fn an_unavailable_llms_txt_is_warning_styled_only_when_adopted_and_names_t
         "no incident"
     );
 }
+
+#[tokio::test]
+async fn a_content_incident_lists_its_pages_once_with_a_count_of_the_rest() {
+    let (app, site, cookie) = setup().await;
+    let mut pages = vec![page(DOMAIN, "/")];
+    for i in 0..8 {
+        pages.push(shell_page(DOMAIN, &format!("/app{i}")));
+    }
+    app.finished_crawl_with_robots(&site, pages, (200, OPEN), Vec::new())
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let issues =
+        &body[body.find(r#"id="aia-issues""#).unwrap()..body.find(r#"id="aia-content""#).unwrap()];
+    assert!(
+        issues.contains("8 important pages are empty app shells"),
+        "{issues}"
+    );
+    // Five pages in the shells grid, the other three counted; no second "Pages" list.
+    assert_eq!(issues.matches(">Shell</span>").count(), 5, "{issues}");
+    assert!(issues.contains("+3 more"), "{issues}");
+    assert!(
+        !issues.contains(r#"<span class="aia-urls-label">Pages</span>"#),
+        "{issues}"
+    );
+}
