@@ -1197,6 +1197,12 @@ pub async fn apply_recheck(
 /// written: the owner just made the choice. Incidents that stay open keep their `last_seen_*`: no
 /// crawl saw them again. Returns how many were (opened, resolved).
 ///
+/// A finding an incident resolved by a recheck (`resolved_by = 'recheck'`) after the report was
+/// written is skipped: rechecks write no report, so the report still holds what they verified
+/// fixed, and only a crawl that sees it again reopens it. (The alternative, persisting each
+/// recheck's overlay as a report, would make a few fetched pages stand in for a crawl in the
+/// baselines, the `before` captures and the preference comparison.)
+///
 /// What it opens keeps no `before`: the problem did not appear between two reports, it was there
 /// all along under the old intent, so the earlier report would only show the same state and a
 /// repair has nothing to put back.
@@ -1219,9 +1225,30 @@ pub async fn reevaluate_quietly(
         if kinds.is_empty() {
             continue;
         }
+        // Rechecks write no report: what one verified fixed after this report was written is
+        // still in it, and must not open again as if the intent had just made it a problem.
+        let verified: HashSet<(String, String)> = sqlx::query_as(
+            "SELECT i.kind, i.subject FROM ai_incidents i \
+             JOIN ai_reports r ON r.crawl_id = $2 \
+             WHERE i.site_id = $1 AND i.resolved_by = 'recheck' \
+               AND i.resolved_at > r.created_at",
+        )
+        .bind(site_id)
+        .bind(crawl_id)
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .collect();
+        let is_open = |f: &Finding| {
+            open.iter()
+                .any(|r| r.kind == f.kind && r.subject == f.subject)
+        };
         let found: Vec<Finding> = hold_unjudged(report, &intent, &open)
             .into_iter()
             .filter(|f| kinds.contains(&f.kind))
+            .filter(|f| {
+                is_open(f) || !verified.contains(&(f.kind.slug().to_owned(), f.subject.clone()))
+            })
             .collect();
         let transitions = reconcile(&as_open(&open), &found, &kinds);
         opened += transitions

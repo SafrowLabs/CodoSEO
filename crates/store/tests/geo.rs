@@ -3066,3 +3066,43 @@ async fn a_recheck_that_sees_it_worse_leaves_the_escalation_to_the_next_crawl() 
     );
     assert_eq!(alert_jobs(&db.pool, worse).await, 1);
 }
+
+#[tokio::test]
+async fn an_intent_change_does_not_reopen_what_a_recheck_verified_fixed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let followup = recover(&db.pool, site, id, owner).await;
+    let (report, kinds) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+    geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
+        .await
+        .unwrap();
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // An unrelated intent change: the newest report still holds the block the rechecks saw
+    // fixed, but it is older than that verdict.
+    let intent = Intent {
+        bots: [("PerplexityBot".to_owned(), Stance::Any)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    assert_eq!(
+        geo::reevaluate_quietly(&db.pool, site).await.unwrap(),
+        (0, 0)
+    );
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // A crawl that sees it again does reopen it.
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+}
