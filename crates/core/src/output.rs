@@ -116,9 +116,17 @@ pub struct WellKnownFile {
 }
 
 /// `/llms.txt` as served, with the status of the links it lists.
+///
+/// A request that got no response (timeout, connection failure, broken redirect) is kept too, as
+/// `status` 0 with `error` set, so a site whose file stopped answering is told apart from one where
+/// the file was never fetched (`SiteSignals::llms_txt` is `None`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmsTxtFetch {
+    /// The final status after redirects; 0 when no response arrived (see `error`).
     pub status: u16,
+    /// Why no response arrived; `None` whenever there is a status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     #[serde(default)]
     pub content_type: Option<String>,
     /// Size of the whole response, which can exceed what `body` keeps.
@@ -161,7 +169,8 @@ pub struct SiteSignals {
     /// `/.well-known/tdmrep.json`; `None` when it was not fetched or the fetch failed.
     #[serde(default)]
     pub tdmrep: Option<WellKnownFile>,
-    /// `/llms.txt`; `None` when it was not fetched or the fetch failed.
+    /// `/llms.txt`; `None` when it was not fetched (signals off, robots.txt disallows it, the crawl
+    /// stopped early or ran out of time). A fetch that got no response is `Some`, with status 0.
     #[serde(default)]
     pub llms_txt: Option<LlmsTxtFetch>,
 }

@@ -1,0 +1,23 @@
+# Acme Docs
+
+> Acme is a payments API. These docs cover setup, the REST API and the SDKs.
+
+Pages are available as Markdown by appending `.md` to their URL.
+All examples use the test mode keys.
+
+## Getting started
+
+- [Quickstart](https://docs.acme.test/quickstart.md): Take your first payment in five minutes
+- [Authentication](https://docs.acme.test/auth.md): API keys and OAuth
+- [Webhooks](https://docs.acme.test/webhooks.md)
+
+## API reference
+
+- [Payments](https://docs.acme.test/api/payments.md): Create, capture and refund payments
+- [Customers](https://docs.acme.test/api/customers.md): Store customer details
+- [Errors](https://docs.acme.test/api/errors.md): Error codes and retries
+
+## Optional
+
+- [Changelog](https://docs.acme.test/changelog.md): Every API version since 2019
+- [Blog](https://acme.test/blog.md)

@@ -8,6 +8,7 @@ pub mod eligibility;
 pub mod findings;
 pub mod incident;
 pub mod intent;
+pub mod llms;
 pub mod probe;
 pub mod registry;
 pub mod report;

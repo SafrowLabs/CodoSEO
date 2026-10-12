@@ -21,6 +21,7 @@ use crate::declared::{
     parse_content_usage, parse_tdmrep,
 };
 use crate::eligibility::{Cause, DirectiveSlug, Effect, EngineId, engines, record_effect};
+use crate::llms::{self, LlmsTxtReport};
 use crate::probe::ProbeReport;
 use crate::registry::{Honours, Purpose, registry};
 use crate::robots::{
@@ -301,6 +302,11 @@ pub struct AccessReport {
     /// none (and in older reports).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<ContentReport>,
+    /// `/llms.txt`, informational only; `None` when it was not fetched (and in older reports).
+    /// `adopted` here assumes no history: the worker carries it from the previous report
+    /// ([`crate::llms::carry_adoption`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt: Option<LlmsTxtReport>,
 }
 
 impl EngineAccess {
@@ -509,6 +515,11 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         declared: declared(out, readable_robots, home),
         probes: None,
         content,
+        llms_txt: out
+            .signals
+            .llms_txt
+            .as_ref()
+            .map(|f| llms::assess(f, false)),
     }
 }
 
