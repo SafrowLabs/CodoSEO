@@ -179,6 +179,16 @@ Every finding carries a grade and links to its sources. Grades, sources and what
 | **C** | Inferred heuristic: a threshold CodoSEO sets where the source names none, such as reading llms.txt's "small enough to fit in context" as 100 KiB. | `llms_size_and_type` |
 | **X** | Undocumented or unverified: something nobody publishes, such as how long an operator takes to notice a robots.txt change. OpenAI (about 24 hours), DuckDuckGo (72 hours) and Google (robots.txt cached up to 24 hours) say so, grade A; for any other operator CodoSEO assumes a day, grade X, and for issues no robots.txt cache governs it waits its own hour before confirming a fix. | |
 
+Which grade shows where:
+
+- **A** is on robots.txt and page-control incidents and on the matching rows of the AI access screen (the per-bot verdicts, the AI answers table, the declared preferences), on the llms.txt format checks and on the `llms_txt_unavailable` incident.
+- **A-** is on the Content in raw HTML card and the `content_missing` incident.
+- **B** is on the Fetch check card and the `fetch_blocked` incident, and every `fetch_blocked` fix says so.
+- **C** is on the llms.txt size and MIME type checks, where the threshold is CodoSEO's own.
+- **X** is not a finding's grade. It is how the wait after a fix is labelled when it is undocumented (see [Recheck](#recheck)).
+
+An incident card shows its grade and a tooltip saying what it means; the same grade is in the incident exports, the API's `grade` field and the Copy task and Copy prompt texts. The panel on the overview shows the weakest grade among your open incidents.
+
 ## Intent
 
 A blocked bot is a mistake or a choice, and only you know which. The intent model tells CodoSEO:
@@ -218,15 +228,75 @@ They are in the alert settings grid like any other kind, so email, Slack, Discor
 
 **A failing robots.txt is checked twice.** A crawl stopped by a robots.txt that answers 5xx or 429 is retried 15 minutes later, like any failed crawl; the incident is recorded only when the retry fails too, so a short blip says nothing. Its alert then stands in for the generic "couldn't reach your site" one.
 
-**Rechecks.** A recheck looks again at one incident without a crawl, as CodoSEObot and at a crawl's pace: robots.txt first (always, so a page robots.txt keeps CodoSEObot off is never requested), then only what the incident is about: nothing more for a robots.txt finding, the named pages (at most 20) for a page finding, the incident's bots on its probed pages (within your plan's probe pages, budget and request cap, and only while fetch checks are on for the site and the install) for a fetch block, `/llms.txt` without link checks for llms.txt. A recheck takes at most two minutes. When it no longer sees the problem the incident is marked recovered, and a follow-up recheck is queued for when the bot's operator says a robots.txt change reaches its systems (24 hours for OpenAI, 72 for DuckDuckGo; one hour for page, fetch and llms.txt findings); if the follow-up still sees it fixed, the incident resolves and `ai_issue_resolved` is announced as for a crawl. A recheck that cannot tell (robots.txt failing, a page that did not load, a probe with no verdict) changes nothing; a follow-up that cannot tell tries again 6 hours later, at most three times in a row, then leaves it to the next crawl. A recheck asked for while a crawl of the site is queued or running is dropped: the crawl will tell. One that cannot reach the site fails and can be asked for again.
+## Fixing an incident
 
-**Mark intended** on an incident says "this is what I want" and changes your intent just enough:
+Every incident card has a **How to fix** panel (open by default unless the incident is accepted, snoozed or being rechecked). It is built from the incident's own evidence and from what was true before it opened, so it names the bots, pages, rules, statuses and the CDN vendor CodoSEO actually saw, and says "undocumented" or "not recorded" where it has nothing. It is computed each time the card is shown, never stored, so a better template reaches every open incident at once. The panel has:
 
-- a bot blocked on the home page is set to Block, so you hear if it can crawl again;
-- a bot blocked on some pages only is set to No preference (Block would report it as getting in), and so is a bot you wanted blocked that still gets in;
-- a page directive such as `nosnippet` joins the directives you use on purpose. The engines' crawlers keep their stance, so robots.txt is still watched for Googlebot, Bingbot and the rest.
+- **Why**, and what the evidence cannot tell (the [ledger's](#evidence-grades) limits for the finding);
+- the **steps**, in order, and for a robots.txt change a **snippet** with a Copy button: the exact lines, restoring the rules an earlier crawl found where it has them (otherwise `Allow` lines that each match one page);
+- **Check it worked**, for example a `curl -I` to run, and when to recheck;
+- the finding's evidence grade and its sources.
 
-It then re-evaluates quietly, the incident resolves as a choice instead of a fix, and the notice says how many issues resolved or opened.
+Under the card, **Copy fix** copies just the change (the snippet, else the steps), **Copy task** a Markdown ticket for whoever makes the change (severity, grade, affected URLs, before and now, the change, how to verify it, sources) and **Copy prompt** a prompt for a coding agent. The prompt puts everything that came from your site (titles, URLs, rules, header values) between `BEGIN UNTRUSTED SITE DATA` and `END UNTRUSTED SITE DATA` lines and tells the agent to treat it as data, never as instructions; control characters, backticks and those marker words are stripped from site strings and each is cut to a fixed length.
+
+What the templates never do:
+
+- **Invent a file path, a framework or a setting.** They say where to look (the web server, the application's route, a CDN rule), and the agent prompt tells the agent to search the repository and ask when it can't find the place.
+- **Promise a gain.** Restoring a policy "does not make the bots crawl again soon or quote the pages": every panel, ticket and prompt says **Policy restored ≠ back in AI answers**.
+- **Write a blanket `Allow: /`.** A robots.txt fix is a group for the named bots with the earlier rules or `Allow` lines that match one page exactly, and leaves the `User-agent: *` group alone.
+- **Tell you to disable a WAF or a challenge.** A fetch block's fix allows the named bots in the vendor's own bot settings (Cloudflare, Vercel, AWS WAF and so on) and says to keep the firewall on for everything else.
+- **Fight a header with a meta tag.** When the restriction is an `X-Robots-Tag` response header, it says a robots meta tag can't override it (the more restrictive one applies) and the header itself has to change.
+
+The same texts are available over the API ([`GET .../fix`](api.md#ai-access-incidents)) and the hosted MCP tool `get_fix` ([mcp.md](mcp.md)).
+
+## Recheck
+
+**Recheck now** on an incident looks again at that one incident without a crawl. It is CodoSEObot, at a crawl's pace: robots.txt first (always, for the crawl delay, and so a page robots.txt keeps CodoSEObot off is never requested), then only what the incident is about:
+
+| Incident | What is fetched |
+|---|---|
+| `robots_unavailable`, `bots_blocked`, `bots_not_blocked` | robots.txt only |
+| `answers_restricted`, `content_missing` | the named pages (at most 20) |
+| `fetch_blocked` | the incident's bots on its probed pages, within your plan's probe pages, time budget and request cap, and only while fetch checks are on for the site and the install |
+| `llms_txt_unavailable` | `/llms.txt`, without link checks |
+
+A recheck takes at most 120 seconds: its fetches stop 10 seconds before that to leave time to record the result, and past 120 seconds it fails (it never stays "running"). A page that was not fetched keeps what the crawl saw, so a recheck of an incident about more than 20 pages can find it still there but never clears pages it did not fetch.
+
+**Two steps to resolved.** A recheck that no longer sees the problem does not resolve the incident. It marks it **Fix detected · policy restored** and queues a follow-up recheck for when the bot's operator says a change reaches its systems; the card reads "verifying until" that time. If the follow-up still sees it fixed, the incident resolves as verified, `ai_issue_resolved` is announced as for a crawl, and the export shows `resolved_by` `recheck`. If a recheck sees the problem again, the recovery is undone.
+
+| Operator | Wait | Where the operator says so |
+|---|---|---|
+| OpenAI | 24 hours | [developers.openai.com/api/docs/bots](https://developers.openai.com/api/docs/bots): "it can take ~24 hours from a site's robots.txt update for our systems to adjust" |
+| DuckDuckGo | 72 hours | [DuckAssistBot](https://duckduckgo.com/duckduckgo-help-pages/results/duckassistbot): "the change will take effect after 72 hours" |
+| Google | 24 hours | [Google's robots.txt documentation](https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt): it caches robots.txt for up to 24 hours; also used for a failing robots.txt |
+| any other operator | 24 hours, an estimate | nobody publishes it: evidence grade X |
+
+For a robots.txt finding with several bots, the wait is the longest among their operators (on a tie, the weakest grade). Page, fetch and llms.txt findings are not governed by a robots.txt cache, so the follow-up waits CodoSEO's own debounce of 1 hour (grade X).
+
+**What a recheck cannot tell.** One that cannot judge (robots.txt failing, a page that did not load, a probe with no verdict) is **inconclusive** and changes nothing. An inconclusive follow-up tries again 6 hours later, at most three in a row since the manual recheck, and then leaves the incident recovered for the next crawl to judge ("Waiting for the next crawl"). A recheck asked for while a crawl of the site is queued or running is refused ("A crawl is running; it will judge this."), and one that a crawl overtakes is **superseded**. One that cannot run at all fails and can be asked for again. A recheck never opens an incident, never touches another one and only judges the kind its incident is.
+
+**Policy restored ≠ back in AI answers.** A verified recheck says your site now lets the bot in. It does not say the bot has crawled again, that your pages are indexed, or that any answer engine quotes you; those happen on the operators' schedules and CodoSEO does not report outcomes.
+
+**Allowance.** Manual rechecks are limited per account over the trailing 24 hours, across all its sites: Free 3, Pro 20, Agency 60, self-hosted unlimited. There is no midnight reset: a slot frees 24 hours after the recheck that used it. An incident can be rechecked again 10 minutes after the last manual recheck and only one is queued or running per incident. Follow-ups queued by the system do not count, nor do manual rechecks that ended superseded or failed (you got no answer from them), though they still start the 10-minute cooldown.
+
+## Accept, mark intended and snooze
+
+Three ways to say "I know":
+
+- **Mark intended** says "this is what I want" and changes your intent just enough:
+  - a bot blocked on the home page is set to Block, so you hear if it can crawl again;
+  - a bot blocked on some pages only is set to No preference (Block would report it as getting in), and so is a bot you wanted blocked that still gets in;
+  - a page directive such as `nosnippet` joins the directives you use on purpose. The engines' crawlers keep their stance, so robots.txt is still watched for Googlebot, Bingbot and the rest.
+
+  It then re-evaluates quietly, the incident resolves as a choice instead of a fix, and the notice says how many issues resolved or opened.
+- **Accept** is for the findings that have no intent to change: `fetch_blocked`, `content_missing` and `llms_txt_unavailable`. The incident stays listed under **Accepted (N)**, muted, and stops counting in the badges and panels and writes no changes or alerts. A crawl that no longer finds it still resolves it. **Unaccept** brings it back. The bot and directive kinds (`bots_blocked`, `bots_not_blocked`, `answers_restricted`) go through Mark intended instead, and a failing robots.txt (`robots_unavailable`) can only be snoozed: bots that follow Google's rules stay out of the whole site until it answers.
+- **Snooze** works for every kind, for 1, 7 or 30 days (never more than 90). A snoozed incident shows a "Snoozed until ..." chip and does not count in the badges, and nothing alerts at once, but its changes are still written, already marked as alerted, so the changes page and the Monday digest stay truthful. **Unsnooze** ends it early; otherwise it ends on its own.
+
+## The AI access panel and exports
+
+The site overview shows an **AI access** panel next to the health score: open incidents by severity, the accepted and snoozed ones set aside, the weakest evidence grade among the open ones and how many fixes are being verified, with a link to the AI access screen. It is not part of the health score. With nothing open, accepted or snoozed it says so.
+
+**Issues CSV** and **JSON** on the AI access screen download the site's open incidents and those resolved in the last 90 days: `kind`, `subject`, `severity`, `grade`, `title`, `state`, `first_seen`, `last_seen`, `resolved_at`, `resolved_by` (`crawl`, `recheck` or `intent`), `verified_at`, `affected_urls` and `sources`. The same rows come from the API ([`GET .../ai-access/incidents`](api.md#ai-access-incidents)). Text cells that start like a spreadsheet formula get a leading `'` in the CSV, since titles and URLs come from the crawled site.
 
 ## The public registry
 
@@ -267,6 +337,8 @@ codoseo llms-txt https://example.com/ --format json   # table (default), json or
 ```
 
 It exits 0 whatever the file holds, including no file. It exits 2, like any command that could not do its job, when robots.txt disallows CodoSEObot on `/llms.txt`, robots.txt can't be read, the address is refused, or the 30-second budget runs out; nothing is checked then.
+
+Findings come with a remedy. The table and markdown reports print the first step of each as a `Fix:` line under the finding, the JSON audit's `ai_access` has a `remedies` array (one per finding: `kind`, `subject`, `fix`, `steps`, `verify`, `grade`, `sources`), and `codoseo probe` prints and returns the same for its `fetch_blocked` findings. There is no stored incident to recheck locally: running `codoseo probe`, `codoseo robots` or `codoseo llms-txt` again after the change is the local recheck. Audits saved by an older version have no `remedies` and print no `Fix:` lines.
 
 `codoseo crawl` adds an **AI access** section to the table and markdown reports, and an `ai_access` object (`report` and `findings`, judged under the default intent) to the JSON audit. The audit's `format_version` stays 1; older audit files load and diff as before. `--fail-on` looks only at the SEO checks.
 
