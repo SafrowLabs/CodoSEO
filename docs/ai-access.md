@@ -294,7 +294,7 @@ Three ways to say "I know":
 
 ## The AI access panel and exports
 
-The site overview shows an **AI access** panel next to the health score: open incidents by severity, the accepted and snoozed ones set aside, the weakest evidence grade among the open ones and how many fixes are being verified, with a link to the AI access screen. It is not part of the health score. With nothing open, accepted or snoozed it says so.
+The site overview shows an **AI access** panel next to the health score: open incidents by severity, the accepted and snoozed ones set aside, the weakest evidence grade among the open ones and how many of their fixes are being verified, with a link to the AI access screen. It is not part of the health score. With nothing open, accepted or snoozed it says so.
 
 **Issues CSV** and **JSON** on the AI access screen download the site's open incidents and those resolved in the last 90 days: `kind`, `subject`, `severity`, `grade`, `title`, `state`, `first_seen`, `last_seen`, `resolved_at`, `resolved_by` (`crawl`, `recheck` or `intent`), `verified_at`, `affected_urls` and `sources`. The same rows come from the API ([`GET .../ai-access/incidents`](api.md#ai-access-incidents)). Text cells that start like a spreadsheet formula get a leading `'` in the CSV, since titles and URLs come from the crawled site.
 

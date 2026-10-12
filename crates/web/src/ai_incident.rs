@@ -341,7 +341,7 @@ pub struct PanelCounts {
     pub snoozed: BySeverity,
     /// The weakest evidence among the open ones.
     pub weakest_grade: Option<Grade>,
-    /// Fixes seen and not yet confirmed.
+    /// Fixes seen and not yet confirmed, of the incidents that ask for attention.
     pub verifying: u32,
 }
 
@@ -367,8 +367,11 @@ pub fn panel_counts(
             c.weakest_grade = Some(grade);
         }
     }
+    // Like the open counts, only the incidents that ask for attention: an accepted or snoozed
+    // one is set aside, whatever its follow-up is doing.
     c.verifying = open
         .iter()
+        .filter(|i| asks_attention(i, now))
         .filter(|i| matches!(phase(i, latest.get(&i.id)), Some(Phase::Verifying { .. })))
         .count() as u32;
     c
@@ -578,6 +581,38 @@ mod tests {
         assert_eq!(c.verifying, 0);
         // fetch_blocked is graded B, content_missing A-: the weakest of the open ones is B.
         assert_eq!(c.weakest_grade, Some(Grade::B));
+    }
+
+    #[test]
+    fn only_fixes_of_incidents_that_ask_attention_are_being_verified() {
+        let now = OffsetDateTime::now_utc();
+        let followup = |id: i64| Recheck {
+            id: id * 10,
+            site_id: uuid::Uuid::nil(),
+            incident_id: id,
+            origin: RecheckOrigin::Followup,
+            requested_by: None,
+            status: RecheckStatus::Queued,
+            due_at: now + time::Duration::hours(1),
+            started_at: None,
+            finished_at: None,
+            outcome: None,
+            failure: None,
+            observations: None,
+            created_at: now,
+        };
+        let recovered = |id: i64| {
+            let mut i = incident(id, FindingKind::FetchBlocked, Severity::Warning);
+            i.recovered_at = Some(now);
+            i
+        };
+        let mut accepted = recovered(2);
+        accepted.accepted_at = Some(now);
+        let mut snoozed = recovered(3);
+        snoozed.snoozed_until = Some(now + time::Duration::days(1));
+        let open = vec![recovered(1), accepted, snoozed];
+        let latest: HashMap<i64, Recheck> = (1..=3).map(|id| (id, followup(id))).collect();
+        assert_eq!(panel_counts(&open, &latest, now).verifying, 1);
     }
 
     #[test]
