@@ -263,3 +263,110 @@ fn the_order_is_by_kind_then_subject() {
         ]
     );
 }
+
+// ---- what was true before an incident opened ------------------------------------------------
+
+mod before {
+    use std::collections::HashSet;
+
+    use codoseo_core::output::CrawlOutput;
+    use codoseo_geo::findings::{FindingKind, findings};
+    use codoseo_geo::incident::{Before, before_of};
+    use codoseo_geo::report::{AccessReport, build_report, important_urls};
+    use codoseo_geo::robots::{GroupMatch, MatchedRule, RobotsAvailability};
+
+    use super::common::*;
+    use codoseo_geo::Intent;
+
+    fn report_for(out: &CrawlOutput) -> AccessReport {
+        let important = important_urls(&out.pages, &out.origin, &HashSet::new());
+        build_report(out, &important)
+    }
+
+    fn pages() -> CrawlOutput {
+        crawl(vec![page("/", 3), page("/private/a", 2), page("/p1", 1)])
+    }
+
+    const PRIVATE: &str =
+        "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /private/\n";
+    const EVERYTHING: &str = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n";
+
+    #[test]
+    fn a_widened_block_remembers_the_rule_that_decided_each_page_before() {
+        let prev = report_for(&with_robots(pages(), 200, PRIVATE));
+        let now = report_for(&with_robots(pages(), 200, EVERYTHING));
+        let f = findings(&now, &Intent::default());
+        assert_eq!(f.len(), 1);
+        let before = before_of(f[0].kind, &f[0].subject, &f[0].evidence, &prev).expect("before");
+        assert_eq!(before.bots.len(), 1);
+        let bot = &before.bots[0];
+        assert_eq!(bot.token, "OAI-SearchBot");
+        assert_eq!(bot.group, GroupMatch::Named);
+        let private = MatchedRule {
+            line: 5,
+            allow: false,
+            pattern: "/private/".to_owned(),
+        };
+        let by_path: Vec<(&str, bool, Option<&MatchedRule>)> = bot
+            .paths
+            .iter()
+            .map(|p| (p.path.as_str(), p.allowed, p.rule.as_ref()))
+            .collect();
+        assert_eq!(
+            by_path,
+            [
+                ("/", true, None),
+                ("/private/a", false, Some(&private)),
+                ("/p1", true, None)
+            ]
+        );
+        assert_eq!(bot.disallows(), ["/private/"]);
+        // Compact: what isn't known isn't written.
+        let json = serde_json::to_string(&before).unwrap();
+        assert!(!json.contains("null"), "{json}");
+        let back: Before = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, before);
+    }
+
+    #[test]
+    fn an_earlier_report_that_could_not_judge_the_kind_gives_nothing() {
+        let prev = report_for(&with_robots(pages(), 503, ""));
+        let now = report_for(&with_robots(pages(), 200, EVERYTHING));
+        let f = &findings(&now, &Intent::default())[0];
+        assert_eq!(before_of(f.kind, &f.subject, &f.evidence, &prev), None);
+    }
+
+    #[test]
+    fn a_broken_robots_txt_remembers_the_status_it_had() {
+        let prev = report_for(&with_robots(pages(), 200, PRIVATE));
+        let now = report_for(&with_robots(pages(), 503, ""));
+        let f = &findings(&now, &Intent::default())[0];
+        assert_eq!(f.kind, FindingKind::RobotsUnavailable);
+        let before = before_of(f.kind, &f.subject, &f.evidence, &prev).unwrap();
+        assert_eq!(before.robots_status, Some(200));
+        assert_eq!(before.robots, Some(RobotsAvailability::Ok));
+    }
+
+    #[test]
+    fn a_header_directive_remembers_each_engines_controls() {
+        let prev = report_for(&crawl(vec![page("/", 2), page("/pricing", 1)]));
+        let now = report_for(&crawl(vec![
+            page("/", 2),
+            page("/pricing", 1).x_robots("nosnippet"),
+        ]));
+        let f = findings(&now, &Intent::default());
+        let f = f
+            .iter()
+            .find(|f| f.kind == FindingKind::AnswersRestricted)
+            .unwrap();
+        let before = before_of(f.kind, &f.subject, &f.evidence, &prev).unwrap();
+        assert!(!before.controls.is_empty());
+        assert!(
+            before
+                .controls
+                .iter()
+                .all(|c| c.url.ends_with("/pricing") && c.causes.is_empty()),
+            "{before:?}"
+        );
+    }
+}

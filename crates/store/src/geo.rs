@@ -23,7 +23,7 @@ use codoseo_geo::findings::{
     Evidence, Finding, FindingKind, evaluated_kinds, findings, hold_unjudged_content,
     hold_unjudged_probes,
 };
-use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
+use codoseo_geo::incident::{OpenIncident, Transition, before_of, reconcile};
 use codoseo_geo::llms::LlmsTxtReport;
 use codoseo_geo::report::{AccessReport, Declared};
 use codoseo_geo::robots::Pair;
@@ -97,7 +97,9 @@ pub struct Incident {
     pub resolution: Option<String>,
     /// Opened without an alert: part of the site's baseline or of an intent change.
     pub quiet: bool,
-    /// The evidence before the owner changed anything, once a repair has started.
+    /// What was true before the incident opened (`codoseo_geo::incident::Before`), from the
+    /// newest earlier report that judged its kind; `None` for a baseline incident and those
+    /// opened before it was kept.
     pub before: Option<Value>,
     /// When the owner accepted the finding as it is, and which account did.
     pub accepted_at: Option<OffsetDateTime>,
@@ -597,6 +599,7 @@ pub async fn reevaluate_quietly(
                 changes: false,
                 resolution: "intent",
                 seen: false,
+                befores: HashMap::new(),
             },
         )
         .await?;
@@ -647,8 +650,9 @@ pub async fn record_failed_crawl(
 /// lands meanwhile either commits first (and is read here) or waits for this transaction (and
 /// re-evaluates what it wrote). The lock also keeps two writers from opening the same incident
 /// twice. An incident opens `quiet`, without a change row, when no earlier stored report judged
-/// its kind (the kind's baseline). A report written again for the same crawl replaces the
-/// earlier one, and "earlier reports" are always other crawls'.
+/// its kind (the kind's baseline); otherwise it keeps, as `before`, what the newest earlier
+/// report that judged its kind held about it ([`before_of`]). A report written again for the
+/// same crawl replaces the earlier one, and "earlier reports" are always other crawls'.
 pub(crate) async fn apply_geo(
     tx: &mut Transaction<'_, Postgres>,
     site_id: Uuid,
@@ -688,6 +692,24 @@ pub(crate) async fn apply_geo(
     let open = lock_open(tx, site_id).await?;
     let found = hold_unjudged(&input.report, &intent, &open);
     let transitions = reconcile(&as_open(&open), &found, &evaluated);
+    // What the newest earlier report that judged each kind held about what just opened.
+    let befores: HashMap<(FindingKind, String), Value> = transitions
+        .iter()
+        .filter_map(|t| match t {
+            Transition::Opened { finding } => Some(finding),
+            _ => None,
+        })
+        .filter_map(|f| {
+            let prev = earlier
+                .iter()
+                .filter_map(|(_, r)| r.as_ref())
+                .find(|r| evaluated_kinds(r).contains(&f.kind))?;
+            let before = before_of(f.kind, &f.subject, &f.evidence, prev)?;
+            let mut value = serde_json::to_value(&before).expect("before always serializes");
+            strip_nul(&mut value);
+            Some(((f.kind, f.subject.clone()), value))
+        })
+        .collect();
     let mut changes = write_transitions(
         tx,
         site_id,
@@ -702,6 +724,7 @@ pub(crate) async fn apply_geo(
             changes: true,
             resolution: "fixed",
             seen: true,
+            befores,
         },
     )
     .await?;
@@ -797,6 +820,8 @@ struct Mode {
     /// A crawl read the site: the incidents it keeps open were seen again by it. A quiet
     /// re-evaluation only re-reads the stored report, so their `last_seen_*` stay as they were.
     seen: bool,
+    /// What was true before each incident that opens, by (kind, subject) ([`before_of`]).
+    befores: HashMap<(FindingKind, String), Value>,
 }
 
 /// An open incident as read for reconciling.
@@ -892,8 +917,8 @@ async fn write_transitions(
                 // taken (the lock only covers rows that existed); refresh that row instead.
                 sqlx::query(
                     "INSERT INTO ai_incidents (site_id, kind, subject, severity, title, summary, \
-                       evidence, opened_crawl_id, last_seen_crawl_id, quiet) \
-                     VALUES ($1, $2, $3, $4::severity, $5, $6, $7, $8, $8, $9) \
+                       evidence, opened_crawl_id, last_seen_crawl_id, quiet, before) \
+                     VALUES ($1, $2, $3, $4::severity, $5, $6, $7, $8, $8, $9, $11) \
                      ON CONFLICT (site_id, kind, subject) WHERE resolved_at IS NULL DO UPDATE SET \
                        severity = EXCLUDED.severity, title = EXCLUDED.title, \
                        summary = EXCLUDED.summary, evidence = EXCLUDED.evidence, \
@@ -911,6 +936,11 @@ async fn write_transitions(
                 .bind(crawl_id)
                 .bind(quiet)
                 .bind(mode.seen)
+                .bind(
+                    mode.befores
+                        .get(&(finding.kind, finding.subject.clone()))
+                        .cloned(),
+                )
                 .execute(&mut **tx)
                 .await?;
                 if mode.changes && !quiet {

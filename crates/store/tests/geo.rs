@@ -14,7 +14,9 @@ use codoseo_core::report::{CrawlReport, CrawlSummary};
 use codoseo_core::url::url_hash;
 use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{FindingKind, evaluated_kinds};
+use codoseo_geo::incident::Before;
 use codoseo_geo::report::{build_report, important_urls};
+use codoseo_geo::robots::GroupMatch;
 use codoseo_geo::{Intent, Purpose, Stance};
 use codoseo_store::alert_rules::{self, ALL_KINDS, DEFAULT_INSTANT};
 use codoseo_store::finalize::finalize;
@@ -265,6 +267,44 @@ async fn blocking_a_search_bot_opens_an_incident_and_removing_the_rule_resolves_
             .map(|i| i.id),
         Some(resolved[0].id)
     );
+}
+
+#[tokio::test]
+async fn an_incident_opened_by_a_later_crawl_keeps_what_the_earlier_report_held() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    let before: Before =
+        serde_json::from_value(open[0].before.clone().expect("before stored")).unwrap();
+    assert_eq!(before.bots.len(), 1);
+    let bot = &before.bots[0];
+    assert_eq!(bot.token, "OAI-SearchBot");
+    assert_eq!(bot.group, GroupMatch::Wildcard);
+    // The home page was allowed by `User-agent: *` / `Allow: /` on line 2.
+    assert_eq!(bot.paths[0].path, "/");
+    assert!(bot.paths[0].allowed);
+    assert_eq!(
+        bot.paths[0].rule.as_ref().map(|r| (r.line, r.allow)),
+        Some((2, true))
+    );
+    assert!(bot.paths.iter().all(|p| p.allowed));
+
+    // The next crawl updates the incident and leaves `before` as it was.
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let again = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(again[0].before, open[0].before);
+}
+
+#[tokio::test]
+async fn a_baseline_incident_has_nothing_before_it() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open[0].before, None);
 }
 
 #[tokio::test]
@@ -1650,7 +1690,8 @@ async fn a_new_incident_has_none_of_the_repair_fields() {
     let db = TestDb::new().await;
     let (site, id) = site_with_incident(&db.pool).await;
     let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
-    assert_eq!(i.before, None);
+    // Only `before` is written when it opens: what the earlier crawl saw.
+    assert!(i.before.is_some());
     assert_eq!(i.accepted_at, None);
     assert_eq!(i.accepted_by, None);
     assert_eq!(i.snoozed_until, None);
