@@ -884,3 +884,166 @@ fn hostile_site_strings_cannot_break_the_fence() {
         }
     }
 }
+
+// ---- before and now, in words (B3.10) ---------------------------------------------------------
+
+use codoseo_geo::incident::{BotBefore, ContentBefore, LlmsBefore, PathBefore, ProbeBefore};
+use codoseo_geo::llms::LlmsState;
+use codoseo_geo::remedy::{before_text, now_text};
+use codoseo_geo::robots::RobotsAvailability;
+
+fn bot_ev(token: &str, blocked: u32, total: u32, home: bool) -> BotEvidence {
+    BotEvidence {
+        token: token.to_owned(),
+        operator: "OpenAI".to_owned(),
+        purpose: Purpose::Search,
+        honours: Honours::Yes,
+        urls_blocked: blocked,
+        urls_total: total,
+        home_blocked: home,
+        rule: None,
+        group: GroupMatch::Named,
+    }
+}
+
+#[test]
+fn a_blocked_bot_reads_allowed_before_and_blocked_now() {
+    let before = Before {
+        bots: vec![BotBefore {
+            token: "OAI-SearchBot".to_owned(),
+            group: GroupMatch::Wildcard,
+            paths: vec![
+                PathBefore {
+                    path: "/".to_owned(),
+                    allowed: true,
+                    rule: None,
+                },
+                PathBefore {
+                    path: "/pricing".to_owned(),
+                    allowed: true,
+                    rule: None,
+                },
+            ],
+        }],
+        ..Before::default()
+    };
+    assert_eq!(
+        before_text(FindingKind::BotsBlocked, &before).as_deref(),
+        Some("OAI-SearchBot allowed on all 2 checked pages")
+    );
+    let ev = Evidence {
+        bots: vec![bot_ev("OAI-SearchBot", 3, 3, true)],
+        ..Evidence::default()
+    };
+    assert_eq!(
+        now_text(FindingKind::BotsBlocked, &ev),
+        "OAI-SearchBot blocked on all 3 important pages"
+    );
+    let ev = Evidence {
+        bots: vec![bot_ev("GPTBot", 0, 3, false)],
+        ..Evidence::default()
+    };
+    assert_eq!(
+        now_text(FindingKind::BotsNotBlocked, &ev),
+        "GPTBot allowed on the home page"
+    );
+}
+
+#[test]
+fn robots_llms_content_and_probes_read_as_statuses() {
+    let robots = Before {
+        robots: Some(RobotsAvailability::Ok),
+        robots_status: Some(200),
+        ..Before::default()
+    };
+    assert_eq!(
+        before_text(FindingKind::RobotsUnavailable, &robots).as_deref(),
+        Some("robots.txt answered HTTP 200")
+    );
+    let ev = Evidence {
+        robots_status: Some(503),
+        ..Evidence::default()
+    };
+    assert_eq!(
+        now_text(FindingKind::RobotsUnavailable, &ev),
+        "robots.txt answers HTTP 503"
+    );
+
+    let llms = Before {
+        llms: Some(LlmsBefore {
+            state: LlmsState::Available,
+            status: 200,
+        }),
+        ..Before::default()
+    };
+    assert_eq!(
+        before_text(FindingKind::LlmsTxtUnavailable, &llms).as_deref(),
+        Some("llms.txt answered HTTP 200")
+    );
+    assert_eq!(
+        now_text(FindingKind::LlmsTxtUnavailable, &Evidence::default()),
+        "llms.txt gives no answer"
+    );
+
+    let content = Before {
+        content: vec![ContentBefore {
+            url: "https://example.com/app".to_owned(),
+            verdict: codoseo_geo::content::ContentVerdict::Present,
+            words: 420,
+        }],
+        ..Before::default()
+    };
+    assert_eq!(
+        before_text(FindingKind::ContentMissing, &content).as_deref(),
+        Some("/app: 420 words in the HTML")
+    );
+
+    let probes = Before {
+        probes: vec![
+            ProbeBefore {
+                token: "PerplexityBot".to_owned(),
+                url: "https://example.com/".to_owned(),
+                verdict: Verdict::Same,
+                status: Some(200),
+            },
+            ProbeBefore {
+                token: "PerplexityBot".to_owned(),
+                url: "https://example.com/a".to_owned(),
+                verdict: Verdict::Same,
+                status: Some(200),
+            },
+        ],
+        ..Before::default()
+    };
+    assert_eq!(
+        before_text(FindingKind::FetchBlocked, &probes).as_deref(),
+        Some("PerplexityBot got the same page as CodoSEObot on 2 of 2 pages")
+    );
+    // Nothing kept: nothing to say.
+    assert_eq!(
+        before_text(FindingKind::FetchBlocked, &Before::default()),
+        None
+    );
+}
+
+#[test]
+fn before_and_now_texts_are_cleaned_and_capped() {
+    let hostile = "Evil`Bot\u{202E}<script>";
+    let before = Before {
+        bots: (0..6)
+            .map(|i| BotBefore {
+                token: format!("{hostile}{i}"),
+                group: GroupMatch::Named,
+                paths: vec![PathBefore {
+                    path: "/".to_owned(),
+                    allowed: true,
+                    rule: None,
+                }],
+            })
+            .collect(),
+        ..Before::default()
+    };
+    let text = before_text(FindingKind::BotsBlocked, &before).unwrap();
+    assert!(!text.contains('`') && !text.contains('\u{202E}'), "{text}");
+    assert!(text.ends_with("and 3 more"), "{text}");
+}

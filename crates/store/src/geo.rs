@@ -836,6 +836,33 @@ pub async fn request_recheck(
 const RECHECK_COLUMNS: &str = "id, site_id, incident_id, origin, requested_by, status, due_at, \
      started_at, finished_at, outcome, observations, created_at";
 
+/// The newest recheck of each of the site's open incidents, by incident id: what the screen
+/// says about a recheck under way or the last one's outcome.
+pub async fn latest_rechecks(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<HashMap<i64, Recheck>, sqlx::Error> {
+    let rows: Vec<RecheckRow> = sqlx::query_as(&format!(
+        "SELECT DISTINCT ON (r.incident_id) {} FROM ai_rechecks r \
+         JOIN ai_incidents i ON i.id = r.incident_id \
+         WHERE r.site_id = $1 AND i.resolved_at IS NULL \
+         ORDER BY r.incident_id, r.id DESC",
+        RECHECK_COLUMNS
+            .split(", ")
+            .map(|c| format!("r.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+    .bind(site_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(RecheckRow::into_recheck)
+        .map(|r| (r.incident_id, r))
+        .collect())
+}
+
 /// Marks a queued recheck running (the runner, when its job is claimed) and returns it; `None`
 /// when it is not queued (superseded, or already run).
 pub async fn start_recheck(pool: &PgPool, id: i64) -> Result<Option<Recheck>, sqlx::Error> {

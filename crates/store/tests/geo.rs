@@ -2780,6 +2780,42 @@ async fn a_superseded_recheck_still_cools_down() {
 }
 
 #[tokio::test]
+async fn the_latest_recheck_of_each_open_incident_is_listed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    assert!(
+        geo::latest_rechecks(&db.pool, site)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let first = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::fail_recheck(&db.pool, first.id).await.unwrap();
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '11 minutes'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let second = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    let latest = geo::latest_rechecks(&db.pool, site).await.unwrap();
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[&id].id, second.id);
+    assert_eq!(latest[&id].status, RecheckStatus::Queued);
+    // Another site sees none of them.
+    let other = make_site(&db.pool, "other.example").await;
+    assert!(
+        geo::latest_rechecks(&db.pool, other)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn the_daily_cap_counts_every_site_of_the_account() {
     let db = TestDb::new().await;
     let owner = make_account(&db.pool, "o@example.com").await;

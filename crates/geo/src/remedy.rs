@@ -17,11 +17,11 @@ use serde::Serialize;
 use url::Url;
 
 use crate::content::{ContentVerdict, NON_RENDERING_BOTS};
-use crate::eligibility::{CauseSource, DirectiveSlug};
+use crate::eligibility::{CauseSource, DirectiveSlug, Effect};
 use crate::findings::{Evidence, FindingKind, Grade, ROBOTS_DOC};
 use crate::incident::{Before, BotBefore};
 use crate::ledger::{Lag, VENDOR_DOCS, finding_sources, for_kind};
-use crate::probe::Vendor;
+use crate::probe::{Vendor, Verdict};
 use crate::registry::{Honours, registry};
 use crate::report::{AccessReport, path_and_query, slug_from_str};
 use crate::robots::{GroupMatch, MatchedRule, RobotsAvailability};
@@ -928,6 +928,237 @@ fn llms_txt_unavailable(ev: &Evidence, ctx: &RemedyContext) -> Body {
         steps,
         snippet: None,
         verify: vec![format!("`curl -I {llms}` answers 200, or 404 if you removed it.")],
+    }
+}
+
+// ---- before and now ---------------------------------------------------------------------------
+
+/// Entries a before or now line names before "and N more".
+const MAX_PARTS: usize = 3;
+
+/// The parts joined with "; ", past [`MAX_PARTS`] with "and N more".
+fn parts_line(parts: Vec<String>) -> String {
+    let more = parts.len().saturating_sub(MAX_PARTS);
+    let mut out = parts
+        .into_iter()
+        .take(MAX_PARTS)
+        .collect::<Vec<_>>()
+        .join("; ");
+    if more > 0 {
+        out.push_str(&format!("; and {more} more"));
+    }
+    out
+}
+
+/// `on the home page`, `on all 3 checked pages`, `on 2 of 3 checked pages`.
+fn share(n: usize, total: usize, what: &str) -> String {
+    if total <= 1 {
+        "on the home page".to_owned()
+    } else if n == total {
+        format!("on all {total} {what}")
+    } else {
+        format!("on {n} of {total} {what}")
+    }
+}
+
+fn engine_name(id: crate::eligibility::EngineId) -> &'static str {
+    crate::eligibility::engines()
+        .iter()
+        .find(|e| e.id == id)
+        .map_or("An engine", |e| e.name)
+}
+
+fn content_label(v: ContentVerdict) -> &'static str {
+    match v {
+        ContentVerdict::Present => "",
+        ContentVerdict::Thin => " (thin)",
+        ContentVerdict::LikelyShell => " (likely an empty shell)",
+        ContentVerdict::Shell => " (an empty shell)",
+    }
+}
+
+/// What was true before the incident opened, in one line for the owner: `OAI-SearchBot allowed
+/// on all 3 checked pages`, `robots.txt answered HTTP 200`. `None` when `before` holds nothing
+/// that kind can say. Site strings are cleaned.
+pub fn before_text(kind: FindingKind, before: &Before) -> Option<String> {
+    let line = match kind {
+        FindingKind::RobotsUnavailable => match (before.robots?, before.robots_status) {
+            (RobotsAvailability::Ok, Some(s)) => format!("robots.txt answered HTTP {s}"),
+            (RobotsAvailability::Missing, Some(s)) => {
+                format!("no robots.txt (HTTP {s}), so every bot could crawl")
+            }
+            _ => return None,
+        },
+        FindingKind::BotsBlocked | FindingKind::BotsNotBlocked => parts_line(
+            before
+                .bots
+                .iter()
+                .filter(|b| !b.paths.is_empty())
+                .map(|b| {
+                    let total = b.paths.len();
+                    let blocked = b.paths.iter().filter(|p| !p.allowed).count();
+                    let token = clean(&b.token, MAX_FIELD);
+                    if blocked == 0 {
+                        format!("{token} allowed {}", share(total, total, "checked pages"))
+                    } else {
+                        format!("{token} blocked {}", share(blocked, total, "checked pages"))
+                    }
+                })
+                .collect(),
+        ),
+        FindingKind::AnswersRestricted => {
+            let mut by_engine: Vec<(crate::eligibility::EngineId, usize, usize)> = Vec::new();
+            for c in &before.controls {
+                let eligible = usize::from(c.effect == Effect::Eligible && !c.robots_blocked);
+                match by_engine.iter_mut().find(|(e, ..)| *e == c.engine) {
+                    Some(entry) => {
+                        entry.1 += eligible;
+                        entry.2 += 1;
+                    }
+                    None => by_engine.push((c.engine, eligible, 1)),
+                }
+            }
+            parts_line(
+                by_engine
+                    .into_iter()
+                    .map(|(e, ok, n)| {
+                        format!(
+                            "{} could quote {}",
+                            engine_name(e),
+                            share(ok, n, "checked pages")
+                        )
+                    })
+                    .collect(),
+            )
+        }
+        FindingKind::FetchBlocked => {
+            let mut by_bot: Vec<(&str, usize, usize)> = Vec::new();
+            for p in &before.probes {
+                let same = usize::from(p.verdict == Verdict::Same);
+                match by_bot
+                    .iter_mut()
+                    .find(|(t, ..)| t.eq_ignore_ascii_case(&p.token))
+                {
+                    Some(entry) => {
+                        entry.1 += same;
+                        entry.2 += 1;
+                    }
+                    None => by_bot.push((&p.token, same, 1)),
+                }
+            }
+            parts_line(
+                by_bot
+                    .into_iter()
+                    .map(|(t, same, n)| {
+                        format!(
+                            "{} got the same page as CodoSEObot on {same} of {n} pages",
+                            clean(t, MAX_FIELD)
+                        )
+                    })
+                    .collect(),
+            )
+        }
+        FindingKind::ContentMissing => parts_line(
+            before
+                .content
+                .iter()
+                .map(|c| {
+                    format!(
+                        "{}: {} words in the HTML{}",
+                        path_of(&c.url),
+                        c.words,
+                        content_label(c.verdict)
+                    )
+                })
+                .collect(),
+        ),
+        FindingKind::LlmsTxtUnavailable => match before.llms.as_ref()?.status {
+            0 => "llms.txt gave no answer".to_owned(),
+            s => format!("llms.txt answered HTTP {s}"),
+        },
+    };
+    (!line.is_empty()).then_some(line)
+}
+
+/// What the incident's evidence says is true now, in one line: `OAI-SearchBot blocked on all 3
+/// important pages`, `robots.txt answers HTTP 503`. Site strings are cleaned.
+pub fn now_text(kind: FindingKind, ev: &Evidence) -> String {
+    match kind {
+        FindingKind::RobotsUnavailable => match ev.robots_status {
+            Some(s) => format!("robots.txt answers HTTP {s}"),
+            None => "robots.txt can't be read".to_owned(),
+        },
+        FindingKind::BotsBlocked => parts_line(
+            ev.bots
+                .iter()
+                .map(|b| {
+                    let (n, total) = (b.urls_blocked as usize, b.urls_total as usize);
+                    let token = clean(&b.token, MAX_FIELD);
+                    if total <= 1 && b.home_blocked {
+                        format!("{token} blocked on the home page")
+                    } else {
+                        format!("{token} blocked {}", share(n, total, "important pages"))
+                    }
+                })
+                .collect(),
+        ),
+        FindingKind::BotsNotBlocked => parts_line(
+            ev.bots
+                .iter()
+                .map(|b| format!("{} allowed on the home page", clean(&b.token, MAX_FIELD)))
+                .collect(),
+        ),
+        FindingKind::AnswersRestricted => parts_line(
+            ev.engines
+                .iter()
+                .map(|e| {
+                    let name = clean(&e.name, MAX_FIELD);
+                    match e.effect {
+                        Effect::Excluded => format!(
+                            "{name} excludes {} important pages from answers",
+                            e.pages_excluded
+                        ),
+                        _ => format!(
+                            "{name} quotes {} important pages only in part",
+                            e.pages_limited
+                        ),
+                    }
+                })
+                .collect(),
+        ),
+        FindingKind::FetchBlocked => parts_line(
+            ev.probes
+                .iter()
+                .map(|p| {
+                    let token = clean(&p.token, MAX_FIELD);
+                    let got = match p.status {
+                        Some(s) => format!("HTTP {s}"),
+                        None => "no page".to_owned(),
+                    };
+                    format!(
+                        "{token} gets {got} on {} of {} probed pages",
+                        p.urls_affected, p.urls_probed
+                    )
+                })
+                .collect(),
+        ),
+        FindingKind::ContentMissing => parts_line(
+            ev.content
+                .iter()
+                .map(|c| {
+                    format!(
+                        "{}: {} words in the HTML{}",
+                        path_of(&c.url),
+                        c.words,
+                        content_label(c.verdict)
+                    )
+                })
+                .collect(),
+        ),
+        FindingKind::LlmsTxtUnavailable => match ev.llms_status {
+            Some(s) => format!("llms.txt answers HTTP {s}"),
+            None => "llms.txt gives no answer".to_owned(),
+        },
     }
 }
 
