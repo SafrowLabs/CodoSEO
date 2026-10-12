@@ -84,11 +84,12 @@ async fn migrate_creates_every_table() {
         "recovered_at",
         "verified_at",
         "resolved_by",
+        "snooze_escalated",
     ])
     .fetch_all(&mut check)
     .await
     .expect("read ai_incidents columns");
-    assert_eq!(columns.len(), 7, "{columns:?}");
+    assert_eq!(columns.len(), 8, "{columns:?}");
     let rechecks: Vec<String> = sqlx::query_scalar(
         "SELECT column_name::text FROM information_schema.columns \
          WHERE table_name = 'ai_rechecks' ORDER BY ordinal_position",
@@ -109,6 +110,7 @@ async fn migrate_creates_every_table() {
             "started_at",
             "finished_at",
             "outcome",
+            "failure",
             "observations",
             "created_at",
         ]
