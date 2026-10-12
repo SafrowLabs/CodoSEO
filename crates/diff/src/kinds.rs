@@ -55,6 +55,8 @@ pub(crate) fn ordinal(kind: ChangeKind) -> u8 {
         ChangeKind::AiIssueResolved => 15,
         ChangeKind::AiPreferencesChanged => 16,
         ChangeKind::AiFetchBlocked => 17,
+        ChangeKind::AiContentMissing => 18,
+        ChangeKind::AiLlmsTxtUnavailable => 19,
     }
 }
 

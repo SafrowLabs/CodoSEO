@@ -255,6 +255,8 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
     let ai: i64 = AI_KINDS.iter().map(|k| c.kind(*k)).sum();
     let ai_bad = c.kind(ChangeKind::AiBotBlocked)
         + c.kind(ChangeKind::AiFetchBlocked)
+        + c.kind(ChangeKind::AiContentMissing)
+        + c.kind(ChangeKind::AiLlmsTxtUnavailable)
         + c.kind(ChangeKind::AiAnswersRestricted)
         + c.kind(ChangeKind::AiBlockNotApplied);
     let mut tiles = vec![
@@ -296,9 +298,11 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
 }
 
 /// The AI access change kinds (`codoseo_geo` findings and declared preferences).
-const AI_KINDS: [ChangeKind; 6] = [
+const AI_KINDS: [ChangeKind; 8] = [
     ChangeKind::AiBotBlocked,
     ChangeKind::AiFetchBlocked,
+    ChangeKind::AiContentMissing,
+    ChangeKind::AiLlmsTxtUnavailable,
     ChangeKind::AiAnswersRestricted,
     ChangeKind::AiIssueResolved,
     ChangeKind::AiBlockNotApplied,
@@ -345,6 +349,7 @@ fn is_instant(kind: ChangeKind) -> bool {
             | ChangeKind::AiAnswersRestricted
             | ChangeKind::AiIssueResolved
             | ChangeKind::AiFetchBlocked
+            | ChangeKind::AiContentMissing
     )
 }
 
@@ -368,6 +373,8 @@ fn title(c: &ChangeRow) -> String {
         ChangeKind::AiIssueResolved => "AI issue resolved".to_owned(),
         ChangeKind::AiPreferencesChanged => "AI preferences changed".to_owned(),
         ChangeKind::AiFetchBlocked => "AI fetch blocked (synthetic)".to_owned(),
+        ChangeKind::AiContentMissing => "Content missing from HTML (AI)".to_owned(),
+        ChangeKind::AiLlmsTxtUnavailable => "llms.txt unavailable".to_owned(),
     }
 }
 
@@ -409,6 +416,12 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
         ChangeKind::AiIssueResolved if value == "resolved" => "Resolved".to_owned(),
         ChangeKind::AiPreferencesChanged if value == "none" => "none declared".to_owned(),
         ChangeKind::AiFetchBlocked if value == "reachable" => "AI bots got through".to_owned(),
+        ChangeKind::AiContentMissing if value == "content in the HTML" => {
+            "Content in the HTML".to_owned()
+        }
+        ChangeKind::AiLlmsTxtUnavailable if value == "llms.txt served" => {
+            "llms.txt served".to_owned()
+        }
         _ => value.to_owned(),
     }
 }

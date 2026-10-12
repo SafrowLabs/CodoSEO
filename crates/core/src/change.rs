@@ -33,6 +33,10 @@ pub enum ChangeKind {
     /// A synthetic fetch with an AI bot's user agent was blocked, challenged, diverted or
     /// degraded where CodoSEObot's own fetch was not.
     AiFetchBlocked,
+    /// A page's content is missing from its server-rendered HTML, which AI crawlers read.
+    AiContentMissing,
+    /// The llms.txt the site adopted stopped serving or lost its links.
+    AiLlmsTxtUnavailable,
 }
 
 impl ChangeKind {
@@ -57,6 +61,8 @@ impl ChangeKind {
             ChangeKind::AiIssueResolved => "ai_issue_resolved",
             ChangeKind::AiPreferencesChanged => "ai_preferences_changed",
             ChangeKind::AiFetchBlocked => "ai_fetch_blocked",
+            ChangeKind::AiContentMissing => "ai_content_missing",
+            ChangeKind::AiLlmsTxtUnavailable => "ai_llms_txt_unavailable",
         }
     }
 
@@ -81,6 +87,8 @@ impl ChangeKind {
             ChangeKind::AiIssueResolved => "AI issue resolved",
             ChangeKind::AiPreferencesChanged => "AI preferences changed",
             ChangeKind::AiFetchBlocked => "AI fetch blocked (synthetic)",
+            ChangeKind::AiContentMissing => "Content missing from HTML (AI)",
+            ChangeKind::AiLlmsTxtUnavailable => "llms.txt unavailable",
         }
     }
 
@@ -95,6 +103,8 @@ impl ChangeKind {
                 | ChangeKind::AiIssueResolved
                 | ChangeKind::AiPreferencesChanged
                 | ChangeKind::AiFetchBlocked
+                | ChangeKind::AiContentMissing
+                | ChangeKind::AiLlmsTxtUnavailable
         )
     }
 }
@@ -133,6 +143,8 @@ mod tests {
             ChangeKind::AiIssueResolved,
             ChangeKind::AiPreferencesChanged,
             ChangeKind::AiFetchBlocked,
+            ChangeKind::AiContentMissing,
+            ChangeKind::AiLlmsTxtUnavailable,
         ];
         for kind in all {
             assert_eq!(

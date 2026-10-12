@@ -37,12 +37,14 @@ use crate::finalize::{enqueue_alert_job, insert_changes};
 /// newest two can't stand in for (see [`reports_to_keep`]).
 const KEEP_REPORTS: usize = 2;
 /// Every kind of finding, for the kinds a run opens quietly.
-const ALL_KINDS: [FindingKind; 5] = [
+const ALL_KINDS: [FindingKind; 7] = [
     FindingKind::RobotsUnavailable,
     FindingKind::BotsBlocked,
     FindingKind::BotsNotBlocked,
     FindingKind::AnswersRestricted,
     FindingKind::FetchBlocked,
+    FindingKind::ContentMissing,
+    FindingKind::LlmsTxtUnavailable,
 ];
 /// Longest `before_value`/`after_value` a change row gets, in characters.
 const MAX_CHANGE_TEXT: usize = 300;
@@ -776,10 +778,8 @@ fn finding_change(finding: &Finding) -> Change {
         FindingKind::BotsNotBlocked => (ChangeKind::AiBlockNotApplied, "intent: block"),
         FindingKind::AnswersRestricted => (ChangeKind::AiAnswersRestricted, "eligible"),
         FindingKind::FetchBlocked => (ChangeKind::AiFetchBlocked, "reachable"),
-        // Placeholder until its own change kind exists (B2.10).
-        FindingKind::ContentMissing => (ChangeKind::AiFetchBlocked, "content in the HTML"),
-        // Placeholder until its own change kind exists (B2.10).
-        FindingKind::LlmsTxtUnavailable => (ChangeKind::AiFetchBlocked, "llms.txt served"),
+        FindingKind::ContentMissing => (ChangeKind::AiContentMissing, "content in the HTML"),
+        FindingKind::LlmsTxtUnavailable => (ChangeKind::AiLlmsTxtUnavailable, "llms.txt served"),
     };
     Change {
         kind,
