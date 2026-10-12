@@ -22,8 +22,8 @@ All routes are scoped to the key's account. A site id that is unknown or belongs
 | `GET /api/v1/sites/{site}` | | The site's health: `latest_crawl` (score, checks passed and total, pages crawled, stop reason, up to 15 `failing_checks` with examples), `active_crawl`, `next_crawl_at`, `audit_url`. |
 | `GET /api/v1/sites/{site}/issues/{check}` | `limit` (default 50, max 200), `offset` | Pages failing a check (by slug, for example `title_missing`) in the latest finished crawl: `total`, `urls`, `next_offset`. |
 | `GET /api/v1/sites/{site}/page` | `url` (required; absolute or a path) | One page's record from the latest finished crawl: status, redirect chain, title, description, canonical, headings, word count, link counts, indexability, `issues`. |
-| `GET /api/v1/sites/{site}/changes` | `severity` (`critical`, `warning`, `notice`), `limit`, `offset` | Changes between the latest finished crawl and the one before: `total`, `changes` (kind, severity, url, before, after), `next_offset`. Kinds include the six AI access ones: `ai_bot_blocked`, `ai_answers_restricted`, `ai_block_not_applied`, `ai_fetch_blocked` (synthetic fetch check), `ai_issue_resolved`, `ai_preferences_changed`. A crawl that failed on robots.txt (5xx or 429) is not a finished crawl: the AI access change it records shows up in the `ai-access` report's `open_incidents` and in alerts, not here. |
-| `GET /api/v1/sites/{site}/ai-access` | | The latest [AI access](ai-access.md) report: `checked_at`, `crawl_id`, `robots`, `open_incidents`, per-bot `bots`, per-engine `engines`, the `declared` preferences, `probes_enabled` and `probes` (the synthetic fetch check, below). Before the first report `checked_at` is `null` and `note` says it appears after the next crawl. |
+| `GET /api/v1/sites/{site}/changes` | `severity` (`critical`, `warning`, `notice`), `limit`, `offset` | Changes between the latest finished crawl and the one before: `total`, `changes` (kind, severity, url, before, after), `next_offset`. Kinds include the eight AI access ones: `ai_bot_blocked`, `ai_answers_restricted`, `ai_block_not_applied`, `ai_fetch_blocked` (synthetic fetch check), `ai_content_missing`, `ai_llms_txt_unavailable`, `ai_issue_resolved`, `ai_preferences_changed`. A crawl that failed on robots.txt (5xx or 429) is not a finished crawl: the AI access change it records shows up in the `ai-access` report's `open_incidents` and in alerts, not here. |
+| `GET /api/v1/sites/{site}/ai-access` | | The latest [AI access](ai-access.md) report: `checked_at`, `crawl_id`, `robots`, `open_incidents`, per-bot `bots`, per-engine `engines`, the `declared` preferences, `probes_enabled` and `probes` (the synthetic fetch check, below), `content` and `llms_txt` (raw HTML content and llms.txt, [below](#content-and-llmstxt-in-ai-access)). Before the first report `checked_at` is `null` and `note` says it appears after the next crawl. |
 | `POST /api/v1/sites/{site}/crawls` | | Queues a crawl. `202` with `{site_id, crawl_id, number, status:"queued"}`. |
 | `GET /api/v1/usage` | | `calls_today`, `limit`, `remaining`, `resets_at`. Not counted against the allowance. |
 
@@ -61,6 +61,54 @@ After each monitored crawl CodoSEO fetches a few important pages with the docume
 - `stop` (`budget` when the time ran out, `request_cap` when the request cap was reached) appears when the check stopped before its last planned page or partway through one; bots it did not reach on that page are `inconclusive`.
 
 Only bots whose intent is `allow` become incidents. The incident kind is `fetch_blocked`, one per cause (`challenge_cloudflare`, `blocked_403`, `diverted`, ...), with a title ending "(synthetic check)". Its severity is at most `warning`.
+
+### Content and llms.txt in `ai-access`
+
+`content` says what the important HTML pages hold **in their HTML as served**, before any JavaScript runs. AI crawlers like GPTBot, ClaudeBot and PerplexityBot don't run it (Vercel and MERJ, 2024), so a client-side app's empty shell is all they read. It rests on evidence grade `A-`. No extra request is made: it is read from the crawl.
+
+```json
+"content": {
+  "grade": "A-",
+  "pages_checked": 12,
+  "shells": 1,
+  "pages": [
+    { "url": "https://example.com/app", "verdict": "shell", "signals": ["mount_empty", "noscript_js"],
+      "words": 0, "title": true, "h1": false, "description": false, "canonical": false,
+      "jsonld": false, "links_internal": 0 },
+    { "url": "https://example.com/", "verdict": "present", "words": 640, "title": true, "h1": true,
+      "description": true, "canonical": true, "jsonld": true, "links_internal": 24 }
+  ],
+  "more": 0
+}
+```
+
+- `verdict` is `shell`, `likely_shell`, `thin` (few words and no shell marker; informational) or `present`. `signals` appears only when there are some: `mount_empty`, `noscript_js`, `script_heavy`, `many_scripts`. `words` counts the text in the HTML as served.
+- `pages` lists shells first, then the others in the report's order, at most 30; `more` counts the pages left out and is omitted when 0. `shells` counts `shell` and `likely_shell` over all checked pages.
+- A shell open on the site is the `content_missing` incident in `open_incidents` (grade `A-`; `warning` when the home page or half or more of the important pages are shells, `notice` otherwise).
+
+`llms_txt` is the site's `/llms.txt` as the last crawl found it. It is informational and never scored.
+
+```json
+"llms_txt": {
+  "informational": true,
+  "state": "available",
+  "status": 200,
+  "adopted": true,
+  "title": "Example",
+  "optional_section": false,
+  "checks": [
+    { "id": "h1", "ok": true, "detail": "…" },
+    { "id": "links_resolve", "ok": false, "detail": "…" }
+  ],
+  "link_summary": { "checked": 7, "failing": 1, "not_checked": 3, "failing_urls": ["https://example.com/old"] }
+}
+```
+
+- `state` is `available`, `absent` (a 4xx other than 429), `soft_not_found` (a web page where the file should be) or `unavailable` (429, 5xx or no answer, with `error` when nothing answered). `checks` is filled only for `available`; ids are `h1`, `summary`, `sections`, `links`, `length`, `size`, `mime` and `links_resolve`.
+- `adopted` is true when the site serves, or served before, an llms.txt. Only an adopted file that becomes `unavailable` raises the `llms_txt_unavailable` incident (`warning`, grade `A`).
+- `link_summary` counts the links checked (a crawl status, or one request each up to the plan's cap: Free 5, other plans 20), those answering 4xx, 5xx or nothing, and those not checked (past the cap or on another site). `failing_urls` holds up to ten.
+
+Both are left out of reports from before they existed, and `content` when no important page is HTML.
 
 `POST .../crawls` follows the same rules as the Run crawl button: the plan's manual crawl allowance applies and only one crawl runs per site at a time.
 

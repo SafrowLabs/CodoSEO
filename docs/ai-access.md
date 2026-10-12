@@ -91,6 +91,63 @@ cargo test -p codoseo-crawler --test probe_corpus -- --nocapture
 
 **Switching it off.** The check is on by default for monitored sites. A site's owner can untick **Run synthetic fetch checks** under **Edit intent** on the AI access screen; from the next crawl no request is sent with an AI bot's user agent. A self-hosted install can set `CODOSEO_PROBE_URLS=0` (for the web and worker roles) to turn it off everywhere; the switch is then shown disabled and the AI access screen says fetch checks are turned off on this install. Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved: with the checks off nothing can judge them, so they are neither resolved nor updated. Anyone running a site can keep the check out: it follows robots.txt for each bot's token, and blocking `CodoSEObot` in robots.txt stops both the crawls and the probes. The [`/bot` page](https://codoseo.com/bot) explains this to site owners who see the requests.
 
+## Content in raw HTML
+
+Most AI crawlers fetch a page's HTML and read it as it is: they don't run its JavaScript. Vercel and MERJ measured this in 2024 for OpenAI's GPTBot, Anthropic's ClaudeBot and PerplexityBot ([The rise of the AI crawler](https://vercel.com/blog/the-rise-of-the-ai-crawler)). A client-side app that sends an empty shell and builds the page in the browser is therefore a blank page to them, however good it looks to a visitor. So for each important page CodoSEO reads **the HTML as served** and says whether the content is in it. It never claims what the page looks like after rendering.
+
+It costs no extra requests: the crawler already fetched these pages, and the verdict is drawn from what it read.
+
+**The verdicts.**
+
+| Verdict | Means |
+|---|---|
+| **Shell** | Under 50 words of text in the HTML as served, and the app's mount element (`#root`, `#app`, `#__next` and the like) is empty, or the page has no H1 and a `<noscript>` notice asks for JavaScript |
+| **Likely shell** | Under 50 words, no H1, no internal links, and scripts make up the page: inline script is at least 60% of its bytes, or it loads 3 or more external scripts (`<script src>` and `modulepreload` links) |
+| **Thin** | Under 50 words but no shell signal: a contact or coming-soon page. Informational, never a finding |
+| **Present** | 50 words or more in the HTML as served, whatever its scripts |
+
+Script share alone never flags a page: a server-rendered Next.js page carries a large `__NEXT_DATA__` and its text as well. A `<noscript>` notice counts only on a page without an H1, because a short post with a Disqus "enable JavaScript" notice is still a real page.
+
+**What you see.** The AI access screen has a **Content in raw HTML** card: the pages checked, how many are shells, and per page the verdict, the words found, whether the title, H1, description, canonical and JSON-LD are in the HTML as served, the internal links and the shell signals (`mount_empty`, `noscript_js`, `script_heavy`, `many_scripts`). `codoseo check` prints the same facts for one page.
+
+**The incident.** Shell or likely-shell important pages open one `content_missing` incident per site, with the pages as its members. It is **evidence grade A-**: read from the pages themselves, against a published measurement of how the bots fetch, not an operator's documentation of the page. It is raised only when at least one of the bots that don't render JavaScript (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User) is wanted under your intent and robots.txt lets it fetch a shell page. A page those bots may not fetch, or a bot you want blocked, raises nothing. Severity is Warning when the home page is a shell or half or more of the important HTML pages are, Notice otherwise. It is never Critical: the page may still reach people and search engines that render JavaScript. The change kind `ai_content_missing` alerts at once by default.
+
+**Measured.** The thresholds come from a corpus of real framework output (`crates/crawler/tests/content_corpus.rs`): 11 shells (Create React App, Vite + React, Vue CLI, Angular, Next.js and Gatsby client-only shells, Ember, SvelteKit CSR and more) and 13 normal pages (WordPress, server-rendered Next.js and Nuxt, Astro, Hugo, Docusaurus, a Shopify product, AMP, and short pages such as a coming-soon page and a post with Disqus). It gives 10 true positives, 13 true negatives, **no false positives and no false negatives** on the scored pages. One shell is a **known false negative** and is not scored: Flutter web's default page, which is a single `flutter_bootstrap.js` script with no mount element, no notice and no inline script, and so looks like an image-only landing page with one analytics tag. Any shell that carries no mount element, notice or other marker will be missed the same way. Run it with:
+
+```sh
+cargo test -p codoseo-crawler --test content_corpus -- --nocapture
+```
+
+## llms.txt
+
+`/llms.txt` is an optional, proposed file at the root of a site: a Markdown index of what an AI agent should read ([llmstxt.org](https://llmstxt.org/)). CodoSEO reports whether you serve one and how it holds up. It is **informational**: it is never scored, never part of the health score and never Critical, and a site without one has nothing to fix.
+
+**Status handling follows Lighthouse's `llms-txt` audit** ([documentation](https://developer.chrome.com/docs/lighthouse/agentic-browsing/llms-txt)):
+
+| Answer | State |
+|---|---|
+| 2xx with a file | **Available** |
+| 4xx except 429 | **No llms.txt**: not applicable, the file is optional |
+| 2xx that serves an HTML page | **No llms.txt (soft 404)**: a web page where the file should be is the site's catch-all, so it is read like a 404 (Lighthouse takes a 2xx at face value) |
+| 429, 5xx, another unexpected status, or no response at all | **Unavailable** |
+
+The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowed `/llms.txt` is not fetched), and read up to 512 KiB. It is not fetched for the instant audits.
+
+**The checks** on an available file. The format follows llmstxt.org; the last two Lighthouse-style rules are kept as they are in its audit:
+
+- Starts with an H1 (the site's name; the only part the format requires; Lighthouse accepts an H1 anywhere).
+- A `>` blockquote summary under the H1.
+- At least one H2 section that is a file list of `- [name](url)` items (an `## Optional` section is noted as links an agent may skip).
+- Has at least one Markdown link.
+- Long enough: at least 50 characters.
+- Size: at most 100 KiB and read whole (llmstxt.org wants it small enough to fit in context).
+- Served as `text/plain` or `text/markdown`.
+- Links resolve: every link that was checked answered 2xx or 3xx.
+
+**Link checks.** Links to pages the crawl already fetched use that status. Other links on your own site get one request each after the crawl, with robots.txt applied, up to a cap that depends on the plan: **Free 5, Pro, Agency and self-hosted 20**. Links to other sites are not checked; the card counts them and the ones past the cap as not checked.
+
+**The incident.** The one finding is `llms_txt_unavailable`, a Warning (grade A), and only after the site had adopted llms.txt, that is, an earlier report served the file and it now answers 5xx or 429 or not at all. A 404 or a soft 404 is a removal, not a failure, and a site that never had one gets nothing. The change kind `ai_llms_txt_unavailable` goes in the Monday digest, not in an instant alert.
+
 ## What is not checked yet
 
 - Whether bots really visit: **log evidence** (which bots crawled you, verified by IP range) arrives later, in C1. Until then the fetch check shows what CodoSEO's own requests get, not what the real bots get.
@@ -102,7 +159,8 @@ Every finding carries a grade and links to its sources.
 
 | Grade | Means |
 |---|---|
-| **A** | It rests on something the operator documents: robots.txt rules, page-level controls, the operator's own description of its bot. Every robots.txt, page-control and preference finding is grade A. |
+| **A** | It rests on something the operator documents: robots.txt rules, page-level controls, the operator's own description of its bot. Every robots.txt, page-control, preference and `llms_txt_unavailable` finding is grade A. |
+| **A-** | Read from your own pages and checked against a published measurement of how the bots fetch, rather than the operator's own documentation: the content in raw HTML verdicts (Vercel and MERJ, 2024: GPTBot, ClaudeBot and PerplexityBot don't execute JavaScript). Every `content_missing` finding is grade A-. |
 | **B** | Observed by CodoSEO's synthetic fetch check: a request with the bot's documented user agent, compared with CodoSEObot's baseline for the same page at the same moment and, the first time, confirmed by a second fetch. Every `fetch_blocked` finding is grade B. |
 
 ## Intent
@@ -125,7 +183,7 @@ The CLI and the local MCP server have nowhere to keep your intent, so `codoseo c
 
 ## Incidents and alerts
 
-The web app turns findings into incidents that open when a crawl first sees a problem and resolve when a later crawl no longer does. The AI access screen lists the open ones, and the changes page and alerts use six change kinds for them:
+The web app turns findings into incidents that open when a crawl first sees a problem and resolve when a later crawl no longer does. The AI access screen lists the open ones, and the changes page and alerts use eight change kinds for them:
 
 | Kind | Meaning |
 |---|---|
@@ -133,10 +191,12 @@ The web app turns findings into incidents that open when a crawl first sees a pr
 | `ai_answers_restricted` | Page markup takes pages out of an engine's AI answers |
 | `ai_block_not_applied` | A bot you want blocked can still crawl the site |
 | `ai_fetch_blocked` | The synthetic fetch check saw a bot you want challenged, blocked, redirected, rate limited or served a different page, while CodoSEObot got the normal one |
+| `ai_content_missing` | Important pages are empty app shells in their HTML as served, to the AI crawlers that don't run JavaScript |
+| `ai_llms_txt_unavailable` | A `/llms.txt` the site served before now fails (5xx, 429 or no answer) |
 | `ai_issue_resolved` | An AI access incident is gone |
 | `ai_preferences_changed` | Your declared Content-Signal, Content-Usage or TDM preferences changed |
 
-They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them. By default `ai_bot_blocked`, `ai_answers_restricted`, `ai_fetch_blocked` and `ai_issue_resolved` alert at once; the other two wait for the Monday digest. An alert whose changes are all AI access ones links to the AI access screen. A crawl that failed on robots.txt is not a finished crawl, so its incident shows on the AI access screen and in alerts, not on the changes page.
+They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them. By default `ai_bot_blocked`, `ai_answers_restricted`, `ai_fetch_blocked`, `ai_content_missing` and `ai_issue_resolved` alert at once; the other three (`ai_block_not_applied`, `ai_preferences_changed`, `ai_llms_txt_unavailable`) wait for the Monday digest. An alert whose changes are all AI access ones links to the AI access screen. A crawl that failed on robots.txt is not a finished crawl, so its incident shows on the AI access screen and in alerts, not on the changes page.
 
 **The first check is quiet.** The incidents opened by the first report that could judge them are your baseline: they are listed but write no changes and send no alerts, so turning the feature on (or a site whose first crawls failed) does not fire a storm. Changing your intent re-evaluates quietly the same way. An open incident that gets worse, or names another bot or engine, writes a change again.
 
@@ -181,6 +241,15 @@ AI bots (path /pricing)
 
 `--format json` adds `bots` (token, operator, purpose, `honours_robots`, `allowed`, `line`, `rule`) and `declared` to the existing fields.
 
+`codoseo check` prints a **Raw HTML content** block for the page: the verdict, the words found, whether the title, H1, description, canonical and JSON-LD are in the HTML as served, the internal links, the scripts and any shell signals, with a note that AI crawlers don't run JavaScript. `codoseo llms-txt` fetches a site's `/llms.txt` after its robots.txt and prints the [checks](#llmstxt); it is informational and never scored:
+
+```sh
+codoseo llms-txt https://example.com/
+codoseo llms-txt https://example.com/ --format json   # table (default), json or markdown
+```
+
+It exits 0 whatever the file holds, including no file. It exits 2, like any command that could not do its job, when robots.txt disallows CodoSEObot on `/llms.txt`, robots.txt can't be read, the address is refused, or the 30-second budget runs out; nothing is checked then.
+
 `codoseo crawl` adds an **AI access** section to the table and markdown reports, and an `ai_access` object (`report` and `findings`, judged under the default intent) to the JSON audit. The audit's `format_version` stays 1; older audit files load and diff as before. `--fail-on` looks only at the SEO checks.
 
 A plain `codoseo crawl` sends no request as an AI bot. `codoseo probe` runs the [synthetic fetch check](#synthetic-fetch-checks) on one page, now, from your machine; `--bots` limits it to some tokens (any case, comma-separated). It takes at most two minutes, robots.txt included; past that it stops and prints what it has, the bots it did not reach marked inconclusive:
@@ -218,7 +287,7 @@ Findings (default intent)
 
 ### Local MCP
 
-`audit_site` saves the same `ai_access` section as `codoseo crawl` in the cached audit, under the default intent. `check_ai_access` takes a `url` and fetches its robots.txt and the page right now. It returns a short `summary`, every registry bot's verdict for the path (`token`, `operator`, `purpose`, `allowed`, `line`, `rule`), the declared preferences, and for each engine the page's effect (`eligible`, `limited` or `excluded`) with its causes. `probe_ai_fetch` runs the synthetic fetch check on one `url` (optionally only some `bots`), like `codoseo probe`; its summary starts "Synthetic check:". `audit_site` never probes. See [mcp.md](mcp.md).
+`audit_site` saves the same `ai_access` section as `codoseo crawl` in the cached audit, under the default intent. `check_ai_access` takes a `url` and fetches its robots.txt and the page right now. It returns a short `summary`, every registry bot's verdict for the path (`token`, `operator`, `purpose`, `allowed`, `line`, `rule`), the declared preferences, and for each engine the page's effect (`eligible`, `limited` or `excluded`) with its causes. `probe_ai_fetch` runs the synthetic fetch check on one `url` (optionally only some `bots`), like `codoseo probe`; its summary starts "Synthetic check:". `audit_site` never probes. `check_ai_access` also returns `content`, the page's raw HTML verdict, words, signals and metadata facts; `check_llms_txt` takes a `url`, fetches `/llms.txt` on its site after robots.txt and returns the state, the checks and the link summary (informational). See [mcp.md](mcp.md).
 
 ### Hosted MCP and REST
 
@@ -255,7 +324,7 @@ curl -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/
 }
 ```
 
-Before a site has a report, `checked_at` is `null` and `note` says it appears after the next crawl. The response also has `probes_enabled` and `probes`, the latest synthetic fetch check per bot, described in [api.md](api.md#the-synthetic-fetch-check-in-ai-access); its incidents are in `open_incidents` with kind `fetch_blocked`. The call counts once against the daily allowance like any other ([api.md](api.md)).
+The response also has `content` (the [raw HTML content](#content-in-raw-html) of the important pages, at most 30 listed with `more` for the rest) and `llms_txt` (the [llms.txt](#llmstxt) report), both described in [api.md](api.md#content-and-llmstxt-in-ai-access) and left out of reports from before they existed. Before a site has a report, `checked_at` is `null` and `note` says it appears after the next crawl. The response also has `probes_enabled` and `probes`, the latest synthetic fetch check per bot, described in [api.md](api.md#the-synthetic-fetch-check-in-ai-access); its incidents are in `open_incidents` with kind `fetch_blocked`. The call counts once against the daily allowance like any other ([api.md](api.md)).
 
 ## Screenshots
 
