@@ -10,7 +10,9 @@ use codoseo_core::page::PageRecord;
 use codoseo_crawler::crawl::inspect_page;
 use url::Url;
 
-use super::output::{clean, severity_label, slug, write_json, write_pairs};
+use super::output::{
+    RAW_NOTE, clean, raw_content_pairs, severity_label, slug, write_json, write_pairs,
+};
 use super::{CliError, EXIT_OK, EXIT_RUNTIME, Outcome, PlainFormat};
 
 #[derive(Debug, Args)]
@@ -80,6 +82,12 @@ fn write_table(w: &mut impl Write, p: &PageRecord) -> std::io::Result<()> {
         pairs.insert(2, ("Error", slug(error)));
     }
     write_pairs(w, "", &pairs)?;
+
+    if let Some(content) = codoseo_geo::content::raw_content(0, p) {
+        writeln!(w, "\nRaw HTML content")?;
+        write_pairs(w, "  ", &raw_content_pairs(&content))?;
+        writeln!(w, "  {RAW_NOTE}")?;
+    }
 
     writeln!(w, "\nRedirect chain")?;
     if p.redirect_chain.is_empty() {

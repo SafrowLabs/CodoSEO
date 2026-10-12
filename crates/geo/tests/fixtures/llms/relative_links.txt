@@ -1,0 +1,9 @@
+# Relative Docs
+
+> Docs that link with site-relative paths.
+
+## Guides
+
+- [Install](/docs/install.md): Get set up
+- [Configure](docs/configure.md): Settings explained
+- [Deploy](./docs/deploy.md)

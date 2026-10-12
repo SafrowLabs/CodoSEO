@@ -6,6 +6,7 @@ mod check;
 mod crawl;
 mod diff;
 mod healthcheck;
+mod llms;
 mod mcp;
 mod migrate;
 mod output;
@@ -88,6 +89,9 @@ enum Command {
     Bots(bots::BotsArgs),
     /// Fetch one page as each AI search and user-triggered bot and compare with CodoSEObot (synthetic)
     Probe(probe::ProbeArgs),
+    /// Fetch a site's /llms.txt and check its format and links (informational, not scored)
+    #[command(name = "llms-txt")]
+    LlmsTxt(llms::LlmsArgs),
     /// Follow a URL's redirects and show each hop
     Redirects(redirects::RedirectsArgs),
     /// Compare two saved audits (`crawl --format json`)
@@ -113,6 +117,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::Robots(args) => robots::run(args).await,
         Command::Bots(args) => bots::run(args),
         Command::Probe(args) => probe::run(args).await,
+        Command::LlmsTxt(args) => llms::run(args).await,
         Command::Redirects(args) => redirects::run(args).await,
         Command::Diff(args) => diff::run(args),
         Command::Mcp(args) => mcp::run(args).await,

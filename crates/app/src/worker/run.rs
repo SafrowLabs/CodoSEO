@@ -342,6 +342,7 @@ async fn run_one_crawl(
         limits: CrawlLimits {
             max_pages,
             max_duration,
+            llms_link_checks: limits.llms_link_checks,
             ..CrawlLimits::default()
         },
         politeness: Politeness::default(),
@@ -451,6 +452,16 @@ async fn run_one_crawl(
         let important = important_urls(&out.pages, &out.origin, &starred);
         GeoInput::new(build_report(&out, &important))
     });
+    // llms.txt adoption outlives a crawl that did not fetch the file: it follows the newest
+    // stored report that did, not merely the latest report.
+    if let Some(input) = geo.as_mut()
+        && let Some(now) = input.report.llms_txt.as_mut()
+    {
+        let prev = geo::latest_llms_txt(pool, claimed.site_id)
+            .await
+            .map_err(|e| format!("could not load the previous llms.txt report: {e}"))?;
+        now.adopted = codoseo_geo::llms::carry_adoption(prev.as_ref(), now);
+    }
     // The synthetic probes: a few important pages fetched as the AI bots, after a monitored crawl
     // only (never a quick audit or a failed crawl), unless the owner switched them off.
     let probe_urls = settings.probes.probe_urls(plan, &limits);

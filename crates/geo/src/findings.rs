@@ -4,6 +4,10 @@
 //! bots the owner wants are blocked, bots the owner wants blocked still get in, and page markup
 //! that takes pages out of an engine's AI answers. A fifth, grade B, comes from the synthetic fetch
 //! probes: the site's CDN or firewall blocks, challenges or diverts bots it lets in by robots.txt.
+//! A sixth, grade A-, reads the important pages as served: an empty app shell is all that AI
+//! crawlers which don't run JavaScript get.
+//! A seventh, grade A, is informational: an llms.txt the site served before has stopped answering.
+//! It is never Critical, and llms.txt never counts toward the health score.
 //! Severity follows the owner's [`Intent`]: a blocked training bot is not a problem unless the
 //! owner said they want it to crawl.
 
@@ -12,11 +16,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use codoseo_core::check::Severity;
 use serde::{Deserialize, Serialize};
 
+use crate::content::{
+    ContentVerdict, MEASURED_BOTS, NON_RENDERING_BOTS, NON_RENDERING_SOURCE, SHELL_MAX_WORDS,
+    ShellSignal,
+};
 use crate::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, EngineId, engines};
 use crate::intent::{Intent, Stance};
+use crate::llms::{LIGHTHOUSE_DOC, LlmsState, SPEC_URL as LLMS_SPEC_URL};
 use crate::probe::{ProbeFetch, ProbeReport, Vendor, Verdict};
 use crate::registry::{Bot, Honours, Purpose, registry};
-use crate::report::{AccessReport, Reason, slug_str};
+use crate::report::{AccessReport, Reason, path_and_query, slug_str};
 use crate::robots::{GroupMatch, MatchedRule, RobotsAvailability};
 
 /// How many URLs the evidence lists as a sample.
@@ -64,6 +73,10 @@ pub enum FindingKind {
     AnswersRestricted,
     /// Synthetic: a probe with a bot's user agent was blocked, challenged or diverted.
     FetchBlocked,
+    /// Important pages are an empty app shell in the HTML as served.
+    ContentMissing,
+    /// An llms.txt the site had adopted answers 5xx or 429, or not at all.
+    LlmsTxtUnavailable,
 }
 
 impl FindingKind {
@@ -74,6 +87,8 @@ impl FindingKind {
             FindingKind::BotsNotBlocked => "bots_not_blocked",
             FindingKind::AnswersRestricted => "answers_restricted",
             FindingKind::FetchBlocked => "fetch_blocked",
+            FindingKind::ContentMissing => "content_missing",
+            FindingKind::LlmsTxtUnavailable => "llms_txt_unavailable",
         }
     }
 
@@ -84,17 +99,23 @@ impl FindingKind {
             FindingKind::BotsNotBlocked,
             FindingKind::AnswersRestricted,
             FindingKind::FetchBlocked,
+            FindingKind::ContentMissing,
+            FindingKind::LlmsTxtUnavailable,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
     }
 }
 
-/// Evidence grade: A is what the operator documents; B is what CodoSEO's synthetic check
-/// observed, against its own baseline and confirmed by a second fetch.
+/// Evidence grade: A is what the operator documents; A- is read from the site's own HTML as
+/// served, against a published measurement of how the bots fetch rather than the operators' own
+/// documentation; B is what CodoSEO's synthetic check observed, against its own baseline and
+/// confirmed by a second fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Grade {
     A,
+    #[serde(rename = "A-")]
+    AMinus,
     B,
 }
 
@@ -160,6 +181,17 @@ pub struct ProbeEvidence {
     pub baseline: Option<ProbeFetch>,
 }
 
+/// One important page's part in a `ContentMissing` finding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContentEvidence {
+    pub url: String,
+    pub verdict: ContentVerdict,
+    #[serde(default)]
+    pub signals: Vec<ShellSignal>,
+    /// Words in the HTML as served.
+    pub words: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UrlSample {
     /// Up to ten important URLs.
@@ -185,6 +217,12 @@ pub struct Evidence {
     /// Observed by CodoSEO's synthetic check rather than documented by an operator.
     #[serde(default, skip_serializing_if = "is_false")]
     pub synthetic: bool,
+    /// The shell pages, for `ContentMissing`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<ContentEvidence>,
+    /// The llms.txt status, for `LlmsTxtUnavailable`; `None` when no response arrived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_status: Option<u16>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -192,14 +230,20 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl Evidence {
-    /// Who the finding is about: its bots' and probed bots' tokens (lower-cased) and its engines'
-    /// names. An incident whose finding gains a member has widened.
+    /// Who the finding is about: its bots' and probed bots' tokens (lower-cased), its engines'
+    /// names and its shell pages as `url:<path>`. An incident whose finding gains a member has
+    /// widened.
     pub fn members(&self) -> BTreeSet<String> {
         self.bots
             .iter()
             .map(|b| b.token.to_ascii_lowercase())
             .chain(self.probes.iter().map(|p| p.token.to_ascii_lowercase()))
             .chain(self.engines.iter().map(|e| e.name.clone()))
+            .chain(
+                self.content
+                    .iter()
+                    .map(|c| format!("url:{}", path_and_query(&c.url))),
+            )
             .collect()
     }
 }
@@ -234,6 +278,14 @@ pub fn evaluated_kinds(report: &AccessReport) -> Vec<FindingKind> {
     if report.probes.as_ref().is_some_and(ProbeReport::conclusive) {
         kinds.push(FindingKind::FetchBlocked);
     }
+    // Who may read the pages comes from robots.txt, so without verdicts there is nothing to say.
+    if report.content.is_some() && report.has_verdicts() {
+        kinds.push(FindingKind::ContentMissing);
+    }
+    // Any fetch speaks to it: a file or a 4xx resolves an open incident, a failure keeps it.
+    if report.llms_txt.is_some() {
+        kinds.push(FindingKind::LlmsTxtUnavailable);
+    }
     kinds
 }
 
@@ -247,8 +299,10 @@ pub fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
         out.extend(bots_blocked(report, intent));
         out.extend(bots_not_blocked(report, intent));
         out.extend(fetch_blocked(report, intent));
+        out.extend(content_missing(report, intent));
     }
     out.extend(answers_restricted(report, intent));
+    out.extend(llms_txt_unavailable(report));
     out.sort_by(|a, b| (a.kind, &a.subject).cmp(&(b.kind, &b.subject)));
     out
 }
@@ -1213,4 +1267,281 @@ fn probe_summary(verdict: &Verdict, tokens: &[String], vendor: Option<Vendor>) -
     format!(
         "A request with {ua}, sent from CodoSEO's address, got {what}, while the same request as CodoSEObot got the normal page. {next} Real bots come from their own addresses and may be treated differently."
     )
+}
+
+// ---- content missing from the HTML as served -------------------------------------------------
+
+/// The `ContentMissing` finding: important pages that are, or are likely, an empty app shell, and
+/// that at least one AI crawler which doesn't run JavaScript ([`NON_RENDERING_BOTS`]) may fetch by
+/// robots.txt and the owner wants. One per site; its members are the pages.
+fn content_missing(report: &AccessReport, intent: &Intent) -> Option<Finding> {
+    let content = report.content.as_ref()?;
+    content_finding(
+        report,
+        intent,
+        content.shells().map(ShellPage::of).collect(),
+    )
+}
+
+/// One shell page a `ContentMissing` finding may name: from this run's content report, or held
+/// from the open incident's evidence by [`hold_unjudged_content`].
+struct ShellPage {
+    /// Index into `AccessReport::important`.
+    url: u16,
+    verdict: ContentVerdict,
+    signals: Vec<ShellSignal>,
+    words: u32,
+}
+
+impl ShellPage {
+    fn of(c: &crate::content::RawContent) -> ShellPage {
+        ShellPage {
+            url: c.url,
+            verdict: c.verdict,
+            signals: c.signals.clone(),
+            words: c.words,
+        }
+    }
+}
+
+/// This run's `ContentMissing` finding with the pages it could not judge held back. A page the
+/// open incident names that is still an important page but has no raw content this run (it
+/// answered 5xx, timed out, or was not HTML) says nothing new: it keeps the evidence the incident
+/// last had for it, so one failed fetch neither resolves the incident nor reopens it a crawl
+/// later. A page that is no longer among the important pages leaves the incident: it stopped
+/// being one of the pages this check watches. Held pages still need a wanted non-rendering bot
+/// that robots.txt lets fetch them. The incident resolves once every page it names was judged
+/// `Present` or `Thin`, or left the important pages. `open` is the open incident's evidence as
+/// last written; a report that cannot judge the kind leaves `found` as it is.
+pub fn hold_unjudged_content(
+    report: &AccessReport,
+    intent: &Intent,
+    open: Option<&Evidence>,
+    mut found: Vec<Finding>,
+) -> Vec<Finding> {
+    let (Some(content), Some(before)) = (report.content.as_ref(), open) else {
+        return found;
+    };
+    if !report.has_verdicts() {
+        return found;
+    }
+    let judged: BTreeSet<u16> = content.pages.iter().map(|p| p.url).collect();
+    let held: Vec<ShellPage> = before
+        .content
+        .iter()
+        .filter_map(|c| {
+            let at = report.important.iter().position(|u| u.url == c.url)?;
+            let url = u16::try_from(at).ok()?;
+            (!judged.contains(&url)).then(|| ShellPage {
+                url,
+                verdict: c.verdict,
+                signals: c.signals.clone(),
+                words: c.words,
+            })
+        })
+        .collect();
+    if held.is_empty() {
+        return found;
+    }
+    let mut pages: Vec<ShellPage> = content.shells().map(ShellPage::of).collect();
+    pages.extend(held);
+    pages.sort_by_key(|p| p.url);
+    found.retain(|f| f.kind != FindingKind::ContentMissing);
+    found.extend(content_finding(report, intent, pages));
+    found.sort_by(|a, b| (a.kind, &a.subject).cmp(&(b.kind, &b.subject)));
+    found
+}
+
+/// The `ContentMissing` finding over `shells`, the shell pages in the report's order.
+fn content_finding(
+    report: &AccessReport,
+    intent: &Intent,
+    shells: Vec<ShellPage>,
+) -> Option<Finding> {
+    if !report.has_verdicts() {
+        return None;
+    }
+    let readers: Vec<(&Bot, &crate::report::BotAccess)> = NON_RENDERING_BOTS
+        .iter()
+        .filter_map(|token| Some((registry().bot(token)?, report.bot(token)?)))
+        .filter(|(bot, _)| intent.effective(bot) == Stance::Allow)
+        .collect();
+    let may_fetch =
+        |access: &crate::report::BotAccess, url: u16| !access.blocked.iter().any(|b| b.url == url);
+    let pages: Vec<ShellPage> = shells
+        .into_iter()
+        .filter(|c| readers.iter().any(|(_, a)| may_fetch(a, c.url)))
+        .collect();
+    if pages.is_empty() {
+        return None;
+    }
+    let tokens: Vec<String> = readers
+        .iter()
+        .filter(|(_, a)| pages.iter().any(|c| may_fetch(a, c.url)))
+        .map(|(bot, _)| bot.token.clone())
+        .collect();
+
+    let is_home = |i: u16| {
+        report
+            .important
+            .get(usize::from(i))
+            .is_some_and(|u| u.reason == Reason::Home)
+    };
+    let home = pages.iter().any(|c| is_home(c.url));
+    let html = report.html_important();
+    let severity = if home || pages.len() * 2 >= html.max(1) {
+        Severity::Warning
+    } else {
+        Severity::Notice
+    };
+
+    let certain = pages.iter().all(|c| c.verdict == ContentVerdict::Shell);
+    let n = pages.len();
+    let who = "AI crawlers that don't run JavaScript";
+    let title = match (n, home, certain) {
+        (1, true, true) => format!("The home page is an empty app shell to {who}"),
+        (1, true, false) => format!("The home page looks like an empty app shell to {who}"),
+        (1, false, true) => format!("1 important page is an empty app shell to {who}"),
+        (1, false, false) => format!("1 important page looks like an empty app shell to {who}"),
+        (_, _, true) => format!("{n} important pages are empty app shells to {who}"),
+        (_, _, false) => format!("{n} important pages look like empty app shells to {who}"),
+    };
+
+    let mut signals: BTreeSet<ShellSignal> = BTreeSet::new();
+    for c in &pages {
+        signals.extend(c.signals.iter().copied());
+    }
+    let what: Vec<String> = signals
+        .iter()
+        .map(|s| {
+            match s {
+                ShellSignal::MountEmpty => "the app's mount element is empty",
+                ShellSignal::NoscriptJs => "a `<noscript>` notice asks for JavaScript",
+                ShellSignal::ScriptHeavy => "inline script makes up most of the page",
+                ShellSignal::ManyScripts => {
+                    "it loads several scripts but has no H1 and no internal links"
+                }
+            }
+            .to_owned()
+        })
+        .collect();
+    let subject = if n == 1 && home {
+        "the home page has"
+    } else if n == 1 {
+        "this page has"
+    } else {
+        "these pages have"
+    };
+    // The remedy first: API and MCP clients clip summaries.
+    let mut summary = format!(
+        "Render the main content on the server, or prerender {}, so it is in the HTML. In the HTML as served, {subject} fewer than {SHELL_MAX_WORDS} words of text",
+        if n == 1 { "the page" } else { "these pages" },
+    );
+    if !what.is_empty() {
+        summary.push_str(&format!(" and {}", join_and(&what)));
+    }
+    summary.push('.');
+    // The measurement is cited only for the crawlers it measured; the others are their
+    // operators' other fetchers.
+    let (measured, others): (Vec<String>, Vec<String>) = tokens
+        .iter()
+        .cloned()
+        .partition(|t| MEASURED_BOTS.contains(&t.as_str()));
+    if !measured.is_empty() {
+        summary.push_str(&format!(
+            " Vercel and MERJ measured in 2024 that {} {} run JavaScript.",
+            join_and(&measured),
+            if measured.len() == 1 {
+                "doesn't"
+            } else {
+                "don't"
+            },
+        ));
+    }
+    if !others.is_empty() {
+        summary.push_str(&format!(
+            " {} {} from the same operators as the crawlers they measured (GPTBot, ClaudeBot and PerplexityBot) and {} expected to fetch the same way.",
+            join_capped(&others),
+            if others.len() == 1 { "comes" } else { "come" },
+            if others.len() == 1 { "is" } else { "are" },
+        ));
+    }
+    summary.push_str(
+        " A bot that doesn't run JavaScript reads the page as served, not what a browser shows once its scripts have run.",
+    );
+
+    let indexes: BTreeSet<u16> = pages.iter().map(|c| c.url).collect();
+    let evidence = pages
+        .iter()
+        .filter_map(|c| {
+            Some(ContentEvidence {
+                url: report.important.get(usize::from(c.url))?.url.clone(),
+                verdict: c.verdict,
+                signals: c.signals.clone(),
+                words: c.words,
+            })
+        })
+        .collect();
+    Some(Finding {
+        kind: FindingKind::ContentMissing,
+        subject: String::new(),
+        severity,
+        grade: Grade::AMinus,
+        title,
+        summary,
+        evidence: Evidence {
+            urls: sample(report, &indexes),
+            content: evidence,
+            ..Evidence::default()
+        },
+        sources: vec![NON_RENDERING_SOURCE.to_owned()],
+    })
+}
+
+// ---- llms.txt unavailable --------------------------------------------------------------------
+
+/// The `LlmsTxtUnavailable` finding: the site had adopted llms.txt (served one before, as carried
+/// by [`crate::llms::carry_adoption`]) and it now answers 5xx or 429, or not at all, as
+/// Lighthouse's audit counts a failure. Informational: Warning at most, whatever the intent, since
+/// no bot depends on the file to crawl. A site that never served one gets nothing, and a 4xx or a
+/// soft 404 is a removal, not a failure.
+fn llms_txt_unavailable(report: &AccessReport) -> Option<Finding> {
+    let llms = report.llms_txt.as_ref()?;
+    if llms.state != LlmsState::Unavailable || !llms.adopted {
+        return None;
+    }
+    let status = (llms.status != 0).then_some(llms.status);
+    let (title, what) = match (status, llms.error.as_deref()) {
+        (Some(429), _) => (
+            "llms.txt returns HTTP 429".to_owned(),
+            "now answers HTTP 429 (too many requests)".to_owned(),
+        ),
+        (Some(s), _) => (
+            format!("llms.txt returns HTTP {s}"),
+            format!("now answers HTTP {s}"),
+        ),
+        (None, Some(e)) => (
+            "llms.txt could not be fetched".to_owned(),
+            format!("now gets no answer ({e})"),
+        ),
+        (None, None) => (
+            "llms.txt could not be fetched".to_owned(),
+            "now gets no answer".to_owned(),
+        ),
+    };
+    Some(Finding {
+        kind: FindingKind::LlmsTxtUnavailable,
+        subject: String::new(),
+        severity: Severity::Warning,
+        grade: Grade::A,
+        title,
+        summary: format!(
+            "Make /llms.txt answer 200 again, or 404 if you removed it on purpose. Your site served it before, and it {what}, so AI agents that look for it get nothing; Lighthouse counts this as a failed llms.txt check. llms.txt is informational: it does not affect your health score or how search engines crawl the site."
+        ),
+        evidence: Evidence {
+            llms_status: status,
+            ..Evidence::default()
+        },
+        sources: vec![LLMS_SPEC_URL.to_owned(), LIGHTHOUSE_DOC.to_owned()],
+    })
 }

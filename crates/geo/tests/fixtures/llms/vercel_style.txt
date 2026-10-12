@@ -1,0 +1,25 @@
+# Cloudhost
+
+> Cloudhost is a cloud platform for building, deploying, and scaling web applications.
+
+Use this index to find machine-readable documentation and platform resources.
+
+## When to use Cloudhost
+
+- Deploy and scale web applications from a Git repository or the CLI.
+- Automate projects, deployments and domains through the REST API.
+
+## How agents should use Cloudhost
+
+- For research, fetch the Markdown documentation indexes below.
+- For REST API calls, read the OpenAPI description first.
+
+## Agent setup
+
+- [Set up Cloudhost for your coding agent](https://cloudhost.test/get-started.md): Install the CLI and connect MCP.
+- [Getting started](https://cloudhost.test/docs/getting-started.md?from=llms-txt): Deploy your first project.
+
+## Documentation
+
+- [Docs index](https://cloudhost.test/docs/llms.txt): Every documentation page as Markdown
+- [REST API](https://cloudhost.test/docs/rest-api.md): Endpoints and authentication

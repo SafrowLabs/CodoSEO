@@ -20,9 +20,11 @@ use codoseo_core::check::Severity;
 use codoseo_geo::Intent;
 use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{
-    Evidence, Finding, FindingKind, evaluated_kinds, findings, hold_unjudged_probes,
+    Evidence, Finding, FindingKind, evaluated_kinds, findings, hold_unjudged_content,
+    hold_unjudged_probes,
 };
 use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
+use codoseo_geo::llms::LlmsTxtReport;
 use codoseo_geo::report::{AccessReport, Declared};
 use codoseo_geo::robots::Pair;
 use serde_json::Value;
@@ -37,12 +39,14 @@ use crate::finalize::{enqueue_alert_job, insert_changes};
 /// newest two can't stand in for (see [`reports_to_keep`]).
 const KEEP_REPORTS: usize = 2;
 /// Every kind of finding, for the kinds a run opens quietly.
-const ALL_KINDS: [FindingKind; 5] = [
+const ALL_KINDS: [FindingKind; 7] = [
     FindingKind::RobotsUnavailable,
     FindingKind::BotsBlocked,
     FindingKind::BotsNotBlocked,
     FindingKind::AnswersRestricted,
     FindingKind::FetchBlocked,
+    FindingKind::ContentMissing,
+    FindingKind::LlmsTxtUnavailable,
 ];
 /// Longest `before_value`/`after_value` a change row gets, in characters.
 const MAX_CHANGE_TEXT: usize = 300;
@@ -253,6 +257,24 @@ where
     )
 }
 
+/// The `llms_txt` part of the site's newest stored report that has one. A crawl that did not
+/// fetch the file (or a failed one) stores a report without it, so this is not simply the latest
+/// report's: it is what adoption is carried from ([`codoseo_geo::llms::carry_adoption`]).
+pub async fn latest_llms_txt(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<LlmsTxtReport>, sqlx::Error> {
+    let value: Option<Value> = sqlx::query_scalar(
+        "SELECT report->'llms_txt' FROM ai_reports \
+         WHERE site_id = $1 AND jsonb_typeof(report->'llms_txt') = 'object' \
+         ORDER BY created_at DESC, crawl_id DESC LIMIT 1",
+    )
+    .bind(site_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 /// Whether the site has any stored report (without reading it).
 pub async fn has_report(pool: &PgPool, site_id: Uuid) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM ai_reports WHERE site_id = $1)")
@@ -364,11 +386,10 @@ pub async fn reevaluate_quietly(
         if kinds.is_empty() {
             continue;
         }
-        let found: Vec<Finding> =
-            hold_unjudged_probes(report, &intent, &held(&open), findings(report, &intent))
-                .into_iter()
-                .filter(|f| kinds.contains(&f.kind))
-                .collect();
+        let found: Vec<Finding> = hold_unjudged(report, &intent, &open)
+            .into_iter()
+            .filter(|f| kinds.contains(&f.kind))
+            .collect();
         let transitions = reconcile(&as_open(&open), &found, &kinds);
         opened += transitions
             .iter()
@@ -478,12 +499,7 @@ pub(crate) async fn apply_geo(
 
     let evaluated = evaluated_kinds(&input.report);
     let open = lock_open(tx, site_id).await?;
-    let found = hold_unjudged_probes(
-        &input.report,
-        &intent,
-        &held(&open),
-        findings(&input.report, &intent),
-    );
+    let found = hold_unjudged(&input.report, &intent, &open);
     let transitions = reconcile(&as_open(&open), &found, &evaluated);
     let mut changes = write_transitions(
         tx,
@@ -637,6 +653,17 @@ async fn lock_open(
         .collect())
 }
 
+/// The report's findings under `intent`, with the bots and pages it could not judge held back
+/// from the `open` incidents ([`hold_unjudged_probes`], [`hold_unjudged_content`]).
+fn hold_unjudged(report: &AccessReport, intent: &Intent, open: &[OpenRow]) -> Vec<Finding> {
+    let content = open
+        .iter()
+        .find(|r| r.kind == FindingKind::ContentMissing)
+        .map(|r| &r.evidence);
+    let found = hold_unjudged_probes(report, intent, &held(open), findings(report, intent));
+    hold_unjudged_content(report, intent, content, found)
+}
+
 /// The open `fetch_blocked` incidents' subjects and evidence, for [`hold_unjudged_probes`].
 fn held(rows: &[OpenRow]) -> Vec<(String, Evidence)> {
     rows.iter()
@@ -753,7 +780,7 @@ async fn write_transitions(
                     && !row.quiet
                 {
                     changes.push(Change {
-                        kind: ChangeKind::AiIssueResolved,
+                        kind: resolved_kind(row.kind),
                         severity: Severity::Notice,
                         url: None,
                         before: truncate(&row.title),
@@ -766,6 +793,18 @@ async fn write_transitions(
     Ok(changes)
 }
 
+/// The change kind that announces an incident of `kind` is gone. Most use `ai_issue_resolved`,
+/// which alerts at once by default. `llms_txt_unavailable` opens as a digest-only kind, so its
+/// recovery is a change of that same kind (after: `resolved`): it reaches people by the same rule
+/// the failure did, and nobody is alerted at once about something they were only told in a
+/// digest.
+fn resolved_kind(kind: FindingKind) -> ChangeKind {
+    match kind {
+        FindingKind::LlmsTxtUnavailable => ChangeKind::AiLlmsTxtUnavailable,
+        _ => ChangeKind::AiIssueResolved,
+    }
+}
+
 /// The change row for an incident that opened, got worse or widened. `before` is what was
 /// expected, `after` the finding's title; the summary and evidence live on the incident.
 fn finding_change(finding: &Finding) -> Change {
@@ -776,6 +815,8 @@ fn finding_change(finding: &Finding) -> Change {
         FindingKind::BotsNotBlocked => (ChangeKind::AiBlockNotApplied, "intent: block"),
         FindingKind::AnswersRestricted => (ChangeKind::AiAnswersRestricted, "eligible"),
         FindingKind::FetchBlocked => (ChangeKind::AiFetchBlocked, "reachable"),
+        FindingKind::ContentMissing => (ChangeKind::AiContentMissing, "content in the HTML"),
+        FindingKind::LlmsTxtUnavailable => (ChangeKind::AiLlmsTxtUnavailable, "llms.txt served"),
     };
     Change {
         kind,

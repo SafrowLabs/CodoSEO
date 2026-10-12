@@ -72,6 +72,63 @@ pub struct PageFields {
     /// What the page says to AI answer engines; empty for pages without any such markup.
     #[serde(default)]
     pub ai: AiMeta,
+    /// What the raw HTML (before any JavaScript) holds, to spot SPA shells. Kept in memory
+    /// for the audit; never written to the `pages` table.
+    #[serde(default, skip_serializing_if = "RawSignals::is_empty")]
+    pub raw: RawSignals,
+}
+
+/// Counts and markers read from the raw HTML of a page, before any script has run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawSignals {
+    /// Words of visible text inside `<main>`, `<article>` and `[role=main]` elements, nested ones
+    /// once.
+    #[serde(default)]
+    pub main_words: u32,
+    /// Bytes of inline `<script>` content, capped by the extractor.
+    #[serde(default)]
+    pub script_bytes: u32,
+    /// `<script src>` elements and `<link rel=modulepreload>` modules.
+    #[serde(default)]
+    pub scripts_external: u16,
+    /// The app mount element found in the body, if any.
+    #[serde(default)]
+    pub mount: Option<MountPoint>,
+    /// The mount element holds no text or child elements.
+    #[serde(default)]
+    pub mount_empty: bool,
+    /// A `<noscript>` block tells the visitor to enable JavaScript.
+    #[serde(default)]
+    pub noscript_js: bool,
+}
+
+impl RawSignals {
+    pub fn is_empty(&self) -> bool {
+        *self == RawSignals::default()
+    }
+}
+
+/// The element a client-side app renders into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum MountPoint {
+    /// `#root` (React, Preact).
+    Root,
+    /// `#app` (Vue, others).
+    App,
+    /// `#__next` (Next.js).
+    Next,
+    /// `#__nuxt` (Nuxt).
+    Nuxt,
+    /// `#___gatsby` (Gatsby).
+    Gatsby,
+    /// `#q-app` (Quasar).
+    QApp,
+    /// `<app-root>` (Angular).
+    AppRoot,
+    /// `#svelte` (SvelteKit).
+    Svelte,
 }
 
 /// Page-level markup that speaks to AI and answer engines, read by the extractor.

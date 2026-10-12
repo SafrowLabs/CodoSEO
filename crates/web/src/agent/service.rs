@@ -19,10 +19,10 @@ use codoseo_geo::probe::{ProbeReport, Verdict};
 use codoseo_geo::report::AccessReport;
 use codoseo_geo::{Honours, Intent, Stance, registry};
 use codoseo_mcp::cloud::types::{
-    ActiveCrawl, AiAccessInfo, AiBotInfo, AiEngineInfo, AiIncidentInfo, AiNotProbedInfo,
-    AiProbeBotInfo, AiProbesInfo, AiRobotsInfo, ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued,
-    IssueUrlsPage, PageInfo, PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip,
-    clip_change_text,
+    ActiveCrawl, AiAccessInfo, AiBotInfo, AiContentInfo, AiContentPage, AiEngineInfo,
+    AiIncidentInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo, AiProbesInfo, AiRobotsInfo,
+    ChangeInfo, ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES,
+    PageInfo, PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
@@ -475,6 +475,9 @@ impl<'a> AgentService<'a> {
                 declared: Default::default(),
                 probes_enabled,
                 probes: None,
+                content: None,
+                llms_txt: None,
+                llms_txt_skipped: None,
             });
         };
         let intent = geo::get_intent(pool, site.id).await?;
@@ -497,6 +500,9 @@ impl<'a> AgentService<'a> {
                 .as_ref()
                 .filter(|_| probes_enabled)
                 .map(|p| ai_probes(p, &intent)),
+            content: ai_content(&report),
+            llms_txt: report.llms_txt.as_ref().map(ai_llms_txt),
+            llms_txt_skipped: report.llms_txt_skipped,
             declared: report.declared,
         })
     }
@@ -685,6 +691,58 @@ pub async fn issue_page(
 
 /// Longest incident title or summary the AI access payload carries.
 const MAX_AI_TEXT: usize = 400;
+
+/// The important pages' raw HTML content: shells first, capped.
+fn ai_content(report: &AccessReport) -> Option<AiContentInfo> {
+    let content = report.content.as_ref()?;
+    let mut pages: Vec<AiContentPage> = content
+        .pages
+        .iter()
+        .filter_map(|c| {
+            Some(AiContentPage {
+                url: report.important.get(usize::from(c.url))?.url.clone(),
+                verdict: c.verdict,
+                signals: c.signals.clone(),
+                words: c.words,
+                title: c.title,
+                h1: c.h1,
+                description: c.description,
+                canonical: c.canonical,
+                jsonld: matches!(c.jsonld, codoseo_core::page::JsonLdStatus::Valid(_)),
+                links_internal: c.links_internal,
+            })
+        })
+        .collect();
+    let total = u32::try_from(pages.len()).unwrap_or(u32::MAX);
+    let shells = u32::try_from(content.shells().count()).unwrap_or(u32::MAX);
+    // Stable: shells keep the report's order, as do the rest.
+    pages.sort_by_key(|p| !p.verdict.is_shell());
+    let more = pages.len().saturating_sub(MAX_AI_CONTENT_PAGES);
+    pages.truncate(MAX_AI_CONTENT_PAGES);
+    Some(AiContentInfo {
+        grade: codoseo_geo::findings::Grade::AMinus,
+        pages_checked: total,
+        shells,
+        pages,
+        more: u32::try_from(more).unwrap_or(u32::MAX),
+    })
+}
+
+fn ai_llms_txt(r: &codoseo_geo::llms::LlmsTxtReport) -> AiLlmsTxtInfo {
+    let mut report = r.clone();
+    for c in &mut report.checks {
+        c.detail = clip(&c.detail, MAX_AI_TEXT);
+    }
+    for u in &mut report.link_summary.failing_urls {
+        *u = clip(u, MAX_AI_TEXT);
+    }
+    report.error = report.error.map(|e| clip(&e, MAX_AI_TEXT));
+    report.title = report.title.map(|t| clip(&t, codoseo_geo::llms::MAX_TITLE));
+    AiLlmsTxtInfo {
+        informational: true,
+        report,
+    }
+}
 
 /// One entry per registry bot, with whether robots.txt does the opposite of the owner's intent:
 /// the bot is allowed but some important page is blocked, or it is blocked from the home page
@@ -890,6 +948,94 @@ mod tests {
         let info = ai_probes(&probes, &Intent::default());
         assert_eq!(info.urls_probed, 3);
         assert_eq!(info.bots[0].urls_probed, 1);
+    }
+
+    /// A report of `n` important HTML pages; every third one (from the second) is a shell.
+    fn content_report(n: usize) -> AccessReport {
+        let important: Vec<serde_json::Value> = (0..n)
+            .map(|i| {
+                serde_json::json!({
+                    "url": format!("https://example.com/p{i}"),
+                    "reason": "most_linked",
+                    "status": 200,
+                    "html_ok": true,
+                })
+            })
+            .collect();
+        let pages: Vec<serde_json::Value> = (0..n)
+            .map(|i| {
+                let shell = i % 3 == 1;
+                serde_json::json!({
+                    "url": i,
+                    "verdict": if shell { "shell" } else { "present" },
+                    "signals": if shell { vec!["mount_empty"] } else { Vec::new() },
+                    "words": if shell { 0 } else { 300 },
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "registry_version": 1,
+            "robots": { "status": 200, "availability": "ok" },
+            "important": important,
+            "content": { "pages": pages },
+        }))
+        .expect("a report")
+    }
+
+    #[test]
+    fn ai_content_lists_shells_first_and_caps_the_pages() {
+        let report = content_report(45);
+        let info = ai_content(&report).expect("content");
+        assert_eq!(info.pages_checked, 45);
+        assert_eq!(info.shells, 15);
+        assert_eq!(info.pages.len(), MAX_AI_CONTENT_PAGES);
+        assert_eq!(info.more, 15);
+        // The 15 shells first, in the report's order, then the first present pages.
+        assert!(info.pages[..15].iter().all(|p| p.verdict.is_shell()));
+        assert_eq!(info.pages[0].url, "https://example.com/p1");
+        assert_eq!(info.pages[14].url, "https://example.com/p43");
+        assert_eq!(info.pages[15].url, "https://example.com/p0");
+        assert!(info.pages[15..].iter().all(|p| !p.verdict.is_shell()));
+
+        let small = ai_content(&content_report(4)).expect("content");
+        assert_eq!((small.pages.len(), small.more), (4, 0));
+    }
+
+    #[test]
+    fn ai_llms_txt_clips_site_text() {
+        use codoseo_geo::llms::{LlmsCheck, LlmsCheckId, MAX_TITLE};
+        let long = "x".repeat(5000);
+        let mut report = codoseo_geo::llms::assess(
+            &codoseo_core::output::LlmsTxtFetch {
+                status: 200,
+                content_type: Some("text/plain".to_owned()),
+                body: "# Site\n".to_owned(),
+                ..Default::default()
+            },
+            false,
+        );
+        // As a report stored before the caps could hold.
+        report.title = Some(long.clone());
+        report.error = Some(long.clone());
+        report.checks.push(LlmsCheck {
+            id: LlmsCheckId::H1,
+            ok: false,
+            detail: long.clone(),
+        });
+        report.link_summary.failing_urls = vec![long.clone()];
+        let info = ai_llms_txt(&report);
+        let r = &info.report;
+        assert!(info.informational);
+        assert_eq!(r.title.as_ref().unwrap().chars().count(), MAX_TITLE);
+        assert_eq!(r.error.as_ref().unwrap().chars().count(), MAX_AI_TEXT);
+        assert!(
+            r.checks
+                .iter()
+                .all(|c| c.detail.chars().count() <= MAX_AI_TEXT)
+        );
+        assert_eq!(r.checks.last().unwrap().detail.chars().count(), MAX_AI_TEXT);
+        assert!(r.checks.last().unwrap().detail.ends_with('…'));
+        assert_eq!(r.link_summary.failing_urls[0].chars().count(), MAX_AI_TEXT);
     }
 
     #[test]

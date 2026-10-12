@@ -569,7 +569,7 @@ async fn unlocking_emails_a_link_that_attaches_the_audit_and_queues_the_first_cr
             &format!("SELECT count(*) FROM alert_rules WHERE site_id = '{site}'")
         )
         .await,
-        9,
+        10,
         "the default instant rules are on for the attached site"
     );
 
@@ -770,6 +770,8 @@ async fn the_bot_page_robots_and_llms_txt_are_served_in_the_cloud() {
         "follows robots.txt for the bot token it uses",
         "switch the check off under AI access",
         "block <code>CodoSEObot</code> in robots.txt",
+        "llms.txt and its links",
+        "at most 5 on a free account, 20 otherwise",
     ] {
         assert!(res.body.contains(needle), "{needle}: {}", res.body);
     }

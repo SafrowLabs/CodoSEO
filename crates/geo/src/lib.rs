@@ -2,11 +2,13 @@
 //! robots.txt verdicts, page-level answer eligibility per engine, the owner's intent, the access
 //! report built from a crawl, the findings drawn from it and the incident lifecycle.
 
+pub mod content;
 pub mod declared;
 pub mod eligibility;
 pub mod findings;
 pub mod incident;
 pub mod intent;
+pub mod llms;
 pub mod probe;
 pub mod registry;
 pub mod report;

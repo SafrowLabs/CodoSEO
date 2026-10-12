@@ -219,6 +219,76 @@ pub struct AiAccessInfo {
     /// (an older report, a quick audit, a crawl whose robots.txt gave no verdicts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probes: Option<AiProbesInfo>,
+    /// What the important pages hold in their HTML as served; absent when the report has none
+    /// (an older report, or no important page is HTML).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<AiContentInfo>,
+    /// `/llms.txt`: informational, never scored. Absent when the report has none (an older
+    /// report, or the file was not fetched).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt: Option<AiLlmsTxtInfo>,
+    /// Why `/llms.txt` was not fetched when the crawl meant to: `robots_disallowed`, `refused` or
+    /// `deadline`. Absent when it was fetched, or the report has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt_skipped: Option<codoseo_core::output::LlmsSkip>,
+}
+
+/// What the important HTML pages hold in their HTML as served, before any JavaScript runs. AI
+/// crawlers like GPTBot, ClaudeBot and PerplexityBot don't run JavaScript (Vercel and MERJ, 2024),
+/// so a client-side app's empty shell is all they read. Evidence grade A-: read from the pages,
+/// against a published measurement of how the bots fetch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiContentInfo {
+    /// Always `A-`.
+    pub grade: codoseo_geo::findings::Grade,
+    /// Important HTML pages that were read.
+    pub pages_checked: u32,
+    /// Pages whose verdict is `shell` or `likely_shell`.
+    pub shells: u32,
+    /// Shells first, then the other pages in the report's order; at most [`MAX_AI_CONTENT_PAGES`].
+    pub pages: Vec<AiContentPage>,
+    /// Pages left out of `pages`.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub more: u32,
+}
+
+/// The most pages `content.pages` lists.
+pub const MAX_AI_CONTENT_PAGES: usize = 30;
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiContentPage {
+    pub url: String,
+    /// `shell` (no text in the HTML as served and a script-built app's markers), `likely_shell`,
+    /// `thin` (few words, no shell markers; informational) or `present`.
+    pub verdict: codoseo_geo::content::ContentVerdict,
+    /// The shell markers found: `mount_empty`, `noscript_js`, `script_heavy`, `many_scripts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<codoseo_geo::content::ShellSignal>,
+    /// Words of text in the HTML as served.
+    pub words: u32,
+    pub title: bool,
+    pub h1: bool,
+    pub description: bool,
+    pub canonical: bool,
+    /// At least one valid JSON-LD block.
+    pub jsonld: bool,
+    pub links_internal: u32,
+}
+
+/// `/llms.txt` as the last crawl found it. Informational: the file is optional and never scored,
+/// and a missing one (`absent`, `soft_not_found`) is nothing to fix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiLlmsTxtInfo {
+    /// Always true.
+    pub informational: bool,
+    /// `absent` (a 4xx), `soft_not_found` (a web page where the file should be), `available` or
+    /// `unavailable` (a 5xx, 429 or no answer).
+    #[serde(flatten)]
+    pub report: codoseo_geo::llms::LlmsTxtReport,
 }
 
 /// The synthetic fetch check: a few important pages fetched with each AI search and user-triggered
@@ -289,9 +359,11 @@ pub struct AiRobotsInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiIncidentInfo {
     pub id: i64,
-    /// `bots_blocked`, `bots_not_blocked`, `robots_unavailable`, `answers_restricted` or
-    /// `fetch_blocked` (the synthetic fetch check: a firewall or CDN blocks or challenges bots the
-    /// owner wants; evidence grade B).
+    /// One of `bots_blocked`, `bots_not_blocked`, `robots_unavailable`, `answers_restricted`,
+    /// `fetch_blocked` (the synthetic fetch check: a firewall or CDN blocks or challenges bots
+    /// the owner wants; evidence grade B), `content_missing` (important pages are empty app
+    /// shells in their HTML as served; evidence grade A-) or `llms_txt_unavailable` (an llms.txt
+    /// the site served before now fails; informational).
     pub kind: String,
     /// The purpose or directive the incident is about, or for `fetch_blocked` the cause
     /// (`challenge_cloudflare`, `blocked_403`, ...); empty for the robots.txt one.

@@ -518,6 +518,50 @@ async fn the_public_registry_needs_no_login_on_either_mode() {
     );
 }
 
+/// A recovery row of a kind that can fail (llms.txt served again) does not colour the AI access
+/// tile as a problem; a failure of the same kind does.
+#[tokio::test]
+async fn an_llms_txt_recovery_does_not_colour_the_ai_access_tile() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl(&site, pages(), Vec::new()).await;
+    let llms = |severity, after: &str| Change {
+        kind: ChangeKind::AiLlmsTxtUnavailable,
+        severity,
+        url: None,
+        before: "llms.txt served".to_owned(),
+        after: after.to_owned(),
+    };
+    let tile = |body: &str| {
+        let start = body
+            .find("<div class=\"tile-label\">AI access</div>")
+            .expect("the AI access tile");
+        let rest = &body[start..];
+        rest[..rest.find("</div></div>").unwrap()].to_owned()
+    };
+    app.finished_crawl(&site, pages(), vec![llms(Severity::Notice, "resolved")])
+        .await;
+    let body = app
+        .get(&format!("/s/{}/changes", site.id), Some(&cookie))
+        .await
+        .body;
+    let t = tile(&body);
+    assert!(t.ends_with(">1"), "the recovery is still counted: {t}");
+    assert!(!t.contains("c-err"), "a recovery is not a problem: {t}");
+
+    app.finished_crawl(
+        &site,
+        pages(),
+        vec![llms(Severity::Warning, "llms.txt could not be fetched")],
+    )
+    .await;
+    let body = app
+        .get(&format!("/s/{}/changes", site.id), Some(&cookie))
+        .await
+        .body;
+    let t = tile(&body);
+    assert!(t.contains("c-err"), "a failure is: {t}");
+}
+
 #[tokio::test]
 async fn the_changes_screen_renders_every_ai_kind() {
     let (app, site, cookie) = setup().await;
@@ -1417,3 +1461,347 @@ async fn probe_urls_zero_turns_the_checks_off_for_the_whole_install() {
 
 /// What the AI access screen says about open synthetic incidents while the checks are off.
 const STAY_OPEN: &str = "Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved.";
+
+// ---- B2.12: content in raw HTML and llms.txt -----------------------------------------------
+
+/// An app shell: no text, an empty mount element and a noscript notice.
+fn shell_page(domain: &str, path: &str) -> PageRecord {
+    let mut p = page(domain, path);
+    p.fields.word_count = 0;
+    p.fields.h1.clear();
+    p.fields.raw.mount_empty = true;
+    p.fields.raw.noscript_js = true;
+    p
+}
+
+fn llms_fetch(status: u16, body: &str) -> codoseo_core::output::LlmsTxtFetch {
+    codoseo_core::output::LlmsTxtFetch {
+        status,
+        content_type: Some("text/plain".to_owned()),
+        bytes: body.len() as u64,
+        body: body.to_owned(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn the_content_card_lists_each_important_page_with_its_verdict() {
+    let (app, site, cookie) = setup().await;
+    let pages = vec![
+        page(DOMAIN, "/"),
+        shell_page(DOMAIN, "/app"),
+        page(DOMAIN, "/pricing"),
+    ];
+    app.finished_crawl_with_robots(&site, pages, (200, OPEN), Vec::new())
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let from = body.find(r#"id="aia-content""#).expect("content card");
+    let to = body.find(r#"id="aia-llms""#).expect("llms card");
+    assert!(
+        body.find(r#"id="aia-fetch""#).unwrap() < from
+            && to < body.find(r#"id="aia-bots""#).unwrap(),
+        "section order"
+    );
+    let card = &body[from..to];
+    for needle in [
+        "Content in raw HTML",
+        "as AI crawlers that don't run JavaScript see it",
+        ">A-</span>",
+        "before JavaScript runs",
+        "vercel.com/blog/the-rise-of-the-ai-crawler",
+        "/app",
+        "/pricing",
+        ">Shell</span>",
+        ">Present</span>",
+        "640",
+        "3 pages · 1 shell",
+        "Signals: the app&#39;s mount element is empty, a noscript notice asks for JavaScript",
+    ] {
+        assert!(card.contains(needle), "missing {needle:?} in {card}");
+    }
+    assert_eq!(
+        card.matches("Signals:").count(),
+        1,
+        "only shell rows: {card}"
+    );
+    // The shell page is an incident, graded A-, with its page as evidence.
+    let issues = &body[body.find(r#"id="aia-issues""#).unwrap()..from];
+    for needle in [
+        "empty app shell",
+        "Evidence grade A-",
+        "0 words in the HTML as served",
+        "the app&#39;s mount element is empty",
+        "vercel.com",
+    ] {
+        assert!(issues.contains(needle), "missing {needle:?} in {issues}");
+    }
+}
+
+#[tokio::test]
+async fn the_content_card_says_why_it_has_no_rows() {
+    let (app, site, cookie) = setup().await;
+    // A page that is not HTML: nothing to read.
+    let mut api = page(DOMAIN, "/");
+    api.content_type = Some("application/json".to_owned());
+    app.finished_crawl_with_robots(&site, vec![api], (200, OPEN), Vec::new())
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(body.contains("No HTML pages to read"), "{body}");
+
+    // A report from before content was read.
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    sqlx::query("UPDATE ai_reports SET report = report - 'content' - 'llms_txt'")
+        .execute(app.pool())
+        .await
+        .expect("strip");
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(
+        body.contains("Content checks run after the next crawl"),
+        "{body}"
+    );
+    assert!(body.contains("Not checked in this report"), "{body}");
+    assert!(!body.contains(">Present</span>"));
+}
+
+#[tokio::test]
+async fn an_llms_txt_robots_txt_disallows_says_so() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    sqlx::query(
+        "UPDATE ai_reports SET report = (report - 'llms_txt') || '{\"llms_txt_skipped\":\"robots_disallowed\"}'",
+    )
+    .execute(app.pool())
+    .await
+    .expect("skip");
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let from = body.find(r#"id="aia-llms""#).expect("llms card");
+    let to = body.find(r#"id="aia-bots""#).unwrap();
+    let card = &body[from..to];
+    assert!(
+        card.contains("robots.txt disallows /llms.txt (or where it redirects) for CodoSEObot"),
+        "{card}"
+    );
+    assert!(
+        !card.contains("Reports from before llms.txt was read"),
+        "{card}"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_llms_txt_is_a_neutral_line_without_warning_styles() {
+    for fetch in [
+        llms_fetch(404, ""),
+        llms_fetch(200, "<!doctype html><html><body>Welcome</body></html>"),
+    ] {
+        let (app, site, cookie) = setup().await;
+        app.finished_crawl_with_llms(&site, pages(), (200, OPEN), fetch, false)
+            .await;
+        let body = ai_access_body(&app, &site, &cookie).await;
+        let from = body.find(r#"id="aia-llms""#).expect("llms card");
+        let to = body.find(r#"id="aia-bots""#).unwrap();
+        let card = &body[from..to];
+        assert!(card.contains("Informational · not scored"), "{card}");
+        assert!(
+            card.contains("No llms.txt — optional, nothing to fix"),
+            "{card}"
+        );
+        assert!(card.contains("llmstxt.org"), "{card}");
+        for bad in ["t-warn", "t-err", "c-warn", "c-err", "alert"] {
+            assert!(!card.contains(bad), "{bad} in {card}");
+        }
+        assert!(!body.contains("llms.txt returns"), "no incident");
+    }
+}
+
+#[tokio::test]
+async fn an_available_llms_txt_shows_its_checks_and_links() {
+    let (app, site, cookie) = setup().await;
+    let file = "# Example\n\n> A site about examples.\n\n## Docs\n\n- [Start](https://example.com/docs/start): begin here\n- [Elsewhere](https://other.example.org/x)\n";
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(200, file), false)
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let from = body.find(r#"id="aia-llms""#).unwrap();
+    let card = &body[from..body.find(r#"id="aia-bots""#).unwrap()];
+    for needle in [
+        "Informational · not scored",
+        ">Available</span>",
+        "Starts with an H1",
+        "Sections of links",
+        "Links",
+        "not checked",
+    ] {
+        assert!(card.contains(needle), "missing {needle:?} in {card}");
+    }
+}
+
+#[tokio::test]
+async fn an_adopted_llms_txt_that_fails_is_an_incident_graded_a() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(503, ""), true)
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let from = body.find(r#"id="aia-issues""#).unwrap();
+    let issues = &body[from..body.find(r#"id="aia-fetch""#).unwrap()];
+    for needle in [
+        "llms.txt returns HTTP 503",
+        "GET /llms.txt → HTTP 503",
+        ">A</span>",
+        "llmstxt.org",
+        "developer.chrome.com",
+    ] {
+        assert!(issues.contains(needle), "missing {needle:?} in {issues}");
+    }
+    let card =
+        &body[body.find(r#"id="aia-llms""#).unwrap()..body.find(r#"id="aia-bots""#).unwrap()];
+    assert!(
+        card.contains(">Unavailable</span>") && card.contains("HTTP 503"),
+        "{card}"
+    );
+}
+
+#[tokio::test]
+async fn a_huge_llms_txt_h1_is_clipped_on_the_card() {
+    let (app, site, cookie) = setup().await;
+    let body = format!(
+        "# {}\n\n> A site.\n\n## Docs\n\n- [Start](/start)\n",
+        "A".repeat(100 * 1024)
+    );
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(200, &body), false)
+        .await;
+    // A report stored before details were capped is clipped on the way out too.
+    sqlx::query(
+        "UPDATE ai_reports SET report = jsonb_set(report, '{llms_txt,checks,0,detail}', to_jsonb(repeat('B', 50000)))",
+    )
+    .execute(app.pool())
+    .await
+    .expect("old detail");
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let from = page.find(r#"id="aia-llms""#).expect("llms card");
+    let to = page.find(r#"id="aia-bots""#).unwrap();
+    let card = &page[from..to];
+    assert!(card.contains("Starts with an H1"), "{card}");
+    // Backtick spans in details are code, as in incident summaries.
+    assert!(
+        card.contains("A <code>&#62;</code> summary follows the H1."),
+        "{card}"
+    );
+    // The tick says what it means in text, not in an aria-label on a plain span.
+    assert!(
+        card.contains(r#"<span class="sr-only">Passes:</span>"#),
+        "{card}"
+    );
+    assert!(!card.contains("aria-label=\"passes\""), "{card}");
+    assert!(!page.contains(&"A".repeat(201)), "H1 clipped");
+    assert!(!card.contains(&"B".repeat(401)), "detail clipped");
+    assert!(card.contains(&format!("{}…", "B".repeat(399))), "{card}");
+}
+
+#[test]
+fn long_llms_txt_urls_and_details_wrap_on_a_phone() {
+    let css = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/app.css"))
+        .expect("app.css");
+    for rule in [
+        ".aia-llms-failing .aia-path { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }",
+        ".aia-llms-check .aia-ev-detail, .aia-llms-facts dd { min-width: 0; overflow-wrap: anywhere; }",
+    ] {
+        assert!(css.contains(rule), "missing {rule}");
+    }
+}
+
+#[tokio::test]
+async fn llms_txt_text_is_escaped_everywhere_it_shows() {
+    let (app, site, cookie) = setup().await;
+    let body = "# <script>alert(\"h1\")</script> \"Quoted\"\n\n> A site.\n\n## Docs\n\n- [Start](/start)\n\n## <img src=x onerror=\"alert(1)\">\n\nprose\n";
+    let mut fetch = llms_fetch(200, body);
+    fetch.links = vec![codoseo_core::output::LinkStatus {
+        url: "https://example.com/\"><script>alert(\"url\")</script>".to_owned(),
+        status: Some(404),
+        from_crawl: false,
+    }];
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), fetch, false)
+        .await;
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let card =
+        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    for raw in ["<script>alert(", "<img src=x", "\"Quoted\"", "\"><script>"] {
+        assert!(!page.contains(raw), "unescaped {raw:?} in {card}");
+    }
+    for escaped in [
+        "&#60;script&#62;alert(&#34;h1&#34;)&#60;/script&#62; &#34;Quoted&#34;",
+        "&#60;img src=x onerror=&#34;alert(1)&#34;&#62;",
+        "&#34;&#62;&#60;script&#62;alert(&#34;url&#34;)&#60;/script&#62;",
+    ] {
+        assert!(card.contains(escaped), "missing {escaped:?} in {card}");
+    }
+}
+
+#[tokio::test]
+async fn an_unavailable_llms_txt_is_warning_styled_only_when_adopted_and_names_the_error() {
+    let no_answer = || codoseo_core::output::LlmsTxtFetch {
+        error: Some("request timed out".to_owned()),
+        ..Default::default()
+    };
+    // Adopted: a warning badge, the error on the card and in the incident.
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), no_answer(), true)
+        .await;
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let card =
+        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    assert!(
+        card.contains(r#"<span class="badge t-warn">Unavailable</span>"#),
+        "{card}"
+    );
+    assert!(card.contains("<dt>Adopted</dt><dd>Yes</dd>"), "{card}");
+    assert!(card.contains("No answer (request timed out)"), "{card}");
+    let issues =
+        &page[page.find(r#"id="aia-issues""#).unwrap()..page.find(r#"id="aia-fetch""#).unwrap()];
+    assert!(
+        issues.contains("GET /llms.txt → no answer (request timed out)"),
+        "{issues}"
+    );
+    // Not adopted: the same answer is muted and raises nothing.
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), no_answer(), false)
+        .await;
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let card =
+        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    assert!(
+        card.contains(r#"<span class="badge t-muted">Unavailable</span>"#),
+        "{card}"
+    );
+    assert!(card.contains("<dt>Adopted</dt><dd>No</dd>"), "{card}");
+    assert!(
+        !page.contains("llms.txt could not be fetched"),
+        "no incident"
+    );
+}
+
+#[tokio::test]
+async fn a_content_incident_lists_its_pages_once_with_a_count_of_the_rest() {
+    let (app, site, cookie) = setup().await;
+    let mut pages = vec![page(DOMAIN, "/")];
+    for i in 0..8 {
+        pages.push(shell_page(DOMAIN, &format!("/app{i}")));
+    }
+    app.finished_crawl_with_robots(&site, pages, (200, OPEN), Vec::new())
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let issues =
+        &body[body.find(r#"id="aia-issues""#).unwrap()..body.find(r#"id="aia-content""#).unwrap()];
+    assert!(
+        issues.contains("8 important pages are empty app shells"),
+        "{issues}"
+    );
+    // Five pages in the shells grid, the other three counted; no second "Pages" list.
+    assert_eq!(issues.matches(">Shell</span>").count(), 5, "{issues}");
+    assert!(issues.contains("+3 more"), "{issues}");
+    assert!(
+        !issues.contains(r#"<span class="aia-urls-label">Pages</span>"#),
+        "{issues}"
+    );
+}

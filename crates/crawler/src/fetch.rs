@@ -114,12 +114,22 @@ impl Fetcher {
 
     /// Fetches a page. Only HTML bodies are read, up to the configured cap.
     pub async fn fetch(&self, url: &Url) -> Result<FetchResult, FetchError> {
-        self.run(url, BodyMode::HtmlOnly, None).await
+        self.run(url, BodyMode::HtmlOnly, None, true).await
     }
 
     /// Fetches any resource (robots.txt, sitemaps) and reads up to `max_bytes` of its body.
     pub async fn fetch_raw(&self, url: &Url, max_bytes: usize) -> Result<FetchResult, FetchError> {
-        self.run(url, BodyMode::Any(max_bytes), None).await
+        self.run(url, BodyMode::Any(max_bytes), None, true).await
+    }
+
+    /// Like [`Fetcher::fetch_raw`], without following redirects: a 3xx comes back as it is, its
+    /// `Location` in `headers`, so the caller can decide (by robots.txt, say) whether to go on.
+    pub async fn fetch_raw_once(
+        &self,
+        url: &Url,
+        max_bytes: usize,
+    ) -> Result<FetchResult, FetchError> {
+        self.run(url, BodyMode::Any(max_bytes), None, false).await
     }
 
     /// Like [`Fetcher::fetch_raw`], sending `headers` on every request of the redirect chain.
@@ -131,7 +141,8 @@ impl Fetcher {
         headers: &HeaderMap,
         max_bytes: usize,
     ) -> Result<FetchResult, FetchError> {
-        self.run(url, BodyMode::Any(max_bytes), Some(headers)).await
+        self.run(url, BodyMode::Any(max_bytes), Some(headers), true)
+            .await
     }
 
     async fn run(
@@ -139,6 +150,7 @@ impl Fetcher {
         start: &Url,
         mode: BodyMode,
         headers: Option<&HeaderMap>,
+        follow: bool,
     ) -> Result<FetchResult, FetchError> {
         let mut current = start.clone();
         let mut chain: Vec<Hop> = Vec::new();
@@ -156,7 +168,8 @@ impl Fetcher {
             let response_ms = sent.elapsed().as_millis().min(u32::MAX as u128) as u32;
             let status = resp.status().as_u16();
 
-            if resp.status().is_redirection()
+            if follow
+                && resp.status().is_redirection()
                 && let Some(location) = resp.headers().get(LOCATION)
             {
                 let location = String::from_utf8_lossy(location.as_bytes()).into_owned();

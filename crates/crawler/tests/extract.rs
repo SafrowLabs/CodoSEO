@@ -1,5 +1,5 @@
 use codoseo_core::Url;
-use codoseo_core::page::JsonLdStatus;
+use codoseo_core::page::{JsonLdStatus, MountPoint, RawSignals};
 use codoseo_crawler::extract::{Extracted, Extractor, extract};
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -356,4 +356,216 @@ fn data_nosnippet_edge_cases_never_stick() {
     assert_eq!(n(r#"<p>Open again <b data-nosnippet>hidden</b></p>"#), 0);
     // Never past the element's parent.
     assert_eq!(n("<div><div data-nosnippet>a</div></div> b c"), 1);
+}
+
+// Raw-HTML signals for SPA-shell detection (B2.2).
+
+#[test]
+fn a_create_react_app_shell_has_an_empty_mount_and_a_noscript_notice() {
+    let f = extract_file("cra_shell.html").fields;
+    assert_eq!(f.word_count, 0, "the noscript notice is not visible text");
+    assert_eq!(
+        f.raw,
+        RawSignals {
+            main_words: 0,
+            script_bytes: 0,
+            scripts_external: 1,
+            mount: Some(MountPoint::Root),
+            mount_empty: true,
+            noscript_js: true,
+        }
+    );
+}
+
+#[test]
+fn a_server_rendered_next_page_has_a_filled_mount_and_a_big_data_script() {
+    let f = extract_file("next_ssr.html").fields;
+    let raw = f.raw;
+    assert_eq!(raw.mount, Some(MountPoint::Next));
+    assert!(!raw.mount_empty);
+    assert!(
+        !raw.noscript_js,
+        "an empty `<noscript data-n-css>` says nothing"
+    );
+    // polyfills, five chunks and the two manifests.
+    assert_eq!(raw.scripts_external, 8);
+    // Only `__NEXT_DATA__` is inline.
+    assert_eq!(raw.script_bytes, 3984);
+    // The nav and footer links are outside `<main>`.
+    assert!(raw.main_words > 50, "{raw:?}");
+    assert_eq!(f.word_count - raw.main_words, 4, "{raw:?}");
+}
+
+#[test]
+fn a_tag_manager_noscript_iframe_is_not_a_javascript_notice() {
+    let raw = extract_file("gtm_noscript.html").fields.raw;
+    assert!(!raw.noscript_js);
+    assert_eq!(raw.mount, None);
+    assert!(!raw.mount_empty);
+    assert_eq!(raw.scripts_external, 0);
+    assert!(raw.script_bytes > 300, "{raw:?}");
+    assert_eq!(raw.main_words, 9, "Spring sale, then seven words");
+}
+
+#[test]
+fn raw_signals_do_not_depend_on_chunk_boundaries() {
+    for name in ["cra_shell.html", "next_ssr.html", "gtm_noscript.html"] {
+        for size in [1, 7, 64] {
+            assert_eq!(
+                extract_chunked(name, size).fields.raw,
+                extract_file(name).fields.raw,
+                "{name} in {size}-byte chunks"
+            );
+        }
+    }
+}
+
+#[test]
+fn noscript_notices_match_ignoring_case_and_markup() {
+    let js = |html: &str| extract_html(html).fields.raw.noscript_js;
+    // Vue CLI's template, with markup inside (lol_html reads noscript as raw text).
+    assert!(js(
+        "<noscript><strong>We're sorry but Shop doesn't work properly without \
+         JavaScript enabled. Please enable it to continue.</strong></noscript>"
+    ));
+    // Angular's.
+    assert!(js(
+        "<noscript>Please enable JavaScript to continue using this application.</noscript>"
+    ));
+    assert!(js("<NOSCRIPT>This site REQUIRES\n  JavaScript.</NOSCRIPT>"));
+    assert!(js(
+        "<noscript>JavaScript is disabled in your browser.</noscript>"
+    ));
+    assert!(js("<noscript>Turn on JavaScript to see prices.</noscript>"));
+    assert!(js(
+        "<noscript><p>JavaScript must be enabled.</p></noscript>"
+    ));
+    // A tag's attributes are not text.
+    assert!(!js(
+        r#"<noscript><img alt="please enable javascript" src="/px.gif"></noscript>"#
+    ));
+    // AMP's boilerplate style, a tracking pixel, and no notice at all.
+    assert!(!js(
+        "<noscript><style amp-boilerplate>body{-webkit-animation:none;animation:none}</style></noscript>"
+    ));
+    assert!(!js(
+        r#"<noscript><img height="1" width="1" src="https://www.facebook.com/tr?id=1&ev=PageView&noscript=1"/></noscript>"#
+    ));
+    assert!(
+        !js("<p>Please enable JavaScript.</p>"),
+        "only inside noscript"
+    );
+    // Only the first 256 bytes of a block are read.
+    let long = format!(
+        "<noscript>{} enable JavaScript</noscript>",
+        "padding ".repeat(40)
+    );
+    assert!(!js(&long));
+    // Each block is read on its own.
+    assert!(js(&format!(
+        "<noscript>{}</noscript><noscript>Enable JavaScript</noscript>",
+        "padding ".repeat(40)
+    )));
+}
+
+#[test]
+fn mount_points_are_empty_only_without_children_or_text() {
+    let raw = |html: &str| extract_html(html).fields.raw;
+    let mount = |html: &str| {
+        let r = raw(html);
+        (r.mount, r.mount_empty)
+    };
+    assert_eq!(
+        mount("<body><app-root></app-root></body>"),
+        (Some(MountPoint::AppRoot), true)
+    );
+    assert_eq!(
+        mount("<div id=\"app\">\n  \n</div><p>after</p>"),
+        (Some(MountPoint::App), true)
+    );
+    assert_eq!(
+        mount(r#"<div id="__nuxt"><!-- spa --></div>"#),
+        (Some(MountPoint::Nuxt), true)
+    );
+    assert_eq!(
+        mount(r#"<div id="___gatsby"><div id="gatsby-focus-wrapper"></div></div>"#),
+        (Some(MountPoint::Gatsby), false),
+        "a child element fills it"
+    );
+    assert_eq!(
+        mount(r#"<div id="q-app">Loading</div>"#),
+        (Some(MountPoint::QApp), false)
+    );
+    assert_eq!(
+        mount(r#"<div id="svelte"><img src="/hero.jpg"></div>"#),
+        (Some(MountPoint::Svelte), false)
+    );
+    // The first mount point is the one reported.
+    assert_eq!(
+        mount(r#"<div id="root"><div id="app"></div></div>"#),
+        (Some(MountPoint::Root), false)
+    );
+    assert_eq!(mount(r#"<div id="main"></div>"#), (None, false));
+}
+
+#[test]
+fn void_and_svg_elements_are_not_mount_points() {
+    let mount = |html: &str| {
+        let r = extract_html(html).fields.raw;
+        (r.mount, r.mount_empty)
+    };
+    assert_eq!(
+        mount(r#"<link id="app" rel="stylesheet" href="/a.css"><p>Hello</p>"#),
+        (None, false)
+    );
+    assert_eq!(
+        mount(r#"<img id="root" src="/logo.png"><p>Hello</p>"#),
+        (None, false)
+    );
+    assert_eq!(
+        mount(r#"<svg><symbol id="app" viewBox="0 0 1 1"/></svg><p>Hello</p>"#),
+        (None, false)
+    );
+    assert_eq!(
+        mount(r#"<svg><g id="root"></g></svg><p>Hello</p>"#),
+        (None, false),
+        "SVG content is not an app container"
+    );
+    // A skipped match does not hide the real mount point after it.
+    assert_eq!(
+        mount(r#"<link id="app" rel="stylesheet" href="/a.css"><div id="root"></div>"#),
+        (Some(MountPoint::Root), true)
+    );
+    // Containers other than div that apps mount on still count.
+    assert_eq!(
+        mount(r#"<main id="app"></main>"#),
+        (Some(MountPoint::App), true)
+    );
+}
+
+#[test]
+fn inline_script_bytes_leave_out_json_ld_and_external_scripts_count_module_preloads() {
+    let raw = extract_html(
+        r#"<link rel="modulepreload" href="/c.js"><link rel="preload" as="script" href="/d.js"><script>var a=1;</script><script src="/a.js"></script><script type="module" src="/b.js"></script><script type="application/ld+json">{"@type":"Thing"}</script><script type="application/json">{"x":1}</script>"#,
+    )
+    .fields
+    .raw;
+    assert_eq!(raw.script_bytes, "var a=1;".len() as u32 + 7);
+    // Two `<script src>` and one modulepreload; a plain preload is only a hint.
+    assert_eq!(raw.scripts_external, 3);
+}
+
+#[test]
+fn main_words_count_main_article_and_role_main_once() {
+    let words = |html: &str| extract_html(html).fields.raw.main_words;
+    assert_eq!(
+        words("<nav>a b</nav><main>c d <article>e f</article></main>"),
+        4
+    );
+    assert_eq!(
+        words(r#"<div role="main">one two three</div><p>four</p>"#),
+        3
+    );
+    assert_eq!(words("<article>x<script>y z</script></article>"), 1);
+    assert_eq!(words("<p>no landmark at all</p>"), 0);
 }

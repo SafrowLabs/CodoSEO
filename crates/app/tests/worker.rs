@@ -1181,3 +1181,270 @@ async fn heartbeats_continue_through_a_slow_probe_run() {
     assert!(latest_probes(&db, site_id).await.is_some());
     assert!(ai_requests(&seen) > 0);
 }
+
+// ---- Content in the HTML and llms.txt through real crawls (B2.11) ------------------------------
+
+#[derive(Clone)]
+struct ContentKnobs {
+    /// The home page is an empty client-side app shell (Create React App) instead of real text.
+    shell: bool,
+    /// The status `/llms.txt` answers with; 404 for none.
+    llms_status: u16,
+    /// robots.txt disallows `/llms.txt`, so the crawler does not fetch it.
+    robots_blocks_llms: bool,
+}
+
+async fn content_site() -> (
+    codoseo_testkit::TestServer,
+    std::sync::Arc<std::sync::Mutex<ContentKnobs>>,
+) {
+    use axum::http::{StatusCode, Uri, header};
+    use axum::response::IntoResponse;
+
+    let knobs = std::sync::Arc::new(std::sync::Mutex::new(ContentKnobs {
+        shell: false,
+        llms_status: 404,
+        robots_blocks_llms: false,
+    }));
+    let state = knobs.clone();
+    let router = axum::Router::new().fallback(axum::routing::any(move |uri: Uri| {
+        let k = state.lock().unwrap().clone();
+        async move {
+            match uri.path() {
+                "/robots.txt" => (
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    if k.robots_blocks_llms {
+                        "User-agent: *\nAllow: /\nDisallow: /llms.txt\n"
+                    } else {
+                        "User-agent: *\nAllow: /\n"
+                    },
+                )
+                    .into_response(),
+                "/llms.txt" => match k.llms_status {
+                    200 => (
+                        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                        "# Example\n\n> A small site.\n\n## Pages\n\n- [Home](/): the home page\n",
+                    )
+                        .into_response(),
+                    s => StatusCode::from_u16(s).unwrap().into_response(),
+                },
+                "/" => {
+                    let body = if k.shell {
+                        "<div id=\"root\"></div>\
+                         <noscript>You need to enable JavaScript to run this app.</noscript>\
+                         <script src=\"/static/js/main.js\"></script>"
+                            .to_owned()
+                    } else {
+                        format!(
+                            "<h1>Home</h1><p>{}</p>",
+                            "Plenty of server rendered words for a crawler to read. ".repeat(12)
+                        )
+                    };
+                    (
+                        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                        format!(
+                            "<!doctype html><html lang=\"en\"><head><title>Home page</title>\
+                             <meta name=\"description\" content=\"A page.\"></head>\
+                             <body>{body}</body></html>"
+                        ),
+                    )
+                        .into_response()
+                }
+                _ => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    }));
+    (codoseo_testkit::TestServer::start(router).await, knobs)
+}
+
+async fn open_kinds(db: &TestDb, site_id: uuid::Uuid, slug: &str) -> Vec<(String, bool)> {
+    sqlx::query_as(
+        "SELECT severity::text, quiet FROM ai_incidents \
+         WHERE site_id = $1 AND kind = $2 AND resolved_at IS NULL",
+    )
+    .bind(site_id)
+    .bind(slug)
+    .fetch_all(&db.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_client_side_shell_is_a_quiet_baseline_and_a_later_regression_alerts_instantly() {
+    use codoseo_core::change::ChangeKind;
+
+    let db = TestDb::new().await;
+    let (server, knobs) = content_site().await;
+    let site_id = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+    let account: uuid::Uuid = sqlx::query_scalar("SELECT account_id FROM sites WHERE id = $1")
+        .bind(site_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    codoseo_store::channels::ensure_default_email(
+        &db.pool,
+        &codoseo_notify::ChannelKey::derive("k"),
+        account,
+    )
+    .await
+    .unwrap();
+    codoseo_store::alert_rules::create_defaults_for_site(&db.pool, account, site_id)
+        .await
+        .unwrap();
+
+    // An app that was never server rendered: the first report is the baseline.
+    knobs.lock().unwrap().shell = true;
+    let first = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let open = open_kinds(&db, site_id, "content_missing").await;
+    assert_eq!(open.len(), 1);
+    assert!(open[0].1, "quiet");
+    assert!(ai_changes(&db, first).await.is_empty());
+    assert_eq!(alert_planning_jobs(&db, first).await, 0);
+
+    // Server rendered again: resolved.
+    knobs.lock().unwrap().shell = false;
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert!(open_kinds(&db, site_id, "content_missing").await.is_empty());
+
+    // The regression: SSR to client-side rendering raises an instant alert.
+    knobs.lock().unwrap().shell = true;
+    let third = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let changes = ai_changes(&db, third).await;
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(changes[0].0, "ai_content_missing");
+    assert_eq!(alert_planning_jobs(&db, third).await, 1);
+    assert!(codoseo_store::alert_rules::DEFAULT_INSTANT.contains(&ChangeKind::AiContentMissing));
+    let channels = codoseo_store::alert_rules::instant_channels_for(
+        &db.pool,
+        site_id,
+        ChangeKind::AiContentMissing,
+    )
+    .await
+    .unwrap();
+    assert_eq!(channels.len(), 1, "an instant rule on the default channel");
+}
+
+#[tokio::test]
+async fn an_adopted_llms_txt_that_goes_down_opens_a_digest_only_warning() {
+    use codoseo_core::change::ChangeKind;
+    use codoseo_geo::llms::LlmsState;
+
+    let db = TestDb::new().await;
+    let (server, knobs) = content_site().await;
+    let site_id = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+
+    knobs.lock().unwrap().llms_status = 200;
+    let first = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let stored = codoseo_store::geo::latest_llms_txt(&db.pool, site_id)
+        .await
+        .unwrap()
+        .expect("llms.txt was fetched");
+    assert_eq!(stored.state, LlmsState::Available);
+    assert!(stored.adopted);
+    assert!(ai_changes(&db, first).await.is_empty());
+
+    knobs.lock().unwrap().llms_status = 503;
+    let second = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let open = open_kinds(&db, site_id, "llms_txt_unavailable").await;
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].0, "warning");
+    // The first judged report was the 200: the incident is new, so it is announced.
+    assert!(!open[0].1);
+    assert_eq!(
+        ai_changes(&db, second).await,
+        vec![("ai_llms_txt_unavailable".to_owned(), "warning".to_owned())]
+    );
+    assert!(
+        !codoseo_store::alert_rules::DEFAULT_INSTANT.contains(&ChangeKind::AiLlmsTxtUnavailable)
+    );
+}
+
+#[tokio::test]
+async fn adoption_is_carried_across_a_crawl_that_did_not_fetch_llms_txt() {
+    let db = TestDb::new().await;
+    let (server, knobs) = content_site().await;
+    let site_id = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+
+    knobs.lock().unwrap().llms_status = 200;
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+
+    // robots.txt now keeps the crawler off /llms.txt: the report has no llms_txt at all.
+    {
+        let mut k = knobs.lock().unwrap();
+        k.robots_blocks_llms = true;
+        k.llms_status = 503;
+    }
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let latest = codoseo_store::geo::latest_report(&db.pool, site_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(latest.report.llms_txt.is_none(), "not fetched this time");
+    assert!(
+        open_kinds(&db, site_id, "llms_txt_unavailable")
+            .await
+            .is_empty()
+    );
+    assert!(
+        codoseo_store::geo::latest_llms_txt(&db.pool, site_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .adopted,
+        "the newest report that fetched it is carried, not the latest report"
+    );
+
+    // Fetched again and failing: still adopted, so the incident opens.
+    knobs.lock().unwrap().robots_blocks_llms = false;
+    let third = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert_eq!(
+        open_kinds(&db, site_id, "llms_txt_unavailable").await.len(),
+        1
+    );
+    assert_eq!(
+        ai_changes(&db, third).await,
+        vec![("ai_llms_txt_unavailable".to_owned(), "warning".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn content_and_llms_findings_leave_the_health_score_alone() {
+    let db = TestDb::new().await;
+    let (server, knobs) = content_site().await;
+    let score = |crawl: uuid::Uuid| {
+        let pool = db.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<i16>>("SELECT health_score FROM crawls WHERE id = $1")
+                .bind(crawl)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // The same markup, so the same score, whether or not the AI findings fire: only the
+    // findings differ, by giving one site an llms.txt that then fails.
+    let calm = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+    let a = run_crawl(&db, calm, CrawlTrigger::Manual).await;
+    let noisy = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+    knobs.lock().unwrap().llms_status = 200;
+    run_crawl(&db, noisy, CrawlTrigger::Manual).await;
+    knobs.lock().unwrap().llms_status = 503;
+    let b = run_crawl(&db, noisy, CrawlTrigger::Manual).await;
+    assert_eq!(
+        open_kinds(&db, noisy, "llms_txt_unavailable").await.len(),
+        1
+    );
+    assert!(score(a).await.is_some());
+    assert_eq!(score(a).await, score(b).await);
+
+    // And a shell page that raises content_missing scores like the page it replaces would,
+    // given the checks look at the page itself, so compare the same shell with and without
+    // the finding (the owner accepts none, so use the store's incident as the proof).
+    knobs.lock().unwrap().shell = true;
+    let shell = seed_owned_site(&db, server.url("/").as_str(), "free").await;
+    let c = run_crawl(&db, shell, CrawlTrigger::Manual).await;
+    assert_eq!(open_kinds(&db, shell, "content_missing").await.len(), 1);
+    let d = run_crawl(&db, shell, CrawlTrigger::Manual).await;
+    assert_eq!(score(c).await, score(d).await);
+}

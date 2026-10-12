@@ -31,6 +31,17 @@
       {% endfor %}
     </div>
     {% endif %}
+    {% if let Some(l) = i.llms_line %}<div class="aia-rule">{{ l }}</div>{% endif %}
+    {% if !i.shells.is_empty() %}
+    <div class="aia-ev-engines">
+      {% for c in i.shells %}
+      <span class="aia-engine">{% if let Some(h) = c.href %}<a class="url" href="{{ h }}">{{ c.path }}</a>{% else %}<span class="mono aia-path">{{ c.path }}</span>{% endif %}</span>
+      <span><span class="badge {% if c.verdict == "Shell" %}t-err{% else %}t-warn{% endif %}">{{ c.verdict }}</span></span>
+      <span class="aia-ev-detail">{{ c.detail }}</span>
+      {% endfor %}
+    </div>
+    {% if i.shells_more > 0 %}<div class="aia-urls"><span class="faint">+{{ i.shells_more }} more</span></div>{% endif %}
+    {% endif %}
     {% if let Some(fix) = i.fix %}
     <div class="aia-fix">
       <div class="aia-fix-head"><span>Add to robots.txt</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ fix }}" aria-label="Copy the robots.txt lines"><svg class="icon"><use href="#i-copy"/></svg>Copy</button></div>
@@ -50,7 +61,7 @@
     <span title="{{ i.opened_full }}">Opened {{ i.opened }}</span>
     <span title="{{ i.last_seen_full }}">Last seen {{ i.last_seen }}</span>
     {% if let Some((label, tip)) = i.quiet %}<span class="chip" title="{{ tip }}">{{ label }}</span>{% endif %}
-    <span class="aia-grade{% if i.synthetic %} aia-grade-b{% endif %}" title="{{ i.grade.1 }}" aria-label="{{ i.grade.1 }}">{{ i.grade.0 }}</span>
+    <span class="aia-grade{% if i.synthetic %} aia-grade-b{% endif %}" title="{{ i.grade.1 }}"><span aria-hidden="true">{{ i.grade.0 }}</span><span class="sr-only">{{ i.grade.1 }}</span></span>
     {% if !i.sources.is_empty() %}<span class="aia-sources">Sources: {% for s in i.sources %}<a href="{{ s.href }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
   </div>
 </article>

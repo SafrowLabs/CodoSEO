@@ -832,6 +832,112 @@ async fn ai_access_shows_the_synthetic_fetch_check_and_its_incidents() {
     assert!(off.get("probes").is_none(), "{off}");
 }
 
+/// A page that is an empty app shell in its HTML as served.
+fn shell(path: &str) -> PageRecord {
+    let mut p = page(DOMAIN, path);
+    p.fields.word_count = 0;
+    p.fields.h1.clear();
+    p.fields.raw.mount_empty = true;
+    p.fields.raw.noscript_js = true;
+    p
+}
+
+fn llms(status: u16, body: &str) -> codoseo_core::output::LlmsTxtFetch {
+    codoseo_core::output::LlmsTxtFetch {
+        status,
+        content_type: Some("text/plain".to_owned()),
+        bytes: body.len() as u64,
+        body: body.to_owned(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn ai_access_carries_raw_html_content_and_llms_txt() {
+    let f = setup(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
+    let file =
+        "# Example\n\n> A site about examples.\n\n## Docs\n\n- [About](/about): who we are\n";
+    f.app
+        .finished_crawl_with_llms(
+            &f.site,
+            vec![page(DOMAIN, "/"), shell("/app"), page(DOMAIN, "/about")],
+            (200, "User-agent: *\nAllow: /\n"),
+            llms(200, file),
+            false,
+        )
+        .await;
+    let v = json(&get(&f.app, &path, &f.key).await);
+
+    let content = &v["content"];
+    assert_eq!(content["grade"], "A-");
+    assert_eq!(content["pages_checked"], 3);
+    assert_eq!(content["shells"], 1);
+    let pages = content["pages"].as_array().unwrap();
+    // Shells come first.
+    assert_eq!(pages[0]["verdict"], "shell");
+    assert!(pages[0]["url"].as_str().unwrap().ends_with("/app"));
+    assert_eq!(pages[0]["words"], 0);
+    assert_eq!(
+        pages[0]["signals"],
+        serde_json::json!(["mount_empty", "noscript_js"])
+    );
+    assert_eq!(pages[1]["verdict"], "present");
+    assert_eq!(pages[1]["words"], 640);
+    assert_eq!(pages[1]["title"], true);
+    assert!(pages[1].get("signals").is_none());
+    assert!(content.get("more").is_none());
+
+    let llms = &v["llms_txt"];
+    assert_eq!(llms["informational"], true);
+    assert_eq!(llms["state"], "available");
+    assert_eq!(llms["adopted"], true);
+    assert!(llms["checks"].as_array().is_some_and(|c| !c.is_empty()));
+    assert_eq!(llms["link_summary"]["checked"], 0);
+
+    // The shell page opened a content_missing incident.
+    let incidents = v["open_incidents"].as_array().unwrap();
+    assert!(
+        incidents.iter().any(|i| i["kind"] == "content_missing"),
+        "{incidents:?}"
+    );
+}
+
+#[tokio::test]
+async fn ai_access_llms_txt_that_is_absent_is_reported_plainly_and_old_reports_have_neither() {
+    let f = setup(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
+    f.app
+        .finished_crawl_with_llms(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: *\nAllow: /\n"),
+            llms(404, ""),
+            false,
+        )
+        .await;
+    let v = json(&get(&f.app, &path, &f.key).await);
+    assert_eq!(v["llms_txt"]["state"], "absent");
+    assert_eq!(v["llms_txt"]["adopted"], false);
+    assert_eq!(v["llms_txt"]["informational"], true);
+    assert!(
+        v["open_incidents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["kind"] != "llms_txt_unavailable")
+    );
+
+    sqlx::query("UPDATE ai_reports SET report = report - 'content' - 'llms_txt'")
+        .execute(f.app.pool())
+        .await
+        .unwrap();
+    let old = json(&get(&f.app, &path, &f.key).await);
+    assert!(old.get("content").is_none(), "{old}");
+    assert!(old.get("llms_txt").is_none(), "{old}");
+    assert!(old["bots"].is_array());
+}
+
 #[tokio::test]
 async fn ai_access_is_metered_like_the_other_calls() {
     let f = setup(Plan::Free).await;
@@ -1240,4 +1346,34 @@ async fn a_redirecting_page_lists_its_hops_as_objects() {
     );
     let info: PageInfo = parsed(&res);
     assert_eq!(info.redirect_chain[0].status, 301);
+}
+
+#[tokio::test]
+async fn ai_access_says_why_llms_txt_was_not_fetched() {
+    let f = setup(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
+    f.app
+        .finished_crawl_with_llms(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: *\nAllow: /\n"),
+            llms(404, ""),
+            false,
+        )
+        .await;
+    // Fetched: no marker.
+    let fetched = json(&get(&f.app, &path, &f.key).await);
+    assert!(fetched.get("llms_txt_skipped").is_none(), "{fetched}");
+
+    // A crawl that meant to fetch it and did not records why.
+    sqlx::query(
+        "UPDATE ai_reports SET report = (report - 'llms_txt') \
+         || '{\"llms_txt_skipped\": \"robots_disallowed\"}'::jsonb",
+    )
+    .execute(f.app.pool())
+    .await
+    .unwrap();
+    let skipped = json(&get(&f.app, &path, &f.key).await);
+    assert_eq!(skipped["llms_txt_skipped"], "robots_disallowed");
+    assert!(skipped.get("llms_txt").is_none(), "{skipped}");
 }

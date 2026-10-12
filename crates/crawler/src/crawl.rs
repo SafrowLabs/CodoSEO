@@ -21,6 +21,7 @@ use url::Url;
 
 use crate::fetch::{FetchError, FetchResult, Fetcher, FetcherConfig};
 use crate::frontier::{Frontier, Queued};
+use crate::llms::{LinkCheck, check_links, fetch_llms_txt};
 use crate::politeness::{Limiter, retry_after_of};
 use crate::preflight::{BLOCKED_MSG, LOGIN_MSG, Preflight, fetch_tdmrep, origin_of, preflight};
 use crate::record::{self, Built};
@@ -93,6 +94,10 @@ pub async fn crawl_shared(
             .await
             .ok()
             .flatten();
+        match fetch_llms_txt(&fetcher, &limiter, &origin, &rules, deadline).await {
+            Ok(f) => signals.llms_txt = Some(f),
+            Err(skip) => signals.llms_txt_skipped = Some(skip),
+        }
     }
 
     let mut run = Run::new(&cfg, &origin, rules, &sitemap_urls, started);
@@ -104,6 +109,20 @@ pub async fn crawl_shared(
     if run.stop.is_none() {
         run.crawl(&fetcher, &limiter, sitemap_urls, deadline, &on_progress)
             .await;
+    }
+    if let Some(llms) = signals.llms_txt.as_mut() {
+        let check = LinkCheck {
+            fetcher: &fetcher,
+            limiter: &limiter,
+            rules: &run.rules,
+            origin: &origin,
+            max_requests: cfg.limits.llms_link_checks,
+            timeout: run.fetch_timeout,
+            deadline,
+            // A site that blocked or failed the crawl gets no more requests.
+            may_request: run.stop.is_none(),
+        };
+        check_links(llms, &run.pages, check).await;
     }
     Ok(run.finish(origin, robots, sitemap, signals))
 }

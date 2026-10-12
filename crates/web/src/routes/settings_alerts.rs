@@ -219,6 +219,10 @@ fn note(kind: ChangeKind) -> &'static str {
         ChangeKind::AiFetchBlocked => {
             "your firewall or CDN blocks or challenges AI bots you want (synthetic check)"
         }
+        ChangeKind::AiContentMissing => {
+            "a page's content is missing from its HTML, so AI crawlers cannot read it"
+        }
+        ChangeKind::AiLlmsTxtUnavailable => "the llms.txt you published stopped serving",
         _ => "",
     }
 }

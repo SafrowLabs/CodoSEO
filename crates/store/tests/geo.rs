@@ -658,12 +658,13 @@ async fn intent_validation_rejects_nonsense_tokens() {
 
 #[tokio::test]
 async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
-    assert!(ALL_KINDS.len() >= 18);
+    assert!(ALL_KINDS.len() >= 20);
     for kind in [
         codoseo_core::change::ChangeKind::AiBotBlocked,
         codoseo_core::change::ChangeKind::AiAnswersRestricted,
         codoseo_core::change::ChangeKind::AiIssueResolved,
         codoseo_core::change::ChangeKind::AiFetchBlocked,
+        codoseo_core::change::ChangeKind::AiContentMissing,
     ] {
         assert!(DEFAULT_INSTANT.contains(&kind), "{kind:?}");
         assert!(ALL_KINDS.contains(&kind));
@@ -671,6 +672,7 @@ async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
     for kind in [
         codoseo_core::change::ChangeKind::AiBlockNotApplied,
         codoseo_core::change::ChangeKind::AiPreferencesChanged,
+        codoseo_core::change::ChangeKind::AiLlmsTxtUnavailable,
     ] {
         assert!(
             !DEFAULT_INSTANT.contains(&kind),
@@ -721,12 +723,13 @@ async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
     alert_rules::create_defaults_for_site(&db.pool, account, site)
         .await
         .unwrap();
-    assert_eq!(count(&db.pool).await, 9);
+    assert_eq!(count(&db.pool).await, 10);
     for kind in [
         codoseo_core::change::ChangeKind::AiBotBlocked,
         codoseo_core::change::ChangeKind::AiAnswersRestricted,
         codoseo_core::change::ChangeKind::AiIssueResolved,
         codoseo_core::change::ChangeKind::AiFetchBlocked,
+        codoseo_core::change::ChangeKind::AiContentMissing,
     ] {
         assert_eq!(
             alert_rules::instant_channels_for(&db.pool, site, kind)
@@ -1419,4 +1422,213 @@ async fn a_bot_inconclusive_for_one_run_neither_narrows_rewidens_nor_resolves() 
     )
     .await;
     assert!(fetch_blocked_open(&db.pool, site).await.is_empty());
+}
+
+// ---- Content in the HTML and llms.txt (B2.10) --------------------------------------------------
+
+use codoseo_core::output::LlmsTxtFetch;
+
+/// Finalizes a new full crawl that allows every bot, whose pages are an empty app shell when
+/// `shell`, and whose llms.txt fetch is `llms` (adopted, when it failed).
+async fn content_crawl(
+    pool: &PgPool,
+    site: Uuid,
+    shell: bool,
+    llms: Option<(LlmsTxtFetch, bool)>,
+) -> Uuid {
+    content_crawl_with(
+        pool,
+        site,
+        |out| {
+            if shell {
+                for p in &mut out.pages {
+                    p.fields.word_count = 0;
+                    p.fields.raw.mount_empty = true;
+                }
+            }
+        },
+        llms,
+    )
+    .await
+}
+
+/// [`content_crawl`] with its pages shaped by `pages`.
+async fn content_crawl_with(
+    pool: &PgPool,
+    site: Uuid,
+    pages: impl Fn(&mut CrawlOutput),
+    llms: Option<(LlmsTxtFetch, bool)>,
+) -> Uuid {
+    let crawl = make_crawl(pool, site, "manual", "running").await;
+    let mut out = crawl_of(200, ALLOW_ALL, None);
+    pages(&mut out);
+    out.signals.llms_txt = llms.as_ref().map(|(f, _)| f.clone());
+    let mut input = input_for(&out);
+    if let (Some(report), Some((_, adopted))) = (input.report.llms_txt.as_mut(), llms.as_ref()) {
+        report.adopted = report.adopted || *adopted;
+    }
+    finalize(
+        pool,
+        crawl,
+        site,
+        WORKER,
+        &out,
+        &check_report(),
+        &[],
+        Some(&input),
+    )
+    .await
+    .expect("finalize");
+    crawl
+}
+
+fn llms_file() -> LlmsTxtFetch {
+    LlmsTxtFetch {
+        status: 200,
+        content_type: Some("text/plain".to_owned()),
+        body: "# Example\n\n> A site.\n\n## Docs\n\n- [Home](https://example.com/)\n".to_owned(),
+        ..LlmsTxtFetch::default()
+    }
+}
+
+fn llms_down() -> LlmsTxtFetch {
+    LlmsTxtFetch {
+        status: 503,
+        ..LlmsTxtFetch::default()
+    }
+}
+
+async fn open_of(pool: &PgPool, site: Uuid, kind: FindingKind) -> Vec<geo::Incident> {
+    geo::open_incidents(pool, site)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == kind)
+        .collect()
+}
+
+#[tokio::test]
+async fn content_missing_opens_quietly_and_a_later_regression_is_announced() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+
+    // The first report that judges it is the baseline: a quiet incident, no change, no alert.
+    let first = content_crawl(&db.pool, site, true, None).await;
+    let open = open_of(&db.pool, site, FindingKind::ContentMissing).await;
+    assert_eq!(open.len(), 1);
+    assert!(open[0].quiet);
+    assert!(quiet_of(&db.pool, site, "content_missing").await);
+    assert!(change_kinds(&db.pool, first).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, first).await, 0);
+
+    // Fixed, then broken again: the regression is a change row of its own kind, and instant.
+    content_crawl(&db.pool, site, false, None).await;
+    assert!(
+        open_of(&db.pool, site, FindingKind::ContentMissing)
+            .await
+            .is_empty()
+    );
+    let again = content_crawl(&db.pool, site, true, None).await;
+    let changes = change_kinds(&db.pool, again).await;
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].0, "ai_content_missing");
+    let (before, after): (String, String) =
+        sqlx::query_as("SELECT before_value, after_value FROM changes WHERE crawl_id = $1")
+            .bind(again)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(before, "content in the HTML");
+    assert_eq!(
+        after,
+        open_of(&db.pool, site, FindingKind::ContentMissing).await[0].title
+    );
+    assert_eq!(alert_jobs(&db.pool, again).await, 1);
+}
+
+#[tokio::test]
+async fn an_adopted_llms_txt_that_fails_opens_quietly_first_then_announces_digest_only() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+
+    // Its first judged report is a baseline, even when it already fails.
+    let first = content_crawl(&db.pool, site, false, Some((llms_down(), true))).await;
+    let open = open_of(&db.pool, site, FindingKind::LlmsTxtUnavailable).await;
+    assert_eq!(open.len(), 1);
+    assert!(open[0].quiet);
+    assert!(change_kinds(&db.pool, first).await.is_empty());
+
+    // Served again, then failing again: announced as its own kind, but not an instant alert.
+    content_crawl(&db.pool, site, false, Some((llms_file(), false))).await;
+    assert!(
+        open_of(&db.pool, site, FindingKind::LlmsTxtUnavailable)
+            .await
+            .is_empty()
+    );
+    let down = content_crawl(&db.pool, site, false, Some((llms_down(), true))).await;
+    let changes = change_kinds(&db.pool, down).await;
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].0, "ai_llms_txt_unavailable");
+    assert_ne!(changes[0].1, "critical");
+    let (before, after): (String, String) =
+        sqlx::query_as("SELECT before_value, after_value FROM changes WHERE crawl_id = $1")
+            .bind(down)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(before, "llms.txt served");
+    assert_eq!(
+        after,
+        open_of(&db.pool, site, FindingKind::LlmsTxtUnavailable).await[0].title
+    );
+    // The planner job is queued for any change; whether it alerts instantly or waits for the
+    // digest is the alert rules' decision (it is digest-only: not in DEFAULT_INSTANT).
+    assert!(!DEFAULT_INSTANT.contains(&codoseo_core::change::ChangeKind::AiLlmsTxtUnavailable));
+
+    // Served again: the recovery is announced as the same digest-only kind, not as an instant
+    // ai_issue_resolved.
+    let back = content_crawl(&db.pool, site, false, Some((llms_file(), false))).await;
+    let changes = change_kinds(&db.pool, back).await;
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(changes[0].0, "ai_llms_txt_unavailable");
+    let after: String = sqlx::query_scalar("SELECT after_value FROM changes WHERE crawl_id = $1")
+        .bind(back)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, "resolved");
+}
+
+#[tokio::test]
+async fn shell_pages_that_fail_one_crawl_keep_content_missing_open_without_a_change() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    content_crawl(&db.pool, site, true, None).await;
+    let open = open_of(&db.pool, site, FindingKind::ContentMissing).await;
+    assert_eq!(open.len(), 1);
+
+    // The home page is fixed; the other shells answer 503 this time, so they are not judged.
+    let failed = content_crawl_with(
+        &db.pool,
+        site,
+        |out| {
+            for p in out.pages.iter_mut().skip(1) {
+                p.status = 503;
+            }
+        },
+        None,
+    )
+    .await;
+    let still = open_of(&db.pool, site, FindingKind::ContentMissing).await;
+    assert_eq!(still.len(), 1, "held, not resolved");
+    assert_eq!(still[0].id, open[0].id);
+    assert!(change_kinds(&db.pool, failed).await.is_empty());
+
+    // Judged and fine: resolved.
+    content_crawl(&db.pool, site, false, None).await;
+    assert!(
+        open_of(&db.pool, site, FindingKind::ContentMissing)
+            .await
+            .is_empty()
+    );
 }

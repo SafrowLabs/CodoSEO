@@ -107,6 +107,66 @@
     {% endif %}
   </section>
 
+  <section class="card aia-section aia-content" aria-labelledby="aia-content">
+    <div class="card-head">
+      <h2 class="card-title" id="aia-content">Content in raw HTML</h2>
+      <span class="card-aside">{% if let Some(n) = v.content.counts %}{{ n }} · {% endif %}as AI crawlers that don't run JavaScript see it · <span class="aia-grade" title="Evidence grade A-: read from your pages' HTML as served, with a published measurement that these AI crawlers don't run JavaScript.">A-</span></span>
+    </div>
+    {% if let Some((title, text)) = v.content.empty %}
+    <div class="aia-none"><b>{{ title }}</b><p>{{ text }}</p></div>
+    {% else %}
+    <div class="aia-fetch-note">
+      <p>What each important page holds in its HTML as served, before JavaScript runs. GPTBot, ClaudeBot and PerplexityBot don't run JavaScript (<a href="{{ v.content.source }}" target="_blank" rel="noopener noreferrer">Vercel and MERJ, 2024</a>), so a page that only fills in after its scripts run reads as empty to them. This is a check of the HTML, not of what a browser shows.</p>
+    </div>
+    <div class="aia-scroll">
+      <table class="aia-table aia-content-table">
+        <thead>
+          <tr><th scope="col">Page</th><th scope="col" class="r">Words</th><th scope="col" class="c">Title</th><th scope="col" class="c">H1</th><th scope="col" class="c">Description</th><th scope="col" class="c">Canonical</th><th scope="col" class="c">JSON-LD</th><th scope="col" class="r">Internal links</th><th scope="col">Verdict</th></tr>
+        </thead>
+        <tbody>
+          {% for r in v.content.rows %}
+          <tr>
+            <th scope="row" class="aia-bot-cell">{% if let Some(h) = r.href %}<a class="url trunc" href="{{ h }}">{{ r.path }}</a>{% else %}<span class="mono trunc aia-path">{{ r.path }}</span>{% endif %}{% if let Some(sig) = r.signals %}<span class="aia-sub aia-signals">{{ sig }}</span>{% endif %}</th>
+            <td data-label="Words" class="r num">{{ r.words }}</td>
+            {% for t in r.ticks %}<td data-label="{{ t.label }}" class="c"><span class="{% if t.on %}c-ok{% else %}c-ghost{% endif %}" title="{{ t.tip }}"><span aria-hidden="true">{{ t.text }}</span><span class="sr-only">{{ t.tip }}</span></span></td>{% endfor %}
+            <td data-label="Internal links" class="r num">{{ r.links }}</td>
+            <td class="aia-status"><span class="badge {{ r.verdict_class }}" title="{{ r.verdict_tip }}">{{ r.verdict }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card aia-section aia-llms" aria-labelledby="aia-llms">
+    <div class="card-head">
+      <h2 class="card-title" id="aia-llms">llms.txt</h2>
+      <span class="chip">Informational · not scored</span>
+      <span class="card-aside"><a href="{{ v.llms.spec }}" target="_blank" rel="noopener noreferrer">llmstxt.org</a></span>
+    </div>
+    {% if let Some((title, text)) = v.llms.none %}
+    <div class="aia-none aia-llms-none"><b>{{ title }}</b><p>{{ text }}</p></div>
+    {% else %}
+    <dl class="aia-llms-facts">
+      <div><dt>State</dt><dd><span class="badge {{ v.llms.state_class }}">{{ v.llms.state }}</span></dd></div>
+      <div><dt>Adopted</dt><dd>{{ v.llms.adopted }}</dd></div>
+      <div><dt>Fetch</dt><dd>{{ v.llms.fetched }}</dd></div>
+      {% if let Some(l) = v.llms.links %}<div><dt>Links</dt><dd>{{ l }}</dd></div>{% endif %}
+    </dl>
+    {% if !v.llms.checks.is_empty() %}
+    <div class="rows aia-llms-checks">
+      {% for c in v.llms.checks %}
+      <div class="aia-llms-check"><span class="{% if c.ok %}c-ok{% else %}c-warn{% endif %}"><span aria-hidden="true">{% if c.ok %}✓{% else %}✗{% endif %}</span><span class="sr-only">{% if c.ok %}Passes:{% else %}Does not pass:{% endif %}</span></span><b>{{ c.label }}</b><span class="aia-ev-detail">{% for s in c.detail %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</span></div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if !v.llms.failing.is_empty() %}
+    <div class="aia-urls aia-llms-failing"><span class="aia-urls-label">Failing links</span>{% for u in v.llms.failing %}<span class="mono aia-path">{{ u }}</span>{% endfor %}</div>
+    {% endif %}
+    {% endif %}
+  </section>
+
   <section class="card aia-section aia-botcard" aria-labelledby="aia-bots">
     <div class="card-head aia-bots-head">
       <h2 class="card-title" id="aia-bots">AI bots</h2>

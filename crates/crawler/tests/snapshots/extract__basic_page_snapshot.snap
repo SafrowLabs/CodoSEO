@@ -31,6 +31,13 @@ fields:
     nosnippet_words: 0
     tdm_reservation: ~
     tdm_policy: ~
+  raw:
+    main_words: 0
+    script_bytes: 40
+    scripts_external: 0
+    mount: ~
+    mount_empty: false
+    noscript_js: false
 links:
   - url: "https://northwind.test/tents/ridgeline-2p"
     anchor: Ridgeline 2P

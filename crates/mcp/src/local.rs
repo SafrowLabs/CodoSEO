@@ -17,6 +17,7 @@ use codoseo_core::page::PageRecord;
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::{crawl, inspect_page};
 use codoseo_crawler::fetch::{FetchError, Fetcher, FetcherConfig, Hop};
+use codoseo_crawler::llms::{PAGE_CHECK_DEADLINE, check_llms_txt};
 use codoseo_crawler::probe::{DEFAULT_MIN_GAP, PAGE_PROBE_DEADLINE, probe_from_env, probe_page};
 use codoseo_crawler::robots::fetch_robots;
 use codoseo_diff::{diff, key_pages};
@@ -30,9 +31,9 @@ use url::Url;
 use crate::backend::{Backend, BackendError};
 use crate::cache::{AuditCache, CacheError};
 use crate::types::{
-    AiAccessReport, AiEngine, AiProbeReport, AiRobots, AuditHandle, AuditId, AuditState,
-    AuditStatus, AuditSummary, FailingCheck, MAX_FAILING_CHECKS, RedirectReport, RobotsReport,
-    UrlRow, rank_failing,
+    AiAccessReport, AiEngine, AiLlmsTxtReport, AiProbeReport, AiRobots, AuditHandle, AuditId,
+    AuditState, AuditStatus, AuditSummary, FailingCheck, MAX_FAILING_CHECKS, RedirectReport,
+    RobotsReport, UrlRow, rank_failing,
 };
 
 pub struct LocalBackend {
@@ -277,7 +278,16 @@ impl Backend for LocalBackend {
             })
             .collect();
 
-        let summary = ai_access_summary(&path, file.status, parsed.is_some(), &bots, &engines);
+        let content = page
+            .as_ref()
+            .and_then(|p| codoseo_geo::content::raw_content(0, p));
+        let mut summary = ai_access_summary(&path, file.status, parsed.is_some(), &bots, &engines);
+        if let Some(c) = content.as_ref().filter(|c| c.verdict.is_shell()) {
+            summary.push_str(&format!(
+                " In the HTML as served (before JavaScript runs) the page has {} words and looks like an empty app shell; AI crawlers like GPTBot, ClaudeBot and PerplexityBot don't run JavaScript.",
+                c.words
+            ));
+        }
         Ok(AiAccessReport {
             url: url.to_string(),
             path,
@@ -290,6 +300,25 @@ impl Backend for LocalBackend {
             declared,
             engines,
             page_status: page.map(|p| p.status),
+            content,
+        })
+    }
+
+    async fn check_llms_txt(&self, url: Url) -> Result<AiLlmsTxtReport, BackendError> {
+        let found = check_llms_txt(
+            &url,
+            AddressPolicy::AllowPrivate,
+            CrawlLimits::default().llms_link_checks,
+            PAGE_CHECK_DEADLINE,
+        )
+        .await
+        .map_err(BackendError::Other)?;
+        let report = codoseo_geo::llms::assess(&found.fetch, false);
+        Ok(AiLlmsTxtReport {
+            url: found.url,
+            informational: true,
+            summary: report.summary(),
+            report,
         })
     }
 
@@ -770,6 +799,90 @@ mod tests {
                 .any(|e| e.effect == codoseo_geo::eligibility::Effect::Excluded)
         );
         assert!(report.summary.contains("GPTBot"), "{}", report.summary);
+    }
+
+    #[tokio::test]
+    async fn check_ai_access_reports_what_the_html_as_served_holds() {
+        let shell = r#"<html><head><title>App</title></head><body><div id="root"></div><noscript>You need to enable JavaScript to run this app.</noscript><script src="/a.js"></script></body></html>"#;
+        let site = SiteBuilder::new()
+            .robots(200, "User-agent: *\nAllow: /\n")
+            .page("/", codoseo_testkit::Page::html(shell))
+            .page(
+                "/real",
+                codoseo_testkit::Page::html(&codoseo_testkit::html_page("Real page", &[])),
+            )
+            .start()
+            .await;
+        let (backend, _dir) = backend();
+        let report = backend.check_ai_access(site.url("/")).await.unwrap();
+        let content = report.content.clone().expect("content for an HTML page");
+        assert_eq!(content.verdict, codoseo_geo::content::ContentVerdict::Shell);
+        assert!(content.mount_empty && content.noscript_js);
+        assert!(
+            report.summary.contains("HTML as served"),
+            "{}",
+            report.summary
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["content"]["verdict"], "shell");
+
+        let real = backend.check_ai_access(site.url("/real")).await.unwrap();
+        let content = real.content.expect("content");
+        assert_ne!(content.verdict, codoseo_geo::content::ContentVerdict::Shell);
+        assert!(!real.summary.contains("app shell"), "{}", real.summary);
+    }
+
+    #[tokio::test]
+    async fn check_llms_txt_reads_the_file_and_says_when_there_is_none() {
+        let file = "# Example\n\n> A site about examples.\n\n## Docs\n\n- [Start](/start): begin here\n- [Gone](/gone)\n";
+        let site = SiteBuilder::new()
+            .robots(200, "User-agent: *\nAllow: /\n")
+            .html("/start", "Start page title for tests", &[])
+            .page(
+                "/llms.txt",
+                codoseo_testkit::Page::html(file).header("content-type", "text/plain"),
+            )
+            .start()
+            .await;
+        let (backend, _dir) = backend();
+        let report = backend.check_llms_txt(site.url("/anything")).await.unwrap();
+        assert!(report.informational);
+        assert!(report.url.ends_with("/llms.txt"));
+        assert_eq!(report.report.state, codoseo_geo::llms::LlmsState::Available);
+        assert!(report.report.adopted);
+        assert_eq!(report.report.link_summary.checked, 2);
+        assert_eq!(report.report.link_summary.failing, 1);
+        assert!(
+            report.summary.contains("Links: 2 checked, 1 failing"),
+            "{}",
+            report.summary
+        );
+
+        let none = SiteBuilder::new()
+            .robots(200, "User-agent: *\nAllow: /\n")
+            .start()
+            .await;
+        let report = backend.check_llms_txt(none.url("/")).await.unwrap();
+        assert_eq!(report.report.state, codoseo_geo::llms::LlmsState::Absent);
+        assert!(!report.report.adopted);
+        assert!(
+            report.summary.contains("nothing to fix"),
+            "{}",
+            report.summary
+        );
+    }
+
+    #[tokio::test]
+    async fn check_llms_txt_keeps_to_robots_txt() {
+        let site = SiteBuilder::new()
+            .robots(200, "User-agent: *\nDisallow: /llms.txt\n")
+            .page("/llms.txt", codoseo_testkit::Page::html("# Example"))
+            .start()
+            .await;
+        let (backend, _dir) = backend();
+        let err = backend.check_llms_txt(site.url("/")).await.unwrap_err();
+        assert!(err.to_string().contains("robots.txt"), "{err}");
+        assert_eq!(site.path_hits("/llms.txt"), 0);
     }
 
     #[test]

@@ -59,6 +59,17 @@ async fn migrate_creates_every_table() {
     .await
     .expect("read change_kind");
     assert!(kind, "change_kind has ai_fetch_blocked");
+
+    // 0013: the content and llms.txt change kinds.
+    for slug in ["ai_content_missing", "ai_llms_txt_unavailable"] {
+        let has: bool =
+            sqlx::query_scalar("SELECT $1 = ANY(enum_range(NULL::change_kind)::text[])")
+                .bind(slug)
+                .fetch_one(&mut check)
+                .await
+                .expect("read change_kind");
+        assert!(has, "change_kind has {slug}");
+    }
     drop(check);
 
     admin

@@ -2,7 +2,8 @@ mod common;
 
 use codoseo_core::Url;
 use codoseo_core::page::{
-    AiMeta, Indexability, PageFields, directives_for, indexability, is_nofollow, is_noindex,
+    AiMeta, Indexability, MountPoint, PageFields, RawSignals, directives_for, indexability,
+    is_nofollow, is_noindex,
 };
 use common::sample_record;
 
@@ -244,4 +245,43 @@ fn a_date_after_unavailable_after_is_not_an_agent_prefix() {
         &["robots"],
     );
     assert!(d.contains(&"noindex".to_owned()), "{d:?}");
+}
+
+#[test]
+fn raw_signals_do_not_change_the_key_hash() {
+    let k = sample_record().compute_key_hash();
+    let mut p = sample_record();
+    p.fields.raw = RawSignals {
+        main_words: 3,
+        mount: Some(MountPoint::Root),
+        mount_empty: true,
+        ..RawSignals::default()
+    };
+    assert_eq!(p.compute_key_hash(), k);
+}
+
+#[test]
+fn raw_signals_empty_and_small() {
+    assert!(RawSignals::default().is_empty());
+    assert!(
+        !RawSignals {
+            noscript_js: true,
+            ..RawSignals::default()
+        }
+        .is_empty()
+    );
+    assert_eq!(std::mem::size_of::<RawSignals>(), 16);
+}
+
+#[test]
+fn raw_signals_are_skipped_when_empty_and_old_json_parses() {
+    let mut f = PageFields::default();
+    let v = serde_json::to_value(&f).unwrap();
+    assert!(v.get("raw").is_none());
+    assert_eq!(serde_json::from_value::<PageFields>(v).unwrap(), f);
+    f.raw.mount = Some(MountPoint::Next);
+    f.raw.scripts_external = 4;
+    let v = serde_json::to_value(&f).unwrap();
+    assert_eq!(v["raw"]["mount"], "next");
+    assert_eq!(serde_json::from_value::<PageFields>(v).unwrap(), f);
 }

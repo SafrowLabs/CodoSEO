@@ -1,0 +1,7 @@
+﻿# BOM Site
+
+> A file saved by an editor that writes a byte-order mark.
+
+## Docs
+
+- [Start](https://bom.test/start.md): Where to begin

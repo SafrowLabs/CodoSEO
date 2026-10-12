@@ -115,6 +115,53 @@ pub struct WellKnownFile {
     pub body: String,
 }
 
+/// `/llms.txt` as served, with the status of the links it lists.
+///
+/// A request that got no response (timeout, connection failure, broken redirect) is kept too, as
+/// `status` 0 with `error` set, so a site whose file stopped answering is told apart from one where
+/// the file was never fetched (`SiteSignals::llms_txt` is `None`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmsTxtFetch {
+    /// The final status after redirects; 0 when no response arrived (see `error`).
+    pub status: u16,
+    /// Why no response arrived; `None` whenever there is a status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// Size of the whole response, which can exceed what `body` keeps.
+    #[serde(default)]
+    pub bytes: u64,
+    /// `body` is cut short of the response.
+    #[serde(default)]
+    pub truncated: bool,
+    /// Empty unless the status was 2xx.
+    #[serde(default)]
+    pub body: String,
+    /// The URL the file was served from after redirects; relative links resolve against it.
+    /// `None` without a response (and in older reports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_url: Option<String>,
+    /// Checked links from the file, in file order.
+    #[serde(default)]
+    pub links: Vec<LinkStatus>,
+    /// Links on other origins that were not checked.
+    #[serde(default)]
+    pub external_unchecked: u16,
+}
+
+/// The outcome for one link listed in `llms.txt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkStatus {
+    pub url: String,
+    /// `None` when the request failed before a response.
+    #[serde(default)]
+    pub status: Option<u16>,
+    /// The status comes from the crawl, not a separate request.
+    #[serde(default)]
+    pub from_crawl: bool,
+}
+
 /// Site-wide signals the crawl read outside the page list: what the site declares
 /// about AI use in response headers and well-known files.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +173,26 @@ pub struct SiteSignals {
     /// `/.well-known/tdmrep.json`; `None` when it was not fetched or the fetch failed.
     #[serde(default)]
     pub tdmrep: Option<WellKnownFile>,
+    /// `/llms.txt`; `None` when it was not fetched (signals off, robots.txt disallows it, the crawl
+    /// stopped early or ran out of time). A fetch that got no response is `Some`, with status 0.
+    #[serde(default)]
+    pub llms_txt: Option<LlmsTxtFetch>,
+    /// Why `/llms.txt` was not fetched, when the crawl meant to and didn't; `None` when it was
+    /// fetched, site signals were off, the crawl stopped before it (and in older crawls).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt_skipped: Option<LlmsSkip>,
+}
+
+/// Why a crawl did not fetch `/llms.txt`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmsSkip {
+    /// robots.txt disallows CodoSEObot on `/llms.txt`, or on where it redirects.
+    RobotsDisallowed,
+    /// The address (or a redirect's) is one CodoSEO may not request.
+    Refused,
+    /// The crawl's time ran out first.
+    Deadline,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

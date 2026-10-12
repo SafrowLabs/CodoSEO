@@ -9,17 +9,19 @@ use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 use codoseo_core::crawl::RobotsFile;
-use codoseo_core::output::{CrawlOutput, WellKnownFile};
+use codoseo_core::output::{CrawlOutput, LlmsSkip, WellKnownFile};
 use codoseo_core::page::PageRecord;
 use codoseo_core::url::url_hash;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::content::{ContentReport, content_report};
 use crate::declared::{
     TdmRepEntry, clean_declared, is_known_signal_key, is_known_usage_key, parse_content_signal,
     parse_content_usage, parse_tdmrep,
 };
 use crate::eligibility::{Cause, DirectiveSlug, Effect, EngineId, engines, record_effect};
+use crate::llms::{self, LlmsTxtReport};
 use crate::probe::ProbeReport;
 use crate::registry::{Honours, Purpose, registry};
 use crate::robots::{
@@ -296,6 +298,19 @@ pub struct AccessReport {
     /// audits, probes switched off or not possible).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probes: Option<ProbeReport>,
+    /// What the important HTML pages hold as served, before JavaScript; `None` when there are
+    /// none (and in older reports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<ContentReport>,
+    /// `/llms.txt`, informational only; `None` when it was not fetched (and in older reports).
+    /// `adopted` here assumes no history: the worker carries it from the previous report
+    /// ([`crate::llms::carry_adoption`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt: Option<LlmsTxtReport>,
+    /// Why the crawl did not fetch `/llms.txt` when it meant to (robots.txt disallows it, the
+    /// address is refused, the time ran out); `None` otherwise and in older reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt_skipped: Option<LlmsSkip>,
 }
 
 impl EngineAccess {
@@ -489,6 +504,7 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         .and_then(|i| by_url.get(i.url.as_str()))
         .copied();
     let readable_robots = parsed.as_ref().filter(|_| avail == RobotsAvailability::Ok);
+    let content = content_report(&important, &by_url);
     AccessReport {
         version: REPORT_VERSION,
         registry_version: registry().version,
@@ -502,6 +518,13 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         engines: engines_out,
         declared: declared(out, readable_robots, home),
         probes: None,
+        content,
+        llms_txt: out
+            .signals
+            .llms_txt
+            .as_ref()
+            .map(|f| llms::assess(f, false)),
+        llms_txt_skipped: out.signals.llms_txt_skipped,
     }
 }
 
@@ -522,7 +545,8 @@ fn stored(rule: MatchedRule) -> MatchedRule {
     MatchedRule { pattern, ..rule }
 }
 
-fn path_and_query(url: &str) -> String {
+/// The path and query of `url`, or `/` when it doesn't parse.
+pub(crate) fn path_and_query(url: &str) -> String {
     match Url::parse(url) {
         Ok(u) => match u.query() {
             Some(q) => format!("{}?{q}", u.path()),

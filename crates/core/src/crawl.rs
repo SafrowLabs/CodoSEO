@@ -28,6 +28,13 @@ pub struct CrawlLimits {
     pub request_timeout: Duration,
     pub max_redirects: u8,
     pub max_sitemap_urls: u32,
+    /// How many links from `llms.txt` get a status check; the rest count as unchecked.
+    #[serde(default = "default_llms_link_checks")]
+    pub llms_link_checks: u16,
+}
+
+fn default_llms_link_checks() -> u16 {
+    20
 }
 
 impl Default for CrawlLimits {
@@ -39,6 +46,7 @@ impl Default for CrawlLimits {
             request_timeout: Duration::from_secs(30),
             max_redirects: 10,
             max_sitemap_urls: 50_000,
+            llms_link_checks: default_llms_link_checks(),
         }
     }
 }

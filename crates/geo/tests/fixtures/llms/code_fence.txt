@@ -1,0 +1,15 @@
+# Fenced Example
+
+> A file that shows an llms.txt example inside a code block.
+
+## Docs
+
+- [Spec notes](https://fence.test/notes.md): How we write our file
+
+## Example
+
+```markdown
+# Not the title
+## Not a section
+- [Not a link](https://fence.test/nope)
+```

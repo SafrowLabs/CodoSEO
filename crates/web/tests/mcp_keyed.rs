@@ -620,6 +620,92 @@ async fn get_ai_access_carries_the_synthetic_fetch_check_like_rest() {
 }
 
 #[tokio::test]
+async fn get_ai_access_carries_content_and_llms_txt_like_rest() {
+    let f = setup(Plan::Pro).await;
+    let site = f.site.id;
+    let tools = f.rpc().tools().await;
+    let tool = tools.iter().find(|t| t["name"] == "get_ai_access").unwrap();
+    let description = tool["description"].as_str().unwrap();
+    for needle in [
+        "`content`",
+        "HTML as served",
+        "`llms_txt`",
+        "never scored",
+        "content_missing",
+    ] {
+        assert!(description.contains(needle), "{needle}: {description}");
+    }
+
+    let mut app_shell = page(DOMAIN, "/app");
+    app_shell.fields.word_count = 0;
+    app_shell.fields.h1.clear();
+    app_shell.fields.raw.mount_empty = true;
+    let mut pages = fixture_pages();
+    pages.push(app_shell);
+    f.app
+        .finished_crawl_with_llms(
+            &f.site,
+            pages,
+            (200, "User-agent: *\nAllow: /\n"),
+            codoseo_core::output::LlmsTxtFetch {
+                status: 404,
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+    let out = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    let res = rest_get(&f.app, &format!("/api/v1/sites/{site}/ai-access"), &f.key).await;
+    assert_eq!(out, serde_json::from_str::<Value>(&res.body).unwrap());
+    assert_eq!(out["content"]["grade"], "A-");
+    assert_eq!(out["content"]["shells"], 1);
+    assert_eq!(out["content"]["pages"][0]["verdict"], "shell");
+    assert_eq!(out["llms_txt"]["state"], "absent");
+    assert_eq!(out["llms_txt"]["informational"], true);
+}
+
+#[tokio::test]
+async fn get_ai_access_says_why_llms_txt_was_not_fetched_like_rest() {
+    let f = setup(Plan::Pro).await;
+    let site = f.site.id;
+    f.app
+        .finished_crawl_with_llms(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: *\nAllow: /\n"),
+            codoseo_core::output::LlmsTxtFetch {
+                status: 404,
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+    let fetched = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    assert!(fetched.get("llms_txt_skipped").is_none(), "{fetched}");
+
+    sqlx::query(
+        "UPDATE ai_reports SET report = (report - 'llms_txt') \
+         || '{\"llms_txt_skipped\": \"deadline\"}'::jsonb",
+    )
+    .execute(f.app.pool())
+    .await
+    .unwrap();
+    let out = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    let res = rest_get(&f.app, &format!("/api/v1/sites/{site}/ai-access"), &f.key).await;
+    assert_eq!(out, serde_json::from_str::<Value>(&res.body).unwrap());
+    assert_eq!(out["llms_txt_skipped"], "deadline");
+}
+
+#[tokio::test]
 async fn bad_arguments_are_tool_errors_the_agent_can_read() {
     let f = setup(Plan::Pro).await;
     let rpc = f.rpc();

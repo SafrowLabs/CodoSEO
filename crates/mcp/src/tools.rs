@@ -1,4 +1,4 @@
-//! The 10 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
+//! The 11 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
 //! `wait_timeout` (50 s in production, shorter in tests) before reporting "still
 //! running" with an `audit_id` the caller polls with `get_audit`.
 
@@ -241,7 +241,7 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
     }
 
     #[tool(
-        description = "Check a URL's AI access right now: for every known AI crawler, whether robots.txt allows its path (with the rule line), the site's declared Content-Signal/Content-Usage preferences, and whether the page's own controls (robots meta, X-Robots-Tag, data-nosnippet) keep it out of each AI engine's answers."
+        description = "Check a URL's AI access right now: for every known AI crawler, whether robots.txt allows its path (with the rule line), the site's declared Content-Signal/Content-Usage preferences, whether the page's own controls (robots meta, X-Robots-Tag, data-nosnippet) keep it out of each AI engine's answers, and `content`: what the page holds in its HTML as served, before JavaScript runs (shell, likely_shell, thin or present), since AI crawlers like GPTBot, ClaudeBot and PerplexityBot don't run JavaScript."
     )]
     async fn check_ai_access(
         &self,
@@ -267,6 +267,22 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
         let report = self
             .backend
             .probe_ai_fetch(url, bots)
+            .await
+            .map_err(|e| e.to_string())?;
+        to_json(&report)
+    }
+
+    #[tool(
+        description = "Informational: fetch a site's /llms.txt (after robots.txt) and check it against the llmstxt.org format and Lighthouse's llms.txt audit: its state (available, absent, a soft 404 or unavailable), whether the site has adopted it, each check, and how many of its links answer. The file is optional and never scored: a missing llms.txt is nothing to fix."
+    )]
+    async fn check_llms_txt(
+        &self,
+        Parameters(UrlRequest { url }): Parameters<UrlRequest>,
+    ) -> Result<String, String> {
+        let url = parse_url(&url)?;
+        let report = self
+            .backend
+            .check_llms_txt(url)
             .await
             .map_err(|e| e.to_string())?;
         to_json(&report)
@@ -354,7 +370,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_has_all_10_tools_with_descriptions() {
+    async fn tools_list_has_all_11_tools_with_descriptions() {
         let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
         let client = serve(CodoseoMcp::new(backend)).await;
         let tools = client.peer().list_tools(None).await.unwrap();
@@ -370,10 +386,11 @@ mod tests {
             "check_redirects",
             "compare_audits",
             "probe_ai_fetch",
+            "check_llms_txt",
         ] {
             assert!(names.contains(&expected), "missing tool {expected}");
         }
-        assert_eq!(tools.tools.len(), 10);
+        assert_eq!(tools.tools.len(), 11);
         for t in &tools.tools {
             assert!(
                 t.description.as_deref().is_some_and(|d| !d.is_empty()),
@@ -381,6 +398,32 @@ mod tests {
                 t.name
             );
         }
+    }
+
+    #[tokio::test]
+    async fn check_llms_txt_is_informational_and_takes_a_url() {
+        let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
+        let client = serve(CodoseoMcp::new(backend)).await;
+        let tools = client.peer().list_tools(None).await.unwrap();
+        let tool = tools
+            .tools
+            .iter()
+            .find(|t| t.name == "check_llms_txt")
+            .expect("check_llms_txt is listed");
+        let description = tool.description.as_deref().unwrap_or_default();
+        assert!(description.starts_with("Informational"), "{description}");
+        assert!(description.contains("never scored"), "{description}");
+        let schema = Value::Object((*tool.input_schema).clone());
+        assert_eq!(schema["required"], json!(["url"]), "{schema}");
+        assert_eq!(schema["properties"]["url"]["type"], "string", "{schema}");
+
+        let check = tools
+            .tools
+            .iter()
+            .find(|t| t.name == "check_ai_access")
+            .expect("check_ai_access is listed");
+        let description = check.description.as_deref().unwrap_or_default();
+        assert!(description.contains("HTML as served"), "{description}");
     }
 
     #[tokio::test]
@@ -658,6 +701,13 @@ mod tests {
             &self,
             _url: Url,
         ) -> Result<crate::types::AiAccessReport, crate::backend::BackendError> {
+            unimplemented!("not exercised by this test")
+        }
+
+        async fn check_llms_txt(
+            &self,
+            _url: Url,
+        ) -> Result<crate::types::AiLlmsTxtReport, crate::backend::BackendError> {
             unimplemented!("not exercised by this test")
         }
 

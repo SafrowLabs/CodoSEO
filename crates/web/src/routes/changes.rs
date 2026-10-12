@@ -253,8 +253,18 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
     let noindex = c.kind(ChangeKind::BecameNoindex);
     let titles = c.kind(ChangeKind::TitleChanged) + c.kind(ChangeKind::TitleRemoved);
     let ai: i64 = AI_KINDS.iter().map(|k| c.kind(*k)).sum();
+    // A recovered llms.txt is a change of the failing kind at notice severity (after: "resolved"):
+    // it counts in the tile but is no problem.
+    let llms_failing: i64 = c
+        .rows
+        .iter()
+        .filter(|(k, s, _)| *k == ChangeKind::AiLlmsTxtUnavailable && *s != Severity::Notice)
+        .map(|r| r.2)
+        .sum();
     let ai_bad = c.kind(ChangeKind::AiBotBlocked)
         + c.kind(ChangeKind::AiFetchBlocked)
+        + c.kind(ChangeKind::AiContentMissing)
+        + llms_failing
         + c.kind(ChangeKind::AiAnswersRestricted)
         + c.kind(ChangeKind::AiBlockNotApplied);
     let mut tiles = vec![
@@ -296,9 +306,11 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
 }
 
 /// The AI access change kinds (`codoseo_geo` findings and declared preferences).
-const AI_KINDS: [ChangeKind; 6] = [
+const AI_KINDS: [ChangeKind; 8] = [
     ChangeKind::AiBotBlocked,
     ChangeKind::AiFetchBlocked,
+    ChangeKind::AiContentMissing,
+    ChangeKind::AiLlmsTxtUnavailable,
     ChangeKind::AiAnswersRestricted,
     ChangeKind::AiIssueResolved,
     ChangeKind::AiBlockNotApplied,
@@ -335,17 +347,7 @@ fn severity_label(s: Severity) -> (&'static str, &'static str) {
 /// The change kinds that alert instantly under the default rules (spec section 10), matching
 /// the alert jobs `finalize` queues. Everything else waits for the Monday digest.
 fn is_instant(kind: ChangeKind) -> bool {
-    matches!(
-        kind,
-        ChangeKind::BecameNoindex
-            | ChangeKind::ErrorSpike
-            | ChangeKind::RobotsTxtChanged
-            | ChangeKind::SitemapShrank
-            | ChangeKind::AiBotBlocked
-            | ChangeKind::AiAnswersRestricted
-            | ChangeKind::AiIssueResolved
-            | ChangeKind::AiFetchBlocked
-    )
+    codoseo_store::alert_rules::DEFAULT_INSTANT.contains(&kind)
 }
 
 fn title(c: &ChangeRow) -> String {
@@ -368,6 +370,8 @@ fn title(c: &ChangeRow) -> String {
         ChangeKind::AiIssueResolved => "AI issue resolved".to_owned(),
         ChangeKind::AiPreferencesChanged => "AI preferences changed".to_owned(),
         ChangeKind::AiFetchBlocked => "AI fetch blocked (synthetic)".to_owned(),
+        ChangeKind::AiContentMissing => "Content missing from HTML (AI)".to_owned(),
+        ChangeKind::AiLlmsTxtUnavailable => "llms.txt unavailable".to_owned(),
     }
 }
 
@@ -406,9 +410,17 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
         ChangeKind::AiAnswersRestricted if value == "eligible" => {
             "Eligible for AI answers".to_owned()
         }
-        ChangeKind::AiIssueResolved if value == "resolved" => "Resolved".to_owned(),
+        ChangeKind::AiIssueResolved | ChangeKind::AiLlmsTxtUnavailable if value == "resolved" => {
+            "Resolved".to_owned()
+        }
         ChangeKind::AiPreferencesChanged if value == "none" => "none declared".to_owned(),
         ChangeKind::AiFetchBlocked if value == "reachable" => "AI bots got through".to_owned(),
+        ChangeKind::AiContentMissing if value == "content in the HTML" => {
+            "Content in the HTML".to_owned()
+        }
+        ChangeKind::AiLlmsTxtUnavailable if value == "llms.txt served" => {
+            "llms.txt served".to_owned()
+        }
         _ => value.to_owned(),
     }
 }
@@ -539,6 +551,20 @@ fn rules() -> Vec<Rule> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instant_kinds_match_the_default_alert_rules() {
+        use codoseo_store::alert_rules::{ALL_KINDS, DEFAULT_INSTANT};
+        for kind in ALL_KINDS {
+            assert_eq!(
+                is_instant(kind),
+                DEFAULT_INSTANT.contains(&kind),
+                "{kind:?}"
+            );
+        }
+        assert!(is_instant(ChangeKind::SiteMoved));
+        assert!(!is_instant(ChangeKind::AiLlmsTxtUnavailable));
+    }
 
     fn point(number: i64, score: i16) -> HealthPoint {
         HealthPoint { number, score }

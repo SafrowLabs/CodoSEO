@@ -14,7 +14,7 @@ CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in R
 - **A web app** with scheduled crawls, a URL explorer, change tracking and email, Slack, Discord and webhook alerts. Self-host it with Docker, or use the hosted version at [codoseo.com](https://codoseo.com).
 - **A REST API and a hosted MCP server** at codoseo.com for your monitored sites.
 
-It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. A synthetic fetch check requests a few pages with the AI bots' documented user agents to catch a CDN or firewall that turns them away. See [docs/ai-access.md](docs/ai-access.md).
+It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. A synthetic fetch check requests a few pages with the AI bots' documented user agents to catch a CDN or firewall that turns them away. It also checks that your important pages' content is in their HTML as served, since GPTBot, ClaudeBot and PerplexityBot don't run JavaScript (Vercel and MERJ, 2024), and reports on your `/llms.txt` (informational, never scored). See [docs/ai-access.md](docs/ai-access.md).
 
 ![The AI access screen](docs/images/ai-access/ai-access-hero.png)
 
@@ -98,10 +98,11 @@ codoseo diff baseline.json audit.json
 | Command | Description |
 |---|---|
 | `codoseo crawl <URL>` | Crawl a site, run all 44 checks, print a report |
-| `codoseo check <URL>` | Inspect one page: fields, redirect chain, page-level issues |
+| `codoseo check <URL>` | Inspect one page: fields, raw HTML content, redirect chain, page-level issues |
 | `codoseo robots <URL>` | Show the site's `robots.txt`, test whether CodoSEObot may fetch a path and what it says to each AI bot |
 | `codoseo bots` | List the AI crawlers, fetchers and control tokens CodoSEO knows (`--format json` prints the public registry file) |
 | `codoseo probe <URL>` | Synthetic check: fetch one page as each AI search and user-triggered bot with its documented user agent and compare with CodoSEObot (`--bots` for a subset; `crawl --probes` does it for up to 5 pages) |
+| `codoseo llms-txt <URL>` | Fetch the site's `/llms.txt` and check it against the llmstxt.org format and Lighthouse's audit (`--format table\|json\|markdown`). Informational, never scored; exits 2 if robots.txt disallows it |
 | `codoseo redirects <URL>` | Follow a URL's redirect chain hop by hop |
 | `codoseo diff <BEFORE> <AFTER>` | Compare two saved JSON audits; surface new issues and regressions |
 | `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [MCP for AI agents](#mcp-for-ai-agents)) |
@@ -332,7 +333,7 @@ Any other client that takes a stdio command (Cursor, Claude Desktop, ...) needs 
 { "mcpServers": { "codoseo": { "command": "codoseo", "args": ["mcp"] } } }
 ```
 
-Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_ai_access`, `check_redirects`, `compare_audits`, `probe_ai_fetch` (a synthetic check: fetches one page as each AI search and user-triggered bot and compares with CodoSEObot). Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
+Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_ai_access`, `check_llms_txt`, `check_redirects`, `compare_audits`, `probe_ai_fetch` (a synthetic check: fetches one page as each AI search and user-triggered bot and compares with CodoSEObot). Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
 
 ### Hosted server (codoseo.com)
 
@@ -377,7 +378,7 @@ DATABASE_URL=postgres://localhost/codoseo codoseo all
 - [docs/deploy-coolify.md](docs/deploy-coolify.md): Coolify template and the two-container layout
 - [docs/operations.md](docs/operations.md): logs, metrics, health checks, upgrades
 - [docs/mcp.md](docs/mcp.md) and [docs/api.md](docs/api.md): agent access
-- [docs/ai-access.md](docs/ai-access.md): AI access monitoring, the synthetic fetch checks, the intent model and the public AI bot registry
+- [docs/ai-access.md](docs/ai-access.md): AI access monitoring, the synthetic fetch checks, content in raw HTML, llms.txt, the intent model and the public AI bot registry
 - [RELEASING.md](RELEASING.md): how releases are cut
 
 Keyboard: <kbd>⌘K</kbd> command palette and URL search, <kbd>G</kbd> then <kbd>E</kbd>/<kbd>A</kbd>/<kbd>C</kbd>/<kbd>H</kbd>/<kbd>I</kbd> to switch screens, <kbd>J</kbd>/<kbd>K</kbd> to move through rows, <kbd>/</kbd> to filter, <kbd>[</kbd> to collapse the sidebar, <kbd>?</kbd> for the full list.
@@ -395,7 +396,7 @@ crates/
   checks/     — the 44 check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
   geo/        — AI bot registry (CC0 data), robots.txt verdicts, AI access report and findings
-  mcp/        — MCP server: the 10 local tools and the hosted tools, over rmcp
+  mcp/        — MCP server: the 11 local tools and the hosted tools, over rmcp
   store/      — Postgres: migrations, crawl and jobs queues, queries for the web app
   web/        — the web app: axum routes, askama templates, htmx, bundled assets
   app/        — CLI (the `codoseo` binary)
