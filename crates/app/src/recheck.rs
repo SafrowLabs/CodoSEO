@@ -1,7 +1,8 @@
 //! The `ai_recheck` job: runs one recheck of an AI access incident ([`run_recheck`]).
 //!
 //! A recheck fetches again only what its incident is about ([`codoseo_geo::recheck::plan`]), as
-//! CodoSEObot and as politely as a crawl: robots.txt first (always, for the crawl delay and so a
+//! CodoSEObot and as politely as a crawl, from the origin the stored report's crawl read (after
+//! the start URL's redirects, [`effective_site`]): robots.txt first (always, for the crawl delay and so a
 //! page robots.txt keeps CodoSEObot off is never requested), then the planned pages, the planned
 //! probes (the B1 probe executor, restricted to the incident's bots and pages, under the plan's
 //! probe budget and request cap and only when the site and the install allow probes) or
@@ -185,7 +186,7 @@ async fn execute(
         .fetch_one(pool)
         .await
         .map_err(db("the site"))?;
-    let site = Url::parse(&start_url).map_err(|e| format!("bad start URL: {e}"))?;
+    let start = Url::parse(&start_url).map_err(|e| format!("bad start URL: {e}"))?;
     let incident = geo::incident(pool, recheck.site_id, recheck.incident_id)
         .await
         .map_err(db("the incident"))?
@@ -202,6 +203,7 @@ async fn execute(
         .map_err(db("the stored report"))?
         .ok_or("the site has no stored AI access report")?
         .report;
+    let site = effective_site(&stored, start);
     let evidence: Evidence = serde_json::from_value(incident.evidence.clone())
         .map_err(|e| format!("the incident's evidence does not read: {e}"))?;
     let plan_name = resolve_plan(pool, recheck.site_id).await?;
@@ -230,10 +232,12 @@ async fn execute(
         }
     }
 
+    // Only pages on the origin the crawl read; any other host has its own robots.txt.
     let pages: Vec<Url> = plan
         .pages
         .iter()
         .filter_map(|u| Url::parse(u).ok())
+        .filter(|u| u.origin() == site.origin())
         .collect();
     let fetched = recheck_fetch(RecheckFetch {
         site: site.clone(),
@@ -291,6 +295,20 @@ async fn execute(
         .await
         .map_err(|e| format!("could not apply the recheck: {e}"))?;
     Ok(Ran::Applied(outcome))
+}
+
+/// Where the crawl behind `stored` read the site: the origin of its first important page (the
+/// home page, after the start URL's redirects, say from the apex to `www`), so robots.txt,
+/// `/llms.txt` and the pages are read from the same host the report judged. The start URL when
+/// the report names no page.
+fn effective_site(stored: &AccessReport, start: Url) -> Url {
+    stored
+        .important
+        .first()
+        .and_then(|i| Url::parse(&i.url).ok())
+        .filter(|u| matches!(u.scheme(), "http" | "https") && u.host().is_some())
+        .and_then(|u| u.join("/").ok())
+        .unwrap_or(start)
 }
 
 /// The probe run of a recheck: the scope's bots on the scope's pages, as the crawl's probes

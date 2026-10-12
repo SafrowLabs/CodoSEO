@@ -543,6 +543,59 @@ async fn a_robots_txt_that_still_blocks_is_still_failing() {
 }
 
 #[tokio::test]
+async fn a_recheck_reads_robots_txt_where_the_crawl_did_after_a_redirect() {
+    use axum::http::{StatusCode, Uri, header};
+    use axum::response::IntoResponse;
+
+    let w = World::new("pro").await;
+    // The site's address is an "apex" with a robots.txt of its own that redirects every page to
+    // the "www" host the crawl ends up on.
+    let www = w.site.server.base();
+    let apex_seen: Arc<Mutex<Vec<String>>> = Default::default();
+    let log = apex_seen.clone();
+    let apex = codoseo_testkit::TestServer::start(axum::Router::new().fallback(
+        axum::routing::any(move |uri: Uri| {
+            log.lock().unwrap().push(uri.path().to_owned());
+            let www = www.clone();
+            async move {
+                if uri.path() == "/robots.txt" {
+                    ([(header::CONTENT_TYPE, "text/plain")], ALLOW_ALL).into_response()
+                } else {
+                    (
+                        StatusCode::MOVED_PERMANENTLY,
+                        [(header::LOCATION, format!("{www}{}", uri.path()))],
+                    )
+                        .into_response()
+                }
+            }
+        }),
+    ))
+    .await;
+    sqlx::query("UPDATE sites SET start_url = $2 WHERE id = $1")
+        .bind(w.site_id)
+        .bind(apex.localhost_url("/").as_str())
+        .execute(w.pool())
+        .await
+        .unwrap();
+    let incident = blocked_bot(&w, "OAI-SearchBot").await;
+
+    // Nothing was fixed on www: the recheck must read www's robots.txt, not the apex's.
+    let mark = w.site.mark();
+    let apex_mark = apex_seen.lock().unwrap().len();
+    let manual = w.request(incident.id).await.unwrap();
+    w.run(manual).await;
+    let r = w.recheck(manual).await;
+    assert_eq!(r.outcome, Some(RecheckOutcome::StillFailing));
+    let seen = w.site.since(mark);
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert_eq!(seen[0].path, "/robots.txt");
+    assert!(
+        apex_seen.lock().unwrap()[apex_mark..].is_empty(),
+        "the apex was not asked"
+    );
+}
+
+#[tokio::test]
 async fn an_inconclusive_follow_up_tries_again_six_hours_on_at_most_three_times() {
     let w = World::new("pro").await;
     let incident = blocked_bot(&w, "OAI-SearchBot").await;
@@ -615,19 +668,22 @@ async fn a_site_that_does_not_answer_fails_the_recheck_and_frees_the_incident() 
     let w = World::new("pro").await;
     let incident = blocked_bot(&w, "OAI-SearchBot").await;
 
-    // The site no longer answers: nothing listens where it was.
-    let closed = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
-    sqlx::query("UPDATE sites SET start_url = $2 WHERE id = $1")
-        .bind(w.site_id)
-        .bind(format!("http://127.0.0.1:{closed}/"))
-        .execute(w.pool())
-        .await
-        .unwrap();
+    // The site no longer answers in time: robots.txt hangs past the request limit.
+    w.site
+        .set(|k| k.robots_delay = Some(Duration::from_secs(3)));
     let manual = w.request(incident.id).await.unwrap();
-    w.run(manual).await;
+    let mut slow = w.ctx.clone();
+    slow.recheck.request_timeout = Duration::from_millis(300);
+    let job: ClaimedJob = sqlx::query_as(
+        "UPDATE jobs SET status = 'running', claimed_at = now() \
+         WHERE kind = 'ai_recheck' AND payload->>'recheck_id' = $1::text \
+         RETURNING id, kind, payload, attempt, max_attempts",
+    )
+    .bind(manual)
+    .fetch_one(w.pool())
+    .await
+    .unwrap();
+    run_job(&slow, job).await.unwrap();
     let r = w.recheck(manual).await;
     assert_eq!(r.status, RecheckStatus::Failed);
     assert!(r.finished_at.is_some());
@@ -649,14 +705,6 @@ async fn a_site_that_does_not_answer_fails_the_recheck_and_frees_the_incident() 
 
     // The time limit: robots.txt answers too late.
     w.cool_down().await;
-    sqlx::query("UPDATE sites SET start_url = $2 WHERE id = $1")
-        .bind(w.site_id)
-        .bind(w.site.server.url("/").as_str())
-        .execute(w.pool())
-        .await
-        .unwrap();
-    w.site
-        .set(|k| k.robots_delay = Some(Duration::from_secs(3)));
     let second = w.request(incident.id).await.expect("not busy");
     let mut ctx = w.ctx.clone();
     ctx.recheck.timeout = Duration::from_millis(500);
