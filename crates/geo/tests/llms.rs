@@ -386,3 +386,41 @@ fn an_older_report_without_llms_txt_still_reads_and_the_section_round_trips() {
     let old: AccessReport = serde_json::from_value(v).unwrap();
     assert_eq!(old.llms_txt, None);
 }
+
+#[test]
+fn hostile_bodies_parse_in_linear_time() {
+    let size = 512 * 1024;
+    let mut nested_links = "[a](".repeat(size / 4);
+    nested_links.push(')');
+    let mut many_links = "# T\n\n## Docs\n\n".to_owned();
+    while many_links.len() < size {
+        many_links.push_str(&format!("[x](/p{}) ", many_links.len()));
+    }
+    let bodies = [
+        "[".repeat(size),
+        format!("{}]", "[".repeat(size)),
+        "[a](".repeat(size / 4),
+        nested_links,
+        format!("[a]({}", "(".repeat(size)),
+        "[a](/x)".repeat(size / 7),
+        many_links,
+    ];
+    for body in &bodies {
+        let start = std::time::Instant::now();
+        let doc = parse(body);
+        let urls = links(&doc);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "{} bytes starting {:?} took {elapsed:?}",
+            body.len(),
+            &body[..8]
+        );
+        assert!(doc.urls.len() <= codoseo_geo::llms::MAX_LINKS);
+        assert!(urls.len() <= codoseo_geo::llms::MAX_LINKS);
+    }
+    // The cap holds the first links in file order.
+    let doc = parse(&bodies[5]);
+    assert_eq!(doc.urls.len(), codoseo_geo::llms::MAX_LINKS);
+    assert_eq!(links(&doc), vec!["/x".to_owned()]);
+}

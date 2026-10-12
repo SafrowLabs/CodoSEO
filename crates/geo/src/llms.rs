@@ -21,6 +21,8 @@
 //! an [`LlmsTxtReport`]. Whether a site has adopted llms.txt carries over from the previous
 //! report ([`carry_adoption`]): only a site that served one before can lose it.
 
+use std::collections::HashSet;
+
 use codoseo_core::output::LlmsTxtFetch;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +41,8 @@ pub const NOTICE_BYTES: u64 = 100 * 1024;
 pub const MAX_BYTES: usize = 512 * 1024;
 /// Lighthouse calls a file shorter than this (in characters) "suspiciously short".
 pub const MIN_CHARS: usize = 50;
+/// Links [`parse`] keeps from one file; the rest are ignored. A real llms.txt lists hundreds.
+pub const MAX_LINKS: usize = 10_000;
 /// Failing link URLs a report keeps.
 const MAX_FAILING_URLS: usize = 10;
 
@@ -69,7 +73,8 @@ pub struct LlmsDoc {
     /// The `>` blockquote right after the H1, lines joined by spaces.
     pub summary: Option<String>,
     pub sections: Vec<LlmsSection>,
-    /// Every link's URL in file order, inside sections or not, duplicates kept.
+    /// Every link's URL in file order, inside sections or not, duplicates kept; at most
+    /// [`MAX_LINKS`].
     pub urls: Vec<String>,
     /// Characters after the BOM.
     pub chars: usize,
@@ -145,8 +150,8 @@ pub fn parse(body: &str) -> LlmsDoc {
             }
             continue;
         }
-        let found = inline_links(line);
-        doc.urls.extend(found.iter().map(|l| l.url.clone()));
+        let found = inline_links(line, MAX_LINKS - doc.urls.len());
+        doc.urls.extend(found.into_iter().map(|l| l.url));
         if let Some(quote) = line.strip_prefix('>')
             && (want_summary || in_summary)
         {
@@ -197,69 +202,93 @@ fn list_link(line: &str) -> Option<LlmsLink> {
         .or_else(|| line.strip_prefix("* "))
         .or_else(|| line.strip_prefix("+ "))?
         .trim_start();
-    let (link, _) = link_at(rest)?;
+    if !rest.starts_with('[') {
+        return None;
+    }
+    let (link, _) = link_at(rest, &Closers::of(rest), 0)?;
     Some(link)
 }
 
-/// Every `[name](url)` on one line, images included (`![alt](src)` is a link too for Lighthouse).
-fn inline_links(line: &str) -> Vec<LlmsLink> {
+/// Every `[name](url)` on one line, images included (`![alt](src)` is a link too for Lighthouse),
+/// at most `limit`. Linear in the line's length: brackets are matched once up front.
+fn inline_links(line: &str, limit: usize) -> Vec<LlmsLink> {
     let mut out = Vec::new();
-    let mut rest = line;
-    while let Some(i) = rest.find('[') {
-        match link_at(&rest[i..]) {
-            Some((link, used)) => {
+    if limit == 0 || !line.contains('[') {
+        return out;
+    }
+    let closers = Closers::of(line);
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && out.len() < limit {
+        if bytes[i] != b'[' {
+            i += 1;
+            continue;
+        }
+        match link_at(line, &closers, i) {
+            Some((link, end)) => {
                 out.push(link);
-                rest = &rest[i + used..];
+                i = end;
             }
-            None => rest = &rest[i + 1..],
+            None => i += 1,
         }
     }
     out
 }
 
-/// The link `[name](url)` at the start of `s` and the bytes it spans. The URL is the destination
-/// without a `"title"` or angle brackets; nested brackets and parentheses are balanced.
-fn link_at(s: &str) -> Option<(LlmsLink, usize)> {
+/// Where each `[` and `(` on a line closes, nesting balanced: one pass with a stack each, so no
+/// opening bracket is ever scanned for twice (a line of `[[[[` or `[a](` stays linear).
+struct Closers {
+    square: Vec<usize>,
+    round: Vec<usize>,
+}
+
+impl Closers {
+    const NONE: usize = usize::MAX;
+
+    fn of(line: &str) -> Closers {
+        let bytes = line.as_bytes();
+        let mut square = vec![Self::NONE; bytes.len()];
+        let mut round = vec![Self::NONE; bytes.len()];
+        let mut squares = Vec::new();
+        let mut rounds = Vec::new();
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'[' => squares.push(i),
+                b']' => {
+                    if let Some(open) = squares.pop() {
+                        square[open] = i;
+                    }
+                }
+                b'(' => rounds.push(i),
+                b')' => {
+                    if let Some(open) = rounds.pop() {
+                        round[open] = i;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Closers { square, round }
+    }
+}
+
+/// The link `[name](url)` whose `[` is at byte `at` of `s`, and the byte just past it. The URL is
+/// the destination without a `"title"` or angle brackets; nested brackets and parentheses are
+/// balanced.
+fn link_at(s: &str, closers: &Closers, at: usize) -> Option<(LlmsLink, usize)> {
     let bytes = s.as_bytes();
-    if bytes.first() != Some(&b'[') {
+    if bytes.get(at) != Some(&b'[') {
         return None;
     }
-    let mut depth = 0usize;
-    let mut close = None;
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'[' => depth += 1,
-            b']' => {
-                depth -= 1;
-                if depth == 0 {
-                    close = Some(i);
-                    break;
-                }
-            }
-            _ => {}
-        }
+    let close = closers.square[at];
+    if close == Closers::NONE || bytes.get(close + 1) != Some(&b'(') {
+        return None;
     }
-    let close = close?;
-    if bytes.get(close + 1) != Some(&b'(') {
+    let end = closers.round[close + 1];
+    if end == Closers::NONE {
         return None;
     }
     let start = close + 2;
-    let mut depth = 1usize;
-    let mut end = None;
-    for (i, &b) in bytes[start..].iter().enumerate() {
-        match b {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = Some(start + i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let end = end?;
     let dest = s[start..end].trim();
     let url = match dest.strip_prefix('<') {
         Some(inner) => inner.split('>').next().unwrap_or(""),
@@ -270,7 +299,7 @@ fn link_at(s: &str) -> Option<(LlmsLink, usize)> {
     }
     Some((
         LlmsLink {
-            name: s[1..close].trim().to_owned(),
+            name: s[at + 1..close].trim().to_owned(),
             url: url.to_owned(),
         },
         end + 1,
@@ -282,8 +311,9 @@ fn link_at(s: &str) -> Option<(LlmsLink, usize)> {
 /// schemes (`mailto:`, `javascript:`) are left out.
 pub fn links(doc: &LlmsDoc) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for url in &doc.urls {
-        if url.starts_with('#') || out.contains(url) {
+    let mut seen: HashSet<&str> = HashSet::new();
+    for url in doc.urls.iter().take(MAX_LINKS) {
+        if url.starts_with('#') || !seen.insert(url.as_str()) {
             continue;
         }
         if let Some(colon) = url.find(':') {
