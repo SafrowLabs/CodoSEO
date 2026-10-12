@@ -11,6 +11,15 @@ fn crawl_limits_default_to_the_global_constraints() {
     assert_eq!(l.request_timeout, Duration::from_secs(30));
     assert_eq!(l.max_redirects, 10);
     assert_eq!(l.max_sitemap_urls, 50_000);
+    assert_eq!(l.llms_link_checks, 20);
+}
+
+#[test]
+fn old_crawl_limits_json_gets_the_llms_link_default() {
+    let mut v = serde_json::to_value(CrawlLimits::default()).unwrap();
+    v.as_object_mut().unwrap().remove("llms_link_checks");
+    let l: CrawlLimits = serde_json::from_value(v).unwrap();
+    assert_eq!(l.llms_link_checks, 20);
 }
 
 #[test]

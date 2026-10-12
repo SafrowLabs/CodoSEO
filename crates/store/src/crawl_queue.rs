@@ -384,6 +384,8 @@ fn page_record_from_row(row: sqlx::postgres::PgRow) -> PageRecord {
             jsonld,
             mixed_content: row.get::<Option<i32>, _>("mixed_content").unwrap_or(0) as u32,
             ai,
+            // Raw-HTML signals are never stored.
+            raw: Default::default(),
         },
         inlinks: row.get::<i32, _>("inlinks") as u32,
         outlinks_internal: row.get::<i32, _>("outlinks_internal") as u32,

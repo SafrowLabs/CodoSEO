@@ -483,6 +483,7 @@ fn record(path: &str, status: u16) -> PageRecord {
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
             ai: Default::default(),
+            raw: Default::default(),
         },
         inlinks: 1,
         outlinks_internal: 0,

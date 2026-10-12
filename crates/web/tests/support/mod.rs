@@ -576,6 +576,7 @@ pub fn page(domain: &str, path: &str) -> PageRecord {
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
             ai: Default::default(),
+            raw: Default::default(),
         },
         inlinks: 0,
         outlinks_internal: 0,

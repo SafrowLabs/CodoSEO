@@ -115,6 +115,41 @@ pub struct WellKnownFile {
     pub body: String,
 }
 
+/// `/llms.txt` as served, with the status of the links it lists.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmsTxtFetch {
+    pub status: u16,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// Size of the whole response, which can exceed what `body` keeps.
+    #[serde(default)]
+    pub bytes: u64,
+    /// `body` is cut short of the response.
+    #[serde(default)]
+    pub truncated: bool,
+    /// Empty unless the status was 2xx.
+    #[serde(default)]
+    pub body: String,
+    /// Checked links from the file, in file order.
+    #[serde(default)]
+    pub links: Vec<LinkStatus>,
+    /// Links on other origins that were not checked.
+    #[serde(default)]
+    pub external_unchecked: u16,
+}
+
+/// The outcome for one link listed in `llms.txt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkStatus {
+    pub url: String,
+    /// `None` when the request failed before a response.
+    #[serde(default)]
+    pub status: Option<u16>,
+    /// The status comes from the crawl, not a separate request.
+    #[serde(default)]
+    pub from_crawl: bool,
+}
+
 /// Site-wide signals the crawl read outside the page list: what the site declares
 /// about AI use in response headers and well-known files.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +161,9 @@ pub struct SiteSignals {
     /// `/.well-known/tdmrep.json`; `None` when it was not fetched or the fetch failed.
     #[serde(default)]
     pub tdmrep: Option<WellKnownFile>,
+    /// `/llms.txt`; `None` when it was not fetched or the fetch failed.
+    #[serde(default)]
+    pub llms_txt: Option<LlmsTxtFetch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -109,6 +109,7 @@ pub(crate) async fn preflight(
             .map(|res| signal_headers(&res.headers))
             .unwrap_or_default(),
         tdmrep: None,
+        llms_txt: None,
     };
     let stop = match &result {
         Err(e) => Some(StopReason::Unreachable(e.to_string())),

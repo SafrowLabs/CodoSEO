@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
-use codoseo_core::page::{AiMeta, JsonLdStatus, OgTags, PageFields};
+use codoseo_core::page::{AiMeta, JsonLdStatus, OgTags, PageFields, RawSignals};
 use codoseo_core::url::normalize;
 use encoding_rs::{Decoder, Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use lol_html::html_content::{Element, EndTag};
@@ -753,6 +753,8 @@ impl State {
                 tdm_reservation: self.tdm_reservation.take(),
                 tdm_policy: self.tdm_policy.take(),
             },
+            // Filled once the extractor reads the raw-HTML signals.
+            raw: RawSignals::default(),
         };
         Extracted { fields, links }
     }

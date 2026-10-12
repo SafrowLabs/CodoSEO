@@ -75,6 +75,7 @@ fn sample_page(idx: u64) -> PageRecord {
             jsonld: JsonLdStatus::default(),
             mixed_content: 0,
             ai: AiMeta::default(),
+            raw: Default::default(),
         },
         inlinks: 0,
         outlinks_internal: 0,
