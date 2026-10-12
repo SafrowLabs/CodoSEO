@@ -1,8 +1,9 @@
 //! Daily cleanup: trims old crawl history past each plan's retention window, deletes
 //! unclaimed no-signup audits after 7 days, and clears out expired tokens/sessions and old
 //! failed (30 days) and finished (14 days) jobs, API usage counters past 35 days and API keys
-//! revoked over 90 days ago. Each step is its own statement — these are independent cleanup
-//! passes, not one atomic unit (unlike `finalize`, which must be all-or-nothing).
+//! revoked over 90 days ago, and prunes each AI access incident's finished rechecks to the newest
+//! 20. Each step is its own statement — these are independent cleanup passes, not one atomic
+//! unit (unlike `finalize`, which must be all-or-nothing).
 
 use codoseo_core::plan::{Plan, PlanLimits};
 use sqlx::PgPool;
@@ -10,10 +11,14 @@ use uuid::Uuid;
 
 use crate::dbenum::enum_slug;
 
+/// Finished rechecks kept per incident ([`run`]).
+const KEEP_RECHECKS: i64 = 20;
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RetentionReport {
     pub crawls_trimmed: u64,
     pub ai_incidents_trimmed: u64,
+    pub ai_rechecks_pruned: u64,
     pub unclaimed_sites_deleted: u64,
     pub tokens_deleted: u64,
     pub sessions_deleted: u64,
@@ -46,6 +51,23 @@ pub async fn run(
         crawls_trimmed += trim_plan_history(pool, &enum_slug(&plan), i64::from(days)).await?;
         ai_incidents_trimmed += trim_ai_incidents(pool, &enum_slug(&plan), i64::from(days)).await?;
     }
+
+    // An open incident can be rechecked for months: keep each incident's newest
+    // KEEP_RECHECKS finished rechecks (the screen shows the newest, a follow-up chain counts
+    // since the last manual one), every queued or running one, and every one the daily
+    // allowance still counts (the trailing window).
+    let ai_rechecks_pruned = sqlx::query(
+        "DELETE FROM ai_rechecks r USING ( \
+           SELECT id, row_number() OVER (PARTITION BY incident_id ORDER BY id DESC) AS rn \
+           FROM ai_rechecks WHERE status NOT IN ('queued', 'running')) old \
+         WHERE r.id = old.id AND old.rn > $1 \
+           AND r.created_at < now() - make_interval(hours => $2)",
+    )
+    .bind(KEEP_RECHECKS)
+    .bind(crate::geo::RECHECK_WINDOW_HOURS)
+    .execute(pool)
+    .await?
+    .rows_affected();
 
     let unclaimed_sites_deleted = sqlx::query(
         "DELETE FROM sites WHERE account_id IS NULL AND created_at < now() - interval '7 days'",
@@ -96,6 +118,7 @@ pub async fn run(
     Ok(RetentionReport {
         crawls_trimmed,
         ai_incidents_trimmed,
+        ai_rechecks_pruned,
         unclaimed_sites_deleted,
         tokens_deleted,
         sessions_deleted,
