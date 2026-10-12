@@ -15,6 +15,7 @@ use codoseo_core::url::url_hash;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::content::{ContentReport, content_report};
 use crate::declared::{
     TdmRepEntry, clean_declared, is_known_signal_key, is_known_usage_key, parse_content_signal,
     parse_content_usage, parse_tdmrep,
@@ -296,6 +297,10 @@ pub struct AccessReport {
     /// audits, probes switched off or not possible).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probes: Option<ProbeReport>,
+    /// What the important HTML pages hold as served, before JavaScript; `None` when there are
+    /// none (and in older reports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<ContentReport>,
 }
 
 impl EngineAccess {
@@ -489,6 +494,7 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         .and_then(|i| by_url.get(i.url.as_str()))
         .copied();
     let readable_robots = parsed.as_ref().filter(|_| avail == RobotsAvailability::Ok);
+    let content = content_report(&important, &by_url);
     AccessReport {
         version: REPORT_VERSION,
         registry_version: registry().version,
@@ -502,6 +508,7 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         engines: engines_out,
         declared: declared(out, readable_robots, home),
         probes: None,
+        content,
     }
 }
 

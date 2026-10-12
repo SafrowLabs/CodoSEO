@@ -2,6 +2,7 @@
 //! robots.txt verdicts, page-level answer eligibility per engine, the owner's intent, the access
 //! report built from a crawl, the findings drawn from it and the incident lifecycle.
 
+pub mod content;
 pub mod declared;
 pub mod eligibility;
 pub mod findings;
