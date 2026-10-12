@@ -3012,3 +3012,57 @@ async fn rechecks_nothing_will_finish_are_failed() {
         .await
         .unwrap();
 }
+
+// ---- B3 review ---------------------------------------------------------------------------------
+
+/// Applies a manual recheck that read `robots_body` and returns its outcome.
+async fn manual_recheck(
+    pool: &PgPool,
+    site: Uuid,
+    incident: i64,
+    owner: Uuid,
+    robots_body: &str,
+) -> Option<RecheckOutcome> {
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(pool)
+        .await
+        .unwrap();
+    let queued = geo::request_recheck(pool, site, incident, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(pool, queued.id).await.unwrap().unwrap();
+    let (report, kinds) = rechecked_robots(pool, site, incident, robots_body).await;
+    geo::apply_recheck(pool, queued.id, &report, &kinds, None)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_recheck_that_sees_it_worse_leaves_the_escalation_to_the_next_crawl() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let before = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(before.len(), 1);
+    let id = before[0].id;
+
+    // The recheck sees the whole site blocked now: still failing, but it changes neither the
+    // stored severity nor the evidence.
+    let outcome = manual_recheck(&db.pool, site, id, owner, BLOCK_OAI).await;
+    assert_eq!(outcome, Some(RecheckOutcome::StillFailing));
+    let after = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(after.severity, before[0].severity);
+    assert_eq!(after.evidence, before[0].evidence);
+    assert_eq!(after.title, before[0].title);
+
+    // The next crawl sees it worse and announces it.
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), false)]
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 1);
+}

@@ -1009,8 +1009,10 @@ pub async fn fail_orphaned_rechecks(
 ///
 /// - Not conclusive for its kind: `inconclusive`, nothing changes; a follow-up queues the next
 ///   one [`FOLLOWUP_RETRY_HOURS`] on, at most [`MAX_INCONCLUSIVE_FOLLOWUPS`] in a row.
-/// - Still there: the incident's evidence and `last_seen_at` are refreshed (its
-///   `last_seen_crawl_id` stays: no crawl saw it), a recovery is undone: `still_failing`.
+/// - Still there: its `last_seen_at` is refreshed (its `last_seen_crawl_id` stays: no crawl
+///   saw it) and a recovery is undone: `still_failing`. Its severity, title and evidence stay
+///   the last crawl's, so a recheck that sees it worse or wider never hides the escalation or
+///   widening from the next crawl, which announces it; the fresh view is in the observations.
 /// - Gone, on a manual recheck: `recovered_at` is set and a follow-up recheck is queued for when
 ///   the operators will have seen the fix ([`codoseo_geo::ledger::lag`]): `clean`.
 /// - Gone again, on that follow-up: resolved (`fixed`, verified now, by `recheck`) and, unless it
@@ -1105,20 +1107,14 @@ pub async fn apply_recheck(
     let found = hold_unjudged(report, &intent, &open)
         .into_iter()
         .find(|f| f.kind == row.kind && f.subject == row.subject);
-    let outcome = if let Some(finding) = found {
-        let mut evidence =
-            serde_json::to_value(&finding.evidence).expect("evidence always serializes");
-        strip_nul(&mut evidence);
+    let outcome = if found.is_some() {
+        // Only when it was seen: the severity, title and evidence stay the last crawl's, so a
+        // recheck that sees it worse or wider leaves that change for the next crawl to find and
+        // announce (a recheck writes no change rows). What it saw is in its observations.
         sqlx::query(
-            "UPDATE ai_incidents SET severity = $2::severity, title = $3, summary = $4, \
-               evidence = $5, last_seen_at = now(), recovered_at = NULL \
-             WHERE id = $1",
+            "UPDATE ai_incidents SET last_seen_at = now(), recovered_at = NULL WHERE id = $1",
         )
         .bind(row.id)
-        .bind(enum_slug(&finding.severity))
-        .bind(without_nul(&finding.title))
-        .bind(without_nul(&finding.summary))
-        .bind(evidence)
         .execute(&mut *tx)
         .await?;
         finish(RecheckStatus::Done, Some(RecheckOutcome::StillFailing))
