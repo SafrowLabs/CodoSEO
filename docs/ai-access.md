@@ -99,7 +99,7 @@ It costs no extra requests: the crawler already fetched these pages, and the ver
 
 <table>
   <tr>
-    <td width="50%"><a href="images/ai-access/ai-access-content-light.png"><img src="images/ai-access/ai-access-content-light.png" alt="The Content in raw HTML card and a content_missing incident, with the llms.txt card below"></a><br>An incident for two shell pages, the <b>Content in raw HTML</b> card and the <b>llms.txt</b> card</td>
+    <td width="50%"><a href="images/ai-access/ai-access-content-light.png"><img src="images/ai-access/ai-access-content-light.png" alt="The Content in raw HTML card and a content_missing incident, with the llms.txt card below"></a><br>An incident for seven shell pages, the <b>Content in raw HTML</b> card and the <b>llms.txt</b> card</td>
     <td width="50%"><a href="images/ai-access/ai-access-content-dark.png"><img src="images/ai-access/ai-access-content-dark.png" alt="The same, dark theme"></a><br>The same, dark theme</td>
   </tr>
 </table>
