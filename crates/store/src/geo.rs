@@ -97,6 +97,18 @@ pub struct Incident {
     pub resolution: Option<String>,
     /// Opened without an alert: part of the site's baseline or of an intent change.
     pub quiet: bool,
+    /// The evidence before the owner changed anything, once a repair has started.
+    pub before: Option<Value>,
+    /// When the owner accepted the finding as it is, and which account did.
+    pub accepted_at: Option<OffsetDateTime>,
+    pub accepted_by: Option<Uuid>,
+    /// The incident raises no reminders until then.
+    pub snoozed_until: Option<OffsetDateTime>,
+    /// When a check first saw the problem gone, and when that was confirmed.
+    pub recovered_at: Option<OffsetDateTime>,
+    pub verified_at: Option<OffsetDateTime>,
+    /// What resolved it: `crawl`, `recheck` or `intent`.
+    pub resolved_by: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -114,6 +126,13 @@ struct IncidentRow {
     resolved_at: Option<OffsetDateTime>,
     resolution: Option<String>,
     quiet: bool,
+    before: Option<Value>,
+    accepted_at: Option<OffsetDateTime>,
+    accepted_by: Option<Uuid>,
+    snoozed_until: Option<OffsetDateTime>,
+    recovered_at: Option<OffsetDateTime>,
+    verified_at: Option<OffsetDateTime>,
+    resolved_by: Option<String>,
 }
 
 impl IncidentRow {
@@ -132,15 +151,183 @@ impl IncidentRow {
             resolved_at: self.resolved_at,
             resolution: self.resolution,
             quiet: self.quiet,
+            before: self.before,
+            accepted_at: self.accepted_at,
+            accepted_by: self.accepted_by,
+            snoozed_until: self.snoozed_until,
+            recovered_at: self.recovered_at,
+            verified_at: self.verified_at,
+            resolved_by: self.resolved_by,
         })
     }
 }
 
 const INCIDENT_COLUMNS: &str = "id, kind, subject, severity::text AS severity, title, summary, \
-     evidence, opened_crawl_id, opened_at, last_seen_at, resolved_at, resolution, quiet";
+     evidence, opened_crawl_id, opened_at, last_seen_at, resolved_at, resolution, quiet, \
+     before, accepted_at, accepted_by, snoozed_until, recovered_at, verified_at, resolved_by";
 
 fn parse_severity(s: &str) -> Option<Severity> {
     serde_json::from_value(Value::String(s.to_owned())).ok()
+}
+
+/// How a recheck came about. Mirrors `ai_rechecks.origin`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecheckOrigin {
+    /// The owner asked for it.
+    Manual,
+    /// Queued by the system after a repair.
+    Followup,
+}
+
+impl RecheckOrigin {
+    pub fn slug(self) -> &'static str {
+        match self {
+            RecheckOrigin::Manual => "manual",
+            RecheckOrigin::Followup => "followup",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<RecheckOrigin> {
+        match slug {
+            "manual" => Some(RecheckOrigin::Manual),
+            "followup" => Some(RecheckOrigin::Followup),
+            _ => None,
+        }
+    }
+}
+
+/// Where a recheck is. Mirrors `ai_rechecks.status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecheckStatus {
+    Queued,
+    Running,
+    Done,
+    /// Replaced by a newer recheck or made moot before it ran.
+    Superseded,
+    Failed,
+}
+
+impl RecheckStatus {
+    pub fn slug(self) -> &'static str {
+        match self {
+            RecheckStatus::Queued => "queued",
+            RecheckStatus::Running => "running",
+            RecheckStatus::Done => "done",
+            RecheckStatus::Superseded => "superseded",
+            RecheckStatus::Failed => "failed",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<RecheckStatus> {
+        match slug {
+            "queued" => Some(RecheckStatus::Queued),
+            "running" => Some(RecheckStatus::Running),
+            "done" => Some(RecheckStatus::Done),
+            "superseded" => Some(RecheckStatus::Superseded),
+            "failed" => Some(RecheckStatus::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// What a finished recheck found. Mirrors `ai_rechecks.outcome`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecheckOutcome {
+    Clean,
+    StillFailing,
+    Inconclusive,
+}
+
+impl RecheckOutcome {
+    pub fn slug(self) -> &'static str {
+        match self {
+            RecheckOutcome::Clean => "clean",
+            RecheckOutcome::StillFailing => "still_failing",
+            RecheckOutcome::Inconclusive => "inconclusive",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<RecheckOutcome> {
+        match slug {
+            "clean" => Some(RecheckOutcome::Clean),
+            "still_failing" => Some(RecheckOutcome::StillFailing),
+            "inconclusive" => Some(RecheckOutcome::Inconclusive),
+            _ => None,
+        }
+    }
+}
+
+/// One row of `ai_rechecks`.
+#[derive(Debug, Clone)]
+pub struct Recheck {
+    pub id: i64,
+    pub site_id: Uuid,
+    pub incident_id: i64,
+    pub origin: RecheckOrigin,
+    pub requested_by: Option<Uuid>,
+    pub status: RecheckStatus,
+    pub due_at: OffsetDateTime,
+    pub started_at: Option<OffsetDateTime>,
+    pub finished_at: Option<OffsetDateTime>,
+    pub outcome: Option<RecheckOutcome>,
+    pub observations: Option<Value>,
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(sqlx::FromRow)]
+struct RecheckRow {
+    id: i64,
+    site_id: Uuid,
+    incident_id: i64,
+    origin: String,
+    requested_by: Option<Uuid>,
+    status: String,
+    due_at: OffsetDateTime,
+    started_at: Option<OffsetDateTime>,
+    finished_at: Option<OffsetDateTime>,
+    outcome: Option<String>,
+    observations: Option<Value>,
+    created_at: OffsetDateTime,
+}
+
+impl RecheckRow {
+    fn into_recheck(self) -> Option<Recheck> {
+        Some(Recheck {
+            id: self.id,
+            site_id: self.site_id,
+            incident_id: self.incident_id,
+            origin: RecheckOrigin::from_slug(&self.origin)?,
+            requested_by: self.requested_by,
+            status: RecheckStatus::from_slug(&self.status)?,
+            due_at: self.due_at,
+            started_at: self.started_at,
+            finished_at: self.finished_at,
+            outcome: match self.outcome {
+                Some(o) => Some(RecheckOutcome::from_slug(&o)?),
+                None => None,
+            },
+            observations: self.observations,
+            created_at: self.created_at,
+        })
+    }
+}
+
+/// One recheck of the site, whatever its status. `None` for another site's id.
+pub async fn recheck(
+    pool: &PgPool,
+    site_id: Uuid,
+    id: i64,
+) -> Result<Option<Recheck>, sqlx::Error> {
+    let row: Option<RecheckRow> = sqlx::query_as(
+        "SELECT id, site_id, incident_id, origin, requested_by, status, due_at, started_at, \
+         finished_at, outcome, observations, created_at \
+         FROM ai_rechecks WHERE site_id = $1 AND id = $2",
+    )
+    .bind(site_id)
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(RecheckRow::into_recheck))
 }
 
 /// Why an intent was not saved.

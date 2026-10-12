@@ -43,7 +43,13 @@ pub const LANES: [&str; 6] = ["0", "1", "2", "3", "4", "5"];
 /// The alert channel kinds (`ChannelKind::as_str`).
 pub const CHANNELS: [&str; 4] = ["email", "slack", "discord", "webhook"];
 /// The job kinds (`JobKind::slug`).
-pub const JOB_KINDS: [&str; 4] = ["send_alert", "send_digest", "send_email", "cleanup"];
+pub const JOB_KINDS: [&str; 5] = [
+    "send_alert",
+    "send_digest",
+    "send_email",
+    "cleanup",
+    "ai_recheck",
+];
 /// What `api_requests_total`'s `result` is: `ok`, an [`AgentError::code`](crate::agent::error::AgentError::code) or `error`.
 pub const API_RESULTS: [&str; 10] = [
     "ok",

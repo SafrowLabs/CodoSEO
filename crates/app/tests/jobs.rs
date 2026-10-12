@@ -218,3 +218,30 @@ async fn the_loop_stops_promptly_when_idle() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     running.stop().await;
 }
+
+#[tokio::test]
+async fn an_ai_recheck_job_is_failed_cleanly_until_its_handler_exists() {
+    let db = TestDb::new().await;
+    let (ctx, _sent) = context(&db.pool);
+    let queue = JobQueue::new(db.pool.clone());
+    let id = queue
+        .enqueue_at(
+            JobKind::AiRecheck,
+            json!({"recheck_id": 1}),
+            time::OffsetDateTime::now_utc(),
+            1,
+        )
+        .await
+        .unwrap();
+    let running = RunningLoop::start(ctx, &db.pool);
+    wait_settled(&db.pool, id).await;
+    running.stop().await;
+    let (status, error): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, last_error FROM jobs WHERE id = $1")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert!(error.unwrap().contains("not implemented"));
+}

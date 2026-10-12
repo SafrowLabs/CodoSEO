@@ -1632,3 +1632,224 @@ async fn shell_pages_that_fail_one_crawl_keep_content_missing_open_without_a_cha
             .is_empty()
     );
 }
+
+const BLOCK_OAI_TXT: &str = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n";
+
+/// A site with one open incident.
+async fn site_with_incident(pool: &PgPool) -> (Uuid, i64) {
+    let site = make_site(pool, "example.com").await;
+    full_crawl(pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(pool, site, 200, BLOCK_OAI_TXT, None).await;
+    let open = geo::open_incidents(pool, site).await.unwrap();
+    assert_eq!(open.len(), 1);
+    (site, open[0].id)
+}
+
+#[tokio::test]
+async fn a_new_incident_has_none_of_the_repair_fields() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.before, None);
+    assert_eq!(i.accepted_at, None);
+    assert_eq!(i.accepted_by, None);
+    assert_eq!(i.snoozed_until, None);
+    assert_eq!(i.recovered_at, None);
+    assert_eq!(i.verified_at, None);
+    assert_eq!(i.resolved_by, None);
+}
+
+#[tokio::test]
+async fn the_repair_fields_of_an_incident_round_trip() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let account: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (email, email_canonical) VALUES ('o@example.com', 'o@example.com') \
+         RETURNING id",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE ai_incidents SET before = '{\"rule\": \"Disallow: /\"}', accepted_at = now(), \
+         accepted_by = $2, snoozed_until = now() + interval '1 day', recovered_at = now(), \
+         verified_at = now(), resolved_by = 'recheck' WHERE id = $1",
+    )
+    .bind(id)
+    .bind(account)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.before, Some(serde_json::json!({"rule": "Disallow: /"})));
+    assert!(i.accepted_at.is_some());
+    assert_eq!(i.accepted_by, Some(account));
+    assert!(i.snoozed_until.is_some());
+    assert!(i.recovered_at.is_some());
+    assert!(i.verified_at.is_some());
+    assert_eq!(i.resolved_by.as_deref(), Some("recheck"));
+    // The listings read the same columns.
+    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    assert_eq!(open[0].resolved_by.as_deref(), Some("recheck"));
+
+    // Deleting the account clears the reference but keeps the incident.
+    sqlx::query("DELETE FROM accounts WHERE id = $1")
+        .bind(account)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.accepted_by, None);
+    assert!(i.accepted_at.is_some());
+}
+
+#[tokio::test]
+async fn resolved_by_only_takes_the_three_known_values() {
+    let db = TestDb::new().await;
+    let (_, id) = site_with_incident(&db.pool).await;
+    for ok in ["crawl", "recheck", "intent"] {
+        sqlx::query("UPDATE ai_incidents SET resolved_by = $2 WHERE id = $1")
+            .bind(id)
+            .bind(ok)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+    }
+    let bad = sqlx::query("UPDATE ai_incidents SET resolved_by = 'magic' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await;
+    assert!(bad.is_err());
+}
+
+async fn insert_recheck(pool: &PgPool, site: Uuid, incident: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
+         VALUES ($1, $2, 'followup', now() + interval '10 minutes') RETURNING id",
+    )
+    .bind(site)
+    .bind(incident)
+    .fetch_one(pool)
+    .await
+}
+
+#[tokio::test]
+async fn a_recheck_row_loads_with_its_defaults_and_values() {
+    use geo::{RecheckOrigin, RecheckOutcome, RecheckStatus};
+
+    let db = TestDb::new().await;
+    let (site, incident) = site_with_incident(&db.pool).await;
+    let id = insert_recheck(&db.pool, site, incident).await.unwrap();
+    let r = geo::recheck(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!((r.site_id, r.incident_id), (site, incident));
+    assert_eq!(r.origin, RecheckOrigin::Followup);
+    assert_eq!(r.status, RecheckStatus::Queued);
+    assert_eq!(
+        (r.requested_by, r.outcome, r.observations),
+        (None, None, None)
+    );
+    assert!(r.started_at.is_none() && r.finished_at.is_none());
+    assert!(r.due_at > r.created_at);
+    assert!(
+        geo::recheck(&db.pool, Uuid::new_v4(), id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    sqlx::query(
+        "UPDATE ai_rechecks SET status = 'done', outcome = 'still_failing', \
+         observations = '{\"probes\": []}', started_at = now(), finished_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let r = geo::recheck(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(r.status, RecheckStatus::Done);
+    assert_eq!(r.outcome, Some(RecheckOutcome::StillFailing));
+    assert_eq!(r.observations, Some(serde_json::json!({"probes": []})));
+}
+
+#[tokio::test]
+async fn only_one_recheck_per_incident_is_queued_or_running() {
+    let db = TestDb::new().await;
+    let (site, incident) = site_with_incident(&db.pool).await;
+    let first = insert_recheck(&db.pool, site, incident).await.unwrap();
+    assert!(insert_recheck(&db.pool, site, incident).await.is_err());
+    sqlx::query("UPDATE ai_rechecks SET status = 'running' WHERE id = $1")
+        .bind(first)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert!(insert_recheck(&db.pool, site, incident).await.is_err());
+    // Once it is over, another can be queued.
+    sqlx::query("UPDATE ai_rechecks SET status = 'superseded' WHERE id = $1")
+        .bind(first)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    insert_recheck(&db.pool, site, incident).await.unwrap();
+}
+
+#[tokio::test]
+async fn recheck_values_are_checked_and_go_with_their_incident_and_site() {
+    let db = TestDb::new().await;
+    let (site, incident) = site_with_incident(&db.pool).await;
+    for (column, bad) in [
+        ("origin", "robot"),
+        ("status", "waiting"),
+        ("outcome", "fine"),
+    ] {
+        let id = insert_recheck(&db.pool, site, incident).await;
+        let id = match id {
+            Ok(id) => id,
+            Err(_) => {
+                sqlx::query("DELETE FROM ai_rechecks")
+                    .execute(&db.pool)
+                    .await
+                    .unwrap();
+                insert_recheck(&db.pool, site, incident).await.unwrap()
+            }
+        };
+        let bad = sqlx::query(&format!(
+            "UPDATE ai_rechecks SET {column} = $2 WHERE id = $1"
+        ))
+        .bind(id)
+        .bind(bad)
+        .execute(&db.pool)
+        .await;
+        assert!(bad.is_err(), "{column} accepted a bad value");
+    }
+    sqlx::query("DELETE FROM ai_incidents WHERE id = $1")
+        .bind(incident)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_rechecks")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "deleting the incident deletes its rechecks");
+
+    let (site2, incident2) = {
+        let site = make_site(&db.pool, "other.example").await;
+        full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+        full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+        (
+            site,
+            geo::open_incidents(&db.pool, site).await.unwrap()[0].id,
+        )
+    };
+    insert_recheck(&db.pool, site2, incident2).await.unwrap();
+    sqlx::query("DELETE FROM sites WHERE id = $1")
+        .bind(site2)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_rechecks")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "deleting the site deletes its rechecks");
+}

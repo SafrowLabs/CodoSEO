@@ -38,9 +38,9 @@ async fn migrate_creates_every_table() {
             .expect("count tables")
             .get(0);
     // 14 data tables from 0001, instance_settings from 0002, billing_events from 0008,
-    // api_usage from 0010, ai_reports and ai_incidents from 0011, and sqlx's own
+    // api_usage from 0010, ai_reports and ai_incidents from 0011, ai_rechecks from 0014, and sqlx's own
     // _sqlx_migrations bookkeeping table.
-    assert_eq!(count, 20);
+    assert_eq!(count, 21);
 
     // 0012: the per-site switch for synthetic agent fetch probes, on unless switched off.
     let (nullable, default): (String, Option<String>) = sqlx::query_as(
@@ -70,6 +70,69 @@ async fn migrate_creates_every_table() {
                 .expect("read change_kind");
         assert!(has, "change_kind has {slug}");
     }
+
+    // 0014: the repair columns, the recheck table and the job kind that runs one.
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns \
+         WHERE table_name = 'ai_incidents' AND column_name = ANY($1) ORDER BY column_name",
+    )
+    .bind(vec![
+        "before",
+        "accepted_at",
+        "accepted_by",
+        "snoozed_until",
+        "recovered_at",
+        "verified_at",
+        "resolved_by",
+    ])
+    .fetch_all(&mut check)
+    .await
+    .expect("read ai_incidents columns");
+    assert_eq!(columns.len(), 7, "{columns:?}");
+    let rechecks: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns \
+         WHERE table_name = 'ai_rechecks' ORDER BY ordinal_position",
+    )
+    .fetch_all(&mut check)
+    .await
+    .expect("read ai_rechecks columns");
+    assert_eq!(
+        rechecks,
+        [
+            "id",
+            "site_id",
+            "incident_id",
+            "origin",
+            "requested_by",
+            "status",
+            "due_at",
+            "started_at",
+            "finished_at",
+            "outcome",
+            "observations",
+            "created_at",
+        ]
+    );
+    let indexes: Vec<String> = sqlx::query_scalar(
+        "SELECT indexname::text FROM pg_indexes WHERE tablename = 'ai_rechecks' ORDER BY indexname",
+    )
+    .fetch_all(&mut check)
+    .await
+    .expect("read ai_rechecks indexes");
+    assert_eq!(
+        indexes,
+        [
+            "ai_rechecks_active_idx",
+            "ai_rechecks_pkey",
+            "ai_rechecks_site_idx"
+        ]
+    );
+    let job: bool =
+        sqlx::query_scalar("SELECT 'ai_recheck' = ANY(enum_range(NULL::job_kind)::text[])")
+            .fetch_one(&mut check)
+            .await
+            .expect("read job_kind");
+    assert!(job, "job_kind has ai_recheck");
     drop(check);
 
     admin

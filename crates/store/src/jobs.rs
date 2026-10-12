@@ -1,5 +1,5 @@
 //! The generic jobs queue: non-crawl work (`send_alert`, `send_digest`, `send_email`,
-//! `cleanup`), claimed the same way as the crawl queue (`SKIP LOCKED`), with exponential
+//! `cleanup`, `ai_recheck`), claimed the same way as the crawl queue (`SKIP LOCKED`), with exponential
 //! backoff on retry.
 
 use sqlx::{FromRow, PgPool};
@@ -13,6 +13,7 @@ pub enum JobKind {
     SendDigest,
     SendEmail,
     Cleanup,
+    AiRecheck,
 }
 
 impl JobKind {
@@ -23,6 +24,7 @@ impl JobKind {
             JobKind::SendDigest => "send_digest",
             JobKind::SendEmail => "send_email",
             JobKind::Cleanup => "cleanup",
+            JobKind::AiRecheck => "ai_recheck",
         }
     }
 }
@@ -56,6 +58,26 @@ impl JobQueue {
             .bind(payload)
             .fetch_one(&self.pool)
             .await
+    }
+
+    /// Enqueues a job that is not claimable before `run_after`, with its own attempt budget.
+    pub async fn enqueue_at(
+        &self,
+        kind: JobKind,
+        payload: serde_json::Value,
+        run_after: time::OffsetDateTime,
+        max_attempts: i16,
+    ) -> Result<Uuid, sqlx::Error> {
+        sqlx::query_scalar(
+            "INSERT INTO jobs (kind, payload, run_after, max_attempts) VALUES ($1, $2, $3, $4) \
+             RETURNING id",
+        )
+        .bind(kind)
+        .bind(payload)
+        .bind(run_after)
+        .bind(max_attempts)
+        .fetch_one(&self.pool)
+        .await
     }
 
     /// Claims the next due job with `SKIP LOCKED`, marking it `running`.

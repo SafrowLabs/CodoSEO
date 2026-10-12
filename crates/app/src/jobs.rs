@@ -130,6 +130,9 @@ pub async fn run_job(ctx: &JobContext, job: ClaimedJob) -> Result<(), String> {
         JobKind::Cleanup => cleanup(ctx).await,
         JobKind::SendAlert => crate::alerts::send_alert(ctx, &job).await,
         JobKind::SendDigest => crate::digest::send_digest(ctx, &job.payload).await,
+        // The row and the job kind exist; the recheck itself arrives with B3.9. Failing keeps
+        // the job visible on the admin page instead of silently dropping it.
+        JobKind::AiRecheck => Err("ai_recheck jobs are not implemented yet".to_owned()),
     }
 }
 
