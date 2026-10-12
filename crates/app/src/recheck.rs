@@ -195,11 +195,12 @@ async fn execute(
         return Ok(Ran::Superseded);
     }
 
-    let start_url: String = sqlx::query_scalar("SELECT start_url FROM sites WHERE id = $1")
-        .bind(recheck.site_id)
-        .fetch_one(pool)
-        .await
-        .map_err(db("the site"))?;
+    let (start_url, crawl_settings): (String, Value) =
+        sqlx::query_as("SELECT start_url, crawl_settings FROM sites WHERE id = $1")
+            .bind(recheck.site_id)
+            .fetch_one(pool)
+            .await
+            .map_err(db("the site"))?;
     let start = Url::parse(&start_url).map_err(|e| format!("bad start URL: {e}"))?;
     let incident = geo::incident(pool, recheck.site_id, recheck.incident_id)
         .await
@@ -221,7 +222,7 @@ async fn execute(
     let evidence: Evidence = serde_json::from_value(incident.evidence.clone())
         .map_err(|e| format!("the incident's evidence does not read: {e}"))?;
     let plan_name = resolve_plan(pool, recheck.site_id).await?;
-    let limits = limits_for(plan_name, &json!({}));
+    let limits = limits_for(plan_name, &crawl_settings);
     let probe_cap = settings.probes.probe_urls(plan_name, &limits);
 
     let mut plan = plan(

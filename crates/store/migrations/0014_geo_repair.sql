@@ -65,5 +65,9 @@ COMMENT ON COLUMN ai_rechecks.failure IS
   'allowance) | ours (it could not run on our side; free); NULL otherwise.';
 COMMENT ON COLUMN ai_rechecks.observations IS 'What the recheck saw (the fresh probes and robots.txt), as JSON; NULL until done.';
 
+-- The orphaned-recheck sweep looks each queued or running recheck's job up by its payload. A
+-- predicate on the payload rather than on the new job kind, which can't be used before commit.
+CREATE INDEX jobs_recheck_id_idx ON jobs ((payload->>'recheck_id')) WHERE payload ? 'recheck_id';
+
 -- The job that runs a recheck when it is due. Not used before the commit, as in 0012 and 0013.
 ALTER TYPE job_kind ADD VALUE 'ai_recheck';

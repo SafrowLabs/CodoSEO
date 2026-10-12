@@ -1075,9 +1075,9 @@ pub async fn fail_orphaned_rechecks(
            started_at = COALESCE(r.started_at, now()) \
          WHERE (r.status = 'running' AND r.started_at < now() - make_interval(secs => $1)) \
             OR (r.status IN ('queued', 'running') AND NOT EXISTS ( \
-                  SELECT 1 FROM jobs j WHERE j.kind = 'ai_recheck' \
-                    AND j.status IN ('queued', 'running') \
-                    AND j.payload->>'recheck_id' = r.id::text))",
+                  SELECT 1 FROM jobs j WHERE j.payload ? 'recheck_id' \
+                    AND j.payload->>'recheck_id' = r.id::text \
+                    AND j.kind = 'ai_recheck' AND j.status IN ('queued', 'running')))",
     )
     .bind(running_for.as_secs_f64())
     .execute(pool)
