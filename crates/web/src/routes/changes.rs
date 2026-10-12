@@ -253,10 +253,18 @@ fn tiles(c: &ChangeCounts) -> Vec<Tile> {
     let noindex = c.kind(ChangeKind::BecameNoindex);
     let titles = c.kind(ChangeKind::TitleChanged) + c.kind(ChangeKind::TitleRemoved);
     let ai: i64 = AI_KINDS.iter().map(|k| c.kind(*k)).sum();
+    // A recovered llms.txt is a change of the failing kind at notice severity (after: "resolved"):
+    // it counts in the tile but is no problem.
+    let llms_failing: i64 = c
+        .rows
+        .iter()
+        .filter(|(k, s, _)| *k == ChangeKind::AiLlmsTxtUnavailable && *s != Severity::Notice)
+        .map(|r| r.2)
+        .sum();
     let ai_bad = c.kind(ChangeKind::AiBotBlocked)
         + c.kind(ChangeKind::AiFetchBlocked)
         + c.kind(ChangeKind::AiContentMissing)
-        + c.kind(ChangeKind::AiLlmsTxtUnavailable)
+        + llms_failing
         + c.kind(ChangeKind::AiAnswersRestricted)
         + c.kind(ChangeKind::AiBlockNotApplied);
     let mut tiles = vec![

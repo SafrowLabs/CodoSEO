@@ -518,6 +518,50 @@ async fn the_public_registry_needs_no_login_on_either_mode() {
     );
 }
 
+/// A recovery row of a kind that can fail (llms.txt served again) does not colour the AI access
+/// tile as a problem; a failure of the same kind does.
+#[tokio::test]
+async fn an_llms_txt_recovery_does_not_colour_the_ai_access_tile() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl(&site, pages(), Vec::new()).await;
+    let llms = |severity, after: &str| Change {
+        kind: ChangeKind::AiLlmsTxtUnavailable,
+        severity,
+        url: None,
+        before: "llms.txt served".to_owned(),
+        after: after.to_owned(),
+    };
+    let tile = |body: &str| {
+        let start = body
+            .find("<div class=\"tile-label\">AI access</div>")
+            .expect("the AI access tile");
+        let rest = &body[start..];
+        rest[..rest.find("</div></div>").unwrap()].to_owned()
+    };
+    app.finished_crawl(&site, pages(), vec![llms(Severity::Notice, "resolved")])
+        .await;
+    let body = app
+        .get(&format!("/s/{}/changes", site.id), Some(&cookie))
+        .await
+        .body;
+    let t = tile(&body);
+    assert!(t.ends_with(">1"), "the recovery is still counted: {t}");
+    assert!(!t.contains("c-err"), "a recovery is not a problem: {t}");
+
+    app.finished_crawl(
+        &site,
+        pages(),
+        vec![llms(Severity::Warning, "llms.txt could not be fetched")],
+    )
+    .await;
+    let body = app
+        .get(&format!("/s/{}/changes", site.id), Some(&cookie))
+        .await
+        .body;
+    let t = tile(&body);
+    assert!(t.contains("c-err"), "a failure is: {t}");
+}
+
 #[tokio::test]
 async fn the_changes_screen_renders_every_ai_kind() {
     let (app, site, cookie) = setup().await;
