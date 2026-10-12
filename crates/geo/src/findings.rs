@@ -6,6 +6,8 @@
 //! probes: the site's CDN or firewall blocks, challenges or diverts bots it lets in by robots.txt.
 //! A sixth, grade A-, reads the important pages as served: an empty app shell is all that AI
 //! crawlers which don't run JavaScript get.
+//! A seventh, grade A, is informational: an llms.txt the site served before has stopped answering.
+//! It is never Critical, and llms.txt never counts toward the health score.
 //! Severity follows the owner's [`Intent`]: a blocked training bot is not a problem unless the
 //! owner said they want it to crawl.
 
@@ -19,6 +21,7 @@ use crate::content::{
 };
 use crate::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, EngineId, engines};
 use crate::intent::{Intent, Stance};
+use crate::llms::{LIGHTHOUSE_DOC, LlmsState, SPEC_URL as LLMS_SPEC_URL};
 use crate::probe::{ProbeFetch, ProbeReport, Vendor, Verdict};
 use crate::registry::{Bot, Honours, Purpose, registry};
 use crate::report::{AccessReport, Reason, path_and_query, slug_str};
@@ -71,6 +74,8 @@ pub enum FindingKind {
     FetchBlocked,
     /// Important pages are an empty app shell in the HTML as served.
     ContentMissing,
+    /// An llms.txt the site had adopted answers 5xx or 429, or not at all.
+    LlmsTxtUnavailable,
 }
 
 impl FindingKind {
@@ -82,6 +87,7 @@ impl FindingKind {
             FindingKind::AnswersRestricted => "answers_restricted",
             FindingKind::FetchBlocked => "fetch_blocked",
             FindingKind::ContentMissing => "content_missing",
+            FindingKind::LlmsTxtUnavailable => "llms_txt_unavailable",
         }
     }
 
@@ -93,6 +99,7 @@ impl FindingKind {
             FindingKind::AnswersRestricted,
             FindingKind::FetchBlocked,
             FindingKind::ContentMissing,
+            FindingKind::LlmsTxtUnavailable,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -212,6 +219,9 @@ pub struct Evidence {
     /// The shell pages, for `ContentMissing`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content: Vec<ContentEvidence>,
+    /// The llms.txt status, for `LlmsTxtUnavailable`; `None` when no response arrived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_status: Option<u16>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -271,6 +281,10 @@ pub fn evaluated_kinds(report: &AccessReport) -> Vec<FindingKind> {
     if report.content.is_some() && report.has_verdicts() {
         kinds.push(FindingKind::ContentMissing);
     }
+    // Any fetch speaks to it: a file or a 4xx resolves an open incident, a failure keeps it.
+    if report.llms_txt.is_some() {
+        kinds.push(FindingKind::LlmsTxtUnavailable);
+    }
     kinds
 }
 
@@ -287,6 +301,7 @@ pub fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
         out.extend(content_missing(report, intent));
     }
     out.extend(answers_restricted(report, intent));
+    out.extend(llms_txt_unavailable(report));
     out.sort_by(|a, b| (a.kind, &a.subject).cmp(&(b.kind, &b.subject)));
     out
 }
@@ -1372,5 +1387,53 @@ fn content_missing(report: &AccessReport, intent: &Intent) -> Option<Finding> {
             ..Evidence::default()
         },
         sources: vec![NON_RENDERING_SOURCE.to_owned()],
+    })
+}
+
+// ---- llms.txt unavailable --------------------------------------------------------------------
+
+/// The `LlmsTxtUnavailable` finding: the site had adopted llms.txt (served one before, as carried
+/// by [`crate::llms::carry_adoption`]) and it now answers 5xx or 429, or not at all, as
+/// Lighthouse's audit counts a failure. Informational: Warning at most, whatever the intent, since
+/// no bot depends on the file to crawl. A site that never served one gets nothing, and a 4xx or a
+/// soft 404 is a removal, not a failure.
+fn llms_txt_unavailable(report: &AccessReport) -> Option<Finding> {
+    let llms = report.llms_txt.as_ref()?;
+    if llms.state != LlmsState::Unavailable || !llms.adopted {
+        return None;
+    }
+    let status = (llms.status != 0).then_some(llms.status);
+    let (title, what) = match (status, llms.error.as_deref()) {
+        (Some(429), _) => (
+            "llms.txt returns HTTP 429".to_owned(),
+            "now answers HTTP 429 (too many requests)".to_owned(),
+        ),
+        (Some(s), _) => (
+            format!("llms.txt returns HTTP {s}"),
+            format!("now answers HTTP {s}"),
+        ),
+        (None, Some(e)) => (
+            "llms.txt could not be fetched".to_owned(),
+            format!("now gets no answer ({e})"),
+        ),
+        (None, None) => (
+            "llms.txt could not be fetched".to_owned(),
+            "now gets no answer".to_owned(),
+        ),
+    };
+    Some(Finding {
+        kind: FindingKind::LlmsTxtUnavailable,
+        subject: String::new(),
+        severity: Severity::Warning,
+        grade: Grade::A,
+        title,
+        summary: format!(
+            "Your site served /llms.txt before, and it {what}, so AI agents that look for it get nothing. Lighthouse counts this as a failed llms.txt check. Make /llms.txt answer 200 again, or 404 if you removed it on purpose. llms.txt is informational: it does not affect your health score or how search engines crawl the site."
+        ),
+        evidence: Evidence {
+            llms_status: status,
+            ..Evidence::default()
+        },
+        sources: vec![LLMS_SPEC_URL.to_owned(), LIGHTHOUSE_DOC.to_owned()],
     })
 }

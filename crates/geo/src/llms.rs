@@ -147,21 +147,21 @@ pub fn parse(body: &str) -> LlmsDoc {
         }
         let found = inline_links(line);
         doc.urls.extend(found.iter().map(|l| l.url.clone()));
-        if let Some(quote) = line.strip_prefix('>') {
-            if want_summary || in_summary {
-                let quote = quote.trim();
-                match &mut doc.summary {
-                    Some(s) if !quote.is_empty() => {
-                        s.push(' ');
-                        s.push_str(quote);
-                    }
-                    Some(_) => {}
-                    None => doc.summary = Some(quote.to_owned()),
+        if let Some(quote) = line.strip_prefix('>')
+            && (want_summary || in_summary)
+        {
+            let quote = quote.trim();
+            match &mut doc.summary {
+                Some(s) if !quote.is_empty() => {
+                    s.push(' ');
+                    s.push_str(quote);
                 }
-                want_summary = false;
-                in_summary = true;
-                continue;
+                Some(_) => {}
+                None => doc.summary = Some(quote.to_owned()),
             }
+            want_summary = false;
+            in_summary = true;
+            continue;
         }
         want_summary = false;
         in_summary = false;

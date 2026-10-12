@@ -723,6 +723,7 @@ dependencies = [
 name = "codoseo-geo"
 version = "0.1.0-rc.1"
 dependencies = [
+ "codoseo-checks",
  "codoseo-core",
  "codoseo-diff",
  "reqwest",

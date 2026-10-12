@@ -778,6 +778,8 @@ fn finding_change(finding: &Finding) -> Change {
         FindingKind::FetchBlocked => (ChangeKind::AiFetchBlocked, "reachable"),
         // Placeholder until its own change kind exists (B2.10).
         FindingKind::ContentMissing => (ChangeKind::AiFetchBlocked, "content in the HTML"),
+        // Placeholder until its own change kind exists (B2.10).
+        FindingKind::LlmsTxtUnavailable => (ChangeKind::AiFetchBlocked, "llms.txt served"),
     };
     Change {
         kind,

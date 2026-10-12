@@ -1483,3 +1483,175 @@ fn content_missing_serialises_with_grade_a_minus() {
     );
     assert_eq!(FindingKind::ContentMissing.slug(), "content_missing");
 }
+
+// ---- llms.txt unavailable --------------------------------------------------------------------
+
+mod llms_txt {
+    use super::*;
+    use codoseo_core::output::LlmsTxtFetch;
+    use codoseo_geo::llms::{LlmsState, carry_adoption};
+
+    fn with_llms(status: u16, error: Option<&str>) -> CrawlOutput {
+        let mut out = site(3, |p| p);
+        out.signals.llms_txt = Some(LlmsTxtFetch {
+            status,
+            error: error.map(str::to_owned),
+            content_type: Some("text/plain".into()),
+            body: if (200..300).contains(&status) {
+                "# Site\n\n> About the site.\n\n## Docs\n\n- [A](https://example.com/a): a page\n"
+                    .into()
+            } else {
+                String::new()
+            },
+            ..LlmsTxtFetch::default()
+        });
+        out
+    }
+
+    /// The report of `now`, with adoption carried from the report of `prev` as the worker does.
+    fn after(prev: &CrawlOutput, now: &CrawlOutput) -> AccessReport {
+        let prev = report_for(prev);
+        let mut report = report_for(now);
+        if let Some(l) = report.llms_txt.as_mut() {
+            l.adopted = carry_adoption(prev.llms_txt.as_ref(), l);
+        }
+        report
+    }
+
+    fn llms_findings(report: &AccessReport) -> Vec<Finding> {
+        findings(report, &Intent::default())
+            .into_iter()
+            .filter(|f| f.kind == FindingKind::LlmsTxtUnavailable)
+            .collect()
+    }
+
+    #[test]
+    fn the_slug_round_trips() {
+        let k = FindingKind::LlmsTxtUnavailable;
+        assert_eq!(k.slug(), "llms_txt_unavailable");
+        assert_eq!(FindingKind::from_slug("llms_txt_unavailable"), Some(k));
+    }
+
+    #[test]
+    fn a_first_ever_failure_is_no_finding() {
+        // A local run or a first crawl has no history: a 5xx is not a file the site lost.
+        for out in [
+            with_llms(503, None),
+            with_llms(0, Some("request timed out")),
+        ] {
+            let report = report_for(&out);
+            assert_eq!(
+                report.llms_txt.as_ref().unwrap().state,
+                LlmsState::Unavailable
+            );
+            assert!(llms_findings(&report).is_empty());
+            assert!(evaluated_kinds(&report).contains(&FindingKind::LlmsTxtUnavailable));
+        }
+    }
+
+    #[test]
+    fn an_adopted_file_that_fails_opens_a_warning() {
+        let report = after(&with_llms(200, None), &with_llms(503, None));
+        let f = llms_findings(&report);
+        assert_eq!(f.len(), 1, "{f:?}");
+        let f = &f[0];
+        println!("{} | {}", f.title, f.summary);
+        assert_eq!(f.subject, "");
+        assert_eq!(f.severity, Severity::Warning);
+        assert_eq!(f.grade, Grade::A);
+        assert_eq!(f.title, "llms.txt returns HTTP 503");
+        assert_eq!(f.evidence.llms_status, Some(503));
+        assert!(f.summary.contains("informational"), "{}", f.summary);
+        assert!(f.evidence.members().is_empty());
+        assert!(f.sources.iter().any(|s| s.contains("llmstxt.org")));
+        assert!(f.sources.iter().any(|s| s.contains("lighthouse")));
+    }
+
+    #[test]
+    fn a_failure_without_a_response_names_the_error() {
+        let report = after(
+            &with_llms(200, None),
+            &with_llms(0, Some("request timed out")),
+        );
+        let f = llms_findings(&report);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].title, "llms.txt could not be fetched");
+        assert!(
+            f[0].summary.contains("request timed out"),
+            "{}",
+            f[0].summary
+        );
+        assert_eq!(f[0].evidence.llms_status, None);
+        // 429 is a failure too, as in Lighthouse.
+        let report = after(&with_llms(200, None), &with_llms(429, None));
+        assert_eq!(llms_findings(&report).len(), 1);
+    }
+
+    #[test]
+    fn it_is_never_critical() {
+        for (status, error) in [
+            (500, None),
+            (502, None),
+            (429, None),
+            (0, Some("connection failed")),
+        ] {
+            let report = after(&with_llms(200, None), &with_llms(status, error));
+            for f in findings(&report, &Intent::default()) {
+                if f.kind == FindingKind::LlmsTxtUnavailable {
+                    assert_ne!(f.severity, Severity::Critical);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adoption_survives_repeated_failures() {
+        let first = after(&with_llms(200, None), &with_llms(503, None));
+        // The next failure carries adoption from the failing report.
+        let mut second = report_for(&with_llms(500, None));
+        let l = second.llms_txt.as_mut().unwrap();
+        l.adopted = carry_adoption(first.llms_txt.as_ref(), l);
+        assert_eq!(llms_findings(&second).len(), 1);
+    }
+
+    #[test]
+    fn removal_or_recovery_resolves_it() {
+        // Evaluated with no finding: an open incident resolves.
+        for now in [
+            with_llms(404, None),
+            with_llms(410, None),
+            with_llms(200, None),
+        ] {
+            let report = after(&with_llms(200, None), &now);
+            assert!(evaluated_kinds(&report).contains(&FindingKind::LlmsTxtUnavailable));
+            assert!(llms_findings(&report).is_empty());
+        }
+        // A soft 404 is a removal too.
+        let mut soft = with_llms(200, None);
+        let l = soft.signals.llms_txt.as_mut().unwrap();
+        l.content_type = Some("text/html".into());
+        l.body = "<!doctype html><title>404</title>".into();
+        let report = after(&with_llms(200, None), &soft);
+        assert_eq!(
+            report.llms_txt.as_ref().unwrap().state,
+            LlmsState::SoftNotFound
+        );
+        assert!(llms_findings(&report).is_empty());
+    }
+
+    #[test]
+    fn not_fetched_means_not_evaluated() {
+        let report = report_for(&site(3, |p| p));
+        assert!(!evaluated_kinds(&report).contains(&FindingKind::LlmsTxtUnavailable));
+    }
+
+    #[test]
+    fn the_health_score_ignores_llms_txt() {
+        let score = |mut out: CrawlOutput| codoseo_checks::run_checks(&mut out).health_score;
+        let base = score(site(3, |p| p));
+        assert_eq!(score(with_llms(503, None)), base);
+        assert_eq!(score(with_llms(0, Some("request timed out"))), base);
+        assert_eq!(score(with_llms(404, None)), base);
+        assert_eq!(score(with_llms(200, None)), base);
+    }
+}
