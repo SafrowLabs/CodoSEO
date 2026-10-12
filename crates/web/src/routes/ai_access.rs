@@ -2208,7 +2208,8 @@ pub struct LlmsCard {
 pub struct LlmsCheckRow {
     pub label: &'static str,
     pub ok: bool,
-    pub detail: String,
+    /// The detail, backtick spans as code like an incident's summary.
+    pub detail: Vec<Seg>,
 }
 
 fn llms_card(report: Option<&LlmsTxtReport>, skipped: Option<LlmsSkip>) -> LlmsCard {
@@ -2287,7 +2288,10 @@ fn llms_card(report: Option<&LlmsTxtReport>, skipped: Option<LlmsSkip>) -> LlmsC
             label: c.id.label(),
             ok: c.ok,
             // Reports stored before details were capped can hold a whole H1.
-            detail: codoseo_mcp::cloud::types::clip(&c.detail, codoseo_geo::llms::MAX_DETAIL),
+            detail: summary_segments(&codoseo_mcp::cloud::types::clip(
+                &c.detail,
+                codoseo_geo::llms::MAX_DETAIL,
+            )),
         })
         .collect();
     if r.state == LlmsState::Available {

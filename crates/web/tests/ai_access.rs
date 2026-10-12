@@ -1639,6 +1639,11 @@ async fn a_huge_llms_txt_h1_is_clipped_on_the_card() {
     let to = page.find(r#"id="aia-bots""#).unwrap();
     let card = &page[from..to];
     assert!(card.contains("Starts with an H1"), "{card}");
+    // Backtick spans in details are code, as in incident summaries.
+    assert!(
+        card.contains("A <code>&#62;</code> summary follows the H1."),
+        "{card}"
+    );
     assert!(!page.contains(&"A".repeat(201)), "H1 clipped");
     assert!(!card.contains(&"B".repeat(401)), "detail clipped");
     assert!(card.contains(&format!("{}…", "B".repeat(399))), "{card}");

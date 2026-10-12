@@ -157,7 +157,7 @@
     {% if !v.llms.checks.is_empty() %}
     <div class="rows aia-llms-checks">
       {% for c in v.llms.checks %}
-      <div class="aia-llms-check"><span class="{% if c.ok %}c-ok{% else %}c-warn{% endif %}" aria-label="{% if c.ok %}passes{% else %}does not pass{% endif %}">{% if c.ok %}✓{% else %}✗{% endif %}</span><b>{{ c.label }}</b><span class="aia-ev-detail">{{ c.detail }}</span></div>
+      <div class="aia-llms-check"><span class="{% if c.ok %}c-ok{% else %}c-warn{% endif %}" aria-label="{% if c.ok %}passes{% else %}does not pass{% endif %}">{% if c.ok %}✓{% else %}✗{% endif %}</span><b>{{ c.label }}</b><span class="aia-ev-detail">{% for s in c.detail %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</span></div>
       {% endfor %}
     </div>
     {% endif %}
