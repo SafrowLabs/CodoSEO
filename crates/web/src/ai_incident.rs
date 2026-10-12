@@ -246,7 +246,12 @@ pub struct Fix {
     pub remedy: Remedy,
     pub facts: IncidentFacts,
     pub before_line: Option<String>,
+    /// What the last crawl saw (the evidence).
     pub now_line: String,
+    /// What to call `now_line`: "Now", or "At last crawl" once a recheck saw the problem gone
+    /// (the incident is recovered and being verified), so the card never says "Now" about what
+    /// the fix already changed.
+    pub now_label: &'static str,
 }
 
 /// The URLs an incident affects, once each, in the order its evidence lists them.
@@ -279,19 +284,26 @@ pub fn fix(origin: &str, report: Option<&AccessReport>, i: &Incident, ev: &Evide
     let remedy = remedy(i.kind, &i.subject, ev, &ctx);
     let before_line = before.as_ref().and_then(|b| before_text(i.kind, b));
     let now_line = now_text(i.kind, ev);
+    let recovered = i.recovered_at.is_some();
+    let after = if recovered {
+        format!("At the last crawl: {now_line} (a recheck has since seen it fixed)")
+    } else {
+        now_line.clone()
+    };
     let facts = IncidentFacts {
         severity: i.severity,
         first_seen: fmt::datetime(i.opened_at),
         last_seen: fmt::datetime(i.last_seen_at),
         affected: affected_urls(ev),
         before: before_line.clone(),
-        after: Some(now_line.clone()),
+        after: Some(after),
     };
     Fix {
         remedy,
         facts,
         before_line,
         now_line,
+        now_label: if recovered { "At last crawl" } else { "Now" },
     }
 }
 
@@ -517,6 +529,31 @@ mod tests {
             verified_at: None,
             resolved_by: None,
         }
+    }
+
+    #[test]
+    fn a_recovered_incident_says_its_now_is_the_last_crawls() {
+        let mut i = incident(1, FindingKind::LlmsTxtUnavailable, Severity::Notice);
+        i.evidence = serde_json::json!({ "llms_status": 503 });
+        i.before = Some(serde_json::json!({ "llms": { "status": 200, "state": "available" } }));
+        let ev: Evidence = serde_json::from_value(i.evidence.clone()).unwrap();
+        let open = fix("https://example.com/", None, &i, &ev);
+        assert_eq!(open.now_label, "Now");
+        assert_eq!(open.facts.after.as_deref(), Some(open.now_line.as_str()));
+
+        // A recheck saw it fixed: what the last crawl saw is not "now" any more.
+        i.recovered_at = Some(OffsetDateTime::now_utc());
+        let verifying = fix("https://example.com/", None, &i, &ev);
+        assert_eq!(verifying.now_label, "At last crawl");
+        assert_eq!(verifying.now_line, open.now_line);
+        let after = verifying.facts.after.clone().unwrap();
+        assert!(after.starts_with("At the last crawl: "), "{after}");
+        assert!(
+            after.contains("a recheck has since seen it fixed"),
+            "{after}"
+        );
+        let task = codoseo_geo::remedy::developer_task(&verifying.remedy, &verifying.facts);
+        assert!(task.contains("- Now: At the last crawl: "), "{task}");
     }
 
     #[test]

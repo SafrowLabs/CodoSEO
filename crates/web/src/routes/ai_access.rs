@@ -416,8 +416,9 @@ pub struct IncidentView {
     pub copy_fix: String,
     pub copy_task: String,
     pub copy_prompt: String,
-    /// What was true before the incident opened, and what is true now.
-    pub before_after: Option<(String, String)>,
+    /// What was true before the incident opened, what to call the now line ("Now", or "At last
+    /// crawl" while a fix is being verified), and the now line.
+    pub before_after: Option<(String, &'static str, String)>,
     /// For a synthetic fetch incident: who the probes claimed to be.
     pub probe: Option<ProbeIdentity>,
     /// Accepted, Snoozed until …, or Open.
@@ -1670,6 +1671,7 @@ fn incident_view(
         facts,
         before_line,
         now_line,
+        now_label,
     } = fix_for(&site.start_url, Some(report), i, &ev);
     let shells: Vec<ShellEv> = ev
         .content
@@ -1785,7 +1787,7 @@ fn incident_view(
         copy_fix: copy_fix(&fix),
         copy_task: developer_task(&fix, &facts),
         copy_prompt: agent_prompt(&fix, &facts),
-        before_after: before_line.map(|b| (b, now_line)),
+        before_after: before_line.map(|b| (b, now_label, now_line)),
         probe: (i.kind == FindingKind::FetchBlocked && !ev.probes.is_empty())
             .then(|| probe_identity(report, &ev)),
         chips,

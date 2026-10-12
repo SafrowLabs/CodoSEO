@@ -22,7 +22,7 @@
     {% if let Some(ba) = i.before_after %}
     <dl class="aia-ba">
       <div><dt>Before</dt><dd>{{ ba.0 }}</dd></div>
-      <div><dt>Now</dt><dd>{{ ba.1 }}</dd></div>
+      <div><dt>{{ ba.1 }}</dt><dd>{{ ba.2 }}</dd></div>
     </dl>
     {% endif %}
     {% if let Some(st) = i.status_line %}<div class="aia-rule">{{ st }}</div>{% endif %}
