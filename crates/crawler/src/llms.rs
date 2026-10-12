@@ -168,3 +168,74 @@ pub(crate) async fn check_links(llms: &mut LlmsTxtFetch, pages: &[PageRecord], c
         });
     }
 }
+
+/// How long a one-off [`check_llms_txt`] may take in all, robots.txt and link checks included.
+pub const PAGE_CHECK_DEADLINE: Duration = Duration::from_secs(30);
+
+/// What a one-off look at a site's `/llms.txt` found.
+#[derive(Debug, Clone)]
+pub struct LlmsLookup {
+    /// The URL that was fetched.
+    pub url: String,
+    /// The fetch, with `links` filled for a file that was served.
+    pub fetch: LlmsTxtFetch,
+}
+
+/// Fetches `/llms.txt` on the site of `url` as CodoSEObot, after reading its robots.txt, and
+/// checks up to `link_checks` of the links it lists on the same origin. For `codoseo llms-txt`
+/// and the local MCP server; nothing is stored. Errors are messages for the user: an unreadable
+/// robots.txt, a robots.txt that keeps CodoSEObot off `/llms.txt`, an address that is refused.
+pub async fn check_llms_txt(
+    url: &Url,
+    address_policy: codoseo_core::crawl::AddressPolicy,
+    link_checks: u16,
+    deadline: Duration,
+) -> Result<LlmsLookup, String> {
+    use crate::fetch::FetcherConfig;
+    let until = Instant::now() + deadline;
+    let origin = url
+        .join("/")
+        .map_err(|e| format!("not a site address: {e}"))?;
+    let llms_url = llms_url(&origin).ok_or_else(|| "not a site address".to_owned())?;
+    let fetcher = Fetcher::new(FetcherConfig::new(address_policy)).map_err(|e| e.to_string())?;
+    let (rules, _) = timeout_at(until, crate::robots::fetch_robots(&fetcher, &origin))
+        .await
+        .map_err(|_| "could not fetch robots.txt in time; nothing was checked".to_owned())?
+        .map_err(|e| format!("could not fetch robots.txt: {e}"))?;
+    if !rules.allowed(PATH) {
+        return Err(
+            "robots.txt disallows CodoSEObot on /llms.txt, so it is not fetched; nothing was checked"
+                .to_owned(),
+        );
+    }
+    let politeness = codoseo_core::crawl::Politeness::default();
+    let limiter = Limiter::new(
+        &politeness,
+        rules.crawl_delay(),
+        std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
+    );
+    let mut fetch = fetch_llms_txt(&fetcher, &limiter, &origin, &rules, until)
+        .await
+        .ok_or_else(|| {
+            "/llms.txt was not fetched: the address is refused or the time ran out".to_owned()
+        })?;
+    check_links(
+        &mut fetch,
+        &[],
+        LinkCheck {
+            fetcher: &fetcher,
+            limiter: &limiter,
+            rules: &rules,
+            origin: &origin,
+            max_requests: link_checks,
+            timeout: Duration::from_secs(10),
+            deadline: until,
+            may_request: true,
+        },
+    )
+    .await;
+    Ok(LlmsLookup {
+        url: llms_url.to_string(),
+        fetch,
+    })
+}

@@ -12,6 +12,7 @@ use codoseo_geo::probe::{InconclusiveReason, ProbeFetch, ProbeReport, SkipReason
 use serde::Serialize;
 use url::Url;
 
+use super::llms::{LlmsFormat, LlmsOutput};
 use super::probe::{ProbeFormat, ProbeOutput};
 use super::{CliError, CrawlFormat, DiffFormat};
 
@@ -245,6 +246,104 @@ pub fn write_changes(
 pub(super) const PROBE_CAVEAT: &str = "Requests sent from this machine with each bot's documented \
     user agent and compared with CodoSEObot's. Real bots come from their own addresses and may be \
     treated differently.";
+
+/// Said first wherever llms.txt results are shown.
+pub(super) const LLMS_BANNER: &str = "INFORMATIONAL · NOT SCORED. llms.txt is optional: nothing \
+    depends on it, and it never affects a health score.";
+
+/// Said under the raw HTML content block.
+pub(super) const RAW_NOTE: &str = "Read from the HTML as served, before JavaScript runs. AI \
+    crawlers like GPTBot, ClaudeBot and PerplexityBot don't run JavaScript (Vercel and MERJ, 2024).";
+
+/// A content verdict in words.
+pub(super) fn content_verdict(v: codoseo_geo::content::ContentVerdict) -> &'static str {
+    use codoseo_geo::content::ContentVerdict;
+    match v {
+        ContentVerdict::Shell => "Shell",
+        ContentVerdict::LikelyShell => "Likely shell",
+        ContentVerdict::Thin => "Thin",
+        ContentVerdict::Present => "Present",
+    }
+}
+
+/// The labelled facts of a page's raw HTML content, as shown by `check`.
+pub(super) fn raw_content_pairs(
+    c: &codoseo_geo::content::RawContent,
+) -> Vec<(&'static str, String)> {
+    use codoseo_core::page::JsonLdStatus;
+    let yes = |b: bool| if b { "yes" } else { "no" }.to_owned();
+    let jsonld = match c.jsonld {
+        JsonLdStatus::Absent => "no".to_owned(),
+        JsonLdStatus::Valid(n) => format!("yes ({n})"),
+        JsonLdStatus::Invalid => "invalid".to_owned(),
+        JsonLdStatus::TooLarge => "too large to check".to_owned(),
+    };
+    let mut pairs = vec![
+        ("Verdict", content_verdict(c.verdict).to_owned()),
+        ("Words", format!("{} ({} in main)", c.words, c.main_words)),
+        ("Title", yes(c.title)),
+        ("H1", yes(c.h1)),
+        ("Description", yes(c.description)),
+        ("Canonical", yes(c.canonical)),
+        ("JSON-LD", jsonld),
+        ("Internal links", c.links_internal.to_string()),
+        (
+            "Scripts",
+            format!(
+                "{} external, {}% of the page inline",
+                c.scripts_external, c.script_share
+            ),
+        ),
+    ];
+    if !c.signals.is_empty() {
+        let signals: Vec<String> = c.signals.iter().map(slug).collect();
+        pairs.push(("Shell signals", signals.join(", ")));
+    }
+    pairs
+}
+
+pub fn write_llms(
+    w: &mut impl Write,
+    format: LlmsFormat,
+    out: &LlmsOutput,
+) -> Result<(), CliError> {
+    match format {
+        LlmsFormat::Json => write_json(w, out)?,
+        LlmsFormat::Table => table::llms(w, out)?,
+        LlmsFormat::Markdown => markdown::llms(w, out)?,
+    }
+    Ok(())
+}
+
+/// The lines every llms.txt format shares: what it found and each check, `(label, value)`.
+pub(super) fn llms_facts(out: &LlmsOutput) -> Vec<(&'static str, String)> {
+    use codoseo_geo::llms::LlmsState;
+    let r = &out.report;
+    let mut pairs = vec![
+        ("URL", out.url.clone()),
+        ("State", r.state.label().to_owned()),
+    ];
+    match (&r.error, r.status) {
+        (Some(e), _) => pairs.push(("Fetch", format!("no answer ({e})"))),
+        (None, 0) => pairs.push(("Fetch", "no answer".to_owned())),
+        (None, s) => pairs.push(("Fetch", format!("HTTP {s}"))),
+    }
+    if r.state == LlmsState::Available {
+        pairs.push(("Adopted", "yes".to_owned()));
+        if let Some(t) = &r.title {
+            pairs.push(("Title", t.clone()));
+        }
+        let l = &r.link_summary;
+        pairs.push((
+            "Links",
+            format!(
+                "{} checked, {} failing, {} not checked (other sites or past the limit)",
+                l.checked, l.failing, l.not_checked
+            ),
+        ));
+    }
+    pairs
+}
 
 pub fn write_probe(
     w: &mut impl Write,

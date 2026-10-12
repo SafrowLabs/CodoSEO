@@ -9,8 +9,8 @@ use codoseo_core::page::PageRecord;
 use url::Url;
 
 use crate::types::{
-    AiAccessReport, AiProbeReport, AuditHandle, AuditId, AuditState, RedirectReport, RobotsReport,
-    UrlRow,
+    AiAccessReport, AiLlmsTxtReport, AiProbeReport, AuditHandle, AuditId, AuditState,
+    RedirectReport, RobotsReport, UrlRow,
 };
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -77,6 +77,13 @@ pub trait Backend: Send + Sync {
         url: Url,
         bots: Option<Vec<String>>,
     ) -> impl Future<Output = Result<AiProbeReport, BackendError>> + Send;
+
+    /// The site's `/llms.txt`, fetched after robots.txt (which may disallow it) and assessed.
+    /// Informational: the file is optional and never scored.
+    fn check_llms_txt(
+        &self,
+        url: Url,
+    ) -> impl Future<Output = Result<AiLlmsTxtReport, BackendError>> + Send;
 
     fn check_redirects(
         &self,

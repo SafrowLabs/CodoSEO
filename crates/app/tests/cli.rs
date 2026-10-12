@@ -1076,3 +1076,144 @@ fn crawl_table_with_probes_says_synthetic() {
     assert!(table.contains("Synthetic fetch check"), "{table}");
     assert!(table.contains("(synthetic check)"), "{table}");
 }
+
+// ---- B2.13: raw HTML content and llms.txt ---------------------------------------------------
+
+const SHELL_HTML: &str = r#"<html><head><title>App</title></head><body><div id="root"></div><noscript>You need to enable JavaScript to run this app.</noscript><script src="/a.js"></script></body></html>"#;
+
+#[test]
+fn check_prints_the_raw_html_content_block() {
+    let url = serve(
+        SiteBuilder::new()
+            .page("/", Page::html(SHELL_HTML))
+            .page(
+                "/real",
+                Page::html(&format!(
+                    "<html><head><title>A real page with enough to say</title></head><body><h1>Real</h1><p>{}</p></body></html>",
+                    "words ".repeat(80)
+                )),
+            ),
+    );
+    let shell = run(["check", url.as_str()]);
+    let block = &shell[shell.find("Raw HTML content").expect("a block")..];
+    for needle in [
+        "Verdict",
+        "Shell",
+        "Words",
+        "mount_empty",
+        "noscript_js",
+        "before JavaScript runs",
+        "GPTBot",
+    ] {
+        assert!(block.contains(needle), "missing {needle}: {block}");
+    }
+    assert!(
+        block.find("Raw HTML content") < block.find("Redirect chain"),
+        "{shell}"
+    );
+
+    let real = run(["check", &at(&url, "/real")]);
+    let block = &real[real.find("Raw HTML content").expect("a block")..];
+    assert!(block.contains("Present"), "{block}");
+    assert!(!block.contains("Shell signals"), "{block}");
+    assert!(block.contains("Words           81"), "{block}");
+}
+
+const LLMS_FILE: &str = "# Example\n\n> A site about examples.\n\n## Docs\n\n- [Start](/start): begin here\n- [Gone](/gone)\n";
+
+fn llms_site() -> SiteBuilder {
+    SiteBuilder::new()
+        .robots(200, "User-agent: *\nAllow: /\n")
+        .html("/start", "Start page title for tests", &[])
+        .page(
+            "/llms.txt",
+            Page::html(LLMS_FILE).header("content-type", "text/plain"),
+        )
+}
+
+#[test]
+fn llms_txt_table_is_informational_and_lists_checks_and_links() {
+    let url = serve(llms_site());
+    let table = run(["llms-txt", url.as_str()]);
+    assert!(table.starts_with("INFORMATIONAL · NOT SCORED"), "{table}");
+    for needle in [
+        "Available",
+        "Starts with an H1",
+        "Sections of links",
+        "2 checked, 1 failing",
+        "Failing links",
+        "/gone",
+    ] {
+        assert!(table.contains(needle), "missing {needle}: {table}");
+    }
+    let md = run(["llms-txt", url.as_str(), "--format", "markdown"]);
+    assert!(md.contains("**Informational · not scored.**"), "{md}");
+    assert!(md.contains("| Starts with an H1 | ok |"), "{md}");
+}
+
+#[test]
+fn llms_txt_json_is_the_report_and_exit_is_always_zero() {
+    let url = serve(llms_site());
+    let json: serde_json::Value =
+        serde_json::from_str(&run(["llms-txt", url.as_str(), "--format", "json"])).expect("json");
+    assert_eq!(json["informational"], true);
+    assert_eq!(json["state"], "available");
+    assert_eq!(json["adopted"], true);
+    assert_eq!(json["link_summary"]["checked"], 2);
+    assert!(json["checks"].as_array().is_some_and(|c| !c.is_empty()));
+
+    // No file: a neutral line, and still exit 0.
+    let none = serve(SiteBuilder::new().robots(200, "User-agent: *\nAllow: /\n"));
+    let table = run(["llms-txt", none.as_str()]);
+    assert!(table.starts_with("INFORMATIONAL"), "{table}");
+    assert!(table.contains("nothing to fix"), "{table}");
+    let json: serde_json::Value =
+        serde_json::from_str(&run(["llms-txt", none.as_str(), "--format", "json"])).expect("json");
+    assert_eq!(json["state"], "absent");
+    assert_eq!(json["adopted"], false);
+
+    // A file that fails is reported, not an error.
+    let down = serve(
+        SiteBuilder::new()
+            .robots(200, "User-agent: *\nAllow: /\n")
+            .page("/llms.txt", Page::status(503, "")),
+    );
+    let table = run(["llms-txt", down.as_str()]);
+    assert!(
+        table.contains("Unavailable") && table.contains("HTTP 503"),
+        "{table}"
+    );
+}
+
+#[test]
+fn llms_txt_keeps_to_robots_txt() {
+    let (url, requests) = serve_logged(
+        SiteBuilder::new()
+            .robots(200, "User-agent: *\nDisallow: /llms.txt\n")
+            .page("/llms.txt", Page::html("# Example")),
+    );
+    codoseo()
+        .args(["llms-txt", url.as_str()])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("robots.txt"));
+    assert!(requests().iter().all(|r| !r.path.contains("llms.txt")));
+}
+
+#[test]
+fn crawl_json_carries_content_and_llms_txt_in_the_ai_access_report() {
+    let url = serve(clean_site().robots(200, "User-agent: *\nAllow: /\n").page(
+        "/llms.txt",
+        Page::html(LLMS_FILE).header("content-type", "text/plain"),
+    ));
+    let out = run(["crawl", url.as_str(), "--rps", "50", "--format", "json"]);
+    let audit: serde_json::Value = serde_json::from_str(&out).expect("json");
+    let report = &audit["ai_access"]["report"];
+    let pages = report["content"]["pages"]
+        .as_array()
+        .expect("content pages");
+    assert!(!pages.is_empty());
+    assert!(pages.iter().all(|p| p["verdict"].is_string()));
+    assert_eq!(report["llms_txt"]["state"], "available");
+    assert_eq!(report["llms_txt"]["adopted"], true);
+}

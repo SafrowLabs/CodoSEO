@@ -5,11 +5,12 @@ use std::io::Write;
 use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
 
+use super::super::llms::LlmsOutput;
 use super::super::probe::ProbeOutput;
 use super::{
-    PROBE_CAVEAT, ai_access_findings, audit_probes, change_url, clean, count_text, fetch_text,
-    findings, headline, not_probed_lines, one_line, probe_rows, probe_stop_text,
-    probe_summary_line, severity_label, slug, summary,
+    LLMS_BANNER, PROBE_CAVEAT, ai_access_findings, audit_probes, change_url, clean, count_text,
+    fetch_text, findings, headline, llms_facts, not_probed_lines, one_line, probe_rows,
+    probe_stop_text, probe_summary_line, severity_label, slug, summary,
 };
 
 /// Text for a table cell or list item: control characters dropped, and backslashes and pipes
@@ -69,6 +70,34 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
     for (label, value) in summary(audit) {
         writeln!(w, "- **{label}:** {value}")?;
     }
+    Ok(())
+}
+
+pub(super) fn llms(w: &mut impl Write, out: &LlmsOutput) -> std::io::Result<()> {
+    writeln!(w, "# llms.txt for {}\n", md_cell(&out.url))?;
+    writeln!(w, "> **Informational · not scored.** {LLMS_BANNER}\n")?;
+    for (label, value) in llms_facts(out) {
+        writeln!(w, "- **{label}:** {}", md_cell(&value))?;
+    }
+    if !out.report.checks.is_empty() {
+        writeln!(w, "\n| Check | Result | Detail |\n|---|---|---|")?;
+        for c in &out.report.checks {
+            writeln!(
+                w,
+                "| {} | {} | {} |",
+                c.id.label(),
+                if c.ok { "ok" } else { "fail" },
+                md_cell(&c.detail)
+            )?;
+        }
+    }
+    if !out.report.link_summary.failing_urls.is_empty() {
+        writeln!(w, "\n## Failing links\n")?;
+        for u in &out.report.link_summary.failing_urls {
+            writeln!(w, "- {}", md_cell(u))?;
+        }
+    }
+    writeln!(w, "\n{}", md_cell(&out.summary))?;
     Ok(())
 }
 

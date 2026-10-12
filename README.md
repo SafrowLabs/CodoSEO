@@ -395,7 +395,7 @@ crates/
   checks/     — the 44 check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
   geo/        — AI bot registry (CC0 data), robots.txt verdicts, AI access report and findings
-  mcp/        — MCP server: the 10 local tools and the hosted tools, over rmcp
+  mcp/        — MCP server: the 11 local tools and the hosted tools, over rmcp
   store/      — Postgres: migrations, crawl and jobs queues, queries for the web app
   web/        — the web app: axum routes, askama templates, htmx, bundled assets
   app/        — CLI (the `codoseo` binary)

@@ -5,11 +5,12 @@ use std::io::Write;
 use codoseo_core::audit::Audit;
 use codoseo_core::change::Change;
 
+use super::super::llms::LlmsOutput;
 use super::super::probe::ProbeOutput;
 use super::{
-    PROBE_CAVEAT, ai_access_findings, audit_probes, change_url, clean, count_text, fetch_text,
-    findings, headline, not_probed_lines, one_line, probe_rows, probe_stop_text,
-    probe_summary_line, severity_label, slug, summary, write_pairs,
+    LLMS_BANNER, PROBE_CAVEAT, ai_access_findings, audit_probes, change_url, clean, count_text,
+    fetch_text, findings, headline, llms_facts, not_probed_lines, one_line, probe_rows,
+    probe_stop_text, probe_summary_line, severity_label, slug, summary, write_pairs,
 };
 
 pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
@@ -65,6 +66,38 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
     }
     writeln!(w, "\nSummary")?;
     write_pairs(w, "  ", &summary(audit))
+}
+
+pub(super) fn llms(w: &mut impl Write, out: &LlmsOutput) -> std::io::Result<()> {
+    writeln!(w, "{LLMS_BANNER}\n")?;
+    write_pairs(w, "", &llms_facts(out))?;
+    if !out.report.checks.is_empty() {
+        writeln!(w, "\nChecks")?;
+        let width = out
+            .report
+            .checks
+            .iter()
+            .map(|c| c.id.label().chars().count())
+            .max()
+            .unwrap_or(0);
+        for c in &out.report.checks {
+            writeln!(
+                w,
+                "  {}  {:<width$}  {}",
+                if c.ok { "ok  " } else { "FAIL" },
+                c.id.label(),
+                clean(&c.detail)
+            )?;
+        }
+    }
+    if !out.report.link_summary.failing_urls.is_empty() {
+        writeln!(w, "\nFailing links")?;
+        for u in &out.report.link_summary.failing_urls {
+            writeln!(w, "  {}", clean(u))?;
+        }
+    }
+    writeln!(w, "\n{}", out.summary)?;
+    Ok(())
 }
 
 pub(super) fn probe(w: &mut impl Write, out: &ProbeOutput) -> std::io::Result<()> {

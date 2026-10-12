@@ -143,6 +143,12 @@ pub struct AiAccessReport {
     pub engines: Vec<AiEngine>,
     /// The page's HTTP status, `None` when it could not be fetched.
     pub page_status: Option<u16>,
+    /// What the page holds in its HTML as served, before JavaScript runs (verdict `shell`,
+    /// `likely_shell`, `thin` or `present`, word count, tags present). Absent when the page was
+    /// not a successful HTML response. AI crawlers like GPTBot, ClaudeBot and PerplexityBot don't
+    /// run JavaScript (Vercel and MERJ, 2024). `url` is always 0: it is the one page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<codoseo_geo::content::RawContent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,6 +184,21 @@ pub struct AiProbeReport {
     pub pages: Vec<String>,
     /// `fetch_blocked` findings under the default intent (every bot wanted).
     pub findings: Vec<codoseo_geo::findings::Finding>,
+}
+
+/// What `check_llms_txt` returns: the site's `/llms.txt` as CodoSEObot fetched it. Informational:
+/// the file is optional and never scored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiLlmsTxtReport {
+    /// The URL that was fetched.
+    pub url: String,
+    /// `true`: llms.txt is informational and never affects a score.
+    pub informational: bool,
+    /// One line an agent can relay as it is.
+    pub summary: String,
+    /// State, status, the checks and the link summary.
+    #[serde(flatten)]
+    pub report: codoseo_geo::llms::LlmsTxtReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

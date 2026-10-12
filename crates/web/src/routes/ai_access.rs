@@ -21,9 +21,7 @@ use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engine
 use codoseo_geo::findings::{
     BotEvidence, Evidence, FindingKind, ProbeEvidence, ROBOTS_DOC, VENDOR_DOCS,
 };
-use codoseo_geo::llms::{
-    LIGHTHOUSE_DOC, LlmsCheckId, LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL,
-};
+use codoseo_geo::llms::{LIGHTHOUSE_DOC, LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL};
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
     SkipReason, Verdict,
@@ -2187,19 +2185,6 @@ pub struct LlmsCheckRow {
     pub detail: String,
 }
 
-fn llms_check_label(id: LlmsCheckId) -> &'static str {
-    match id {
-        LlmsCheckId::H1 => "Starts with an H1",
-        LlmsCheckId::Summary => "Summary under the H1",
-        LlmsCheckId::Sections => "Sections of links",
-        LlmsCheckId::Links => "Has links",
-        LlmsCheckId::Length => "Long enough",
-        LlmsCheckId::Size => "Size",
-        LlmsCheckId::Mime => "Served as text",
-        LlmsCheckId::LinksResolve => "Links resolve",
-    }
-}
-
 fn llms_card(report: Option<&LlmsTxtReport>) -> LlmsCard {
     let mut card = LlmsCard {
         none: None,
@@ -2259,7 +2244,7 @@ fn llms_card(report: Option<&LlmsTxtReport>) -> LlmsCard {
         .checks
         .iter()
         .map(|c| LlmsCheckRow {
-            label: llms_check_label(c.id),
+            label: c.id.label(),
             ok: c.ok,
             detail: c.detail.clone(),
         })

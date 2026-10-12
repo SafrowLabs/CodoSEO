@@ -340,6 +340,34 @@ pub enum LlmsCheckId {
     LinksResolve,
 }
 
+impl LlmsCheckId {
+    /// A short name for tables and lists.
+    pub fn label(self) -> &'static str {
+        match self {
+            LlmsCheckId::H1 => "Starts with an H1",
+            LlmsCheckId::Summary => "Summary under the H1",
+            LlmsCheckId::Sections => "Sections of links",
+            LlmsCheckId::Links => "Has links",
+            LlmsCheckId::Length => "Long enough",
+            LlmsCheckId::Size => "Size",
+            LlmsCheckId::Mime => "Served as text",
+            LlmsCheckId::LinksResolve => "Links resolve",
+        }
+    }
+}
+
+impl LlmsState {
+    /// `Available`, `Not found`, ... in words.
+    pub fn label(self) -> &'static str {
+        match self {
+            LlmsState::Absent => "No llms.txt",
+            LlmsState::SoftNotFound => "No llms.txt (soft 404)",
+            LlmsState::Available => "Available",
+            LlmsState::Unavailable => "Unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmsCheck {
     pub id: LlmsCheckId,
@@ -389,6 +417,45 @@ pub struct LlmsTxtReport {
 impl LlmsTxtReport {
     pub fn check(&self, id: LlmsCheckId) -> Option<&LlmsCheck> {
         self.checks.iter().find(|c| c.id == id)
+    }
+}
+
+impl LlmsTxtReport {
+    /// One plain line about the file, for the CLI and the MCP server. Informational: a missing
+    /// file is optional and nothing to fix.
+    pub fn summary(&self) -> String {
+        match self.state {
+            LlmsState::Absent => format!(
+                "No llms.txt (HTTP {}): it is optional, so there is nothing to fix.",
+                self.status
+            ),
+            LlmsState::SoftNotFound => format!(
+                "No llms.txt: /llms.txt answered HTTP {} with a web page instead of a file. It is optional, so there is nothing to fix.",
+                self.status
+            ),
+            LlmsState::Unavailable => match (&self.error, self.status) {
+                (Some(e), _) => format!("/llms.txt could not be fetched ({e})."),
+                (None, 0) => "/llms.txt could not be fetched.".to_owned(),
+                (None, s) => format!("/llms.txt answered HTTP {s}."),
+            },
+            LlmsState::Available => {
+                let failed = self.checks.iter().filter(|c| !c.ok).count();
+                let l = &self.link_summary;
+                let mut text = if failed == 0 {
+                    "llms.txt is available and passes every check.".to_owned()
+                } else {
+                    format!(
+                        "llms.txt is available; {failed} of {} checks don't pass.",
+                        self.checks.len()
+                    )
+                };
+                text.push_str(&format!(
+                    " Links: {} checked, {} failing, {} not checked.",
+                    l.checked, l.failing, l.not_checked
+                ));
+                text
+            }
+        }
     }
 }
 
