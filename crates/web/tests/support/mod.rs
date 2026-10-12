@@ -17,7 +17,7 @@ use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use codoseo_core::change::Change;
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
-use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, SiteSignals, StopReason};
+use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, LlmsTxtFetch, SiteSignals, StopReason};
 use codoseo_core::page::{Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::plan::Plan;
 use codoseo_geo::probe::ProbeReport;
@@ -346,6 +346,46 @@ impl TestApp {
             StopReason::Completed,
             Some(robots),
             None,
+            None,
+        )
+        .await;
+        crawl_id
+    }
+
+    /// Like [`finished_crawl_with_robots`](Self::finished_crawl_with_robots), with the
+    /// `/llms.txt` the crawl fetched; `adopted` marks a site that served one before (as the
+    /// worker carries from the previous report) so a failing file opens an incident.
+    pub async fn finished_crawl_with_llms(
+        &self,
+        site: &Site,
+        pages: Vec<PageRecord>,
+        robots: (u16, &str),
+        llms: LlmsTxtFetch,
+        adopted: bool,
+    ) -> Uuid {
+        let crawl_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id, started_at, heartbeat_at) \
+             VALUES ($1, $2, 'manual', 2, 'running', 'test-worker', now() - interval '95 seconds', now()) \
+             RETURNING id",
+        )
+        .bind(site.id)
+        .bind(&site.domain)
+        .fetch_one(self.pool())
+        .await
+        .expect("insert crawl");
+        let robots = RobotsFile {
+            status: robots.0,
+            body: robots.1.to_owned(),
+            hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
+        };
+        self.finalize_with(
+            crawl_id,
+            pages,
+            Vec::new(),
+            StopReason::Completed,
+            Some(robots),
+            None,
+            Some((llms, adopted)),
         )
         .await;
         crawl_id
@@ -383,6 +423,7 @@ impl TestApp {
             StopReason::Completed,
             Some(robots),
             Some(probes),
+            None,
         )
         .await;
         crawl_id
@@ -398,7 +439,7 @@ impl TestApp {
         changes: Vec<Change>,
         stop: StopReason,
     ) {
-        self.finalize_with(crawl_id, pages, changes, stop, None, None)
+        self.finalize_with(crawl_id, pages, changes, stop, None, None, None)
             .await;
     }
 
@@ -412,6 +453,7 @@ impl TestApp {
         stop: StopReason,
         robots: Option<RobotsFile>,
         probes: Option<&dyn Fn(&AccessReport) -> ProbeReport>,
+        llms: Option<(LlmsTxtFetch, bool)>,
     ) {
         let (site_id, start_url): (Uuid, String) = sqlx::query_as(
             "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
@@ -449,7 +491,10 @@ impl TestApp {
             sitemap: SitemapSummary::default(),
             stop,
             duration_ms: 95_000,
-            signals: SiteSignals::default(),
+            signals: SiteSignals {
+                llms_txt: llms.as_ref().map(|(f, _)| f.clone()),
+                ..SiteSignals::default()
+            },
         };
         let report = codoseo_checks::run_checks(&mut out);
         let geo = match &out.robots {
@@ -462,6 +507,9 @@ impl TestApp {
                 let mut report = codoseo_geo::report::build_report(&out, &important);
                 if let Some(probes) = probes {
                     report.probes = Some(probes(&report));
+                }
+                if let (Some(l), Some((_, true))) = (report.llms_txt.as_mut(), llms.as_ref()) {
+                    l.adopted = true;
                 }
                 Some(codoseo_store::geo::GeoInput::new(report))
             }

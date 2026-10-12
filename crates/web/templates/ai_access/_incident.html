@@ -31,6 +31,16 @@
       {% endfor %}
     </div>
     {% endif %}
+    {% if let Some(l) = i.llms_line %}<div class="aia-rule">{{ l }}</div>{% endif %}
+    {% if !i.shells.is_empty() %}
+    <div class="aia-ev-engines">
+      {% for c in i.shells %}
+      <span class="aia-engine">{% if let Some(h) = c.href %}<a class="url" href="{{ h }}">{{ c.path }}</a>{% else %}<span class="mono aia-path">{{ c.path }}</span>{% endif %}</span>
+      <span><span class="badge {% if c.verdict == "Shell" %}t-err{% else %}t-warn{% endif %}">{{ c.verdict }}</span></span>
+      <span class="aia-ev-detail">{{ c.detail }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
     {% if let Some(fix) = i.fix %}
     <div class="aia-fix">
       <div class="aia-fix-head"><span>Add to robots.txt</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ fix }}" aria-label="Copy the robots.txt lines"><svg class="icon"><use href="#i-copy"/></svg>Copy</button></div>

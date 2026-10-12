@@ -15,9 +15,14 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
 use codoseo_core::check::Severity;
+use codoseo_core::page::JsonLdStatus;
+use codoseo_geo::content::{ContentVerdict, NON_RENDERING_SOURCE, RawContent, ShellSignal};
 use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engines};
 use codoseo_geo::findings::{
     BotEvidence, Evidence, FindingKind, ProbeEvidence, ROBOTS_DOC, VENDOR_DOCS,
+};
+use codoseo_geo::llms::{
+    LIGHTHOUSE_DOC, LlmsCheckId, LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL,
 };
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
@@ -57,6 +62,8 @@ pub fn routes() -> Router<AppState> {
 /// What grade B means, on a synthetic incident's grade.
 const GRADE_B: &str = "Evidence grade B: observed by CodoSEO's synthetic check, compared with CodoSEObot's own fetch and confirmed by a second one. Grade A is what the operator documents.";
 
+/// What grade A means on an llms.txt incident.
+const GRADE_A_LLMS: &str = "Evidence grade A: what your /llms.txt answered, judged by Lighthouse's documented llms.txt check. llms.txt is informational and never affects your score.";
 /// What grade A- means, on a content incident's grade.
 const GRADE_A_MINUS: &str = "Evidence grade A-: read from your pages' HTML as served, with Vercel and MERJ's published measurement that these AI crawlers don't run JavaScript. Grade A is what the operator documents.";
 
@@ -267,6 +274,10 @@ pub struct Overview {
     pub clear: (&'static str, &'static str, &'static str),
     /// The synthetic fetch probes of the latest report, or why there are none.
     pub fetch: FetchCheck,
+    /// What the important pages hold in their HTML as served.
+    pub content: ContentCard,
+    /// `/llms.txt`, informational.
+    pub llms: LlmsCard,
     /// Shown instead of the bots table when robots.txt gave no verdicts.
     pub robots_callout: Option<Callout>,
     /// `robots.txt · HTTP 200`
@@ -338,6 +349,14 @@ pub struct UrlLink {
     pub href: Option<String>,
 }
 
+/// One shell page in a content incident's evidence.
+pub struct ShellEv {
+    pub path: String,
+    pub href: Option<String>,
+    pub verdict: &'static str,
+    pub detail: String,
+}
+
 pub struct IncidentView {
     pub id: i64,
     pub severity: &'static str,
@@ -361,6 +380,10 @@ pub struct IncidentView {
     pub engines: Vec<EngineEv>,
     pub urls: Vec<UrlLink>,
     pub urls_more: u32,
+    /// The shell pages of a `content_missing` incident, one line each.
+    pub shells: Vec<ShellEv>,
+    /// What `/llms.txt` answered, for an `llms_txt_unavailable` incident.
+    pub llms_line: Option<String>,
     /// robots.txt lines that would apply the owner's block.
     pub fix: Option<String>,
     /// The confirmation for "Mark intended"; `None` when the finding can't be a choice.
@@ -607,6 +630,8 @@ async fn render_page(
             probes_on,
             state.config.probe_urls_for(user.account.plan) > 0,
         ),
+        content: content_card(site, &base, report),
+        llms: llms_card(report.llms_txt.as_ref()),
         robots_callout: robots_callout(report),
         robots_aside: robots_aside(report),
         bot_attention: bot_groups
@@ -1189,6 +1214,13 @@ fn sources(kind: FindingKind, ev: &Evidence) -> Vec<SourceLink> {
     if kind == FindingKind::RobotsUnavailable {
         push(ROBOTS_DOC);
     }
+    if kind == FindingKind::ContentMissing {
+        push(NON_RENDERING_SOURCE);
+    }
+    if kind == FindingKind::LlmsTxtUnavailable {
+        push(LLMS_SPEC_URL);
+        push(LIGHTHOUSE_DOC);
+    }
     for b in &ev.bots {
         if let Some(bot) = registry().bot(&b.token) {
             push(&bot.source_url);
@@ -1470,6 +1502,31 @@ fn incident_view(
         lines.push("Disallow: /".to_owned());
         lines.join("\n")
     });
+    let shells: Vec<ShellEv> = ev
+        .content
+        .iter()
+        .take(URLS_SHOWN)
+        .map(|c| {
+            let mut detail = format!(
+                "{} in the HTML as served",
+                plural(c.words as usize, "word", "words")
+            );
+            if !c.signals.is_empty() {
+                let what: Vec<&str> = c.signals.iter().map(|s| signal_text(*s)).collect();
+                detail.push_str(&format!(" · {}", what.join(", ")));
+            }
+            ShellEv {
+                path: path_of(&c.url),
+                href: explorer_href(site, base, &c.url),
+                verdict: if c.verdict == ContentVerdict::Shell {
+                    "Shell"
+                } else {
+                    "Likely shell"
+                },
+                detail,
+            }
+        })
+        .collect();
     let quiet = i.quiet.then(|| match report_at {
         // The same transaction: Postgres' now() is the same instant for both rows. Quiet then
         // means no earlier crawl could check this kind of issue (the first one, or the first
@@ -1497,6 +1554,8 @@ fn incident_view(
             ("B", GRADE_B)
         } else if i.kind == FindingKind::ContentMissing {
             ("A-", GRADE_A_MINUS)
+        } else if i.kind == FindingKind::LlmsTxtUnavailable {
+            ("A", GRADE_A_LLMS)
         } else {
             ("A", "Evidence grade A: documented by the operator")
         },
@@ -1515,6 +1574,17 @@ fn incident_view(
         engines: engines_ev,
         urls,
         urls_more,
+        shells,
+        llms_line: (i.kind == FindingKind::LlmsTxtUnavailable).then(|| {
+            match (
+                ev.llms_status,
+                report.llms_txt.as_ref().and_then(|l| l.error.as_deref()),
+            ) {
+                (Some(s), _) => format!("GET /llms.txt → HTTP {s}"),
+                (None, Some(e)) => format!("GET /llms.txt → no answer ({e})"),
+                (None, None) => "GET /llms.txt → no answer".to_owned(),
+            }
+        }),
         fix,
         intend: intended_change(i.kind, &i.subject, &ev).map(|c| intend_confirm(i.kind, &c)),
     }
@@ -1942,6 +2012,267 @@ fn declared_items(d: &Declared) -> Vec<DeclaredItem> {
         }
     }
     out
+}
+
+/// The "Content in raw HTML" section.
+pub struct ContentCard {
+    /// Set instead of the rows, saying why there are none.
+    pub empty: Option<(&'static str, &'static str)>,
+    pub rows: Vec<ContentRow>,
+    pub source: &'static str,
+}
+
+/// One important page's facts from its HTML as served.
+pub struct ContentRow {
+    pub path: String,
+    pub href: Option<String>,
+    pub words: String,
+    pub ticks: Vec<Tick>,
+    pub links: String,
+    pub verdict: &'static str,
+    pub verdict_class: &'static str,
+    pub verdict_tip: String,
+}
+
+/// A yes/no signal cell.
+pub struct Tick {
+    pub label: &'static str,
+    pub on: bool,
+    /// What to show for the cell: `✓`, `—` or a word.
+    pub text: String,
+    pub tip: String,
+}
+
+fn tick(label: &'static str, on: bool) -> Tick {
+    Tick {
+        label,
+        on,
+        text: if on { "✓" } else { "—" }.to_owned(),
+        tip: format!("{label}: {}", if on { "present" } else { "missing" }),
+    }
+}
+
+fn jsonld_tick(status: JsonLdStatus) -> Tick {
+    let (on, text, tip) = match status {
+        JsonLdStatus::Absent => (false, "—".to_owned(), "JSON-LD: missing".to_owned()),
+        JsonLdStatus::Valid(n) => (
+            true,
+            "✓".to_owned(),
+            format!("JSON-LD: {}", plural(usize::from(n), "block", "blocks")),
+        ),
+        JsonLdStatus::Invalid => (
+            false,
+            "Invalid".to_owned(),
+            "JSON-LD: a block does not parse as JSON".to_owned(),
+        ),
+        JsonLdStatus::TooLarge => (
+            false,
+            "Too large".to_owned(),
+            "JSON-LD: a block is too big to check".to_owned(),
+        ),
+    };
+    Tick {
+        label: "JSON-LD",
+        on,
+        text,
+        tip,
+    }
+}
+
+fn signal_text(s: ShellSignal) -> &'static str {
+    match s {
+        ShellSignal::MountEmpty => "the app's mount element is empty",
+        ShellSignal::NoscriptJs => "a noscript notice asks for JavaScript",
+        ShellSignal::ScriptHeavy => "inline script makes up most of the page",
+        ShellSignal::ManyScripts => "it loads several scripts",
+    }
+}
+
+fn content_row(
+    site: &Site,
+    base: &str,
+    report: &AccessReport,
+    c: &RawContent,
+) -> Option<ContentRow> {
+    let u = report.important.get(usize::from(c.url))?;
+    let (verdict, verdict_class) = match c.verdict {
+        ContentVerdict::Shell => ("Shell", "t-err"),
+        ContentVerdict::LikelyShell => ("Likely shell", "t-warn"),
+        ContentVerdict::Thin => ("Thin", "t-muted"),
+        ContentVerdict::Present => ("Present", "t-ok"),
+    };
+    let mut tip = match c.verdict {
+        ContentVerdict::Shell => {
+            "Almost no text in the HTML as served, before JavaScript runs".to_owned()
+        }
+        ContentVerdict::LikelyShell => {
+            "Almost no text in the HTML as served, and the page looks like a script-built app"
+                .to_owned()
+        }
+        ContentVerdict::Thin => {
+            "Few words in the HTML as served, with no sign of an app shell".to_owned()
+        }
+        ContentVerdict::Present => "Enough text in the HTML as served".to_owned(),
+    };
+    if c.verdict.is_shell() && !c.signals.is_empty() {
+        let what: Vec<&str> = c.signals.iter().map(|s| signal_text(*s)).collect();
+        tip.push_str(&format!(": {}", what.join(", ")));
+    }
+    Some(ContentRow {
+        path: path_of(&u.url),
+        href: explorer_href(site, base, &u.url),
+        words: fmt::thousands(c.words),
+        ticks: vec![
+            tick("Title", c.title),
+            tick("H1", c.h1),
+            tick("Description", c.description),
+            tick("Canonical", c.canonical),
+            jsonld_tick(c.jsonld),
+        ],
+        links: fmt::thousands(c.links_internal),
+        verdict,
+        verdict_class,
+        verdict_tip: tip,
+    })
+}
+
+fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
+    let empty = |title, text| ContentCard {
+        empty: Some((title, text)),
+        rows: Vec::new(),
+        source: NON_RENDERING_SOURCE,
+    };
+    if report.html_important() == 0 {
+        return empty(
+            "No HTML pages to read",
+            "None of your important pages answered with an HTML page, so there is no content to check.",
+        );
+    }
+    let Some(content) = &report.content else {
+        return empty(
+            "Content checks run after the next crawl",
+            "This report is from a crawl that did not read what your pages hold in their HTML as served. The next crawl will.",
+        );
+    };
+    ContentCard {
+        empty: None,
+        rows: content
+            .pages
+            .iter()
+            .filter_map(|c| content_row(site, base, report, c))
+            .collect(),
+        source: NON_RENDERING_SOURCE,
+    }
+}
+
+/// The "llms.txt" section.
+pub struct LlmsCard {
+    /// A neutral line instead of the details: no file, or not checked.
+    pub none: Option<(&'static str, String)>,
+    pub state: &'static str,
+    pub state_class: &'static str,
+    pub adopted: &'static str,
+    /// `HTTP 200`, or why nothing came back.
+    pub fetched: String,
+    pub checks: Vec<LlmsCheckRow>,
+    /// `3 checked · 1 failing · 2 not checked (other sites)`
+    pub links: Option<String>,
+    pub failing: Vec<String>,
+    pub spec: &'static str,
+}
+
+pub struct LlmsCheckRow {
+    pub label: &'static str,
+    pub ok: bool,
+    pub detail: String,
+}
+
+fn llms_check_label(id: LlmsCheckId) -> &'static str {
+    match id {
+        LlmsCheckId::H1 => "Starts with an H1",
+        LlmsCheckId::Summary => "Summary under the H1",
+        LlmsCheckId::Sections => "Sections of links",
+        LlmsCheckId::Links => "Has links",
+        LlmsCheckId::Length => "Long enough",
+        LlmsCheckId::Size => "Size",
+        LlmsCheckId::Mime => "Served as text",
+        LlmsCheckId::LinksResolve => "Links resolve",
+    }
+}
+
+fn llms_card(report: Option<&LlmsTxtReport>) -> LlmsCard {
+    let mut card = LlmsCard {
+        none: None,
+        state: "",
+        state_class: "t-muted",
+        adopted: "",
+        fetched: String::new(),
+        checks: Vec::new(),
+        links: None,
+        failing: Vec::new(),
+        spec: LLMS_SPEC_URL,
+    };
+    let Some(r) = report else {
+        card.none = Some((
+            "Not checked in this report",
+            "Reports from before llms.txt was read, and crawls that skip site signals, leave it out.".to_owned(),
+        ));
+        return card;
+    };
+    match r.state {
+        LlmsState::Absent => {
+            card.none = Some((
+                "No llms.txt — optional, nothing to fix",
+                format!(
+                    "/llms.txt answered HTTP {}. Nothing depends on it.",
+                    r.status
+                ),
+            ));
+            return card;
+        }
+        LlmsState::SoftNotFound => {
+            card.none = Some((
+                "No llms.txt — optional, nothing to fix",
+                format!(
+                    "/llms.txt answered HTTP {} with a web page instead of a file, so it is read as missing.",
+                    r.status
+                ),
+            ));
+            return card;
+        }
+        LlmsState::Available => {
+            card.state = "Available";
+            card.state_class = "t-ok";
+        }
+        LlmsState::Unavailable => {
+            card.state = "Unavailable";
+            card.state_class = if r.adopted { "t-warn" } else { "t-muted" };
+        }
+    }
+    card.adopted = if r.adopted { "Yes" } else { "No" };
+    card.fetched = match (&r.error, r.status) {
+        (Some(e), _) => format!("No answer ({e})"),
+        (None, 0) => "No answer".to_owned(),
+        (None, s) => format!("HTTP {s}"),
+    };
+    card.checks = r
+        .checks
+        .iter()
+        .map(|c| LlmsCheckRow {
+            label: llms_check_label(c.id),
+            ok: c.ok,
+            detail: c.detail.clone(),
+        })
+        .collect();
+    if r.state == LlmsState::Available {
+        let l = &r.link_summary;
+        card.links = Some(format!(
+            "{} checked · {} failing · {} not checked (other sites or past the limit)",
+            l.checked, l.failing, l.not_checked
+        ));
+        card.failing = l.failing_urls.clone();
+    }
+    card
 }
 
 fn important_row(site: &Site, base: &str, u: &codoseo_geo::report::ImportantUrl) -> ImportantRow {

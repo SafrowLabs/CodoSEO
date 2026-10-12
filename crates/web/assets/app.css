@@ -1157,6 +1157,18 @@ body.solo { overflow: auto; }
 .aia-declared-note { display: flex; align-items: center; gap: 8px; padding: 9px 18px; font-size: 12.5px; color: var(--muted-2); background: var(--surface-2); border-bottom: 1px solid var(--line-soft); }
 .aia-declared-note .icon { width: 14px; height: 14px; color: var(--faint); }
 .aia-none { padding: 18px; }
+.aia-content .card-aside { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.aia-content-table th.c, .aia-content-table td.c { text-align: center; }
+.aia-content-table .aia-bot-cell { min-width: 160px; }
+.aia-llms .card-head .chip { margin-left: 2px; }
+.aia-llms-none { border-top: 0; }
+.aia-llms-facts { display: flex; flex-wrap: wrap; gap: 6px 28px; padding: 12px 18px; margin: 0; font-size: 12.5px; border-bottom: 1px solid var(--line-soft); }
+.aia-llms-facts > div { display: flex; align-items: baseline; gap: 6px; }
+.aia-llms-facts dt { color: var(--faint-2); }
+.aia-llms-facts dd { margin: 0; }
+.aia-llms-check { display: grid; grid-template-columns: 16px minmax(120px, 190px) minmax(0, 1fr); gap: 4px 10px; align-items: baseline; padding: 8px 18px; font-size: 12.5px; }
+.aia-llms-failing { padding: 10px 18px 12px; }
+
 .aia-none b { font-weight: 600; }
 .aia-none p { margin-top: 4px; font-size: 13px; color: var(--muted-2); max-width: 60ch; }
 .aia-decl { display: grid; gap: 7px; padding: 12px 18px; border-bottom: 1px solid var(--line-faint); }
@@ -1332,6 +1344,11 @@ body.solo { overflow: auto; }
   .aia-res { flex-direction: column; gap: 4px; padding: 10px 16px; }
   .aia-decl { padding: 12px 16px; }
   .aia-fetch-note { padding: 10px 16px 12px; }
+  .aia-llms-facts { padding: 10px 16px; gap: 4px 20px; }
+  .aia-llms-check { grid-template-columns: 16px minmax(0, 1fr); padding: 8px 16px; }
+  .aia-llms-check .aia-ev-detail { grid-column: 2; }
+  .aia-llms-failing { padding: 10px 16px 12px; }
+  .aia-content-table td.c { text-align: left; }
   .aia-skipped > summary { padding: 10px 16px; }
   .aia-skip-groups { padding: 12px 16px 14px; }
   .aia-skip { grid-template-columns: minmax(0, 1fr); }
