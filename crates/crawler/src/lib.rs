@@ -7,6 +7,7 @@ pub mod extract;
 pub mod fetch;
 pub mod frontier;
 pub mod guard;
+pub(crate) mod llms;
 pub mod politeness;
 pub mod preflight;
 pub mod probe;
