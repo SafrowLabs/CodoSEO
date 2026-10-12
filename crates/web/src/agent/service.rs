@@ -948,6 +948,94 @@ mod tests {
         assert_eq!(info.bots[0].urls_probed, 1);
     }
 
+    /// A report of `n` important HTML pages; every third one (from the second) is a shell.
+    fn content_report(n: usize) -> AccessReport {
+        let important: Vec<serde_json::Value> = (0..n)
+            .map(|i| {
+                serde_json::json!({
+                    "url": format!("https://example.com/p{i}"),
+                    "reason": "most_linked",
+                    "status": 200,
+                    "html_ok": true,
+                })
+            })
+            .collect();
+        let pages: Vec<serde_json::Value> = (0..n)
+            .map(|i| {
+                let shell = i % 3 == 1;
+                serde_json::json!({
+                    "url": i,
+                    "verdict": if shell { "shell" } else { "present" },
+                    "signals": if shell { vec!["mount_empty"] } else { Vec::new() },
+                    "words": if shell { 0 } else { 300 },
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "registry_version": 1,
+            "robots": { "status": 200, "availability": "ok" },
+            "important": important,
+            "content": { "pages": pages },
+        }))
+        .expect("a report")
+    }
+
+    #[test]
+    fn ai_content_lists_shells_first_and_caps_the_pages() {
+        let report = content_report(45);
+        let info = ai_content(&report).expect("content");
+        assert_eq!(info.pages_checked, 45);
+        assert_eq!(info.shells, 15);
+        assert_eq!(info.pages.len(), MAX_AI_CONTENT_PAGES);
+        assert_eq!(info.more, 15);
+        // The 15 shells first, in the report's order, then the first present pages.
+        assert!(info.pages[..15].iter().all(|p| p.verdict.is_shell()));
+        assert_eq!(info.pages[0].url, "https://example.com/p1");
+        assert_eq!(info.pages[14].url, "https://example.com/p43");
+        assert_eq!(info.pages[15].url, "https://example.com/p0");
+        assert!(info.pages[15..].iter().all(|p| !p.verdict.is_shell()));
+
+        let small = ai_content(&content_report(4)).expect("content");
+        assert_eq!((small.pages.len(), small.more), (4, 0));
+    }
+
+    #[test]
+    fn ai_llms_txt_clips_site_text() {
+        use codoseo_geo::llms::{LlmsCheck, LlmsCheckId, MAX_TITLE};
+        let long = "x".repeat(5000);
+        let mut report = codoseo_geo::llms::assess(
+            &codoseo_core::output::LlmsTxtFetch {
+                status: 200,
+                content_type: Some("text/plain".to_owned()),
+                body: "# Site\n".to_owned(),
+                ..Default::default()
+            },
+            false,
+        );
+        // As a report stored before the caps could hold.
+        report.title = Some(long.clone());
+        report.error = Some(long.clone());
+        report.checks.push(LlmsCheck {
+            id: LlmsCheckId::H1,
+            ok: false,
+            detail: long.clone(),
+        });
+        report.link_summary.failing_urls = vec![long.clone()];
+        let info = ai_llms_txt(&report);
+        let r = &info.report;
+        assert!(info.informational);
+        assert_eq!(r.title.as_ref().unwrap().chars().count(), MAX_TITLE);
+        assert_eq!(r.error.as_ref().unwrap().chars().count(), MAX_AI_TEXT);
+        assert!(
+            r.checks
+                .iter()
+                .all(|c| c.detail.chars().count() <= MAX_AI_TEXT)
+        );
+        assert_eq!(r.checks.last().unwrap().detail.chars().count(), MAX_AI_TEXT);
+        assert!(r.checks.last().unwrap().detail.ends_with('…'));
+        assert_eq!(r.link_summary.failing_urls[0].chars().count(), MAX_AI_TEXT);
+    }
+
     #[test]
     fn the_next_page_starts_where_this_one_ends_until_the_total_is_reached() {
         assert_eq!(next_offset(0, 50, 120), Some(50));

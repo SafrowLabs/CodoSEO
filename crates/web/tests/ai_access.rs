@@ -1655,3 +1655,73 @@ fn long_llms_txt_urls_and_details_wrap_on_a_phone() {
         assert!(css.contains(rule), "missing {rule}");
     }
 }
+
+#[tokio::test]
+async fn llms_txt_text_is_escaped_everywhere_it_shows() {
+    let (app, site, cookie) = setup().await;
+    let body = "# <script>alert(\"h1\")</script> \"Quoted\"\n\n> A site.\n\n## Docs\n\n- [Start](/start)\n\n## <img src=x onerror=\"alert(1)\">\n\nprose\n";
+    let mut fetch = llms_fetch(200, body);
+    fetch.links = vec![codoseo_core::output::LinkStatus {
+        url: "https://example.com/\"><script>alert(\"url\")</script>".to_owned(),
+        status: Some(404),
+        from_crawl: false,
+    }];
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), fetch, false)
+        .await;
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let card =
+        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    for raw in ["<script>alert(", "<img src=x", "\"Quoted\"", "\"><script>"] {
+        assert!(!page.contains(raw), "unescaped {raw:?} in {card}");
+    }
+    for escaped in [
+        "&#60;script&#62;alert(&#34;h1&#34;)&#60;/script&#62; &#34;Quoted&#34;",
+        "&#60;img src=x onerror=&#34;alert(1)&#34;&#62;",
+        "&#34;&#62;&#60;script&#62;alert(&#34;url&#34;)&#60;/script&#62;",
+    ] {
+        assert!(card.contains(escaped), "missing {escaped:?} in {card}");
+    }
+}
+
+#[tokio::test]
+async fn an_unavailable_llms_txt_is_warning_styled_only_when_adopted_and_names_the_error() {
+    let no_answer = || codoseo_core::output::LlmsTxtFetch {
+        error: Some("request timed out".to_owned()),
+        ..Default::default()
+    };
+    // Adopted: a warning badge, the error on the card and in the incident.
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), no_answer(), true)
+        .await;
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let card =
+        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    assert!(
+        card.contains(r#"<span class="badge t-warn">Unavailable</span>"#),
+        "{card}"
+    );
+    assert!(card.contains("<dt>Adopted</dt><dd>Yes</dd>"), "{card}");
+    assert!(card.contains("No answer (request timed out)"), "{card}");
+    let issues =
+        &page[page.find(r#"id="aia-issues""#).unwrap()..page.find(r#"id="aia-fetch""#).unwrap()];
+    assert!(
+        issues.contains("GET /llms.txt → no answer (request timed out)"),
+        "{issues}"
+    );
+    // Not adopted: the same answer is muted and raises nothing.
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), no_answer(), false)
+        .await;
+    let page = ai_access_body(&app, &site, &cookie).await;
+    let card =
+        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    assert!(
+        card.contains(r#"<span class="badge t-muted">Unavailable</span>"#),
+        "{card}"
+    );
+    assert!(card.contains("<dt>Adopted</dt><dd>No</dd>"), "{card}");
+    assert!(
+        !page.contains("llms.txt could not be fetched"),
+        "no incident"
+    );
+}
