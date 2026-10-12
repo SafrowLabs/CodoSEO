@@ -2221,6 +2221,37 @@ async fn the_repair_actions_are_not_found_for_another_account() {
 }
 
 #[tokio::test]
+async fn incident_refusals_have_their_own_headings() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    // An unknown issue on one's own site: not a missing page.
+    let res = app
+        .post_hx(&action(&site, 999_999, "snooze"), "days=7", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    assert!(res.body.contains("Issue not found"), "{}", res.body);
+    assert!(!res.body.contains("Page not found"), "{}", res.body);
+    assert!(!res.body.contains("That page doesn"), "{}", res.body);
+
+    // A refusal that is no crawl or job in progress.
+    sqlx::query("UPDATE ai_incidents SET resolved_at = now(), resolution = 'fixed' WHERE id = $1")
+        .bind(id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let res = app
+        .post_hx(&action(&site, id, "snooze"), "days=7", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert!(
+        res.body.contains("Can&#39;t do that right now")
+            || res.body.contains("Can&#x27;t do that right now"),
+        "{}",
+        res.body
+    );
+    assert!(!res.body.contains("Already in progress"), "{}", res.body);
+}
+
+#[tokio::test]
 async fn copy_payloads_escape_hostile_site_strings() {
     let (app, site, cookie, id) = llms_incident().await;
     // Evidence a hostile site could put words in: its pages' paths.

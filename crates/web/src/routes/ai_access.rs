@@ -2943,8 +2943,8 @@ async fn recheck_incident(
 impl From<Refusal> for AppError {
     fn from(r: Refusal) -> AppError {
         match r {
-            Refusal::NotFound => AppError::NotFound,
-            Refusal::Conflict(m) => AppError::Conflict(m),
+            Refusal::NotFound => AppError::IncidentNotFound,
+            Refusal::Conflict(m) => AppError::Refused(m),
             Refusal::Limit(m) => AppError::Limit(m),
             Refusal::BadRequest(m) => AppError::BadRequest(m),
             Refusal::Db(e) => e.into(),
