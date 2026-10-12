@@ -376,7 +376,7 @@ fn three_shell_pages_are_rendered_on_the_server_and_checked_with_curl() {
         "https://example.com/app",
         "https://example.com/docs",
     ]) {
-        assert!(v.starts_with(&format!("`curl -A 'GPTBot' {url}`")), "{v}");
+        assert!(v.starts_with(&format!("`curl -A 'GPTBot' '{url}'`")), "{v}");
         assert!(v.contains("text is in the response"), "{v}");
     }
 }
@@ -881,6 +881,85 @@ fn hostile_site_strings_cannot_break_the_fence() {
             let fix = copy_fix(&r);
             assert!(!fix.contains('\0'));
             assert!(fix.len() < 16 * 1024);
+        }
+    }
+}
+
+/// The `curl` commands in the verify lines.
+fn curl_commands(r: &Remedy) -> Vec<String> {
+    r.verify
+        .iter()
+        .flat_map(|v| v.split('`').skip(1).step_by(2))
+        .filter(|c| c.starts_with("curl "))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Panics unless every character a POSIX shell would interpret is inside single quotes (or a
+/// `\'` between them): letters, digits, spaces and `-` are all that may stand outside.
+fn assert_shell_safe(cmd: &str) {
+    let mut quoted = false;
+    let mut chars = cmd.chars();
+    while let Some(c) = chars.next() {
+        match (quoted, c) {
+            (_, '\'') => quoted = !quoted,
+            (true, _) => {}
+            (false, '\\') => assert_eq!(chars.next(), Some('\''), "{cmd}"),
+            (false, c) => assert!(
+                c.is_ascii_alphanumeric() || c == ' ' || c == '-',
+                "{c:?} unquoted in {cmd}"
+            ),
+        }
+    }
+    assert!(!quoted, "unbalanced quotes in {cmd}");
+}
+
+#[test]
+fn every_curl_command_quotes_what_it_names() {
+    let mut seen = 0;
+    each(|_, _, _, r, _| {
+        for c in curl_commands(r) {
+            assert_shell_safe(&c);
+            seen += 1;
+        }
+    });
+    assert!(seen > 0);
+    for h in [
+        "/a$(touch pwned)",
+        "/a;rm -rf x",
+        "/a&b|c",
+        "/it's",
+        "/x`id`",
+    ] {
+        let url = format!("https://example.com{h}");
+        let ev = Evidence {
+            content: vec![ContentEvidence {
+                url: url.clone(),
+                verdict: codoseo_geo::content::ContentVerdict::Shell,
+                signals: Vec::new(),
+                words: 0,
+            }],
+            ..Evidence::default()
+        };
+        let c = ctx(FindingKind::ContentMissing, &ev, None, None);
+        let r = remedy(FindingKind::ContentMissing, "", &ev, &c);
+        let cmds = curl_commands(&r);
+        assert!(!cmds.is_empty());
+        for cmd in &cmds {
+            assert_shell_safe(cmd);
+        }
+        for kind in [
+            FindingKind::RobotsUnavailable,
+            FindingKind::LlmsTxtUnavailable,
+        ] {
+            let ev = Evidence::default();
+            let c = RemedyContext {
+                origin: &url,
+                ..ctx(kind, &ev, None, None)
+            };
+            for cmd in curl_commands(&remedy(kind, "", &ev, &c)) {
+                assert_shell_safe(&cmd);
+            }
         }
     }
 }

@@ -150,6 +150,12 @@ fn join_and(items: &[String]) -> String {
     }
 }
 
+/// `s` as one single-quoted shell word, for the `curl` lines: a URL can hold `$(`, `;`, `&` or a
+/// quote, and the owner pastes these into a terminal.
+fn sh(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 fn code(s: &str) -> String {
     format!("`{s}`")
 }
@@ -302,7 +308,10 @@ fn robots_unavailable(ev: &Evidence, ctx: &RemedyContext) -> Option<Body> {
         steps,
         snippet: None,
         verify: vec![
-            format!("`curl -I {robots}` answers 200, or 404 if you have no rules."),
+            format!(
+                "`curl -I {}` answers 200, or 404 if you have no rules.",
+                sh(&robots)
+            ),
             recheck_robots(ctx),
         ],
     })
@@ -660,7 +669,8 @@ fn answers_restricted(subject: &str, ev: &Evidence, ctx: &RemedyContext) -> Opti
         ));
         if let Some(u) = first {
             verify.push(format!(
-                "`curl -I {u}` shows no `X-Robots-Tag` header carrying {}.",
+                "`curl -I {}` shows no `X-Robots-Tag` header carrying {}.",
+                sh(u),
                 code(detail)
             ));
         }
@@ -677,7 +687,8 @@ fn answers_restricted(subject: &str, ev: &Evidence, ctx: &RemedyContext) -> Opti
         ));
         if let Some(u) = first {
             verify.push(format!(
-                "`curl -s {u}` and check the `<meta name=\"{name}\">` tag no longer carries {}.",
+                "`curl -s {}` and check the `<meta name=\"{name}\">` tag no longer carries {}.",
+                sh(u),
                 code(detail)
             ));
         }
@@ -688,7 +699,8 @@ fn answers_restricted(subject: &str, ev: &Evidence, ctx: &RemedyContext) -> Opti
         ));
         if let Some(u) = first {
             verify.push(format!(
-                "`curl -s {u}` and check `data-nosnippet` is only on the elements you don't want quoted."
+                "`curl -s {}` and check `data-nosnippet` is only on the elements you don't want quoted.",
+                sh(u)
             ));
         }
     }
@@ -881,8 +893,9 @@ fn content_missing(ev: &Evidence, ctx: &RemedyContext) -> Option<Body> {
         .iter()
         .map(|c| {
             format!(
-                "`curl -A '{agent}' {}` and check the page's main text is in the response ({} words now).",
-                clean(&c.url, MAX_URL),
+                "`curl -A {} {}` and check the page's main text is in the response ({} words now).",
+                sh(agent),
+                sh(&clean(&c.url, MAX_URL)),
                 c.words
             )
         })
@@ -927,7 +940,7 @@ fn llms_txt_unavailable(ev: &Evidence, ctx: &RemedyContext) -> Body {
         why: "Your site served llms.txt before and it now fails, so agents that look for it get an error.".to_owned(),
         steps,
         snippet: None,
-        verify: vec![format!("`curl -I {llms}` answers 200, or 404 if you removed it.")],
+        verify: vec![format!("`curl -I {}` answers 200, or 404 if you removed it.", sh(&llms))],
     }
 }
 
