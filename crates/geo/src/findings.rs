@@ -17,12 +17,12 @@ use codoseo_core::check::Severity;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{
-    ContentVerdict, MEASURED_BOTS, NON_RENDERING_BOTS, NON_RENDERING_SOURCE, SHELL_MAX_WORDS,
-    ShellSignal,
+    ContentVerdict, MEASURED_BOTS, NON_RENDERING_BOTS, SHELL_MAX_WORDS, ShellSignal,
 };
 use crate::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, EngineId, engines};
 use crate::intent::{Intent, Stance};
-use crate::llms::{LIGHTHOUSE_DOC, LlmsState, SPEC_URL as LLMS_SPEC_URL};
+use crate::ledger::{finding_sources, for_kind};
+use crate::llms::LlmsState;
 use crate::probe::{ProbeFetch, ProbeReport, Vendor, Verdict};
 use crate::registry::{Bot, Honours, Purpose, registry};
 use crate::report::{AccessReport, Reason, path_and_query, slug_str};
@@ -35,35 +35,6 @@ const MAX_NAMES: usize = 3;
 /// Google's account of what a failing robots.txt does, cited by `RobotsUnavailable`.
 pub const ROBOTS_DOC: &str =
     "https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt";
-/// Where each bot manager documents its bot settings, cited by `FetchBlocked` findings for its
-/// challenges. Only pages the vendor owns and that were confirmed to exist; Imperva is left out
-/// because its documentation moved and no stable page could be confirmed.
-pub const VENDOR_DOCS: &[(Vendor, &str)] = &[
-    (
-        Vendor::Cloudflare,
-        "https://developers.cloudflare.com/ai-crawl-control/",
-    ),
-    (
-        Vendor::Cloudflare,
-        "https://developers.cloudflare.com/bots/",
-    ),
-    (Vendor::Vercel, "https://vercel.com/docs/bot-management"),
-    (
-        Vendor::AwsWaf,
-        "https://docs.aws.amazon.com/waf/latest/developerguide/waf-bot-control.html",
-    ),
-    (Vendor::DataDome, "https://docs.datadome.co/docs/"),
-    (
-        Vendor::Human,
-        "https://docs.humansecurity.com/applications-and-accounts/docs/getting-started-with-bot-defender",
-    ),
-    (
-        Vendor::Akamai,
-        "https://techdocs.akamai.com/cloud-security/docs/about-bots",
-    ),
-    (Vendor::Sucuri, "https://docs.sucuri.net/website-firewall/"),
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingKind {
@@ -110,13 +81,40 @@ impl FindingKind {
 /// Evidence grade: A is what the operator documents; A- is read from the site's own HTML as
 /// served, against a published measurement of how the bots fetch rather than the operators' own
 /// documentation; B is what CodoSEO's synthetic check observed, against its own baseline and
-/// confirmed by a second fetch.
+/// confirmed by a second fetch; C is a heuristic CodoSEO infers; X is undocumented or unverified
+/// (an operator lag nobody publishes). Which check has which grade is in [`crate::ledger`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Grade {
     A,
     #[serde(rename = "A-")]
     AMinus,
     B,
+    C,
+    X,
+}
+
+impl Grade {
+    /// The letter as it is shown and serialised.
+    pub fn label(self) -> &'static str {
+        match self {
+            Grade::A => "A",
+            Grade::AMinus => "A-",
+            Grade::B => "B",
+            Grade::C => "C",
+            Grade::X => "X",
+        }
+    }
+
+    /// Strength, A highest.
+    pub fn rank(self) -> u8 {
+        match self {
+            Grade::A => 4,
+            Grade::AMinus => 3,
+            Grade::B => 2,
+            Grade::C => 1,
+            Grade::X => 0,
+        }
+    }
 }
 
 /// One bot's part in a finding.
@@ -421,7 +419,13 @@ fn robots_unavailable(report: &AccessReport, intent: &Intent) -> Option<Finding>
         return None;
     }
     let status = report.robots.status?;
-    let mut sources = vec![ROBOTS_DOC.to_owned()];
+    let evidence = Evidence {
+        robots_status: Some(status),
+        ..Evidence::default()
+    };
+    // The ledger's sources, then the pages of the bots the owner wants, which the evidence
+    // doesn't carry.
+    let mut sources = finding_sources(FindingKind::RobotsUnavailable, &evidence);
     let mut wanted = false;
     for bot in &registry().bots {
         if intent.effective(bot) == Stance::Allow && bot.honours_robots == Honours::Yes {
@@ -442,17 +446,14 @@ fn robots_unavailable(report: &AccessReport, intent: &Intent) -> Option<Finding>
         } else {
             Severity::Notice
         },
-        grade: Grade::A,
+        grade: for_kind(FindingKind::RobotsUnavailable).grade,
         title: format!(
             "robots.txt returns HTTP {status}, so bots treat the whole site as off limits"
         ),
         summary: format!(
             "Google treats a site as off limits while its robots.txt {why}, and bots that follow the same rules do too, so new and changed pages may not be picked up until it is fixed. Make /robots.txt answer 200, or 404 if you have none."
         ),
-        evidence: Evidence {
-            robots_status: Some(status),
-            ..Evidence::default()
-        },
+        evidence,
         sources,
     })
 }
@@ -581,26 +582,23 @@ fn bots_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
             }
 
             let mut urls = BTreeSet::new();
-            let mut sources = Vec::new();
             for access in report.bots.iter().filter(|a| tokens.contains(&a.token)) {
                 urls.extend(access.blocked.iter().map(|b| b.url));
             }
-            for r in &rows {
-                push_source(&mut sources, &r.bot.source_url);
-            }
+            let evidence = Evidence {
+                bots: rows.into_iter().map(|r| r.evidence).collect(),
+                urls: sample(report, &urls),
+                ..Evidence::default()
+            };
             Finding {
                 kind: FindingKind::BotsBlocked,
                 subject: purpose_slug(purpose).to_owned(),
                 severity,
-                grade: Grade::A,
+                grade: for_kind(FindingKind::BotsBlocked).grade,
                 title,
                 summary,
-                evidence: Evidence {
-                    bots: rows.into_iter().map(|r| r.evidence).collect(),
-                    urls: sample(report, &urls),
-                    ..Evidence::default()
-                },
-                sources,
+                sources: finding_sources(FindingKind::BotsBlocked, &evidence),
+                evidence,
             }
         })
         .collect()
@@ -704,22 +702,19 @@ fn bots_not_blocked(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
                 tokens[0],
             ));
 
-            let mut sources = Vec::new();
-            for r in &rows {
-                push_source(&mut sources, &r.bot.source_url);
-            }
+            let evidence = Evidence {
+                bots: rows.into_iter().map(|r| r.evidence).collect(),
+                ..Evidence::default()
+            };
             Finding {
                 kind: FindingKind::BotsNotBlocked,
                 subject: purpose_slug(purpose).to_owned(),
                 severity: Severity::Warning,
-                grade: Grade::A,
+                grade: for_kind(FindingKind::BotsNotBlocked).grade,
                 title,
                 summary,
-                evidence: Evidence {
-                    bots: rows.into_iter().map(|r| r.evidence).collect(),
-                    ..Evidence::default()
-                },
-                sources,
+                sources: finding_sources(FindingKind::BotsNotBlocked, &evidence),
+                evidence,
             }
         })
         .collect()
@@ -884,13 +879,11 @@ fn answers_restricted(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
                 });
             }
 
-            let mut sources = Vec::new();
             let mut engine_evidence = Vec::new();
             for (id, p) in &per_engine {
                 let Some(engine) = engines().iter().find(|e| e.id == *id) else {
                     continue;
                 };
-                push_source(&mut sources, engine.source_url);
                 engine_evidence.push(EngineEvidence {
                     engine: *id,
                     name: engine.name.to_owned(),
@@ -907,19 +900,20 @@ fn answers_restricted(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
                         .map_or(0, |(_, n)| *n),
                 });
             }
+            let evidence = Evidence {
+                engines: engine_evidence,
+                urls: sample(report, &urls),
+                ..Evidence::default()
+            };
             Finding {
                 kind: FindingKind::AnswersRestricted,
                 subject: key.to_owned(),
                 severity,
-                grade: Grade::A,
+                grade: for_kind(FindingKind::AnswersRestricted).grade,
                 title,
                 summary,
-                evidence: Evidence {
-                    engines: engine_evidence,
-                    urls: sample(report, &urls),
-                    ..Evidence::default()
-                },
-                sources,
+                sources: finding_sources(FindingKind::AnswersRestricted, &evidence),
+                evidence,
             }
         })
         .collect()
@@ -1082,38 +1076,28 @@ fn fetch_finding(report: &AccessReport, cause: &str, rows: Vec<ProbeEvidence>) -
     );
     let summary = probe_summary(&verdict, &tokens, vendor);
 
-    let mut sources = Vec::new();
-    for r in &rows {
-        if let Some(bot) = registry().bot(&r.token) {
-            push_source(&mut sources, &bot.source_url);
-        }
-    }
-    for (v, url) in VENDOR_DOCS {
-        if Some(*v) == vendor {
-            push_source(&mut sources, url);
-        }
-    }
+    let evidence = Evidence {
+        urls: UrlSample {
+            sample: urls
+                .iter()
+                .take(SAMPLE_URLS)
+                .map(|u| (*u).to_owned())
+                .collect(),
+            total: urls.len() as u32,
+        },
+        probes: rows,
+        synthetic: true,
+        ..Evidence::default()
+    };
     Some(Finding {
         kind: FindingKind::FetchBlocked,
         subject: cause.to_owned(),
         severity,
-        grade: Grade::B,
+        grade: for_kind(FindingKind::FetchBlocked).grade,
         title,
         summary,
-        evidence: Evidence {
-            urls: UrlSample {
-                sample: urls
-                    .iter()
-                    .take(SAMPLE_URLS)
-                    .map(|u| (*u).to_owned())
-                    .collect(),
-                total: urls.len() as u32,
-            },
-            probes: rows,
-            synthetic: true,
-            ..Evidence::default()
-        },
-        sources,
+        sources: finding_sources(FindingKind::FetchBlocked, &evidence),
+        evidence,
     })
 }
 
@@ -1471,7 +1455,7 @@ fn content_finding(
     );
 
     let indexes: BTreeSet<u16> = pages.iter().map(|c| c.url).collect();
-    let evidence = pages
+    let content = pages
         .iter()
         .filter_map(|c| {
             Some(ContentEvidence {
@@ -1482,19 +1466,20 @@ fn content_finding(
             })
         })
         .collect();
+    let evidence = Evidence {
+        urls: sample(report, &indexes),
+        content,
+        ..Evidence::default()
+    };
     Some(Finding {
         kind: FindingKind::ContentMissing,
         subject: String::new(),
         severity,
-        grade: Grade::AMinus,
+        grade: for_kind(FindingKind::ContentMissing).grade,
         title,
         summary,
-        evidence: Evidence {
-            urls: sample(report, &indexes),
-            content: evidence,
-            ..Evidence::default()
-        },
-        sources: vec![NON_RENDERING_SOURCE.to_owned()],
+        sources: finding_sources(FindingKind::ContentMissing, &evidence),
+        evidence,
     })
 }
 
@@ -1529,19 +1514,20 @@ fn llms_txt_unavailable(report: &AccessReport) -> Option<Finding> {
             "now gets no answer".to_owned(),
         ),
     };
+    let evidence = Evidence {
+        llms_status: status,
+        ..Evidence::default()
+    };
     Some(Finding {
         kind: FindingKind::LlmsTxtUnavailable,
         subject: String::new(),
         severity: Severity::Warning,
-        grade: Grade::A,
+        grade: for_kind(FindingKind::LlmsTxtUnavailable).grade,
         title,
         summary: format!(
             "Make /llms.txt answer 200 again, or 404 if you removed it on purpose. Your site served it before, and it {what}, so AI agents that look for it get nothing; Lighthouse counts this as a failed llms.txt check. llms.txt is informational: it does not affect your health score or how search engines crawl the site."
         ),
-        evidence: Evidence {
-            llms_status: status,
-            ..Evidence::default()
-        },
-        sources: vec![LLMS_SPEC_URL.to_owned(), LIGHTHOUSE_DOC.to_owned()],
+        sources: finding_sources(FindingKind::LlmsTxtUnavailable, &evidence),
+        evidence,
     })
 }

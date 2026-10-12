@@ -5,14 +5,32 @@ use std::collections::HashSet;
 use codoseo_core::check::Severity;
 use codoseo_core::output::CrawlOutput;
 use codoseo_geo::eligibility::{Effect, EngineId};
-use codoseo_geo::findings::{Finding, FindingKind, Grade, evaluated_kinds, findings};
+use codoseo_geo::findings::{Finding, FindingKind, Grade, evaluated_kinds};
 use codoseo_geo::intent::Intent;
+use codoseo_geo::ledger::{finding_sources, for_kind};
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use common::*;
 
 fn report_for(out: &CrawlOutput) -> AccessReport {
     let important = important_urls(&out.pages, &out.origin, &HashSet::new());
     build_report(out, &important)
+}
+
+/// [`codoseo_geo::findings::findings`], checking every finding against the evidence ledger: its
+/// grade is its kind's, and its sources are the ones the ledger draws from its evidence (a broken
+/// robots.txt also cites the wanted bots' pages, which its evidence doesn't carry).
+fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
+    let found = codoseo_geo::findings::findings(report, intent);
+    for f in &found {
+        assert_eq!(f.grade, for_kind(f.kind).grade, "{f:?}");
+        let ledger = finding_sources(f.kind, &f.evidence);
+        if f.kind == FindingKind::RobotsUnavailable {
+            assert!(f.sources.starts_with(&ledger), "{f:?}");
+        } else {
+            assert_eq!(f.sources, ledger, "{f:?}");
+        }
+    }
+    found
 }
 
 fn run(out: &CrawlOutput, intent: &Intent) -> Vec<Finding> {
@@ -605,7 +623,8 @@ fn a_redirecting_robots_txt_is_missing_not_off_limits() {
 
 // ---- Synthetic fetch probes ------------------------------------------------------------------
 
-use codoseo_geo::findings::{Evidence, VENDOR_DOCS};
+use codoseo_geo::findings::Evidence;
+use codoseo_geo::ledger::VENDOR_DOCS;
 use codoseo_geo::probe::{
     InconclusiveReason, ProbeFetch, ProbeReport, ProbeResult, ProbedUrl, Vendor, Verdict,
 };

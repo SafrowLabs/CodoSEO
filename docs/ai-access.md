@@ -169,13 +169,15 @@ The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowe
 
 ## Evidence grades
 
-Every finding carries a grade and links to its sources.
+Every finding carries a grade and links to its sources. Grades, sources and what each check cannot tell come from one evidence ledger in the code (`crates/geo/src/ledger.rs`); a test keeps this table in step with it.
 
-| Grade | Means |
-|---|---|
-| **A** | It rests on something the operator documents: robots.txt rules, page-level controls, the operator's own description of its bot. Every robots.txt, page-control, preference and `llms_txt_unavailable` finding is grade A. |
-| **A-** | Read from your own pages and checked against a published measurement of how the bots fetch, rather than the operator's own documentation: the content in raw HTML verdicts (Vercel and MERJ, 2024: GPTBot, ClaudeBot and PerplexityBot don't execute JavaScript). Every `content_missing` finding is grade A-. |
-| **B** | Observed by CodoSEO's synthetic fetch check: a request with the bot's documented user agent, compared with CodoSEObot's baseline for the same page at the same moment and, the first time, confirmed by a second fetch. Every `fetch_blocked` finding is grade B. |
+| Grade | Means | Ledger entries |
+|---|---|---|
+| **A** | It rests on something the operator documents: robots.txt rules, page-level controls, the operator's own description of its bot, the specification of a declared preference. Declared preferences are graded on how they are read, and stay *declared, not enforced*. | `robots_unavailable`, `bots_blocked`, `bots_not_blocked`, `answers_restricted`, `llms_txt_unavailable`, `robots_verdict`, `eligibility`, `declared_preferences`, `llms_format` |
+| **A-** | Read from your own pages and checked against a published measurement of how the bots fetch, rather than the operator's own documentation: the content in raw HTML verdicts (Vercel and MERJ, 2024: GPTBot, ClaudeBot and PerplexityBot don't execute JavaScript). | `content_missing`, `content_verdict` |
+| **B** | Observed by CodoSEO's synthetic fetch check: a request with the bot's documented user agent, compared with CodoSEObot's baseline for the same page at the same moment and, the first time, confirmed by a second fetch. | `fetch_blocked`, `synthetic_probe` |
+| **C** | Inferred heuristic: a threshold CodoSEO sets where the source names none, such as reading llms.txt's "small enough to fit in context" as 100 KiB. | `llms_size_and_type` |
+| **X** | Undocumented or unverified: something nobody publishes, such as how long an operator takes to notice a robots.txt change. OpenAI (about 24 hours), DuckDuckGo (72 hours) and Google (robots.txt cached up to 24 hours) say so, grade A; for any other operator CodoSEO assumes a day, grade X, and for issues no robots.txt cache governs it waits its own hour before confirming a fix. | |
 
 ## Intent
 

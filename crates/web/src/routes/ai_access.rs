@@ -19,10 +19,9 @@ use codoseo_core::output::LlmsSkip;
 use codoseo_core::page::JsonLdStatus;
 use codoseo_geo::content::{ContentVerdict, NON_RENDERING_SOURCE, RawContent, ShellSignal};
 use codoseo_geo::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, engines};
-use codoseo_geo::findings::{
-    BotEvidence, Evidence, FindingKind, ProbeEvidence, ROBOTS_DOC, VENDOR_DOCS,
-};
-use codoseo_geo::llms::{LIGHTHOUSE_DOC, LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL};
+use codoseo_geo::findings::{BotEvidence, Evidence, FindingKind, ProbeEvidence};
+use codoseo_geo::ledger;
+use codoseo_geo::llms::{LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL};
 use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
     SkipReason, Verdict,
@@ -57,14 +56,6 @@ pub fn routes() -> Router<AppState> {
             post(mark_intended),
         )
 }
-
-/// What grade B means, on a synthetic incident's grade.
-const GRADE_B: &str = "Evidence grade B: observed by CodoSEO's synthetic check, compared with CodoSEObot's own fetch and confirmed by a second one. Grade A is what the operator documents.";
-
-/// What grade A means on an llms.txt incident.
-const GRADE_A_LLMS: &str = "Evidence grade A: what your /llms.txt answered, judged by Lighthouse's documented llms.txt check. llms.txt is informational and never affects your score.";
-/// What grade A- means, on a content incident's grade.
-const GRADE_A_MINUS: &str = "Evidence grade A-: read from your pages' HTML as served, with Vercel and MERJ's published measurement that these AI crawlers don't run JavaScript. Grade A is what the operator documents.";
 
 /// Resolved incidents listed under "Recently resolved".
 const RESOLVED_SHOWN: i64 = 10;
@@ -1206,48 +1197,7 @@ fn summary_segments(s: &str) -> Vec<Seg> {
 }
 
 fn sources(kind: FindingKind, ev: &Evidence) -> Vec<SourceLink> {
-    let mut urls: Vec<String> = Vec::new();
-    let mut push = |u: &str| {
-        if !urls.iter().any(|x| x == u) {
-            urls.push(u.to_owned());
-        }
-    };
-    if kind == FindingKind::RobotsUnavailable {
-        push(ROBOTS_DOC);
-    }
-    if kind == FindingKind::ContentMissing {
-        push(NON_RENDERING_SOURCE);
-    }
-    if kind == FindingKind::LlmsTxtUnavailable {
-        push(LLMS_SPEC_URL);
-        push(LIGHTHOUSE_DOC);
-    }
-    for b in &ev.bots {
-        if let Some(bot) = registry().bot(&b.token) {
-            push(&bot.source_url);
-        }
-    }
-    for e in &ev.engines {
-        if let Some(engine) = engines().iter().find(|x| x.id == e.engine) {
-            push(engine.source_url);
-        }
-    }
-    for p in &ev.probes {
-        if let Some(bot) = registry().bot(&p.token) {
-            push(&bot.source_url);
-        }
-    }
-    let vendors: BTreeSet<&str> = ev
-        .probes
-        .iter()
-        .filter_map(|p| p.vendor)
-        .map(|v| v.slug())
-        .collect();
-    for (vendor, url) in VENDOR_DOCS {
-        if vendors.contains(vendor.slug()) {
-            push(url);
-        }
-    }
+    let urls = ledger::finding_sources(kind, ev);
     // Two pages on one host (Cloudflare's AI Crawl Control and bots docs) read by their path.
     let hosts: Vec<String> = urls.iter().map(|u| host_label(u)).collect();
     urls.iter()
@@ -1557,14 +1507,9 @@ fn incident_view(
         severity,
         severity_label,
         synthetic,
-        grade: if synthetic {
-            ("B", GRADE_B)
-        } else if i.kind == FindingKind::ContentMissing {
-            ("A-", GRADE_A_MINUS)
-        } else if i.kind == FindingKind::LlmsTxtUnavailable {
-            ("A", GRADE_A_LLMS)
-        } else {
-            ("A", "Evidence grade A: documented by the operator")
+        grade: {
+            let entry = ledger::for_kind(i.kind);
+            (entry.grade.label(), entry.explain)
         },
         title: i.title.clone(),
         summary: summary_segments(&i.summary),
@@ -2030,6 +1975,8 @@ pub struct ContentCard {
     pub counts: Option<String>,
     pub rows: Vec<ContentRow>,
     pub source: &'static str,
+    /// The content verdicts' evidence grade and what it means.
+    pub grade: (&'static str, &'static str),
 }
 
 /// One important page's facts from its HTML as served.
@@ -2154,11 +2101,14 @@ fn content_row(
 }
 
 fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
+    let entry = ledger::entry("content_verdict").expect("the ledger grades content verdicts");
+    let grade = (entry.grade.label(), entry.explain);
     let empty = |title, text| ContentCard {
         empty: Some((title, text)),
         counts: None,
         rows: Vec::new(),
         source: NON_RENDERING_SOURCE,
+        grade,
     };
     if report.html_important() == 0 {
         return empty(
@@ -2186,6 +2136,7 @@ fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
             .filter_map(|c| content_row(site, base, report, c))
             .collect(),
         source: NON_RENDERING_SOURCE,
+        grade,
     }
 }
 

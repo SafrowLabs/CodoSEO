@@ -110,7 +110,7 @@
   <section class="card aia-section aia-content" aria-labelledby="aia-content">
     <div class="card-head">
       <h2 class="card-title" id="aia-content">Content in raw HTML</h2>
-      <span class="card-aside">{% if let Some(n) = v.content.counts %}{{ n }} · {% endif %}as AI crawlers that don't run JavaScript see it · <span class="aia-grade" title="Evidence grade A-: read from your pages' HTML as served, with a published measurement that these AI crawlers don't run JavaScript.">A-</span></span>
+      <span class="card-aside">{% if let Some(n) = v.content.counts %}{{ n }} · {% endif %}as AI crawlers that don't run JavaScript see it · <span class="aia-grade" title="{{ v.content.grade.1 }}">{{ v.content.grade.0 }}</span></span>
     </div>
     {% if let Some((title, text)) = v.content.empty %}
     <div class="aia-none"><b>{{ title }}</b><p>{{ text }}</p></div>
