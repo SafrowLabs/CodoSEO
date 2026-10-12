@@ -668,6 +668,44 @@ async fn get_ai_access_carries_content_and_llms_txt_like_rest() {
 }
 
 #[tokio::test]
+async fn get_ai_access_says_why_llms_txt_was_not_fetched_like_rest() {
+    let f = setup(Plan::Pro).await;
+    let site = f.site.id;
+    f.app
+        .finished_crawl_with_llms(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: *\nAllow: /\n"),
+            codoseo_core::output::LlmsTxtFetch {
+                status: 404,
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+    let fetched = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    assert!(fetched.get("llms_txt_skipped").is_none(), "{fetched}");
+
+    sqlx::query(
+        "UPDATE ai_reports SET report = (report - 'llms_txt') \
+         || '{\"llms_txt_skipped\": \"deadline\"}'::jsonb",
+    )
+    .execute(f.app.pool())
+    .await
+    .unwrap();
+    let out = f
+        .rpc()
+        .call_ok("get_ai_access", json!({"site_id": site}))
+        .await;
+    let res = rest_get(&f.app, &format!("/api/v1/sites/{site}/ai-access"), &f.key).await;
+    assert_eq!(out, serde_json::from_str::<Value>(&res.body).unwrap());
+    assert_eq!(out["llms_txt_skipped"], "deadline");
+}
+
+#[tokio::test]
 async fn bad_arguments_are_tool_errors_the_agent_can_read() {
     let f = setup(Plan::Pro).await;
     let rpc = f.rpc();

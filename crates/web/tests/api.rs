@@ -1347,3 +1347,33 @@ async fn a_redirecting_page_lists_its_hops_as_objects() {
     let info: PageInfo = parsed(&res);
     assert_eq!(info.redirect_chain[0].status, 301);
 }
+
+#[tokio::test]
+async fn ai_access_says_why_llms_txt_was_not_fetched() {
+    let f = setup(Plan::Pro).await;
+    let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
+    f.app
+        .finished_crawl_with_llms(
+            &f.site,
+            fixture_pages(),
+            (200, "User-agent: *\nAllow: /\n"),
+            llms(404, ""),
+            false,
+        )
+        .await;
+    // Fetched: no marker.
+    let fetched = json(&get(&f.app, &path, &f.key).await);
+    assert!(fetched.get("llms_txt_skipped").is_none(), "{fetched}");
+
+    // A crawl that meant to fetch it and did not records why.
+    sqlx::query(
+        "UPDATE ai_reports SET report = (report - 'llms_txt') \
+         || '{\"llms_txt_skipped\": \"robots_disallowed\"}'::jsonb",
+    )
+    .execute(f.app.pool())
+    .await
+    .unwrap();
+    let skipped = json(&get(&f.app, &path, &f.key).await);
+    assert_eq!(skipped["llms_txt_skipped"], "robots_disallowed");
+    assert!(skipped.get("llms_txt").is_none(), "{skipped}");
+}

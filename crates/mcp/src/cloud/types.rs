@@ -227,6 +227,10 @@ pub struct AiAccessInfo {
     /// report, or the file was not fetched).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llms_txt: Option<AiLlmsTxtInfo>,
+    /// Why `/llms.txt` was not fetched when the crawl meant to: `robots_disallowed`, `refused` or
+    /// `deadline`. Absent when it was fetched, or the report has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt_skipped: Option<codoseo_core::output::LlmsSkip>,
 }
 
 /// What the important HTML pages hold in their HTML as served, before any JavaScript runs. AI

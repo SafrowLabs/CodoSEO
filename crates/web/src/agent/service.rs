@@ -477,6 +477,7 @@ impl<'a> AgentService<'a> {
                 probes: None,
                 content: None,
                 llms_txt: None,
+                llms_txt_skipped: None,
             });
         };
         let intent = geo::get_intent(pool, site.id).await?;
@@ -501,6 +502,7 @@ impl<'a> AgentService<'a> {
                 .map(|p| ai_probes(p, &intent)),
             content: ai_content(&report),
             llms_txt: report.llms_txt.as_ref().map(ai_llms_txt),
+            llms_txt_skipped: report.llms_txt_skipped,
             declared: report.declared,
         })
     }

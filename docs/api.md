@@ -106,6 +106,7 @@ Only bots whose intent is `allow` become incidents. The incident kind is `fetch_
 
 - `state` is `available`, `absent` (a 4xx other than 429), `soft_not_found` (a web page where the file should be) or `unavailable` (429, 5xx or no answer, with `error` when nothing answered). `checks` is filled only for `available`; ids are `h1`, `summary`, `sections`, `links`, `length`, `size`, `mime` and `links_resolve`.
 - `adopted` is true when the site serves, or served before, an llms.txt. Only an adopted file that becomes `unavailable` raises the `llms_txt_unavailable` incident (`warning`, grade `A`).
+- `llms_txt_skipped` (top level, next to `llms_txt`, left out when absent) says why the crawl did not fetch the file: `robots_disallowed` (robots.txt disallows `/llms.txt`, or where it redirects, for CodoSEObot), `refused` (the address, or a redirect's, is one CodoSEO may not request) or `deadline` (the crawl ran out of time). `llms_txt` is then absent too.
 - `link_summary` counts the links checked (a crawl status, or one request each up to the plan's cap: Free 5, other plans 20), those answering 4xx, 5xx or nothing, and those not checked (past the cap or on another site). `failing_urls` holds up to ten.
 
 Both are left out of reports from before they existed, and `content` when no important page is HTML.
