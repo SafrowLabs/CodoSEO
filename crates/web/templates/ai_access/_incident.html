@@ -1,17 +1,30 @@
 {#- One open incident on the AI access screen. Expects `i: IncidentView` and `base`. -#}
-<article class="card aia-issue is-{{ i.severity }}" id="issue-{{ i.id }}" aria-labelledby="issue-{{ i.id }}-title">
+<article class="card aia-issue is-{{ i.severity }}{% if i.accepted || i.snoozed %} is-muted{% endif %}" id="issue-{{ i.id }}" aria-labelledby="issue-{{ i.id }}-title">
   <div class="aia-issue-head">
     <span class="aia-issue-badges"><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span>{% if i.synthetic %}<span class="badge aia-synthetic">Synthetic</span>{% endif %}</span>
     <h3 class="aia-issue-title" id="issue-{{ i.id }}-title">{{ i.title }}</h3>
-    {% if let Some(confirm) = i.intend %}
-    <form class="aia-intend" method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/intended" hx-confirm="{{ confirm }}">
-      <button class="btn btn-ghost btn-sm" type="submit" title="Change your intent so this is expected"><svg class="icon"><use href="#i-check"/></svg>Mark intended</button>
-    </form>
-    {% endif %}
+    <span class="aia-states">{% for c in i.chips %}<span class="chip{% if !c.class.is_empty() %} {{ c.class }}{% endif %}" title="{{ c.tip }}">{{ c.label }}</span>{% endfor %}</span>
   </div>
   <p class="aia-summary">{% for s in i.summary %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</p>
 
+  {% if let Some(p) = i.progress %}
+  <div class="aia-progress{% if p.recovered %} is-recovered{% endif %}" role="status">
+    <svg class="icon"><use href="#{% if p.recovered %}i-check{% else %}i-refresh{% endif %}"/></svg>
+    <div>
+      <b>{{ p.text }}</b>
+      {% if p.recovered %}<span>{% if let Some(src) = p.lag_source %}The wait is the operator's documented lag: <a href="{{ src.href }}" target="_blank" rel="noopener noreferrer">{{ src.label }}</a>.{% else %}The wait is CodoSEO's default, undocumented.{% endif %} Policy restored ≠ back in AI answers: bots re-crawl on their own schedule.</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% if let Some(l) = i.last_recheck %}<p class="aia-recheck-last">{{ l }}</p>{% endif %}
+
   <div class="aia-evidence">
+    {% if let Some(ba) = i.before_after %}
+    <dl class="aia-ba">
+      <div><dt>Before</dt><dd>{{ ba.0 }}</dd></div>
+      <div><dt>Now</dt><dd>{{ ba.1 }}</dd></div>
+    </dl>
+    {% endif %}
     {% if let Some(st) = i.status_line %}<div class="aia-rule">{{ st }}</div>{% endif %}
     {% for g in i.bots %}
     <div class="aia-ev">
@@ -22,6 +35,12 @@
       {% if let Some(rule) = g.rule %}<div class="aia-rule">{{ rule }}</div>{% endif %}
     </div>
     {% endfor %}
+    {% if let Some(p) = i.probe %}
+    <div class="aia-probe-id">
+      {% for a in p.agents %}<div class="aia-rule">{{ a.0 }} · User-Agent: {{ a.1 }}</div>{% endfor %}
+      <p class="aia-ev-detail">From: {{ p.from }} · sent from CodoSEO's address, not the bots' own, so a firewall that checks addresses may treat the real bots differently.</p>
+    </div>
+    {% endif %}
     {% if !i.engines.is_empty() %}
     <div class="aia-ev-engines">
       {% for e in i.engines %}
@@ -42,12 +61,6 @@
     </div>
     {% if i.shells_more > 0 %}<div class="aia-urls"><span class="faint">+{{ i.shells_more }} more</span></div>{% endif %}
     {% endif %}
-    {% if let Some(fix) = i.fix %}
-    <div class="aia-fix">
-      <div class="aia-fix-head"><span>Add to robots.txt</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ fix }}" aria-label="Copy the robots.txt lines"><svg class="icon"><use href="#i-copy"/></svg>Copy</button></div>
-      <pre class="aia-snippet">{{ fix }}</pre>
-    </div>
-    {% endif %}
     {% if !i.urls.is_empty() %}
     <div class="aia-urls">
       <span class="aia-urls-label">Pages</span>
@@ -57,11 +70,73 @@
     {% endif %}
   </div>
 
+  <details class="aia-remedy"{% if i.remedy_open %} open{% endif %}>
+    <summary><svg class="icon chev"><use href="#i-chev"/></svg>How to fix</summary>
+    <div class="aia-remedy-body">
+      <p class="aia-why">{% for s in i.remedy.why %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</p>
+      <ol class="aia-steps">
+        {% for step in i.remedy.steps %}<li>{% for s in step %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</li>{% endfor %}
+      </ol>
+      {% if let Some(sn) = i.remedy.snippet %}
+      <div class="aia-fix">
+        <div class="aia-fix-head"><span>{{ sn.0 }}</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ sn.1 }}" aria-label="Copy these lines"><svg class="icon"><use href="#i-copy"/></svg>Copy</button></div>
+        <pre class="aia-snippet">{{ sn.1 }}</pre>
+      </div>
+      {% endif %}
+      {% if !i.remedy.verify.is_empty() %}
+      <div class="aia-verify">
+        <span class="aia-urls-label">Check it worked</span>
+        <ul>{% for v in i.remedy.verify %}<li>{% for s in v %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+      <p class="aia-limits"><b>Policy restored ≠ back in AI answers.</b> {{ i.remedy.limits }}</p>
+    </div>
+  </details>
+
+  <div class="aia-actions">
+    {% if i.can_recheck %}
+    <form method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/recheck">
+      <button class="btn btn-sm" type="submit" title="Check this issue again now, without a crawl"><svg class="icon"><use href="#i-crawls"/></svg>Recheck now</button>
+    </form>
+    {% endif %}
+    <span class="aia-copy" role="group" aria-label="Copy the fix">
+      <button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_fix }}" title="Just the change"><svg class="icon"><use href="#i-copy"/></svg>Copy fix</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_task }}" title="A Markdown ticket for whoever makes the change"><svg class="icon"><use href="#i-copy"/></svg>Copy task</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_prompt }}" title="A prompt for a coding agent, with the site's data fenced off"><svg class="icon"><use href="#i-copy"/></svg>Copy prompt</button>
+    </span>
+    <span class="grow"></span>
+    {% if let Some(confirm) = i.intend %}
+    <form method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/intended" hx-confirm="{{ confirm }}">
+      <button class="btn btn-ghost btn-sm" type="submit" title="Change your intent so this is expected"><svg class="icon"><use href="#i-check"/></svg>Mark intended</button>
+    </form>
+    {% else if i.accept %}
+    <form method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/accept" hx-confirm="Accept this as intentional? It stays listed under Accepted, but stops counting and alerting. A crawl that no longer finds it still closes it.">
+      <button class="btn btn-ghost btn-sm" type="submit" title="Intentional: stop counting and alerting"><svg class="icon"><use href="#i-check"/></svg>Accept</button>
+    </form>
+    {% else if i.accepted %}
+    <form method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/unaccept">
+      <button class="btn btn-ghost btn-sm" type="submit">Unaccept</button>
+    </form>
+    {% endif %}
+    {% if i.snoozed %}
+    <form method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/unsnooze">
+      <button class="btn btn-ghost btn-sm" type="submit">Unsnooze</button>
+    </form>
+    {% else if !i.accepted %}
+    <form class="aia-snooze" method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/snooze">
+      <label class="sr-only" for="snooze-{{ i.id }}">Snooze for</label>
+      <select class="select" id="snooze-{{ i.id }}" name="days"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select>
+      <button class="btn btn-ghost btn-sm" type="submit" title="Not counted and no instant alerts for a while; changes are still logged">Snooze</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if let Some(why) = i.snooze_only %}<p class="aia-snooze-why">{{ why }}</p>{% endif %}
+
   <div class="aia-meta">
     <span title="{{ i.opened_full }}">Opened {{ i.opened }}</span>
     <span title="{{ i.last_seen_full }}">Last seen {{ i.last_seen }}</span>
     {% if let Some((label, tip)) = i.quiet %}<span class="chip" title="{{ tip }}">{{ label }}</span>{% endif %}
-    <span class="aia-grade{% if i.synthetic %} aia-grade-b{% endif %}" title="{{ i.grade.1 }}"><span aria-hidden="true">{{ i.grade.0 }}</span><span class="sr-only">{{ i.grade.1 }}</span></span>
+    <span class="aia-grade{{ i.grade_class }}" title="{{ i.grade.1 }}"><span aria-hidden="true">{{ i.grade.0 }}</span><span class="sr-only">{{ i.grade.1 }}</span></span>
     {% if !i.sources.is_empty() %}<span class="aia-sources">Sources: {% for s in i.sources %}<a href="{{ s.href }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
   </div>
 </article>

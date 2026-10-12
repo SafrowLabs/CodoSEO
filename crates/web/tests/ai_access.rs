@@ -1813,3 +1813,461 @@ async fn a_content_incident_lists_its_pages_once_with_a_count_of_the_rest() {
         "{issues}"
     );
 }
+
+// ---- B3.10: the incident card's repair actions -----------------------------------------------
+
+/// A site whose second crawl blocks OAI-SearchBot: one open, alerted `bots_blocked` incident.
+async fn blocked_incident() -> (TestApp, Site, String, i64) {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    (app, site, cookie, id)
+}
+
+/// A site whose adopted llms.txt fails: one open `llms_txt_unavailable` incident (acceptable).
+async fn llms_incident() -> (TestApp, Site, String, i64) {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(503, ""), true)
+        .await;
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    (app, site, cookie, id)
+}
+
+fn action(site: &Site, id: i64, what: &str) -> String {
+    format!("/s/{}/ai-access/incidents/{id}/{what}", site.id)
+}
+
+/// The sidebar's AI access item.
+fn nav_item(body: &str, site: &Site) -> String {
+    let href = format!(r#"href="/s/{}/ai-access""#, site.id);
+    let start = body.find(&href).expect("the AI access nav item");
+    body[start..start + body[start..].find("</a>").unwrap()].to_owned()
+}
+
+/// The card of incident `id` on the page.
+fn card(body: &str, id: i64) -> String {
+    let start = body
+        .find(&format!(r#"id="issue-{id}""#))
+        .unwrap_or_else(|| panic!("no card for {id} in {body}"));
+    body[start..start + body[start..].find("</article>").unwrap()].to_owned()
+}
+
+#[tokio::test]
+async fn a_card_shows_the_remedy_the_copy_buttons_and_the_honest_line() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let card = card(&body, id);
+    for needle in [
+        "How to fix",
+        "Copy fix",
+        "Copy task",
+        "Copy prompt",
+        "data-copy=",
+        "Recheck now",
+        "Mark intended",
+        "Policy restored ≠ back in AI answers",
+        // Before and after.
+        "OAI-SearchBot allowed on all",
+        "OAI-SearchBot blocked on all 3 important pages",
+        // The ledger's grade and sources.
+        "Evidence grade A: documented by the operator",
+        "developers.openai.com",
+        "Snooze",
+    ] {
+        assert!(card.contains(needle), "missing {needle:?} in {card}");
+    }
+    // Bot and directive kinds go through the intent: no Accept.
+    assert!(!card.contains(">Accept<"), "{card}");
+}
+
+#[tokio::test]
+async fn rechecking_queues_one_and_the_card_says_so() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let res = app
+        .post_hx(&action(&site, id, "recheck"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(
+        toast_message(&res),
+        "Recheck queued · results in a minute or two"
+    );
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM ai_rechecks WHERE status = 'queued' AND origin = 'manual'"
+        )
+        .await,
+        1
+    );
+    assert!(
+        card(&res.body, id).contains("Recheck queued"),
+        "{}",
+        res.body
+    );
+    // A plain form post is sent back to the page.
+    let res = app
+        .post(&action(&site, id, "recheck"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert!(
+        res.body
+            .contains("A recheck of this issue is already queued"),
+        "{}",
+        res.body
+    );
+}
+
+#[tokio::test]
+async fn refused_rechecks_say_why_and_when() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let path = action(&site, id, "recheck");
+
+    // Cooldown: one finished a minute ago.
+    app.post_hx(&path, "", Some(&cookie)).await;
+    sqlx::query("UPDATE ai_rechecks SET status = 'done', outcome = 'still_failing', created_at = now() - interval '1 minute', finished_at = now()")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let res = app.post_hx(&path, "", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert!(
+        res.body.contains("Rechecked moments ago. Try again at"),
+        "{}",
+        res.body
+    );
+
+    // The card says what the last one found.
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(
+        card(&body, id).contains("Last recheck: still failing"),
+        "{body}"
+    );
+
+    // Busy while verifying a fix: a follow-up is queued.
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
+         VALUES ($1, $2, 'followup', now() + interval '24 hours')",
+    )
+    .bind(site.id)
+    .bind(id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let res = app.post_hx(&path, "", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert!(
+        res.body.contains("Already verifying — due at"),
+        "{}",
+        res.body
+    );
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let c = card(&body, id);
+    assert!(
+        c.contains("Fix detected · policy restored — verifying until"),
+        "{c}"
+    );
+    assert!(c.contains("Policy restored ≠ back in AI answers"), "{c}");
+    assert!(c.contains("openai.com"), "the lag's source: {c}");
+
+    // A crawl is running: it will judge it.
+    sqlx::query("UPDATE ai_rechecks SET status = 'superseded' WHERE origin = 'followup'")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status) \
+         VALUES ($1, $2, 'manual', 2, 'queued')",
+    )
+    .bind(site.id)
+    .bind(&site.domain)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let res = app.post_hx(&path, "", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert!(
+        res.body.contains("A crawl is running; it will judge this"),
+        "{}",
+        res.body
+    );
+    // The follow-up gave way to the crawl: the card waits for it.
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(
+        card(&body, id).contains("Waiting for the next crawl"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn the_daily_recheck_cap_is_the_plan_s() {
+    let app = TestApp::with_config(cloud_config()).await;
+    let (account, cookie) = app
+        .login_with_plan("ana@example.com", Some(codoseo_core::plan::Plan::Free))
+        .await;
+    let site = app.site(&account, DOMAIN).await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    for _ in 0..3 {
+        sqlx::query(
+            "INSERT INTO ai_rechecks (site_id, incident_id, origin, status, outcome, due_at, created_at) \
+             VALUES ($1, $2, 'manual', 'done', 'still_failing', now(), now() - interval '2 hours')",
+        )
+        .bind(site.id)
+        .bind(id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    }
+    let res = app
+        .post_hx(&action(&site, id, "recheck"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN, "{}", res.body);
+    assert!(
+        res.body
+            .contains("3 rechecks per day on your plan — next at"),
+        "{}",
+        res.body
+    );
+}
+
+#[tokio::test]
+async fn accepting_mutes_the_incident_and_lists_it_under_accepted() {
+    let (app, site, cookie, id) = llms_incident().await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(card(&body, id).contains(">Accept<"), "{body}");
+    assert!(nav_item(&body, &site).contains(">1<"));
+
+    let res = app
+        .post_hx(&action(&site, id, "accept"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(
+        toast_message(&res),
+        "Accepted · it no longer counts or alerts"
+    );
+    let i = geo::incident(app.pool(), site.id, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(i.accepted_at.is_some());
+    let body = &res.body;
+    assert!(body.contains("Accepted (1)"), "{body}");
+    assert!(card(body, id).contains("Unaccept"));
+    assert!(
+        nav_item(body, &site).contains(r#"<span class="count"></span>"#),
+        "{}",
+        nav_item(body, &site)
+    );
+    // The open issues list and its count leave it out.
+    let open = &body[body.find(r#"id="aia-issues""#).unwrap()..body.find("Accepted (1)").unwrap()];
+    assert!(!open.contains(&format!(r#"id="issue-{id}""#)), "{open}");
+    assert!(body.contains("No AI access issues"), "{body}");
+
+    let res = app
+        .post_hx(&action(&site, id, "unaccept"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(
+        toast_message(&res),
+        "No longer accepted · it counts and alerts again"
+    );
+    assert!(!res.body.contains("Accepted (1)"));
+    assert!(
+        geo::incident(app.pool(), site.id, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .accepted_at
+            .is_none()
+    );
+
+    // A plain form post redirects back.
+    let res = app
+        .post(&action(&site, id, "accept"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        res.location(),
+        Some(format!("/s/{}/ai-access", site.id).as_str())
+    );
+}
+
+#[tokio::test]
+async fn snoozing_takes_one_seven_or_thirty_days_and_leaves_the_badge() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    for bad in ["days=5", "days=90", "days=", "days=abc", ""] {
+        let res = app
+            .post_hx(&action(&site, id, "snooze"), bad, Some(&cookie))
+            .await;
+        assert_eq!(res.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert!(
+        geo::incident(app.pool(), site.id, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .snoozed_until
+            .is_none()
+    );
+
+    let res = app
+        .post_hx(&action(&site, id, "snooze"), "days=7", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert!(
+        toast_message(&res).starts_with("Snoozed until "),
+        "{}",
+        toast_message(&res)
+    );
+    let until = geo::incident(app.pool(), site.id, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .snoozed_until
+        .unwrap();
+    let left = until - time::OffsetDateTime::now_utc();
+    assert!(
+        left > time::Duration::days(6) && left <= time::Duration::days(7),
+        "{left}"
+    );
+    let c = card(&res.body, id);
+    assert!(c.contains("Snoozed until"), "{c}");
+    assert!(c.contains("Unsnooze"), "{c}");
+    assert!(nav_item(&res.body, &site).contains(r#"<span class="count"></span>"#));
+    // Still listed among the open issues, but not counted.
+    let tile = &res.body[res.body.find("Open issues").unwrap()..];
+    assert!(
+        tile.contains("nothing to fix") || tile.contains(">0<"),
+        "{tile}"
+    );
+
+    let res = app
+        .post_hx(&action(&site, id, "unsnooze"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(toast_message(&res), "Snooze ended");
+    assert!(
+        geo::incident(app.pool(), site.id, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .snoozed_until
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn a_failing_robots_txt_can_only_be_snoozed() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (503, ""), Vec::new())
+        .await;
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let c = card(&body, id);
+    assert!(
+        !c.contains(">Accept<") && !c.contains("Mark intended"),
+        "{c}"
+    );
+    assert!(c.contains("Snooze"), "{c}");
+    assert!(
+        c.contains("A failing robots.txt can&#39;t be accepted")
+            || c.contains("A failing robots.txt can&#x27;t be accepted"),
+        "{c}"
+    );
+    let res = app
+        .post_hx(&action(&site, id, "accept"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert!(res.body.contains("can only be snoozed"), "{}", res.body);
+}
+
+#[tokio::test]
+async fn the_repair_actions_are_not_found_for_another_account() {
+    let (app, site, _, id) = blocked_incident().await;
+    let (_, other) = app.login("bo@example.com").await;
+    for what in ["recheck", "accept", "unaccept", "snooze", "unsnooze"] {
+        let res = app
+            .post(&action(&site, id, what), "days=7", Some(&other))
+            .await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{what}");
+    }
+    // An unknown incident on one's own site is not found either.
+    let (app, site, cookie, _) = blocked_incident().await;
+    for what in ["recheck", "accept", "unaccept", "snooze", "unsnooze"] {
+        let res = app
+            .post(&action(&site, 999_999, what), "days=7", Some(&cookie))
+            .await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{what}");
+    }
+    assert_eq!(count(&app, "SELECT count(*) FROM ai_rechecks").await, 0);
+}
+
+#[tokio::test]
+async fn copy_payloads_escape_hostile_site_strings() {
+    let (app, site, cookie, id) = llms_incident().await;
+    // Evidence a hostile site could put words in: its pages' paths.
+    sqlx::query(
+        "UPDATE ai_incidents SET evidence = jsonb_set(evidence, '{urls}', \
+         '{\"sample\": [\"https://example.com/\\\"><img src=x onerror=alert(1)>\"], \"total\": 1}') \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let c = card(&body, id);
+    assert!(c.contains("Copy prompt"), "{c}");
+    assert!(!body.contains("<img src=x"), "{c}");
+    assert!(!body.contains(r#""><img"#), "{c}");
+    // The copy payloads carry it, escaped in their attribute.
+    assert!(
+        c.contains("&#34;&#62;&#60;img src=x onerror=alert(1)&#62;"),
+        "{c}"
+    );
+}
+
+#[tokio::test]
+async fn a_fetch_blocked_card_names_the_probe_identity() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| {
+        probes_with(r, &|_, _| None)
+    })
+    .await;
+    app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
+        .await;
+    let i = geo::open_incidents(app.pool(), site.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.kind == codoseo_geo::findings::FindingKind::FetchBlocked)
+        .expect("a fetch_blocked incident");
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let c = card(&body, i.id);
+    let ua = registry()
+        .bot("OAI-SearchBot")
+        .unwrap()
+        .user_agent
+        .clone()
+        .unwrap();
+    assert!(
+        c.contains(&ua.replace('/', "&#x2f;")) || c.contains(&ua),
+        "{c}"
+    );
+    assert!(c.contains("From: hello@codoseo.com"), "{c}");
+    assert!(c.contains("sent from CodoSEO's address"), "{c}");
+    assert!(c.contains(">Accept<"), "{c}");
+}

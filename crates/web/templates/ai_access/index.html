@@ -37,7 +37,7 @@
   </div>
 
   <section class="aia-section" aria-labelledby="aia-issues">
-    <div class="aia-section-head"><h2 id="aia-issues">Open issues</h2><span class="chip">{{ v.incidents.len() }}</span></div>
+    <div class="aia-section-head"><h2 id="aia-issues">Open issues</h2><span class="chip" title="Accepted and snoozed issues aren't counted">{{ v.attention }}</span></div>
     {% if v.incidents.is_empty() %}
     <div class="card">
       <div class="empty aia-clear">
@@ -50,6 +50,14 @@
     <div class="stack aia-issues">
       {% for i in v.incidents %}{% include "ai_access/_incident.html" %}{% endfor %}
     </div>
+    {% endif %}
+    {% if !v.accepted.is_empty() %}
+    <details class="aia-accepted">
+      <summary><svg class="icon chev"><use href="#i-chev"/></svg>Accepted ({{ v.accepted.len() }})<span class="aia-accepted-note">Muted: not counted, no alerts. A crawl that no longer finds one still closes it.</span></summary>
+      <div class="stack aia-issues">
+        {% for i in v.accepted %}{% include "ai_access/_incident.html" %}{% endfor %}
+      </div>
+    </details>
     {% endif %}
   </section>
 
