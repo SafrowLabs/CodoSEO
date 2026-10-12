@@ -1894,3 +1894,322 @@ async fn recheck_values_are_checked_and_go_with_their_incident_and_site() {
         .unwrap();
     assert_eq!(left, 0, "deleting the site deletes its rechecks");
 }
+
+// ---- Accept and snooze (B3.6) ------------------------------------------------------------------
+
+use codoseo_store::geo::IncidentActionError;
+use time::{Duration as TimeDuration, OffsetDateTime};
+
+async fn make_account(pool: &PgPool, email: &str) -> Uuid {
+    sqlx::query_scalar("INSERT INTO accounts (email, email_canonical) VALUES ($1, $1) RETURNING id")
+        .bind(email)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// The crawl's change rows as (kind, alerted).
+async fn changes_alerted(pool: &PgPool, crawl: Uuid) -> Vec<(String, bool)> {
+    sqlx::query_as(
+        "SELECT kind::text, alerted_at IS NOT NULL FROM changes WHERE crawl_id = $1 ORDER BY id",
+    )
+    .bind(crawl)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// A site whose one open incident is a quiet `fetch_blocked` for OAI-SearchBot.
+async fn site_with_fetch_blocked(pool: &PgPool) -> (Uuid, i64) {
+    let site = make_site(pool, "example.com").await;
+    probed_crawl(pool, site, &[("OAI-SearchBot", cloudflare())]).await;
+    let open = fetch_blocked_open(pool, site).await;
+    assert_eq!(open.len(), 1);
+    (site, open[0].id)
+}
+
+#[tokio::test]
+async fn an_accepted_incident_stays_listed_but_is_not_counted_and_writes_no_changes() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 0));
+
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.accepted_at.is_some());
+    assert_eq!(i.accepted_by, Some(owner));
+    let accepted_at = i.accepted_at;
+    // Accepting again keeps the first time.
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+    assert_eq!(
+        geo::incident(&db.pool, site, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .accepted_at,
+        accepted_at
+    );
+    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
+
+    // Widened: same incident, no change row, no alert job, still quiet.
+    let widened = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    let open = fetch_blocked_open(&db.pool, site).await;
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].id, id);
+    assert!(open[0].evidence["probes"].as_array().unwrap().len() == 2);
+    assert!(change_kinds(&db.pool, widened).await.is_empty());
+    assert_eq!(alert_jobs(&db.pool, widened).await, 0);
+
+    // Resolved by a crawl: resolved quietly, by the crawl.
+    let clear = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", Verdict::Same),
+            ("Claude-SearchBot", Verdict::Same),
+        ],
+    )
+    .await;
+    assert!(fetch_blocked_open(&db.pool, site).await.is_empty());
+    assert!(change_kinds(&db.pool, clear).await.is_empty());
+    let r = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(r.resolution.as_deref(), Some("fixed"));
+    assert_eq!(r.resolved_by.as_deref(), Some("crawl"));
+}
+
+#[tokio::test]
+async fn unaccepting_makes_the_incident_count_and_announce_again() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+    geo::unaccept(&db.pool, site, id).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!((i.accepted_at, i.accepted_by), (None, None));
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 0));
+    let widened = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    assert_eq!(
+        changes_alerted(&db.pool, widened).await,
+        vec![("ai_fetch_blocked".to_owned(), false)]
+    );
+}
+
+#[tokio::test]
+async fn only_kinds_without_an_intent_path_can_be_accepted() {
+    let db = TestDb::new().await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    // bots_blocked: "Mark intended" is its path.
+    let (site, id) = site_with_incident(&db.pool).await;
+    assert!(matches!(
+        geo::accept(&db.pool, site, id, owner).await,
+        Err(IncidentActionError::NotAcceptable(FindingKind::BotsBlocked))
+    ));
+    // robots_unavailable: snooze only.
+    let crawl = full_crawl(&db.pool, site, 503, "", None).await;
+    let robots = open_of(&db.pool, site, FindingKind::RobotsUnavailable).await;
+    assert_eq!(robots.len(), 1, "{crawl}");
+    assert!(matches!(
+        geo::accept(&db.pool, site, robots[0].id, owner).await,
+        Err(IncidentActionError::NotAcceptable(
+            FindingKind::RobotsUnavailable
+        ))
+    ));
+    let until = OffsetDateTime::now_utc() + TimeDuration::days(2);
+    geo::snooze(&db.pool, site, robots[0].id, until)
+        .await
+        .unwrap();
+    assert!(
+        geo::incident(&db.pool, site, robots[0].id)
+            .await
+            .unwrap()
+            .unwrap()
+            .accepted_at
+            .is_none()
+    );
+    // Another site's id, an unknown id.
+    let other = make_site(&db.pool, "other.example").await;
+    assert!(matches!(
+        geo::snooze(&db.pool, other, robots[0].id, until).await,
+        Err(IncidentActionError::NotFound)
+    ));
+    assert!(matches!(
+        geo::unaccept(&db.pool, site, 999_999).await,
+        Err(IncidentActionError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn a_resolved_incident_can_be_neither_accepted_nor_snoozed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    probed_crawl(&db.pool, site, &[("OAI-SearchBot", Verdict::Same)]).await;
+    let until = OffsetDateTime::now_utc() + TimeDuration::days(2);
+    assert!(matches!(
+        geo::accept(&db.pool, site, id, owner).await,
+        Err(IncidentActionError::Resolved)
+    ));
+    assert!(matches!(
+        geo::snooze(&db.pool, site, id, until).await,
+        Err(IncidentActionError::Resolved)
+    ));
+    assert!(matches!(
+        geo::unsnooze(&db.pool, site, id).await,
+        Err(IncidentActionError::Resolved)
+    ));
+}
+
+#[tokio::test]
+async fn a_snooze_must_end_in_the_future_and_lasts_at_most_90_days() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let past = OffsetDateTime::now_utc() - TimeDuration::minutes(1);
+    assert!(matches!(
+        geo::snooze(&db.pool, site, id, past).await,
+        Err(IncidentActionError::SnoozeInPast)
+    ));
+    let far = OffsetDateTime::now_utc() + TimeDuration::days(400);
+    let until = geo::snooze(&db.pool, site, id, far).await.unwrap();
+    assert!(until <= OffsetDateTime::now_utc() + TimeDuration::days(90));
+    assert!(until > OffsetDateTime::now_utc() + TimeDuration::days(89));
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.snoozed_until, Some(until));
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
+
+    geo::unsnooze(&db.pool, site, id).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.snoozed_until, None);
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 1));
+}
+
+#[tokio::test]
+async fn a_snoozed_incident_still_writes_its_changes_but_alerts_nobody() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let until = OffsetDateTime::now_utc() + TimeDuration::days(7);
+    geo::snooze(&db.pool, site, id, until).await.unwrap();
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
+
+    // Escalated while snoozed: the change is on record (changes page, digest) but already
+    // marked alerted, so no instant alert goes out.
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), true)]
+    );
+    assert!(
+        alert_rules::unalerted_changes(&db.pool, worse)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 0);
+    assert!(
+        !quiet_of(&db.pool, site, "bots_blocked").await,
+        "announced on the record"
+    );
+
+    // Resolved while snoozed: the same.
+    let fixed = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, fixed).await,
+        vec![("ai_issue_resolved".to_owned(), true)]
+    );
+    assert_eq!(alert_jobs(&db.pool, fixed).await, 0);
+}
+
+#[tokio::test]
+async fn an_expired_snooze_alerts_again() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    geo::snooze(
+        &db.pool,
+        site,
+        id,
+        OffsetDateTime::now_utc() + TimeDuration::days(1),
+    )
+    .await
+    .unwrap();
+    // Time passes.
+    sqlx::query(
+        "UPDATE ai_incidents SET snoozed_until = now() - interval '1 minute' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (1, 0));
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), false)]
+    );
+    assert_eq!(
+        alert_rules::unalerted_changes(&db.pool, worse)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 1);
+}
+
+#[tokio::test]
+async fn a_crawl_that_still_finds_the_problem_clears_its_recovery() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.recovered_at, None);
+    assert!(i.resolved_at.is_none());
+}
+
+#[tokio::test]
+async fn resolved_by_says_whether_a_crawl_or_the_intent_resolved_it() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolved_by.as_deref(), Some("crawl"));
+
+    full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let intent = Intent {
+        bots: [("OAI-SearchBot".to_owned(), Stance::Any)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    geo::reevaluate_quietly(&db.pool, site).await.unwrap();
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!(i.resolution.as_deref(), Some("intent"));
+    assert_eq!(i.resolved_by.as_deref(), Some("intent"));
+}

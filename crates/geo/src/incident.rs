@@ -103,6 +103,23 @@ pub fn reconcile(
     out
 }
 
+/// Whether the owner may accept an incident of `kind` as it is (muted, still listed). The bot and
+/// directive kinds are made a choice through the owner's intent ("Mark intended"), which changes
+/// what the findings are; accepting is for the kinds that have no intent to change: what the
+/// site's CDN serves bots, app-shell pages and llms.txt. A failing robots.txt is never fine (it
+/// stops every bot that follows Google's rules), so it can only be snoozed.
+pub fn acceptable(kind: FindingKind) -> bool {
+    match kind {
+        FindingKind::FetchBlocked
+        | FindingKind::ContentMissing
+        | FindingKind::LlmsTxtUnavailable => true,
+        FindingKind::RobotsUnavailable
+        | FindingKind::BotsBlocked
+        | FindingKind::BotsNotBlocked
+        | FindingKind::AnswersRestricted => false,
+    }
+}
+
 // ---- before ----------------------------------------------------------------------------------
 
 /// What was true before an incident opened, as the newest earlier report that judged its kind

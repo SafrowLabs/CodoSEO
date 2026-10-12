@@ -12,6 +12,11 @@
 //! opens are `quiet` and write no change rows, so switching the feature on (or a site whose first
 //! crawls failed) does not fire an alert storm. A change of intent ([`reevaluate_quietly`]) is
 //! quiet the same way.
+//!
+//! The owner can [`accept`] an incident (it stays listed, writes no change rows and leaves the
+//! badges) or [`snooze`] it (its change rows are still recorded, already marked alerted, so the
+//! changes page and the digest stay truthful but nothing alerts at once, until the snooze ends on
+//! its own).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -539,14 +544,143 @@ pub async fn incident(
 }
 
 /// How many incidents are open on the site, and how many of those are critical (the sidebar).
+/// Accepted incidents and those snoozed until later are left out: the owner already decided
+/// about them, so they don't ask for attention.
 pub async fn open_counts(pool: &PgPool, site_id: Uuid) -> Result<(i64, i64), sqlx::Error> {
     sqlx::query_as(
         "SELECT count(*), count(*) FILTER (WHERE severity = 'critical') \
-         FROM ai_incidents WHERE site_id = $1 AND resolved_at IS NULL",
+         FROM ai_incidents WHERE site_id = $1 AND resolved_at IS NULL \
+           AND accepted_at IS NULL AND (snoozed_until IS NULL OR snoozed_until <= now())",
     )
     .bind(site_id)
     .fetch_one(pool)
     .await
+}
+
+/// The longest an incident can be snoozed, in days.
+pub const MAX_SNOOZE_DAYS: i64 = 90;
+
+/// Why accepting or snoozing an incident did not happen.
+#[derive(Debug, thiserror::Error)]
+pub enum IncidentActionError {
+    /// No incident with that id on that site.
+    #[error("no such incident")]
+    NotFound,
+    /// It is resolved: there is nothing left to accept or snooze.
+    #[error("the incident is resolved")]
+    Resolved,
+    /// Its kind can't be accepted ([`codoseo_geo::incident::acceptable`]): the bot and directive
+    /// kinds go through the owner's intent, a failing robots.txt can only be snoozed.
+    #[error("a {} incident can't be accepted", .0.slug())]
+    NotAcceptable(FindingKind),
+    /// A snooze has to end after now.
+    #[error("a snooze must end in the future")]
+    SnoozeInPast,
+    #[error(transparent)]
+    Db(#[from] sqlx::Error),
+}
+
+/// Locks one open incident of the site for an owner's action and returns its kind.
+async fn lock_incident(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+    id: i64,
+) -> Result<FindingKind, IncidentActionError> {
+    let row: Option<(String, bool)> = sqlx::query_as(
+        "SELECT kind, resolved_at IS NOT NULL FROM ai_incidents \
+         WHERE site_id = $1 AND id = $2 FOR UPDATE",
+    )
+    .bind(site_id)
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    match row {
+        None => Err(IncidentActionError::NotFound),
+        Some((_, true)) => Err(IncidentActionError::Resolved),
+        Some((kind, false)) => FindingKind::from_slug(&kind).ok_or(IncidentActionError::NotFound),
+    }
+}
+
+/// The owner accepts the incident as it is: it stays open and listed (under "Accepted"), but no
+/// longer counts in the badges and writes no change rows, so nothing about it alerts or reaches
+/// the digest; a crawl that no longer finds it still resolves it, quietly. Only for kinds
+/// without an intent path ([`codoseo_geo::incident::acceptable`]). Accepting again keeps the
+/// first time and account.
+pub async fn accept(
+    pool: &PgPool,
+    site_id: Uuid,
+    id: i64,
+    account_id: Uuid,
+) -> Result<(), IncidentActionError> {
+    let mut tx = pool.begin().await?;
+    let kind = lock_incident(&mut tx, site_id, id).await?;
+    if !codoseo_geo::incident::acceptable(kind) {
+        return Err(IncidentActionError::NotAcceptable(kind));
+    }
+    sqlx::query(
+        "UPDATE ai_incidents SET accepted_at = now(), accepted_by = $2 \
+         WHERE id = $1 AND accepted_at IS NULL",
+    )
+    .bind(id)
+    .bind(account_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Takes back an acceptance: the incident counts and announces its changes again.
+pub async fn unaccept(pool: &PgPool, site_id: Uuid, id: i64) -> Result<(), IncidentActionError> {
+    let mut tx = pool.begin().await?;
+    lock_incident(&mut tx, site_id, id).await?;
+    sqlx::query("UPDATE ai_incidents SET accepted_at = NULL, accepted_by = NULL WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Snoozes the incident until `until`, at most [`MAX_SNOOZE_DAYS`] from now (a later time is cut
+/// to that). While snoozed it does not count in the badges, and the change rows it writes are
+/// still recorded (the changes page and the digest stay truthful) but marked alerted, so no
+/// instant alert goes out. The snooze ends on its own. Any kind can be snoozed. Returns the time
+/// stored.
+pub async fn snooze(
+    pool: &PgPool,
+    site_id: Uuid,
+    id: i64,
+    until: OffsetDateTime,
+) -> Result<OffsetDateTime, IncidentActionError> {
+    let mut tx = pool.begin().await?;
+    lock_incident(&mut tx, site_id, id).await?;
+    let stored: Option<OffsetDateTime> = sqlx::query_scalar(
+        "UPDATE ai_incidents \
+         SET snoozed_until = LEAST($2, now() + make_interval(days => $3::int)) \
+         WHERE id = $1 AND $2 > now() RETURNING snoozed_until",
+    )
+    .bind(id)
+    .bind(until)
+    .bind(MAX_SNOOZE_DAYS as i32)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(stored) = stored else {
+        return Err(IncidentActionError::SnoozeInPast);
+    };
+    tx.commit().await?;
+    Ok(stored)
+}
+
+/// Ends a snooze early.
+pub async fn unsnooze(pool: &PgPool, site_id: Uuid, id: i64) -> Result<(), IncidentActionError> {
+    let mut tx = pool.begin().await?;
+    lock_incident(&mut tx, site_id, id).await?;
+    sqlx::query("UPDATE ai_incidents SET snoozed_until = NULL WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 /// After an intent change: the findings of the site's stored reports under the new intent,
@@ -602,6 +736,7 @@ pub async fn reevaluate_quietly(
                 quiet: ALL_KINDS.into(),
                 changes: false,
                 resolution: "intent",
+                resolved_by: "intent",
                 seen: false,
                 befores: HashMap::new(),
             },
@@ -714,7 +849,7 @@ pub(crate) async fn apply_geo(
             Some(((f.kind, f.subject.clone()), value))
         })
         .collect();
-    let mut changes = write_transitions(
+    let written = write_transitions(
         tx,
         site_id,
         crawl_id,
@@ -727,11 +862,14 @@ pub(crate) async fn apply_geo(
                 .collect(),
             changes: true,
             resolution: "fixed",
+            resolved_by: "crawl",
             seen: true,
             befores,
         },
     )
     .await?;
+    insert_muted_changes(tx, crawl_id, site_id, &written.muted).await?;
+    let mut changes = written.changes;
 
     // Preferences are compared with the newest earlier report that knew them all.
     let previous = earlier
@@ -821,6 +959,8 @@ struct Mode {
     changes: bool,
     /// The `resolution` recorded on resolved incidents.
     resolution: &'static str,
+    /// The `resolved_by` recorded on them: `crawl` or `intent`.
+    resolved_by: &'static str,
     /// A crawl read the site: the incidents it keeps open were seen again by it. A quiet
     /// re-evaluation only re-reads the stored report, so their `last_seen_*` stay as they were.
     seen: bool,
@@ -836,37 +976,59 @@ struct OpenRow {
     severity: Severity,
     title: String,
     quiet: bool,
+    /// The owner accepted it: its changes are not written.
+    accepted: bool,
+    /// Snoozed until later: its changes are written already alerted.
+    snoozed: bool,
     members: BTreeSet<String>,
     evidence: Evidence,
+}
+
+#[derive(sqlx::FromRow)]
+struct OpenDbRow {
+    id: i64,
+    kind: String,
+    subject: String,
+    severity: String,
+    title: String,
+    quiet: bool,
+    evidence: Value,
+    accepted: bool,
+    snoozed: bool,
+}
+
+impl OpenDbRow {
+    fn into_open(self) -> Option<OpenRow> {
+        let evidence = serde_json::from_value::<Evidence>(self.evidence).unwrap_or_default();
+        Some(OpenRow {
+            id: self.id,
+            kind: FindingKind::from_slug(&self.kind)?,
+            subject: self.subject,
+            severity: parse_severity(&self.severity)?,
+            title: self.title,
+            quiet: self.quiet,
+            accepted: self.accepted,
+            snoozed: self.snoozed,
+            members: evidence.members(),
+            evidence,
+        })
+    }
 }
 
 async fn lock_open(
     tx: &mut Transaction<'_, Postgres>,
     site_id: Uuid,
 ) -> Result<Vec<OpenRow>, sqlx::Error> {
-    let rows: Vec<(i64, String, String, String, String, bool, Value)> = sqlx::query_as(
-        "SELECT id, kind, subject, severity::text, title, quiet, evidence FROM ai_incidents \
-         WHERE site_id = $1 AND resolved_at IS NULL ORDER BY id FOR UPDATE",
+    let rows: Vec<OpenDbRow> = sqlx::query_as(
+        "SELECT id, kind, subject, severity::text AS severity, title, quiet, evidence, \
+           accepted_at IS NOT NULL AS accepted, \
+           COALESCE(snoozed_until > now(), false) AS snoozed \
+         FROM ai_incidents WHERE site_id = $1 AND resolved_at IS NULL ORDER BY id FOR UPDATE",
     )
     .bind(site_id)
     .fetch_all(&mut **tx)
     .await?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|(id, kind, subject, severity, title, quiet, evidence)| {
-            let evidence = serde_json::from_value::<Evidence>(evidence).unwrap_or_default();
-            Some(OpenRow {
-                id,
-                kind: FindingKind::from_slug(&kind)?,
-                subject,
-                severity: parse_severity(&severity)?,
-                title,
-                quiet,
-                members: evidence.members(),
-                evidence,
-            })
-        })
-        .collect())
+    Ok(rows.into_iter().filter_map(OpenDbRow::into_open).collect())
 }
 
 /// The report's findings under `intent`, with the bots and pages it could not judge held back
@@ -900,6 +1062,26 @@ fn as_open(rows: &[OpenRow]) -> Vec<OpenIncident> {
         .collect()
 }
 
+/// The change rows [`write_transitions`] produced: `changes` go through the alert planner,
+/// `muted` (a snoozed incident's) are recorded already alerted.
+#[derive(Default)]
+struct Written {
+    changes: Vec<Change>,
+    muted: Vec<Change>,
+}
+
+impl Written {
+    /// Files a change of the incident `row` (`None` for one that just opened): nothing for an
+    /// accepted one, muted for one snoozed until later.
+    fn push(&mut self, row: Option<&OpenRow>, change: Change) {
+        match row {
+            Some(r) if r.accepted => {}
+            Some(r) if r.snoozed => self.muted.push(change),
+            _ => self.changes.push(change),
+        }
+    }
+}
+
 async fn write_transitions(
     tx: &mut Transaction<'_, Postgres>,
     site_id: Uuid,
@@ -907,9 +1089,9 @@ async fn write_transitions(
     transitions: &[Transition],
     open: &[OpenRow],
     mode: Mode,
-) -> Result<Vec<Change>, sqlx::Error> {
+) -> Result<Written, sqlx::Error> {
     let by_id: HashMap<i64, &OpenRow> = open.iter().map(|r| (r.id, r)).collect();
-    let mut changes = Vec::new();
+    let mut written = Written::default();
     for transition in transitions {
         match transition {
             Transition::Opened { finding } => {
@@ -928,7 +1110,8 @@ async fn write_transitions(
                        summary = EXCLUDED.summary, evidence = EXCLUDED.evidence, \
                        last_seen_crawl_id = CASE WHEN $10 THEN EXCLUDED.last_seen_crawl_id \
                          ELSE ai_incidents.last_seen_crawl_id END, \
-                       last_seen_at = CASE WHEN $10 THEN now() ELSE ai_incidents.last_seen_at END",
+                       last_seen_at = CASE WHEN $10 THEN now() ELSE ai_incidents.last_seen_at END, \
+                       recovered_at = CASE WHEN $10 THEN NULL ELSE ai_incidents.recovered_at END",
                 )
                 .bind(site_id)
                 .bind(finding.kind.slug())
@@ -948,7 +1131,7 @@ async fn write_transitions(
                 .execute(&mut **tx)
                 .await?;
                 if mode.changes && !quiet {
-                    changes.push(finding_change(finding));
+                    written.push(None, finding_change(finding));
                 }
             }
             Transition::Updated {
@@ -957,17 +1140,22 @@ async fn write_transitions(
                 escalated,
                 widened,
             } => {
+                let row = by_id.get(id).copied();
                 // Worse, or about more bots or engines than before: announced like a new
                 // incident, and from then on no longer quiet, so its resolution is announced too.
-                let announce = mode.changes && (*escalated || *widened);
+                // An accepted incident announces nothing.
+                let announce =
+                    mode.changes && (*escalated || *widened) && !row.is_some_and(|r| r.accepted);
                 let mut evidence =
                     serde_json::to_value(&finding.evidence).expect("evidence always serializes");
                 strip_nul(&mut evidence);
+                // A crawl that still finds it undoes a recovery a recheck saw.
                 sqlx::query(
                     "UPDATE ai_incidents SET severity = $2::severity, title = $3, summary = $4, \
                        evidence = $5, \
                        last_seen_crawl_id = CASE WHEN $7 THEN $6 ELSE last_seen_crawl_id END, \
                        last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END, \
+                       recovered_at = CASE WHEN $7 THEN NULL ELSE recovered_at END, \
                        quiet = quiet AND NOT $8 \
                      WHERE id = $1",
                 )
@@ -982,17 +1170,18 @@ async fn write_transitions(
                 .execute(&mut **tx)
                 .await?;
                 if announce {
-                    changes.push(finding_change(finding));
+                    written.push(row, finding_change(finding));
                 }
             }
             Transition::Resolved { id, .. } => {
                 sqlx::query(
                     "UPDATE ai_incidents SET resolved_at = now(), resolved_crawl_id = $2, \
-                       resolution = $3 WHERE id = $1",
+                       resolution = $3, resolved_by = $4 WHERE id = $1",
                 )
                 .bind(id)
                 .bind(crawl_id)
                 .bind(mode.resolution)
+                .bind(mode.resolved_by)
                 .execute(&mut **tx)
                 .await?;
                 // Nobody was told a quiet incident opened, so nobody is told it is gone.
@@ -1000,18 +1189,50 @@ async fn write_transitions(
                     && mode.changes
                     && !row.quiet
                 {
-                    changes.push(Change {
-                        kind: resolved_kind(row.kind),
-                        severity: Severity::Notice,
-                        url: None,
-                        before: truncate(&row.title),
-                        after: "resolved".to_owned(),
-                    });
+                    written.push(Some(row), resolved_change(row.kind, &row.title));
                 }
             }
         }
     }
-    Ok(changes)
+    Ok(written)
+}
+
+/// The change row announcing that the incident of `kind` titled `title` is gone.
+fn resolved_change(kind: FindingKind, title: &str) -> Change {
+    Change {
+        kind: resolved_kind(kind),
+        severity: Severity::Notice,
+        url: None,
+        before: truncate(title),
+        after: "resolved".to_owned(),
+    }
+}
+
+/// Records a snoozed incident's changes already marked alerted: on the changes page and in the
+/// digest, but never routed to an instant channel.
+async fn insert_muted_changes(
+    tx: &mut Transaction<'_, Postgres>,
+    crawl_id: Uuid,
+    site_id: Uuid,
+    changes: &[Change],
+) -> Result<(), sqlx::Error> {
+    for c in changes {
+        sqlx::query(
+            "INSERT INTO changes (crawl_id, site_id, kind, severity, url, before_value, \
+               after_value, alerted_at) \
+             VALUES ($1, $2, $3::change_kind, $4::severity, $5, $6, $7, now())",
+        )
+        .bind(crawl_id)
+        .bind(site_id)
+        .bind(enum_slug(&c.kind))
+        .bind(enum_slug(&c.severity))
+        .bind(c.url.as_ref().map(|u| u.as_str()))
+        .bind(&c.before)
+        .bind(&c.after)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 /// The change kind that announces an incident of `kind` is gone. Most use `ai_issue_resolved`,

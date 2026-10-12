@@ -370,3 +370,25 @@ mod before {
         );
     }
 }
+
+#[test]
+fn only_kinds_without_an_intent_path_can_be_accepted() {
+    use codoseo_geo::incident::acceptable;
+    // The owner's intent ("Mark intended") is the way to make these a choice.
+    for kind in [
+        FindingKind::BotsBlocked,
+        FindingKind::BotsNotBlocked,
+        FindingKind::AnswersRestricted,
+    ] {
+        assert!(!acceptable(kind), "{kind:?}");
+    }
+    // A failing robots.txt is never fine: it can only be snoozed.
+    assert!(!acceptable(FindingKind::RobotsUnavailable));
+    for kind in [
+        FindingKind::FetchBlocked,
+        FindingKind::ContentMissing,
+        FindingKind::LlmsTxtUnavailable,
+    ] {
+        assert!(acceptable(kind), "{kind:?}");
+    }
+}
