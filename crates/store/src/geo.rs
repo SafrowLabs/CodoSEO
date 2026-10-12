@@ -22,6 +22,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::Severity;
+use codoseo_core::plan::PlanLimits;
 use codoseo_geo::Intent;
 use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{
@@ -39,6 +40,7 @@ use uuid::Uuid;
 
 use crate::dbenum::enum_slug;
 use crate::finalize::{enqueue_alert_job, insert_changes};
+use crate::jobs::{JobKind, enqueue_at_in};
 
 /// Reports kept per site: the newest two, like the per-URL data of a crawl, plus older ones the
 /// newest two can't stand in for (see [`reports_to_keep`]).
@@ -325,11 +327,9 @@ pub async fn recheck(
     site_id: Uuid,
     id: i64,
 ) -> Result<Option<Recheck>, sqlx::Error> {
-    let row: Option<RecheckRow> = sqlx::query_as(
-        "SELECT id, site_id, incident_id, origin, requested_by, status, due_at, started_at, \
-         finished_at, outcome, observations, created_at \
-         FROM ai_rechecks WHERE site_id = $1 AND id = $2",
-    )
+    let row: Option<RecheckRow> = sqlx::query_as(&format!(
+        "SELECT {RECHECK_COLUMNS} FROM ai_rechecks WHERE site_id = $1 AND id = $2"
+    ))
     .bind(site_id)
     .bind(id)
     .fetch_optional(pool)
@@ -681,6 +681,372 @@ pub async fn unsnooze(pool: &PgPool, site_id: Uuid, id: i64) -> Result<(), Incid
         .await?;
     tx.commit().await?;
     Ok(())
+}
+
+/// How long after a manual recheck of an incident the next one can be asked for, in minutes.
+pub const RECHECK_COOLDOWN_MINUTES: i32 = 10;
+/// The window the daily recheck allowance counts over, in hours: a trailing 24 hours rather
+/// than a calendar day, so there is no midnight (in whose time zone?) to wait for and the time a
+/// slot frees up is simply a day after the recheck that used it.
+pub const RECHECK_WINDOW_HOURS: i32 = 24;
+
+/// A recheck that was queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecheckQueued {
+    pub id: i64,
+    pub due_at: OffsetDateTime,
+}
+
+/// Why a recheck was not queued.
+#[derive(Debug, thiserror::Error)]
+pub enum RecheckError {
+    #[error("no such incident")]
+    NotFound,
+    #[error("the incident is resolved")]
+    Resolved,
+    /// A recheck of the incident (manual or follow-up) is already queued or running.
+    #[error("a recheck of this incident is already queued")]
+    Busy,
+    /// The incident was rechecked by hand less than [`RECHECK_COOLDOWN_MINUTES`] ago; another
+    /// can be asked for from this time.
+    #[error("this incident was rechecked moments ago")]
+    Cooldown(OffsetDateTime),
+    /// The account used its manual rechecks for the last 24 hours; one frees up at this time
+    /// (`None` when the plan allows none).
+    #[error("the daily recheck allowance is used up")]
+    LimitReached(Option<OffsetDateTime>),
+    /// A crawl of the site is queued or running: it will judge the incident soon anyway.
+    #[error("a crawl of this site is under way")]
+    CrawlActive,
+    #[error(transparent)]
+    Db(#[from] sqlx::Error),
+}
+
+/// Queues a manual recheck of an open incident, with its `ai_recheck` job (one attempt, due
+/// now), in one transaction. Refused while one is already queued or running for the incident,
+/// within [`RECHECK_COOLDOWN_MINUTES`] of the last manual one, while a crawl of the site is
+/// queued or running, and past the plan's `ai_rechecks_per_day`: manual rechecks over the last
+/// [`RECHECK_WINDOW_HOURS`] across every site of the site's account (follow-ups don't count).
+/// Requests for one account are serialised, so two at once can't both take the last slot.
+pub async fn request_recheck(
+    pool: &PgPool,
+    site_id: Uuid,
+    incident_id: i64,
+    account_id: Uuid,
+    limits: &PlanLimits,
+) -> Result<RecheckQueued, RecheckError> {
+    let mut tx = pool.begin().await?;
+    let owner: Option<Option<Uuid>> =
+        sqlx::query_scalar("SELECT account_id FROM sites WHERE id = $1")
+            .bind(site_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some(owner) = owner else {
+        return Err(RecheckError::NotFound);
+    };
+    let key = format!("codoseo.ai_recheck.{}", owner.unwrap_or(site_id));
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
+    match lock_incident(&mut tx, site_id, incident_id).await {
+        Ok(_) => {}
+        Err(IncidentActionError::Resolved) => return Err(RecheckError::Resolved),
+        Err(IncidentActionError::Db(e)) => return Err(RecheckError::Db(e)),
+        Err(_) => return Err(RecheckError::NotFound),
+    }
+    let busy: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM ai_rechecks \
+         WHERE incident_id = $1 AND status IN ('queued', 'running'))",
+    )
+    .bind(incident_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if busy {
+        return Err(RecheckError::Busy);
+    }
+    let cooling: Option<OffsetDateTime> = sqlx::query_scalar(
+        "SELECT until FROM ( \
+           SELECT max(created_at) + make_interval(mins => $2) AS until FROM ai_rechecks \
+           WHERE incident_id = $1 AND origin = 'manual') t \
+         WHERE until > now()",
+    )
+    .bind(incident_id)
+    .bind(RECHECK_COOLDOWN_MINUTES)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(until) = cooling {
+        return Err(RecheckError::Cooldown(until));
+    }
+    let crawling: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM crawls \
+         WHERE site_id = $1 AND status IN ('queued', 'running'))",
+    )
+    .bind(site_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if crawling {
+        return Err(RecheckError::CrawlActive);
+    }
+    if let Some(cap) = limits.ai_rechecks_per_day {
+        let cap = usize::from(cap);
+        let used: Vec<OffsetDateTime> = sqlx::query_scalar(
+            "SELECT r.created_at FROM ai_rechecks r JOIN sites s ON s.id = r.site_id \
+             WHERE r.origin = 'manual' \
+               AND r.created_at > now() - make_interval(hours => $3) \
+               AND (r.site_id = $1 OR ($2::uuid IS NOT NULL AND s.account_id = $2)) \
+             ORDER BY r.created_at",
+        )
+        .bind(site_id)
+        .bind(owner)
+        .bind(RECHECK_WINDOW_HOURS)
+        .fetch_all(&mut *tx)
+        .await?;
+        if used.len() >= cap {
+            // The slot frees when enough of the oldest leave the window to drop below the cap.
+            let frees_at = used
+                .get(used.len() - cap)
+                .map(|t| *t + time::Duration::hours(i64::from(RECHECK_WINDOW_HOURS)));
+            return Err(RecheckError::LimitReached(frees_at));
+        }
+    }
+    let (id, due_at): (i64, OffsetDateTime) = sqlx::query_as(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, requested_by, due_at) \
+         VALUES ($1, $2, 'manual', $3, now()) RETURNING id, due_at",
+    )
+    .bind(site_id)
+    .bind(incident_id)
+    .bind(account_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    enqueue_at_in(
+        &mut *tx,
+        JobKind::AiRecheck,
+        serde_json::json!({ "recheck_id": id }),
+        due_at,
+        1,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(RecheckQueued { id, due_at })
+}
+
+const RECHECK_COLUMNS: &str = "id, site_id, incident_id, origin, requested_by, status, due_at, \
+     started_at, finished_at, outcome, observations, created_at";
+
+/// Marks a queued recheck running (the runner, when its job is claimed) and returns it; `None`
+/// when it is not queued (superseded, or already run).
+pub async fn start_recheck(pool: &PgPool, id: i64) -> Result<Option<Recheck>, sqlx::Error> {
+    let row: Option<RecheckRow> = sqlx::query_as(&format!(
+        "UPDATE ai_rechecks SET status = 'running', started_at = now() \
+         WHERE id = $1 AND status = 'queued' RETURNING {RECHECK_COLUMNS}"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(RecheckRow::into_recheck))
+}
+
+/// Marks a queued or running recheck failed (it could not run at all). Returns whether it did.
+pub async fn fail_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE ai_rechecks SET status = 'failed', finished_at = now(), \
+           started_at = COALESCE(started_at, now()) \
+         WHERE id = $1 AND status IN ('queued', 'running')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+/// Applies what a recheck saw to its incident: `report` is the stored report with the
+/// recheck's observations laid over it and `kinds` the kinds they were conclusive for
+/// ([`codoseo_geo::recheck::overlay`]). Locks like [`apply_geo`] (the site row, then the open
+/// incidents) and judges the incident as a crawl would, with the bots and pages the report could
+/// not judge held back, but only that incident: a recheck never opens one, and never touches
+/// another.
+///
+/// - Not conclusive for its kind: `inconclusive`, nothing changes.
+/// - Still there: the incident's evidence and `last_seen_at` are refreshed (its
+///   `last_seen_crawl_id` stays: no crawl saw it), a recovery is undone: `still_failing`.
+/// - Gone, on a manual recheck: `recovered_at` is set and a follow-up recheck is queued for when
+///   the operators will have seen the fix ([`codoseo_geo::ledger::lag`]): `clean`.
+/// - Gone again, on that follow-up: resolved (`fixed`, verified now, by `recheck`) and, unless it
+///   was quiet or accepted, announced like a crawl's resolution, on the crawl that last saw it
+///   (already alerted while snoozed): `clean`.
+///
+/// A follow-up for an incident that is resolved, or whose recovery a crawl undid meanwhile, does
+/// nothing and is marked `superseded`, as is a recheck for an incident resolved meanwhile.
+/// Returns `None` then, and for a recheck that already finished. `observations` (what the
+/// recheck saw, as JSON) is kept on the recheck.
+pub async fn apply_recheck(
+    pool: &PgPool,
+    recheck_id: i64,
+    report: &AccessReport,
+    kinds: &[FindingKind],
+    observations: Option<&Value>,
+) -> Result<Option<RecheckOutcome>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let row: Option<(Uuid, i64, String)> =
+        sqlx::query_as("SELECT site_id, incident_id, origin FROM ai_rechecks WHERE id = $1")
+            .bind(recheck_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((site_id, incident_id, origin)) = row else {
+        return Err(sqlx::Error::RowNotFound);
+    };
+    let origin = RecheckOrigin::from_slug(&origin).unwrap_or(RecheckOrigin::Manual);
+    let intent = lock_site(&mut tx, site_id).await?;
+    let open = lock_open(&mut tx, site_id).await?;
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM ai_rechecks WHERE id = $1 FOR UPDATE")
+            .bind(recheck_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if !matches!(status.as_str(), "queued" | "running") {
+        return Ok(None);
+    }
+    let mut observations = observations.cloned();
+    if let Some(v) = observations.as_mut() {
+        strip_nul(v);
+    }
+    let finish = |status: RecheckStatus, outcome: Option<RecheckOutcome>| {
+        sqlx::query(
+            "UPDATE ai_rechecks SET status = $2, outcome = $3, finished_at = now(), \
+               started_at = COALESCE(started_at, now()), \
+               observations = COALESCE($4, observations) \
+             WHERE id = $1",
+        )
+        .bind(recheck_id)
+        .bind(status.slug())
+        .bind(outcome.map(RecheckOutcome::slug))
+        .bind(observations.clone())
+    };
+
+    let incident = open.iter().find(|r| r.id == incident_id);
+    let recovery: Option<(Option<OffsetDateTime>, Option<Uuid>)> = match incident {
+        Some(_) => Some(
+            sqlx::query_as(
+                "SELECT recovered_at, last_seen_crawl_id FROM ai_incidents WHERE id = $1",
+            )
+            .bind(incident_id)
+            .fetch_one(&mut *tx)
+            .await?,
+        ),
+        None => None,
+    };
+    let (Some(row), Some((recovered_at, last_seen_crawl))) = (incident, recovery) else {
+        finish(RecheckStatus::Superseded, None)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(None);
+    };
+    if origin == RecheckOrigin::Followup && recovered_at.is_none() {
+        finish(RecheckStatus::Superseded, None)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(None);
+    }
+    if !kinds.contains(&row.kind) || !evaluated_kinds(report).contains(&row.kind) {
+        finish(RecheckStatus::Done, Some(RecheckOutcome::Inconclusive))
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(Some(RecheckOutcome::Inconclusive));
+    }
+
+    let found = hold_unjudged(report, &intent, &open)
+        .into_iter()
+        .find(|f| f.kind == row.kind && f.subject == row.subject);
+    let outcome = if let Some(finding) = found {
+        let mut evidence =
+            serde_json::to_value(&finding.evidence).expect("evidence always serializes");
+        strip_nul(&mut evidence);
+        sqlx::query(
+            "UPDATE ai_incidents SET severity = $2::severity, title = $3, summary = $4, \
+               evidence = $5, last_seen_at = now(), recovered_at = NULL \
+             WHERE id = $1",
+        )
+        .bind(row.id)
+        .bind(enum_slug(&finding.severity))
+        .bind(without_nul(&finding.title))
+        .bind(without_nul(&finding.summary))
+        .bind(evidence)
+        .execute(&mut *tx)
+        .await?;
+        finish(RecheckStatus::Done, Some(RecheckOutcome::StillFailing))
+            .execute(&mut *tx)
+            .await?;
+        RecheckOutcome::StillFailing
+    } else if origin == RecheckOrigin::Manual {
+        sqlx::query(
+            "UPDATE ai_incidents SET recovered_at = COALESCE(recovered_at, now()) WHERE id = $1",
+        )
+        .bind(row.id)
+        .execute(&mut *tx)
+        .await?;
+        // Done first: one recheck at a time per incident.
+        finish(RecheckStatus::Done, Some(RecheckOutcome::Clean))
+            .execute(&mut *tx)
+            .await?;
+        let lag = codoseo_geo::ledger::lag(row.kind, &row.evidence);
+        let (id, due_at): (i64, OffsetDateTime) = sqlx::query_as(
+            "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
+             VALUES ($1, $2, 'followup', now() + make_interval(hours => $3)) \
+             RETURNING id, due_at",
+        )
+        .bind(site_id)
+        .bind(row.id)
+        .bind(i32::try_from(lag.hours).unwrap_or(i32::MAX))
+        .fetch_one(&mut *tx)
+        .await?;
+        enqueue_at_in(
+            &mut *tx,
+            JobKind::AiRecheck,
+            serde_json::json!({ "recheck_id": id }),
+            due_at,
+            1,
+        )
+        .await?;
+        RecheckOutcome::Clean
+    } else {
+        sqlx::query(
+            "UPDATE ai_incidents SET resolved_at = now(), resolution = 'fixed', \
+               verified_at = now(), resolved_by = 'recheck' WHERE id = $1",
+        )
+        .bind(row.id)
+        .execute(&mut *tx)
+        .await?;
+        // Announced like a crawl's resolution, on the crawl that last saw it (a recheck is no
+        // crawl); nothing when that crawl is gone.
+        let crawl = match last_seen_crawl {
+            Some(c) if !row.quiet => {
+                let exists: bool =
+                    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM crawls WHERE id = $1)")
+                        .bind(c)
+                        .fetch_one(&mut *tx)
+                        .await?;
+                exists.then_some(c)
+            }
+            _ => None,
+        };
+        if let Some(crawl) = crawl {
+            let mut written = Written::default();
+            written.push(Some(row), resolved_change(row.kind, &row.title));
+            insert_changes(&mut tx, crawl, site_id, &written.changes).await?;
+            insert_muted_changes(&mut tx, crawl, site_id, &written.muted).await?;
+            enqueue_alert_job(&mut tx, crawl, !written.changes.is_empty()).await?;
+        }
+        finish(RecheckStatus::Done, Some(RecheckOutcome::Clean))
+            .execute(&mut *tx)
+            .await?;
+        RecheckOutcome::Clean
+    };
+    tx.commit().await?;
+    Ok(Some(outcome))
 }
 
 /// After an intent change: the findings of the site's stored reports under the new intent,
