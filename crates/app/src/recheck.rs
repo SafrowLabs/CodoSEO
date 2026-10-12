@@ -12,8 +12,10 @@
 //!
 //! The whole run has a hard limit ([`RECHECK_TIMEOUT`]). Whatever stops it before the result is
 //! applied (an error, a panic, the limit) marks the recheck `failed`, so it never stays
-//! `running`, and the job itself still succeeds: it has one attempt, and a recheck is asked for
-//! again rather than retried. A recheck whose site is being crawled is `superseded`: the crawl
+//! `running`, and the job itself still succeeds. A robots.txt that gets no answer fails it too,
+//! by the site ([`RecheckFailure::Site`], which uses the allowance), except for a
+//! `robots_unavailable` incident, for which no answer is an answer: still failing. The job has
+//! one attempt, and a recheck is asked for again rather than retried. A recheck whose site is being crawled is `superseded`: the crawl
 //! will judge the incident.
 
 use std::time::Duration;
@@ -22,7 +24,7 @@ use codoseo_core::crawl::{AddressPolicy, Politeness, RobotsFile};
 use codoseo_core::output::{LlmsSkip, LlmsTxtFetch};
 use codoseo_core::plan::PlanLimits;
 use codoseo_crawler::probe::{MAX_OVERRUN, ProbeConfig, run_probes};
-use codoseo_crawler::recheck::{RecheckFetch, RecheckFetched, recheck_fetch};
+use codoseo_crawler::recheck::{RecheckFetch, RecheckFetchError, RecheckFetched, recheck_fetch};
 use codoseo_crawler::robots::{ROBOTS_AGENT, RobotsRules};
 use codoseo_geo::findings::{Evidence, FindingKind};
 use codoseo_geo::llms::state_of;
@@ -30,7 +32,7 @@ use codoseo_geo::probe::{ProbePlan, ProbeReport, candidates};
 use codoseo_geo::recheck::{Observations, ProbeScope, RecheckPlan, overlay, plan};
 use codoseo_geo::report::{AccessReport, agent_rules};
 use codoseo_geo::robots::RobotsTxt;
-use codoseo_store::geo::{self, Recheck, RecheckOutcome};
+use codoseo_store::geo::{self, Recheck, RecheckFailure, RecheckOutcome};
 use codoseo_web::metrics;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -135,12 +137,14 @@ pub async fn run_recheck(pool: &PgPool, settings: &RecheckSettings, id: i64) -> 
         Ok(Ran::Applied(Some(outcome))) => outcome.slug(),
         // Finished meanwhile, or made moot (resolved, superseded by a crawl).
         Ok(Ran::Applied(None)) | Ok(Ran::Superseded) => "superseded",
+        Ok(Ran::SiteSilent(error)) => {
+            tracing::info!(parent: &span, %error, "recheck failed: the site did not answer");
+            fail(pool, &span, id, RecheckFailure::Site).await;
+            "failed"
+        }
         Err(error) => {
             tracing::warn!(parent: &span, %error, "recheck failed");
-            if let Err(e) = geo::fail_recheck(pool, id).await {
-                // The orphan sweep fails it later.
-                tracing::error!(parent: &span, error = %e, "could not mark the recheck failed");
-            }
+            fail(pool, &span, id, RecheckFailure::Ours).await;
             "failed"
         }
     };
@@ -149,11 +153,21 @@ pub async fn run_recheck(pool: &PgPool, settings: &RecheckSettings, id: i64) -> 
     Ok(())
 }
 
+async fn fail(pool: &PgPool, span: &tracing::Span, id: i64, cause: RecheckFailure) {
+    if let Err(e) = geo::fail_recheck(pool, id, cause).await {
+        // The orphan sweep fails it later.
+        tracing::error!(parent: span, error = %e, "could not mark the recheck failed");
+    }
+}
+
 enum Ran {
     /// `apply_recheck`'s answer.
     Applied(Option<RecheckOutcome>),
     /// A crawl of the site is under way.
     Superseded,
+    /// robots.txt got no answer, and the incident is not about it: failed, by the site (a
+    /// manual recheck still uses the allowance).
+    SiteSilent(String),
 }
 
 async fn execute(
@@ -239,7 +253,7 @@ async fn execute(
         .filter_map(|u| Url::parse(u).ok())
         .filter(|u| u.origin() == site.origin())
         .collect();
-    let fetched = recheck_fetch(RecheckFetch {
+    let fetched = match recheck_fetch(RecheckFetch {
         site: site.clone(),
         pages,
         llms: plan.llms,
@@ -249,7 +263,28 @@ async fn execute(
         deadline: fetch_until,
     })
     .await
-    .map_err(|e| format!("could not fetch from the site: {e}"))?;
+    {
+        Ok(f) => f,
+        Err(e @ (RecheckFetchError::Unreachable(_) | RecheckFetchError::Deadline)) => {
+            // The site gave no answer. For a robots.txt that does not answer, that is the
+            // answer: still failing.
+            if incident.kind == FindingKind::RobotsUnavailable {
+                let observed = json!({
+                    "robots": { "status": null, "error": clip(&e.to_string()) },
+                    "requests": 1,
+                    "conclusive": [FindingKind::RobotsUnavailable.slug()],
+                });
+                let outcome = geo::apply_recheck_unanswered(pool, recheck.id, Some(&observed))
+                    .await
+                    .map_err(|e| format!("could not apply the recheck: {e}"))?;
+                return Ok(Ran::Applied(outcome));
+            }
+            return Ok(Ran::SiteSilent(format!(
+                "could not fetch from the site: {e}"
+            )));
+        }
+        Err(e) => return Err(format!("could not fetch from the site: {e}")),
+    };
     metrics::recheck_requests(u64::from(fetched.requests));
 
     let probes = match &plan.probe {

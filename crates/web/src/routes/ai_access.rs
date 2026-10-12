@@ -40,7 +40,7 @@ use codoseo_geo::robots::{GroupMatch, MatchedRule, Pair, RobotsAvailability};
 use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
 use codoseo_store::crawls;
 use codoseo_store::geo::{
-    self, Incident, IncidentActionError, IntentError, Recheck, RecheckStatus,
+    self, Incident, IncidentActionError, IntentError, Recheck, RecheckFailure, RecheckStatus,
 };
 use codoseo_store::sites::Site;
 use time::OffsetDateTime;
@@ -1494,6 +1494,9 @@ fn recheck_outcome(r: &Recheck) -> Option<String> {
         "still_failing" => "still failing".to_owned(),
         "inconclusive" if last.notes.is_empty() => "inconclusive".to_owned(),
         "inconclusive" => format!("inconclusive ({})", last.notes.join("; ")),
+        "failed" if r.failure == Some(RecheckFailure::Site) => {
+            "the site didn't answer; it counted toward your daily rechecks".to_owned()
+        }
         "failed" => "couldn't run; it didn't count toward your daily rechecks".to_owned(),
         _ => "replaced by a crawl, which judges it instead".to_owned(),
     };
@@ -3087,6 +3090,36 @@ async fn respond(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn failed_recheck(failure: Option<RecheckFailure>) -> Recheck {
+        let now = OffsetDateTime::now_utc();
+        Recheck {
+            id: 1,
+            site_id: uuid::Uuid::nil(),
+            incident_id: 1,
+            origin: geo::RecheckOrigin::Manual,
+            requested_by: None,
+            status: RecheckStatus::Failed,
+            due_at: now,
+            started_at: Some(now),
+            finished_at: Some(now),
+            outcome: None,
+            failure,
+            observations: None,
+            created_at: now,
+        }
+    }
+
+    #[test]
+    fn a_failed_recheck_says_whether_it_used_the_allowance() {
+        let site = recheck_outcome(&failed_recheck(Some(RecheckFailure::Site))).unwrap();
+        assert!(site.contains("the site didn't answer"), "{site}");
+        assert!(site.contains("counted toward"), "{site}");
+        for f in [Some(RecheckFailure::Ours), None] {
+            let ours = recheck_outcome(&failed_recheck(f)).unwrap();
+            assert!(ours.contains("didn't count toward"), "{ours}");
+        }
+    }
 
     fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
         v.iter()

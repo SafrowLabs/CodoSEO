@@ -279,6 +279,8 @@ pub struct Recheck {
     pub started_at: Option<OffsetDateTime>,
     pub finished_at: Option<OffsetDateTime>,
     pub outcome: Option<RecheckOutcome>,
+    /// Why a failed one failed; `None` otherwise (and for one failed before this was kept).
+    pub failure: Option<RecheckFailure>,
     pub observations: Option<Value>,
     pub created_at: OffsetDateTime,
 }
@@ -295,6 +297,7 @@ struct RecheckRow {
     started_at: Option<OffsetDateTime>,
     finished_at: Option<OffsetDateTime>,
     outcome: Option<String>,
+    failure: Option<String>,
     observations: Option<Value>,
     created_at: OffsetDateTime,
 }
@@ -313,6 +316,11 @@ impl RecheckRow {
             finished_at: self.finished_at,
             outcome: match self.outcome {
                 Some(o) => Some(RecheckOutcome::from_slug(&o)?),
+                None => None,
+            },
+            failure: match self.failure.as_deref() {
+                Some("site") => Some(RecheckFailure::Site),
+                Some(_) => Some(RecheckFailure::Ours),
                 None => None,
             },
             observations: self.observations,
@@ -758,8 +766,10 @@ pub enum RecheckError {
 /// within [`RECHECK_COOLDOWN_MINUTES`] of the last manual one, while a crawl of the site is
 /// queued or running, and past the plan's `ai_rechecks_per_day`: manual rechecks over the last
 /// [`RECHECK_WINDOW_HOURS`] across every site of the site's account. Follow-ups don't count,
-/// nor do manual ones that ended `superseded` (a crawl took over) or `failed` (they never ran
-/// on our side): the owner got no answer from those. They still start the cooldown.
+/// nor do manual ones that ended `superseded` (a crawl took over) or `failed` on our side: the
+/// owner got no answer from those. They still start the cooldown. One that failed because the
+/// site gave no answer ([`RecheckFailure::Site`]) does count: it asked the site, and the site's
+/// silence is the answer, so a site that never answers can't be asked without limit.
 /// Requests for one account are serialised, so two at once can't both take the last slot.
 pub async fn request_recheck(
     pool: &PgPool,
@@ -825,7 +835,9 @@ pub async fn request_recheck(
         let cap = usize::from(cap);
         let used: Vec<OffsetDateTime> = sqlx::query_scalar(
             "SELECT r.created_at FROM ai_rechecks r JOIN sites s ON s.id = r.site_id \
-             WHERE r.origin = 'manual' AND r.status NOT IN ('superseded', 'failed') \
+             WHERE r.origin = 'manual' \
+               AND (r.status NOT IN ('superseded', 'failed') \
+                    OR (r.status = 'failed' AND r.failure = 'site')) \
                AND r.created_at > now() - make_interval(hours => $3) \
                AND (r.site_id = $1 OR ($2::uuid IS NOT NULL AND s.account_id = $2)) \
              ORDER BY r.created_at",
@@ -865,7 +877,7 @@ pub async fn request_recheck(
 }
 
 const RECHECK_COLUMNS: &str = "id, site_id, incident_id, origin, requested_by, status, due_at, \
-     started_at, finished_at, outcome, observations, created_at";
+     started_at, finished_at, outcome, failure, observations, created_at";
 
 /// The newest recheck of each of the site's open incidents, by incident id: what the screen
 /// says about a recheck under way or the last one's outcome.
@@ -907,14 +919,38 @@ pub async fn start_recheck(pool: &PgPool, id: i64) -> Result<Option<Recheck>, sq
     Ok(row.and_then(RecheckRow::into_recheck))
 }
 
-/// Marks a queued or running recheck failed (it could not run at all). Returns whether it did.
-pub async fn fail_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+/// Why a recheck failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecheckFailure {
+    /// The site gave no answer (robots.txt unreachable or too slow): the site was asked, so a
+    /// manual one uses the daily allowance.
+    Site,
+    /// It could not run on our side (an error, a panic, our time limit, a dead worker): free.
+    Ours,
+}
+
+impl RecheckFailure {
+    pub fn slug(self) -> &'static str {
+        match self {
+            RecheckFailure::Site => "site",
+            RecheckFailure::Ours => "ours",
+        }
+    }
+}
+
+/// Marks a queued or running recheck failed, for `cause`. Returns whether it did.
+pub async fn fail_recheck(
+    pool: &PgPool,
+    id: i64,
+    cause: RecheckFailure,
+) -> Result<bool, sqlx::Error> {
     let done = sqlx::query(
-        "UPDATE ai_rechecks SET status = 'failed', finished_at = now(), \
+        "UPDATE ai_rechecks SET status = 'failed', failure = $2, finished_at = now(), \
            started_at = COALESCE(started_at, now()) \
          WHERE id = $1 AND status IN ('queued', 'running')",
     )
     .bind(id)
+    .bind(cause.slug())
     .execute(pool)
     .await?;
     Ok(done.rows_affected() > 0)
@@ -1035,7 +1071,7 @@ pub async fn fail_orphaned_rechecks(
     running_for: std::time::Duration,
 ) -> Result<u64, sqlx::Error> {
     let done = sqlx::query(
-        "UPDATE ai_rechecks r SET status = 'failed', finished_at = now(), \
+        "UPDATE ai_rechecks r SET status = 'failed', failure = 'ours', finished_at = now(), \
            started_at = COALESCE(r.started_at, now()) \
          WHERE (r.status = 'running' AND r.started_at < now() - make_interval(secs => $1)) \
             OR (r.status IN ('queued', 'running') AND NOT EXISTS ( \
@@ -1079,6 +1115,45 @@ pub async fn apply_recheck(
     recheck_id: i64,
     report: &AccessReport,
     kinds: &[FindingKind],
+    observations: Option<&Value>,
+) -> Result<Option<RecheckOutcome>, sqlx::Error> {
+    apply_seen(
+        pool,
+        recheck_id,
+        Seen::Report { report, kinds },
+        observations,
+    )
+    .await
+}
+
+/// Applies a recheck whose robots.txt got no answer at all (unreachable, or no answer in
+/// time), like [`apply_recheck`]. For a `robots_unavailable` incident that is an answer: the
+/// file still does not answer, so it is `still_failing`. For any other kind it judges nothing:
+/// `inconclusive` (the runner marks such a recheck failed by the site instead of calling this).
+pub async fn apply_recheck_unanswered(
+    pool: &PgPool,
+    recheck_id: i64,
+    observations: Option<&Value>,
+) -> Result<Option<RecheckOutcome>, sqlx::Error> {
+    apply_seen(pool, recheck_id, Seen::RobotsUnanswered, observations).await
+}
+
+/// What a recheck saw, for [`apply_seen`].
+enum Seen<'a> {
+    /// The stored report with the observations laid over it, and the kinds they were conclusive
+    /// for.
+    Report {
+        report: &'a AccessReport,
+        kinds: &'a [FindingKind],
+    },
+    /// robots.txt got no answer at all.
+    RobotsUnanswered,
+}
+
+async fn apply_seen(
+    pool: &PgPool,
+    recheck_id: i64,
+    seen: Seen<'_>,
     observations: Option<&Value>,
 ) -> Result<Option<RecheckOutcome>, sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -1152,7 +1227,18 @@ pub async fn apply_recheck(
         tx.commit().await?;
         return Ok(None);
     }
-    if !kinds.contains(&row.kind) || !evaluated_kinds(report).contains(&row.kind) {
+    // Whether it is still there; `None` when what the recheck saw can't tell.
+    let still_there = match seen {
+        Seen::Report { report, kinds } => {
+            (kinds.contains(&row.kind) && evaluated_kinds(report).contains(&row.kind)).then(|| {
+                hold_unjudged(report, &intent, &open)
+                    .iter()
+                    .any(|f| f.kind == row.kind && f.subject == row.subject)
+            })
+        }
+        Seen::RobotsUnanswered => (row.kind == FindingKind::RobotsUnavailable).then_some(true),
+    };
+    let Some(still_there) = still_there else {
         finish(RecheckStatus::Done, Some(RecheckOutcome::Inconclusive))
             .execute(&mut *tx)
             .await?;
@@ -1161,12 +1247,9 @@ pub async fn apply_recheck(
         }
         tx.commit().await?;
         return Ok(Some(RecheckOutcome::Inconclusive));
-    }
+    };
 
-    let found = hold_unjudged(report, &intent, &open)
-        .into_iter()
-        .find(|f| f.kind == row.kind && f.subject == row.subject);
-    let outcome = if found.is_some() {
+    let outcome = if still_there {
         // Only when it was seen: the severity, title and evidence stay the last crawl's, so a
         // recheck that sees it worse or wider leaves that change for the next crawl to find and
         // announce (a recheck writes no change rows). What it saw is in its observations.

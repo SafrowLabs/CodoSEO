@@ -2793,7 +2793,9 @@ async fn the_latest_recheck_of_each_open_incident_is_listed() {
     let first = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
         .await
         .unwrap();
-    geo::fail_recheck(&db.pool, first.id).await.unwrap();
+    geo::fail_recheck(&db.pool, first.id, geo::RecheckFailure::Ours)
+        .await
+        .unwrap();
     sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '11 minutes'")
         .execute(&db.pool)
         .await
@@ -2847,14 +2849,22 @@ async fn a_failed_recheck_is_marked_and_frees_the_incident() {
         .await
         .unwrap();
     geo::start_recheck(&db.pool, queued.id).await.unwrap();
-    assert!(geo::fail_recheck(&db.pool, queued.id).await.unwrap());
+    assert!(
+        geo::fail_recheck(&db.pool, queued.id, geo::RecheckFailure::Ours)
+            .await
+            .unwrap()
+    );
     let r = geo::recheck(&db.pool, site, queued.id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(r.status, RecheckStatus::Failed);
     assert!(r.finished_at.is_some());
-    assert!(!geo::fail_recheck(&db.pool, queued.id).await.unwrap());
+    assert!(
+        !geo::fail_recheck(&db.pool, queued.id, geo::RecheckFailure::Ours)
+            .await
+            .unwrap()
+    );
     // Not busy any more (the cooldown still applies).
     assert!(matches!(
         geo::request_recheck(&db.pool, site, id, owner, &limits_with(None)).await,
@@ -3443,4 +3453,91 @@ async fn a_snoozed_incident_that_got_worse_alerts_once_when_the_snooze_ends() {
     .unwrap();
     let quiet_end = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
     assert!(change_kinds(&db.pool, quiet_end).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_recheck_the_site_did_not_answer_uses_the_allowance() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let one = limits_with(Some(1));
+    // Failed on our side: free.
+    let first = geo::request_recheck(&db.pool, site, id, owner, &one)
+        .await
+        .unwrap();
+    assert!(
+        geo::fail_recheck(&db.pool, first.id, geo::RecheckFailure::Ours)
+            .await
+            .unwrap()
+    );
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    // The site did not answer: it asked the site, so it counts.
+    let second = geo::request_recheck(&db.pool, site, id, owner, &one)
+        .await
+        .unwrap();
+    assert!(
+        geo::fail_recheck(&db.pool, second.id, geo::RecheckFailure::Site)
+            .await
+            .unwrap()
+    );
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &one).await,
+        Err(RecheckError::LimitReached(Some(_)))
+    ));
+}
+
+#[tokio::test]
+async fn a_robots_txt_that_still_does_not_answer_is_still_failing() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 503, "", None).await;
+    let robots = open_of(&db.pool, site, FindingKind::RobotsUnavailable).await;
+    let id = robots[0].id;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = geo::apply_recheck_unanswered(
+        &db.pool,
+        queued.id,
+        Some(&serde_json::json!({"robots": {"error": "timed out"}})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, Some(RecheckOutcome::StillFailing));
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (r.status, r.outcome),
+        (RecheckStatus::Done, Some(RecheckOutcome::StillFailing))
+    );
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.last_seen_at > robots[0].last_seen_at);
+    assert!(i.resolved_at.is_none());
+
+    // For any other kind an unanswered robots.txt judges nothing: that is a failure.
+    let (other, oid) = site_with_incident(&db.pool).await;
+    let queued = geo::request_recheck(&db.pool, other, oid, owner, &limits_with(None))
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::apply_recheck_unanswered(&db.pool, queued.id, None)
+            .await
+            .unwrap(),
+        Some(RecheckOutcome::Inconclusive)
+    );
 }

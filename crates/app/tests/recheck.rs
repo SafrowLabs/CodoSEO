@@ -663,6 +663,14 @@ async fn a_crawl_under_way_supersedes_the_recheck() {
     assert_eq!(w.recheck(manual).await.status, RecheckStatus::Superseded);
 }
 
+async fn failure_of(w: &World, recheck: i64) -> Option<String> {
+    sqlx::query_scalar("SELECT failure FROM ai_rechecks WHERE id = $1")
+        .bind(recheck)
+        .fetch_one(w.pool())
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn a_site_that_does_not_answer_fails_the_recheck_and_frees_the_incident() {
     let w = World::new("pro").await;
@@ -687,6 +695,7 @@ async fn a_site_that_does_not_answer_fails_the_recheck_and_frees_the_incident() 
     let r = w.recheck(manual).await;
     assert_eq!(r.status, RecheckStatus::Failed);
     assert!(r.finished_at.is_some());
+    assert_eq!(failure_of(&w, manual).await.as_deref(), Some("site"));
     let job: String = sqlx::query_scalar(
         "SELECT status::text FROM jobs WHERE kind = 'ai_recheck' \
          AND payload->>'recheck_id' = $1::text",
@@ -721,6 +730,8 @@ async fn a_site_that_does_not_answer_fails_the_recheck_and_frees_the_incident() 
     run_job(&ctx, job).await.unwrap();
     assert!(started.elapsed() < Duration::from_secs(2));
     assert_eq!(w.recheck(second).await.status, RecheckStatus::Failed);
+    // robots.txt did not answer before the fetches' deadline: the site's silence again.
+    assert_eq!(failure_of(&w, second).await.as_deref(), Some("site"));
 
     // Not busy afterwards.
     w.cool_down().await;

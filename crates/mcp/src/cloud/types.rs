@@ -451,7 +451,7 @@ pub struct AiLagInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiRecheckInfo {
-    /// `clean`, `still_failing`, `inconclusive`, `failed` (it never ran on our side) or
+    /// `clean`, `still_failing`, `inconclusive`, `failed` (it could not run, or the site did not answer) or
     /// `superseded` (a crawl judged instead).
     pub outcome: String,
     #[serde(

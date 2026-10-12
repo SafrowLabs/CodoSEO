@@ -47,6 +47,7 @@ CREATE TABLE ai_rechecks (
   started_at TIMESTAMPTZ,
   finished_at TIMESTAMPTZ,
   outcome TEXT CHECK (outcome IN ('clean', 'still_failing', 'inconclusive')),
+  failure TEXT CHECK (failure IN ('site', 'ours')),
   observations JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -59,6 +60,9 @@ COMMENT ON COLUMN ai_rechecks.requested_by IS 'The account that asked for a manu
 COMMENT ON COLUMN ai_rechecks.status IS 'queued | running | done | superseded | failed';
 COMMENT ON COLUMN ai_rechecks.due_at IS 'When the recheck may run; later than created_at for a follow-up.';
 COMMENT ON COLUMN ai_rechecks.outcome IS 'clean | still_failing | inconclusive; NULL until done.';
+COMMENT ON COLUMN ai_rechecks.failure IS
+  'Why a failed recheck failed: site (robots.txt got no answer; a manual one uses the daily '
+  'allowance) | ours (it could not run on our side; free); NULL otherwise.';
 COMMENT ON COLUMN ai_rechecks.observations IS 'What the recheck saw (the fresh probes and robots.txt), as JSON; NULL until done.';
 
 -- The job that runs a recheck when it is due. Not used before the commit, as in 0012 and 0013.

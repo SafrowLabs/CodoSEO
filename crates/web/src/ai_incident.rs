@@ -199,7 +199,7 @@ pub fn state(i: &Incident, latest: Option<&Recheck>, now: OffsetDateTime) -> AiI
 /// The last finished recheck of an incident.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastRecheck {
-    /// `clean`, `still_failing`, `inconclusive`, `failed` (it never ran on our side) or
+    /// `clean`, `still_failing`, `inconclusive`, `failed` (it could not run, or the site did not answer) or
     /// `superseded` (a crawl judged instead).
     pub outcome: &'static str,
     pub at: Option<OffsetDateTime>,
