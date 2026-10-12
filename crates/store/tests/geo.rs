@@ -2772,3 +2772,154 @@ async fn a_failed_recheck_is_marked_and_frees_the_incident() {
         Err(RecheckError::Cooldown(_))
     ));
 }
+
+#[tokio::test]
+async fn an_inconclusive_follow_up_queues_the_next_six_hours_on_three_times_in_a_row() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let mut followup = recover(&db.pool, site, id, owner).await;
+    let (report, _) = rechecked_robots(&db.pool, site, id, ALLOW_ALL).await;
+
+    for round in 1..=geo::MAX_INCONCLUSIVE_FOLLOWUPS {
+        geo::start_recheck(&db.pool, followup)
+            .await
+            .unwrap()
+            .unwrap();
+        let outcome = geo::apply_recheck(&db.pool, followup, &report, &[], None)
+            .await
+            .unwrap();
+        assert_eq!(outcome, Some(RecheckOutcome::Inconclusive));
+        let all = rechecks_of(&db.pool, site, id).await;
+        let last = all.last().unwrap();
+        if round < geo::MAX_INCONCLUSIVE_FOLLOWUPS {
+            assert_ne!(last.id, followup, "round {round} queues another");
+            assert_eq!(last.origin, RecheckOrigin::Followup);
+            assert_eq!(last.status, RecheckStatus::Queued);
+            let wait = last.due_at - last.created_at;
+            assert!(
+                wait >= TimeDuration::hours(6) && wait < TimeDuration::hours(7),
+                "{wait}"
+            );
+            assert!(
+                recheck_jobs(&db.pool)
+                    .await
+                    .contains(&(last.id, last.due_at, 1))
+            );
+            followup = last.id;
+        } else {
+            assert_eq!(last.id, followup, "the third in a row queues none");
+        }
+    }
+    // One manual, three follow-ups; the incident stays recovered for the next crawl.
+    assert_eq!(rechecks_of(&db.pool, site, id).await.len(), 4);
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.recovered_at.is_some());
+    assert!(i.resolved_at.is_none());
+}
+
+#[tokio::test]
+async fn a_superseded_recheck_is_finished_and_frees_the_incident() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(geo::supersede_recheck(&db.pool, queued.id).await.unwrap());
+    assert!(!geo::supersede_recheck(&db.pool, queued.id).await.unwrap());
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.status, RecheckStatus::Superseded);
+    assert_eq!(r.outcome, None);
+    assert!(r.finished_at.is_some());
+}
+
+#[tokio::test]
+async fn rechecks_nothing_will_finish_are_failed() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let ten_minutes = std::time::Duration::from_secs(600);
+
+    // Queued with its job queued: left alone.
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        0
+    );
+    // Running, its job running, started a minute ago: left alone.
+    geo::start_recheck(&db.pool, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("UPDATE jobs SET status = 'running', claimed_at = now() WHERE kind = 'ai_recheck'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        0
+    );
+    // Its worker died: the job failed (one attempt) and the row would stay running forever.
+    sqlx::query("UPDATE jobs SET status = 'failed' WHERE kind = 'ai_recheck'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        1
+    );
+    let r = geo::recheck(&db.pool, site, queued.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.status, RecheckStatus::Failed);
+    assert!(r.finished_at.is_some());
+
+    // Running far past the runner's time limit, whatever its job says.
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let second = geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+    geo::start_recheck(&db.pool, second.id)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET started_at = now() - interval '11 minutes' WHERE id = $1")
+        .bind(second.id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        geo::fail_orphaned_rechecks(&db.pool, ten_minutes)
+            .await
+            .unwrap(),
+        1
+    );
+    // Not busy any more.
+    sqlx::query("UPDATE ai_rechecks SET created_at = now() - interval '1 hour'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    geo::request_recheck(&db.pool, site, id, owner, &limits_with(None))
+        .await
+        .unwrap();
+}

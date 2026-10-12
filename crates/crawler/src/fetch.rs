@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::error::Error as _;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -88,6 +89,8 @@ impl From<GuardError> for FetchError {
 pub struct Fetcher {
     client: reqwest::Client,
     cfg: FetcherConfig,
+    /// Requests sent so far, every redirect hop counted.
+    sent: AtomicU32,
 }
 
 enum BodyMode {
@@ -109,7 +112,16 @@ impl Fetcher {
         let client = builder
             .build()
             .map_err(|e| FetchError::Client(e.to_string()))?;
-        Ok(Fetcher { client, cfg })
+        Ok(Fetcher {
+            client,
+            cfg,
+            sent: AtomicU32::new(0),
+        })
+    }
+
+    /// Requests this fetcher has sent, every redirect hop counted.
+    pub fn requests(&self) -> u32 {
+        self.sent.load(Ordering::Relaxed)
     }
 
     /// Fetches a page. Only HTML bodies are read, up to the configured cap.
@@ -164,6 +176,7 @@ impl Fetcher {
             if let Some(headers) = headers {
                 req = req.headers(headers.clone());
             }
+            self.sent.fetch_add(1, Ordering::Relaxed);
             let resp = req.send().await.map_err(map_err)?;
             let response_ms = sent.elapsed().as_millis().min(u32::MAX as u128) as u32;
             let status = resp.status().as_u16();

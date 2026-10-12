@@ -860,6 +860,89 @@ pub async fn fail_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
     Ok(done.rows_affected() > 0)
 }
 
+/// How long after an inconclusive follow-up recheck the next one is due, in hours.
+pub const FOLLOWUP_RETRY_HOURS: i32 = 6;
+/// Inconclusive follow-ups in a row (since the manual recheck that queued the first) after which
+/// no other is queued: the incident stays recovered and the next crawl judges it.
+pub const MAX_INCONCLUSIVE_FOLLOWUPS: i64 = 3;
+
+/// After an inconclusive follow-up: queues the next one [`FOLLOWUP_RETRY_HOURS`] on, with its
+/// job, unless [`MAX_INCONCLUSIVE_FOLLOWUPS`] were inconclusive in a row. Returns its id.
+async fn retry_followup(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+    incident_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    let in_a_row: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ai_rechecks \
+         WHERE incident_id = $1 AND origin = 'followup' AND outcome = 'inconclusive' \
+           AND id > COALESCE((SELECT max(id) FROM ai_rechecks \
+                              WHERE incident_id = $1 AND origin = 'manual'), 0)",
+    )
+    .bind(incident_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if in_a_row >= MAX_INCONCLUSIVE_FOLLOWUPS {
+        return Ok(None);
+    }
+    let (id, due_at): (i64, OffsetDateTime) = sqlx::query_as(
+        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
+         VALUES ($1, $2, 'followup', now() + make_interval(hours => $3)) \
+         RETURNING id, due_at",
+    )
+    .bind(site_id)
+    .bind(incident_id)
+    .bind(FOLLOWUP_RETRY_HOURS)
+    .fetch_one(&mut **tx)
+    .await?;
+    enqueue_at_in(
+        &mut **tx,
+        JobKind::AiRecheck,
+        serde_json::json!({ "recheck_id": id }),
+        due_at,
+        1,
+    )
+    .await?;
+    Ok(Some(id))
+}
+
+/// Marks a queued or running recheck superseded (a crawl of the site is under way and will
+/// judge the incident). Returns whether it did.
+pub async fn supersede_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE ai_rechecks SET status = 'superseded', finished_at = now(), \
+           started_at = COALESCE(started_at, now()) \
+         WHERE id = $1 AND status IN ('queued', 'running')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+/// Fails the rechecks nothing will finish, so an incident is never left busy: those `running`
+/// for longer than `running_for` (the runner's own time limit is far shorter, so its worker
+/// died), and those queued or running whose `ai_recheck` job is no longer queued or running
+/// (it failed, or was removed). Returns how many.
+pub async fn fail_orphaned_rechecks(
+    pool: &PgPool,
+    running_for: std::time::Duration,
+) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE ai_rechecks r SET status = 'failed', finished_at = now(), \
+           started_at = COALESCE(r.started_at, now()) \
+         WHERE (r.status = 'running' AND r.started_at < now() - make_interval(secs => $1)) \
+            OR (r.status IN ('queued', 'running') AND NOT EXISTS ( \
+                  SELECT 1 FROM jobs j WHERE j.kind = 'ai_recheck' \
+                    AND j.status IN ('queued', 'running') \
+                    AND j.payload->>'recheck_id' = r.id::text))",
+    )
+    .bind(running_for.as_secs_f64())
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
+}
+
 /// Applies what a recheck saw to its incident: `report` is the stored report with the
 /// recheck's observations laid over it and `kinds` the kinds they were conclusive for
 /// ([`codoseo_geo::recheck::overlay`]). Locks like [`apply_geo`] (the site row, then the open
@@ -867,7 +950,8 @@ pub async fn fail_recheck(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
 /// not judge held back, but only that incident: a recheck never opens one, and never touches
 /// another.
 ///
-/// - Not conclusive for its kind: `inconclusive`, nothing changes.
+/// - Not conclusive for its kind: `inconclusive`, nothing changes; a follow-up queues the next
+///   one [`FOLLOWUP_RETRY_HOURS`] on, at most [`MAX_INCONCLUSIVE_FOLLOWUPS`] in a row.
 /// - Still there: the incident's evidence and `last_seen_at` are refreshed (its
 ///   `last_seen_crawl_id` stays: no crawl saw it), a recovery is undone: `still_failing`.
 /// - Gone, on a manual recheck: `recovered_at` is set and a follow-up recheck is queued for when
@@ -954,6 +1038,9 @@ pub async fn apply_recheck(
         finish(RecheckStatus::Done, Some(RecheckOutcome::Inconclusive))
             .execute(&mut *tx)
             .await?;
+        if origin == RecheckOrigin::Followup {
+            retry_followup(&mut tx, site_id, row.id).await?;
+        }
         tx.commit().await?;
         return Ok(Some(RecheckOutcome::Inconclusive));
     }

@@ -132,10 +132,18 @@ pub async fn crawl_shared(
 pub async fn inspect_page(cfg: &CrawlConfig) -> Result<PageRecord, CrawlError> {
     let url = valid_start(cfg)?;
     let fetcher = fetcher_for(cfg)?;
-    let mut res = match fetcher.fetch(&url).await {
+    match fetcher.fetch(&url).await {
+        Err(FetchError::Blocked(msg)) => Err(CrawlError::AddressBlocked(msg)),
+        res => Ok(inspected(&url, res)),
+    }
+}
+
+/// The record of one page fetched on its own (see [`inspect_page`]): an error record when no
+/// response arrived, else the page it settled on with every redirect hop in `redirect_chain`.
+pub(crate) fn inspected(url: &Url, res: Result<FetchResult, FetchError>) -> PageRecord {
+    let mut res = match res {
         Ok(res) => res,
-        Err(FetchError::Blocked(msg)) => return Err(CrawlError::AddressBlocked(msg)),
-        Err(e) => return Ok(record::from_error(&url, Some(0), false, &e)),
+        Err(e) => return record::from_error(url, Some(0), false, &e),
     };
     let chain = std::mem::take(&mut res.chain);
     let final_url =
@@ -153,7 +161,7 @@ pub async fn inspect_page(cfg: &CrawlConfig) -> Result<PageRecord, CrawlError> {
         rec.redirect_target = Some(final_url);
         rec.key_hash = rec.compute_key_hash();
     }
-    Ok(rec)
+    rec
 }
 
 /// Runs only the preflight step with a fetcher and limiter built from `cfg`.
