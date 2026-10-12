@@ -203,7 +203,19 @@ impl<'a> AnonService<'a> {
         {
             tracing::error!(%error, %crawl_id, "could not record the audit_started event");
         }
-        self.state_of(crawl_id).await
+        // The audit exists now, so a failed read of it must not lose the id the agent needs:
+        // say "running" and let it ask again with get_audit.
+        match self.state_of(crawl_id).await {
+            Ok(state) => Ok(state),
+            Err(error) => {
+                tracing::warn!(%error, %crawl_id, "quick_audit could not read its audit, answering running");
+                Ok(QuickAuditState::Running {
+                    audit_id: crawl_id,
+                    pages_done: None,
+                    message: "Call get_audit with this audit_id again in a few seconds.".to_owned(),
+                })
+            }
+        }
     }
 
     pub async fn get_audit(
