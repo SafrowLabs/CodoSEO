@@ -26,6 +26,7 @@ use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
     SkipReason, Verdict,
 };
+use codoseo_geo::remedy::{RemedyContext, remedy};
 use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str, slug_str};
 use codoseo_geo::robots::{GroupMatch, MatchedRule, Pair, RobotsAvailability};
 use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
@@ -1450,15 +1451,19 @@ fn incident_view(
     } else {
         0
     };
-    let fix = (i.kind == FindingKind::BotsNotBlocked && !ev.bots.is_empty()).then(|| {
-        let mut lines: Vec<String> = ev
-            .bots
-            .iter()
-            .map(|b| format!("User-agent: {}", b.token))
-            .collect();
-        lines.push("Disallow: /".to_owned());
-        lines.join("\n")
-    });
+    // The robots.txt lines to add, from the remedy (the rest of it is shown from B3.10 on).
+    let fix = (i.kind == FindingKind::BotsNotBlocked)
+        .then(|| {
+            let ctx = RemedyContext {
+                origin: &site.start_url,
+                report: Some(report),
+                before: None,
+                lag: ledger::lag(i.kind, &ev),
+            };
+            remedy(i.kind, &i.subject, &ev, &ctx).snippet
+        })
+        .flatten()
+        .map(|s| s.text);
     let shells: Vec<ShellEv> = ev
         .content
         .iter()

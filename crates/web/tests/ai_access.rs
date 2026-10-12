@@ -256,6 +256,14 @@ async fn saving_the_intent_re_evaluates_the_latest_report_quietly() {
     assert!(res.body.contains("can still"), "{}", res.body);
     assert!(res.body.contains("After an intent change"));
     assert!(res.body.contains("Add to robots.txt"));
+    // The remedy's snippet: one `User-agent` line per bot, then `Disallow: /`.
+    assert!(
+        res.body
+            .contains("<pre class=\"aia-snippet\">User-agent: GPTBot\nUser-agent: "),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains("\nDisallow: /</pre>"), "{}", res.body);
 
     let intent = geo::get_intent(app.pool(), site.id).await.unwrap();
     assert_eq!(

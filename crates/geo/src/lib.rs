@@ -12,6 +12,7 @@ pub mod ledger;
 pub mod llms;
 pub mod probe;
 pub mod registry;
+pub mod remedy;
 pub mod report;
 pub mod robots;
 
