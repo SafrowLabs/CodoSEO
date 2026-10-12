@@ -380,15 +380,18 @@ async fn incident_export(
                 if !csv {
                     return (status, Json(records)).into_response();
                 }
-                (
-                    status,
-                    [(
-                        header::CONTENT_TYPE,
-                        HeaderValue::from_static("text/csv; charset=utf-8"),
-                    )],
-                    ai_incident::to_csv(&records, super::export::text),
-                )
-                    .into_response()
+                match ai_incident::to_csv(&records, super::export::text) {
+                    Ok(body) => (
+                        status,
+                        [(
+                            header::CONTENT_TYPE,
+                            HeaderValue::from_static("text/csv; charset=utf-8"),
+                        )],
+                        body,
+                    )
+                        .into_response(),
+                    Err(e) => AgentError::Internal(e).into_response(),
+                }
             },
         ),
     }

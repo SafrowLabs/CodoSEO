@@ -112,7 +112,7 @@ pub async fn request_recheck(
             let latest = geo::latest_rechecks(pool, site_id).await?;
             Err(Refusal::Conflict(match latest.get(&incident_id) {
                 Some(r) if r.origin == RecheckOrigin::Followup => {
-                    format!("Already verifying — due at {}.", fmt::datetime(r.due_at))
+                    format!("Already verifying — due at {}.", fmt::until(r.due_at))
                 }
                 _ => "A recheck of this issue is already queued.".to_owned(),
             }))
@@ -472,9 +472,13 @@ fn severity_slug(s: Severity) -> &'static str {
 /// The records as CSV in [`EXPORT_COLUMNS`] order. Every text cell goes through `text`, which
 /// keeps a spreadsheet from running one that starts like a formula: titles and URLs came from
 /// the crawled site. URLs and sources are joined by a space.
-pub fn to_csv(records: &[IncidentRecord], text: impl Fn(Option<&str>) -> String) -> String {
+pub fn to_csv(
+    records: &[IncidentRecord],
+    text: impl Fn(Option<&str>) -> String,
+) -> Result<String, String> {
+    let failed = |e: csv::Error| format!("could not write the incidents CSV: {e}");
     let mut w = csv::Writer::from_writer(Vec::new());
-    let _ = w.write_record(EXPORT_COLUMNS);
+    w.write_record(EXPORT_COLUMNS).map_err(failed)?;
     let when = |t: Option<OffsetDateTime>| {
         t.and_then(|t| {
             t.format(&time::format_description::well_known::Rfc3339)
@@ -483,7 +487,7 @@ pub fn to_csv(records: &[IncidentRecord], text: impl Fn(Option<&str>) -> String)
         .unwrap_or_default()
     };
     for r in records {
-        let _ = w.write_record([
+        w.write_record([
             text(Some(&r.kind)),
             text(Some(&r.subject)),
             severity_slug(r.severity).to_owned(),
@@ -497,9 +501,13 @@ pub fn to_csv(records: &[IncidentRecord], text: impl Fn(Option<&str>) -> String)
             when(r.verified_at),
             text(Some(&r.affected_urls.join(" "))),
             text(Some(&r.sources.join(" "))),
-        ]);
+        ])
+        .map_err(failed)?;
     }
-    String::from_utf8(w.into_inner().unwrap_or_default()).unwrap_or_default()
+    let bytes = w
+        .into_inner()
+        .map_err(|e| format!("could not write the incidents CSV: {e}"))?;
+    String::from_utf8(bytes).map_err(|e| format!("the incidents CSV is not UTF-8: {e}"))
 }
 
 #[cfg(test)]

@@ -83,6 +83,9 @@ struct SnoozeArgs {
     days: i64,
 }
 
+/// What a snooze can be, as the REST API and the app say it.
+const SNOOZE_CHOICES: &str = "Snooze for 1, 7 or 30 days.";
+
 #[tool_router(router = keyed_router, vis = "pub(super)")]
 impl<B: CloudBackend> CloudMcp<B> {
     #[tool(
@@ -327,6 +330,11 @@ impl<B: CloudBackend> CloudMcp<B> {
         Extension(parts): Extension<Parts>,
     ) -> Result<String, String> {
         let who = self.keyed(&parts)?;
+        // A missing or non-integer `days` gets the same words as a wrong one.
+        if !arguments.get("days").is_some_and(|d| d.is_i64()) {
+            let Err(message) = self.backend.reject(who, SNOOZE_CHOICES.to_owned()).await;
+            return Err(message);
+        }
         let SnoozeArgs {
             site_id,
             incident_id,

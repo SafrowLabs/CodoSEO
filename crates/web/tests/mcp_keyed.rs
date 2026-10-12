@@ -787,6 +787,14 @@ async fn the_repair_tools_refuse_in_the_same_words_as_rest() {
         )
         .await;
     assert_eq!(e, "Snooze for 1, 7 or 30 days.");
+    // No days at all: the same words, not a deserializer's.
+    let e = rpc
+        .call_err(
+            "snooze_incident",
+            json!({"site_id": site, "incident_id": fetch}),
+        )
+        .await;
+    assert_eq!(e, "Snooze for 1, 7 or 30 days.");
     let e = rpc
         .call_err(
             "accept_incident",

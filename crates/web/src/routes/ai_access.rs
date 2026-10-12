@@ -1524,7 +1524,7 @@ fn progress(i: &Incident, ev: &Evidence, latest: Option<&Recheck>) -> Option<Pro
             Progress {
                 text: format!(
                     "Fix detected · policy restored — verifying until {}",
-                    fmt::datetime(due_at)
+                    fmt::until(due_at)
                 ),
                 lag_source: lag.source.map(|href| SourceLink {
                     label: host_label(href),
@@ -1740,7 +1740,7 @@ fn incident_view(
     }
     if let Some(until) = snoozed_until {
         chips.push(StateChip {
-            label: format!("Snoozed until {}", fmt::datetime(until)),
+            label: format!("Snoozed until {}", fmt::until(until)),
             class: "",
             tip: "Not counted and no instant alerts until then; changes are still logged"
                 .to_owned(),
@@ -3027,7 +3027,7 @@ async fn snooze(
         &user,
         &site,
         hx,
-        &format!("Snoozed until {}", fmt::datetime(until)),
+        &format!("Snoozed until {}", fmt::until(until)),
         "hx-replace-url",
     )
     .await

@@ -43,7 +43,7 @@ async fn incidents_csv(
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
     let (site, records) = incident_records(&state, &user, &site).await?;
-    let body = ai_incident::to_csv(&records, text);
+    let body = ai_incident::to_csv(&records, text).map_err(AppError::Internal)?;
     attachment(
         "text/csv; charset=utf-8",
         &incident_file_name(&site.domain, "csv"),
