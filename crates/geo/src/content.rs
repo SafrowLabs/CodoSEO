@@ -3,17 +3,38 @@
 //!
 //! Most AI crawlers fetch the HTML and read it as it is: they don't run scripts, so a client-side
 //! app's empty shell is all they get. [`classify`] reads the raw-HTML signals the extractor keeps
-//! ([`RawSignals`]) and never claims what a page looks like after rendering:
+//! ([`RawSignals`](codoseo_core::page::RawSignals)) and never claims what a page looks like after
+//! rendering:
 //!
-//! - [`ContentVerdict::Shell`]: under [`SHELL_MAX_WORDS`] words and the app's mount element is
-//!   empty, or a `<noscript>` notice asks for JavaScript.
+//! - [`ContentVerdict::Shell`]: under [`SHELL_MAX_WORDS`] words, and the app's mount element is
+//!   empty or, on a page without an H1, a `<noscript>` notice asks for JavaScript.
 //! - [`ContentVerdict::LikelyShell`]: under [`SHELL_MAX_WORDS`] words, no H1, no internal links,
 //!   and scripts make up the page: inline script is at least [`SCRIPT_SHARE_PERCENT`] of its bytes,
-//!   or it loads at least [`MIN_EXTERNAL_SCRIPTS`] external scripts. Script share alone never flags
-//!   a page: a server-rendered Next.js page carries a big `__NEXT_DATA__` and its text too.
+//!   or it loads at least [`MIN_EXTERNAL_SCRIPTS`] external scripts (`<script src>` and
+//!   `modulepreload` links). Script share alone never flags a page: a server-rendered Next.js page
+//!   carries a big `__NEXT_DATA__` and its text too.
 //! - [`ContentVerdict::Thin`]: few words but no shell signal (a contact or coming-soon page).
 //!   Informational, never a finding.
 //! - [`ContentVerdict::Present`]: enough text in the HTML as served.
+//!
+//! The thresholds are the ones the content corpus (`crates/crawler/tests/content_corpus.rs`, 11
+//! framework shells and 13 normal pages) justifies:
+//!
+//! - 50 words: every shell there has 0 words as served, and the shortest real page is a coming-soon
+//!   page with 10, under an H1. Below 50, the shell signals decide; at 50 or more a page is
+//!   `Present` whatever its scripts (Shopify's product page has 65 words and 45% inline script).
+//! - A noscript notice counts only without an H1: Disqus's "Please enable JavaScript to view the
+//!   comments" sits under a short post with an H1 and 31 words, which is not a shell. Every
+//!   framework shell with a notice (Create React App, Vue CLI, Angular) also has an empty mount.
+//! - 60% inline script: never decisive in the corpus. Next.js's app-router bailout shell is at 33%
+//!   and Gatsby's client-only route at 18%, both caught by their external scripts; an image-only
+//!   landing page with Google and Meta tags is at 37%; a server-rendered Next.js page at 55%.
+//! - 3 external scripts: Gatsby loads exactly 3, Ember 4 (vendor, two auto-import chunks, app),
+//!   SvelteKit's CSR shell 5 modulepreloads and no `<script src>`. Short normal pages load at most
+//!   1, and those with more have an H1 or internal links.
+//! - Known false negative: Flutter web's default page is one `flutter_bootstrap.js` script and
+//!   nothing else (no mount element, no notice, no inline script). Its signals are those of an
+//!   image-only landing page with one analytics tag, so it is not flagged.
 
 use std::collections::HashMap;
 
@@ -86,10 +107,11 @@ pub fn classify(page: &PageRecord) -> ContentVerdict {
         return ContentVerdict::Present;
     }
     let raw = &page.fields.raw;
-    if raw.mount_empty || raw.noscript_js {
+    let no_h1 = page.fields.h1.is_empty();
+    if raw.mount_empty || (raw.noscript_js && no_h1) {
         return ContentVerdict::Shell;
     }
-    let bare = page.fields.h1.is_empty() && page.outlinks_internal == 0;
+    let bare = no_h1 && page.outlinks_internal == 0;
     let scripted =
         script_share(page) >= SCRIPT_SHARE_PERCENT || raw.scripts_external >= MIN_EXTERNAL_SCRIPTS;
     if bare && scripted {

@@ -88,7 +88,7 @@ pub struct RawSignals {
     /// Bytes of inline `<script>` content, capped by the extractor.
     #[serde(default)]
     pub script_bytes: u32,
-    /// `<script src>` elements.
+    /// `<script src>` elements and `<link rel=modulepreload>` modules.
     #[serde(default)]
     pub scripts_external: u16,
     /// The app mount element found in the body, if any.

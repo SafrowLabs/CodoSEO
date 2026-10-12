@@ -509,14 +509,15 @@ fn mount_points_are_empty_only_without_children_or_text() {
 }
 
 #[test]
-fn inline_script_bytes_leave_out_json_ld_and_external_scripts() {
+fn inline_script_bytes_leave_out_json_ld_and_external_scripts_count_module_preloads() {
     let raw = extract_html(
-        r#"<script>var a=1;</script><script src="/a.js"></script><script type="module" src="/b.js"></script><script type="application/ld+json">{"@type":"Thing"}</script><script type="application/json">{"x":1}</script>"#,
+        r#"<link rel="modulepreload" href="/c.js"><link rel="preload" as="script" href="/d.js"><script>var a=1;</script><script src="/a.js"></script><script type="module" src="/b.js"></script><script type="application/ld+json">{"@type":"Thing"}</script><script type="application/json">{"x":1}</script>"#,
     )
     .fields
     .raw;
     assert_eq!(raw.script_bytes, "var a=1;".len() as u32 + 7);
-    assert_eq!(raw.scripts_external, 2);
+    // Two `<script src>` and one modulepreload; a plain preload is only a hint.
+    assert_eq!(raw.scripts_external, 3);
 }
 
 #[test]

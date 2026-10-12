@@ -66,6 +66,12 @@ fn the_threshold_table() {
     let cases: Vec<(&str, PageRecord, ContentVerdict)> = vec![
         ("no words, empty mount", raw(0, mount_empty()), Shell),
         ("49 words, noscript notice", raw(49, noscript()), Shell),
+        // Disqus's "Please enable JavaScript to view the comments" under a short post.
+        (
+            "noscript notice under an H1",
+            with_h1(raw(30, noscript())),
+            Thin,
+        ),
         ("50 words, empty mount", raw(50, mount_empty()), Present),
         (
             "empty mount under an H1",

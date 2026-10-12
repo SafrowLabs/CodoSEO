@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="docs-wrapper plugin-docs plugin-id-default docs-version-current docs-doc-page docs-doc-id-intro" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.4.0">
+<title data-rh="true">Getting started | Ferrite Docs</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="description" content="Install Ferrite and run your first query."><link data-rh="true" rel="canonical" href="https://docs.ferrite.test/docs/intro"><link rel="stylesheet" href="/assets/css/styles.4b8e2c1f.css">
+<script src="/assets/js/runtime~main.9a3e7f1c.js" defer="defer"></script>
+<script src="/assets/js/main.2d5c8b0e.js" defer="defer"></script>
+</head>
+<body class="navigation-with-keyboard">
+<script>!function(){function t(t){document.documentElement.setAttribute("data-theme",t)}var e=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();t(null!==e?e:"light")}(),function(){try{const n=new URLSearchParams(window.location.search).entries();for(var[t,e]of n)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><a class="navbar__brand" href="/"><b class="navbar__title text--truncate">Ferrite</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/docs/intro">Docs</a><a class="navbar__item navbar__link" href="/blog">Blog</a></div></div></nav><div id="__docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0"><div class="docsWrapper_hBAB"><main class="docMainContainer_TBSr"><div class="container padding-top--md padding-bottom--lg"><article><div class="theme-doc-markdown markdown"><header><h1>Getting started</h1></header>
+<p>Ferrite is an embedded time-series database. This page installs it and runs a first query against sample data.</p>
+<h2 class="anchor anchorWithStickyNavbar_LWe7" id="install">Install</h2>
+<p>Add the crate to your project, then open a database file. Ferrite creates the file on first use and keeps one write-ahead log next to it.</p>
+<h2 class="anchor anchorWithStickyNavbar_LWe7" id="first-query">First query</h2>
+<p>Insert a few points and ask for the hourly average. Queries return an iterator, so large ranges never load into memory at once.</p>
+<p>Next, read about <a href="/docs/retention">retention policies</a>.</p></div></article></div></main></div></div><footer class="footer"><a href="https://github.com/ferrite/ferrite">GitHub</a></footer></div>
+</body>
+</html>

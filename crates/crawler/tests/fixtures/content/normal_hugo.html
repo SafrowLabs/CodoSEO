@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+	<meta name="generator" content="Hugo 0.128.0">
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Notes on Rust lifetimes | Ada's notebook</title>
+	<meta name="description" content="What a lifetime annotation does and doesn't promise.">
+	<link rel="canonical" href="https://ada.test/posts/rust-lifetimes/">
+	<link rel="stylesheet" href="/css/main.min.6f2a1c.css">
+</head>
+<body>
+	<header><a href="/">Ada's notebook</a> <nav><a href="/posts/">Posts</a> <a href="/about/">About</a></nav></header>
+	<main>
+	<article>
+		<h1>Notes on Rust lifetimes</h1>
+		<time datetime="2024-06-11">June 11, 2024</time>
+		<p>A lifetime annotation never changes how long a value lives. It only describes how the lifetimes of several references relate to each other, so the compiler can check that no reference outlives the data it points to.</p>
+		<p>The classic example is a function returning the longer of two string slices. Without an annotation the compiler cannot tell which input the output borrows from.</p>
+		<pre><code>fn longest&lt;'a&gt;(x: &amp;'a str, y: &amp;'a str) -&gt; &amp;'a str</code></pre>
+		<p>Read more in <a href="/posts/rust-borrowing/">my notes on borrowing</a>.</p>
+	</article>
+	</main>
+	<footer>&copy; 2024 Ada</footer>
+</body>
+</html>

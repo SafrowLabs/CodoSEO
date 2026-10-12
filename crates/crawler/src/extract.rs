@@ -9,7 +9,8 @@
 //! Malformed input never panics: a parser error just ends extraction early.
 //!
 //! The raw-HTML signals ([`RawSignals`]) describe the page as served, before any script runs:
-//! the app mount element and whether it is empty, inline script bytes, external scripts, a
+//! the app mount element and whether it is empty, inline script bytes, external scripts (with
+//! `modulepreload` links), a
 //! `<noscript>` notice asking for JavaScript, and the words inside the main landmarks.
 
 use std::cell::RefCell;
@@ -623,6 +624,7 @@ struct State {
     /// Inside a `<script>` without `src` that isn't JSON-LD.
     inline_script: bool,
     script_bytes: u32,
+    /// `<script src>` and `<link rel=modulepreload>`.
     scripts_external: u16,
     /// The open `<noscript>` block's text.
     noscript: Option<NoscriptText>,
@@ -796,6 +798,9 @@ impl State {
                     }
                 }
                 "stylesheet" => self.check_mixed(Some(&href)),
+                // A module the page will run: SvelteKit and Vite list their chunks this way and
+                // load them from an inline script, with no `<script src>` at all.
+                "modulepreload" => self.scripts_external = self.scripts_external.saturating_add(1),
                 _ => {}
             }
         }
