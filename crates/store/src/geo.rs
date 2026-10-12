@@ -726,7 +726,9 @@ pub enum RecheckError {
 /// now), in one transaction. Refused while one is already queued or running for the incident,
 /// within [`RECHECK_COOLDOWN_MINUTES`] of the last manual one, while a crawl of the site is
 /// queued or running, and past the plan's `ai_rechecks_per_day`: manual rechecks over the last
-/// [`RECHECK_WINDOW_HOURS`] across every site of the site's account (follow-ups don't count).
+/// [`RECHECK_WINDOW_HOURS`] across every site of the site's account. Follow-ups don't count,
+/// nor do manual ones that ended `superseded` (a crawl took over) or `failed` (they never ran
+/// on our side): the owner got no answer from those. They still start the cooldown.
 /// Requests for one account are serialised, so two at once can't both take the last slot.
 pub async fn request_recheck(
     pool: &PgPool,
@@ -792,7 +794,7 @@ pub async fn request_recheck(
         let cap = usize::from(cap);
         let used: Vec<OffsetDateTime> = sqlx::query_scalar(
             "SELECT r.created_at FROM ai_rechecks r JOIN sites s ON s.id = r.site_id \
-             WHERE r.origin = 'manual' \
+             WHERE r.origin = 'manual' AND r.status NOT IN ('superseded', 'failed') \
                AND r.created_at > now() - make_interval(hours => $3) \
                AND (r.site_id = $1 OR ($2::uuid IS NOT NULL AND s.account_id = $2)) \
              ORDER BY r.created_at",

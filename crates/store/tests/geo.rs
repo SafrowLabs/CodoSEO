@@ -2727,6 +2727,59 @@ async fn follow_ups_do_not_count_toward_the_daily_cap() {
 }
 
 #[tokio::test]
+async fn superseded_and_failed_rechecks_do_not_use_the_daily_allowance() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    // A crawl took one over, another never ran on our side: neither costs the owner a slot.
+    for status in ["superseded", "failed"] {
+        sqlx::query(
+            "INSERT INTO ai_rechecks (site_id, incident_id, origin, status, due_at, created_at) \
+             VALUES ($1, $2, 'manual', $3, now(), now() - interval '1 hour')",
+        )
+        .bind(site)
+        .bind(id)
+        .bind(status)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+    geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(1)))
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE ai_rechecks SET created_at = now() - interval '11 minutes' WHERE status = 'queued'",
+    )
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE ai_rechecks SET status = 'done' WHERE status = 'queued'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    // The one that ran does count.
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(1))).await,
+        Err(RecheckError::LimitReached(Some(_)))
+    ));
+}
+
+#[tokio::test]
+async fn a_superseded_recheck_still_cools_down() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_incident(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let queued = geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(5)))
+        .await
+        .unwrap();
+    assert!(geo::supersede_recheck(&db.pool, queued.id).await.unwrap());
+    assert!(matches!(
+        geo::request_recheck(&db.pool, site, id, owner, &limits_with(Some(5))).await,
+        Err(RecheckError::Cooldown(_))
+    ));
+}
+
+#[tokio::test]
 async fn the_daily_cap_counts_every_site_of_the_account() {
     let db = TestDb::new().await;
     let owner = make_account(&db.pool, "o@example.com").await;
