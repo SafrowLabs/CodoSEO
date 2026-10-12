@@ -1169,6 +1169,8 @@ body.solo { overflow: auto; }
 .aia-llms-facts dd { margin: 0; }
 .aia-llms-check { display: grid; grid-template-columns: 16px minmax(120px, 190px) minmax(0, 1fr); gap: 4px 10px; align-items: baseline; padding: 8px 18px; font-size: 12.5px; }
 .aia-llms-failing { padding: 10px 18px 12px; }
+.aia-llms-failing .aia-path { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.aia-llms-check .aia-ev-detail, .aia-llms-facts dd { min-width: 0; overflow-wrap: anywhere; }
 
 .aia-none b { font-weight: 600; }
 .aia-none p { margin-top: 4px; font-size: 13px; color: var(--muted-2); max-width: 60ch; }

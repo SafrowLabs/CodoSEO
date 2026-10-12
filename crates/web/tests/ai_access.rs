@@ -1643,3 +1643,15 @@ async fn a_huge_llms_txt_h1_is_clipped_on_the_card() {
     assert!(!card.contains(&"B".repeat(401)), "detail clipped");
     assert!(card.contains(&format!("{}…", "B".repeat(399))), "{card}");
 }
+
+#[test]
+fn long_llms_txt_urls_and_details_wrap_on_a_phone() {
+    let css = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/app.css"))
+        .expect("app.css");
+    for rule in [
+        ".aia-llms-failing .aia-path { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }",
+        ".aia-llms-check .aia-ev-detail, .aia-llms-facts dd { min-width: 0; overflow-wrap: anywhere; }",
+    ] {
+        assert!(css.contains(rule), "missing {rule}");
+    }
+}
