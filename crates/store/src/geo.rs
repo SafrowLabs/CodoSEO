@@ -631,7 +631,9 @@ async fn lock_incident(
 
 /// The owner accepts the incident as it is: it stays open and listed (under "Accepted"), but no
 /// longer counts in the badges and writes no change rows, so nothing about it alerts or reaches
-/// the digest; a crawl that no longer finds it still resolves it, quietly. Only for kinds
+/// the digest; a crawl that no longer finds it still resolves it, quietly, and one that finds it
+/// wider at the same severity says nothing. A crawl that finds it worse ends the acceptance (the
+/// owner accepted what it was) and announces it like any escalation. Only for kinds
 /// without an intent path ([`codoseo_geo::incident::acceptable`]). Accepting again keeps the
 /// first time and account.
 pub async fn accept(
@@ -672,8 +674,9 @@ pub async fn unaccept(pool: &PgPool, site_id: Uuid, id: i64) -> Result<(), Incid
 /// Snoozes the incident until `until`, at most [`MAX_SNOOZE_DAYS`] from now (a later time is cut
 /// to that). While snoozed it does not count in the badges, and the change rows it writes are
 /// still recorded (the changes page and the digest stay truthful) but marked alerted, so no
-/// instant alert goes out. The snooze ends on its own. Any kind can be snoozed. Returns the time
-/// stored.
+/// instant alert goes out. The snooze ends on its own. If it got worse meanwhile
+/// (`snooze_escalated`), the first crawl that still finds it after the snooze announces it, once.
+/// Any kind can be snoozed. Returns the time stored.
 pub async fn snooze(
     pool: &PgPool,
     site_id: Uuid,
@@ -1574,6 +1577,8 @@ struct OpenRow {
     accepted: bool,
     /// Snoozed until later: its changes are written already alerted.
     snoozed: bool,
+    /// It got worse during a snooze that is over now: announced by the next crawl that finds it.
+    escalation_due: bool,
     members: BTreeSet<String>,
     evidence: Evidence,
 }
@@ -1589,6 +1594,7 @@ struct OpenDbRow {
     evidence: Value,
     accepted: bool,
     snoozed: bool,
+    escalation_due: bool,
 }
 
 impl OpenDbRow {
@@ -1603,6 +1609,7 @@ impl OpenDbRow {
             quiet: self.quiet,
             accepted: self.accepted,
             snoozed: self.snoozed,
+            escalation_due: self.escalation_due,
             members: evidence.members(),
             evidence,
         })
@@ -1616,7 +1623,8 @@ async fn lock_open(
     let rows: Vec<OpenDbRow> = sqlx::query_as(
         "SELECT id, kind, subject, severity::text AS severity, title, quiet, evidence, \
            accepted_at IS NOT NULL AS accepted, \
-           COALESCE(snoozed_until > now(), false) AS snoozed \
+           COALESCE(snoozed_until > now(), false) AS snoozed, \
+           snooze_escalated AND NOT COALESCE(snoozed_until > now(), false) AS escalation_due \
          FROM ai_incidents WHERE site_id = $1 AND resolved_at IS NULL ORDER BY id FOR UPDATE",
     )
     .bind(site_id)
@@ -1737,9 +1745,17 @@ async fn write_transitions(
                 let row = by_id.get(id).copied();
                 // Worse, or about more bots or engines than before: announced like a new
                 // incident, and from then on no longer quiet, so its resolution is announced too.
-                // An accepted incident announces nothing.
-                let announce =
-                    mode.changes && (*escalated || *widened) && !row.is_some_and(|r| r.accepted);
+                // An accepted incident announces nothing, unless it got worse: the owner
+                // accepted what it was, not this, so it is accepted no longer. One that got
+                // worse during a snooze that is over now is announced by this crawl, once.
+                let unaccept = mode.changes && *escalated && row.is_some_and(|r| r.accepted);
+                let due = mode.changes && row.is_some_and(|r| r.escalation_due);
+                let announce = unaccept
+                    || due
+                    || (mode.changes
+                        && (*escalated || *widened)
+                        && !row.is_some_and(|r| r.accepted));
+                let snoozed = row.is_some_and(|r| r.snoozed);
                 let mut evidence =
                     serde_json::to_value(&finding.evidence).expect("evidence always serializes");
                 strip_nul(&mut evidence);
@@ -1752,7 +1768,11 @@ async fn write_transitions(
                        last_seen_crawl_id = CASE WHEN $7 THEN $6 ELSE last_seen_crawl_id END, \
                        last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END, \
                        recovered_at = CASE WHEN $9 THEN NULL ELSE recovered_at END, \
-                       quiet = quiet AND NOT $8 \
+                       quiet = quiet AND NOT $8, \
+                       accepted_at = CASE WHEN $10 THEN NULL ELSE accepted_at END, \
+                       accepted_by = CASE WHEN $10 THEN NULL ELSE accepted_by END, \
+                       snooze_escalated = CASE WHEN $12 AND $13 THEN true \
+                         WHEN $11 AND NOT $12 THEN false ELSE snooze_escalated END \
                      WHERE id = $1",
                 )
                 .bind(id)
@@ -1764,10 +1784,18 @@ async fn write_transitions(
                 .bind(mode.seen)
                 .bind(announce)
                 .bind(undo_recovery)
+                .bind(unaccept)
+                .bind(announce)
+                .bind(snoozed)
+                .bind(*escalated)
                 .execute(&mut **tx)
                 .await?;
                 if announce {
-                    written.push(row, finding_change(finding));
+                    match row {
+                        _ if snoozed => written.muted.push(finding_change(finding)),
+                        Some(_) if unaccept => written.changes.push(finding_change(finding)),
+                        _ => written.push(row, finding_change(finding)),
+                    }
                 }
             }
             Transition::Resolved { id, .. } => {

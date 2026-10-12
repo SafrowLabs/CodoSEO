@@ -3331,3 +3331,116 @@ async fn a_recheck_applied_while_a_crawl_is_under_way_leaves_the_incident_to_it(
     let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
     assert_eq!(i.recovered_at, None);
 }
+
+#[tokio::test]
+async fn an_accepted_incident_that_gets_worse_is_no_longer_accepted_and_alerts() {
+    let db = TestDb::new().await;
+    let (site, id) = site_with_fetch_blocked(&db.pool).await;
+    let owner = make_account(&db.pool, "o@example.com").await;
+    let before = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    geo::accept(&db.pool, site, id, owner).await.unwrap();
+
+    // Wider at the same severity: still accepted, still muted.
+    let wider = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert!(i.accepted_at.is_some());
+    assert_eq!(i.severity, before.severity);
+    assert!(change_kinds(&db.pool, wider).await.is_empty());
+
+    // Worse: what was accepted is not what is there now. (Accepted while it was a notice.)
+    sqlx::query("UPDATE ai_incidents SET severity = 'notice' WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let worse = probed_crawl(
+        &db.pool,
+        site,
+        &[
+            ("OAI-SearchBot", cloudflare()),
+            ("Claude-SearchBot", cloudflare()),
+        ],
+    )
+    .await;
+    let i = geo::incident(&db.pool, site, id).await.unwrap().unwrap();
+    assert_eq!((i.accepted_at, i.accepted_by), (None, None));
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_fetch_blocked".to_owned(), false)]
+    );
+    assert_eq!(alert_jobs(&db.pool, worse).await, 1);
+    assert_eq!(geo::open_counts(&db.pool, site).await.unwrap().0, 1);
+}
+
+#[tokio::test]
+async fn a_snoozed_incident_that_got_worse_alerts_once_when_the_snooze_ends() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    full_crawl(&db.pool, site, 200, below_home, None).await;
+    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    geo::snooze(
+        &db.pool,
+        site,
+        id,
+        OffsetDateTime::now_utc() + TimeDuration::days(7),
+    )
+    .await
+    .unwrap();
+
+    // Worse while snoozed: recorded, muted.
+    let worse = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, worse).await,
+        vec![("ai_bot_blocked".to_owned(), true)]
+    );
+    // Still snoozed: the next crawl says nothing.
+    let same = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(change_kinds(&db.pool, same).await.is_empty());
+
+    // The snooze ends: the first crawl after it alerts about the worse state, once.
+    sqlx::query(
+        "UPDATE ai_incidents SET snoozed_until = now() - interval '1 minute' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let after = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert_eq!(
+        changes_alerted(&db.pool, after).await,
+        vec![("ai_bot_blocked".to_owned(), false)]
+    );
+    assert_eq!(alert_jobs(&db.pool, after).await, 1);
+    let again = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(change_kinds(&db.pool, again).await.is_empty(), "only once");
+
+    // A snooze with no escalation ends silently.
+    geo::snooze(
+        &db.pool,
+        site,
+        id,
+        OffsetDateTime::now_utc() + TimeDuration::days(1),
+    )
+    .await
+    .unwrap();
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    sqlx::query(
+        "UPDATE ai_incidents SET snoozed_until = now() - interval '1 minute' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    let quiet_end = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    assert!(change_kinds(&db.pool, quiet_end).await.is_empty());
+}

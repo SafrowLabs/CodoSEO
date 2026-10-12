@@ -7,6 +7,7 @@ ALTER TABLE ai_incidents
   ADD COLUMN accepted_at TIMESTAMPTZ,
   ADD COLUMN accepted_by UUID REFERENCES accounts(id) ON DELETE SET NULL,
   ADD COLUMN snoozed_until TIMESTAMPTZ,
+  ADD COLUMN snooze_escalated BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN recovered_at TIMESTAMPTZ,
   ADD COLUMN verified_at TIMESTAMPTZ,
   ADD COLUMN resolved_by TEXT CHECK (resolved_by IN ('crawl', 'recheck', 'intent'));
@@ -21,6 +22,9 @@ COMMENT ON COLUMN ai_incidents.accepted_by IS
   'The account that accepted it. Set NULL if that account is deleted.';
 COMMENT ON COLUMN ai_incidents.snoozed_until IS
   'The incident stays open but raises no reminders until this time; NULL if not snoozed.';
+COMMENT ON COLUMN ai_incidents.snooze_escalated IS
+  'It got worse while snoozed (that change was recorded already alerted): the first crawl '
+  'that still finds it once the snooze is over announces it, then this is cleared.';
 COMMENT ON COLUMN ai_incidents.recovered_at IS
   'When a check first saw the problem gone, before it was confirmed; NULL if it has not recovered.';
 COMMENT ON COLUMN ai_incidents.verified_at IS
