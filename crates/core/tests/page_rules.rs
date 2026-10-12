@@ -2,7 +2,8 @@ mod common;
 
 use codoseo_core::Url;
 use codoseo_core::page::{
-    AiMeta, Indexability, MountPoint, PageFields, RawSignals, directives_for, indexability, is_nofollow, is_noindex,
+    AiMeta, Indexability, MountPoint, PageFields, RawSignals, directives_for, indexability,
+    is_nofollow, is_noindex,
 };
 use common::sample_record;
 

@@ -7,13 +7,17 @@
 //! Text comes from one document-wide handler and is routed by state that the
 //! element handlers keep (inside `<title>`, a heading, a link, a skipped element).
 //! Malformed input never panics: a parser error just ends extraction early.
+//!
+//! The raw-HTML signals ([`RawSignals`]) describe the page as served, before any script runs:
+//! the app mount element and whether it is empty, inline script bytes, external scripts, a
+//! `<noscript>` notice asking for JavaScript, and the words inside the main landmarks.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
-use codoseo_core::page::{AiMeta, JsonLdStatus, OgTags, PageFields, RawSignals};
+use codoseo_core::page::{AiMeta, JsonLdStatus, MountPoint, OgTags, PageFields, RawSignals};
 use codoseo_core::url::normalize;
 use encoding_rs::{Decoder, Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use lol_html::html_content::{Element, EndTag};
@@ -44,6 +48,20 @@ const BOT_META_NAMES: [&str; 8] = [
 const MAX_JSONLD_BYTES: usize = 1024 * 1024;
 /// How far to look for `<meta charset>` before parsing, as browsers do.
 const PRESCAN_BYTES: usize = 1024;
+/// Text read from each `<noscript>` block when looking for a JavaScript notice.
+const MAX_NOSCRIPT_BYTES: usize = 256;
+/// What a `<noscript>` notice says when the page needs JavaScript, matched lower-cased with
+/// whitespace collapsed: React's, Vue CLI's and Angular's templates and common hand-written ones.
+const NOSCRIPT_JS_PHRASES: [&str; 6] = [
+    "enable javascript",
+    "javascript is disabled",
+    "requires javascript",
+    "without javascript enabled",
+    "turn on javascript",
+    "javascript must be enabled",
+];
+/// The elements client-side frameworks render into.
+const MOUNT_SELECTOR: &str = "#root, #app, #__next, #__nuxt, #___gatsby, #q-app, app-root, #svelte";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Link {
@@ -212,7 +230,13 @@ fn build_rewriter(
         s_media,
         s_text,
         s_nosnippet,
+        s_mount,
+        s_main,
+        s_noscript,
     ) = (
+        s(state),
+        s(state),
+        s(state),
         s(state),
         s(state),
         s(state),
@@ -235,6 +259,11 @@ fn build_rewriter(
             let mut st = s_any.borrow_mut();
             st.words.break_word();
             st.nosnippet.in_word = false;
+            st.main_words.in_word = false;
+            // Runs before the mount handler, so the mount element doesn't fill itself.
+            if st.mount_open {
+                st.mount_filled = true;
+            }
             if is_block_or_break(&el.tag_name()) {
                 st.separate_open_text();
             }
@@ -331,19 +360,53 @@ fn build_rewriter(
         }))
         .append_element_content_handler(element!("script", move |el| {
             let mut st = s_script.borrow_mut();
-            st.check_mixed(el.get_attribute("src").as_deref());
+            let src = el.get_attribute("src");
+            st.check_mixed(src.as_deref());
             let is_jsonld = el
                 .get_attribute("type")
                 .is_some_and(|t| t.trim().eq_ignore_ascii_case("application/ld+json"));
             if is_jsonld {
                 st.jsonld_buf = Some(String::new());
             }
+            if src.is_some() {
+                st.scripts_external = st.scripts_external.saturating_add(1);
+            } else if !is_jsonld {
+                st.inline_script = true;
+            }
             st.skip_depth += 1;
             drop(st);
             let st = Rc::clone(&s_script);
             on_end(el, move || st.borrow_mut().close_script())
         }))
-        .append_element_content_handler(element!("style, noscript, template", move |el| {
+        .append_element_content_handler(element!("noscript", move |el| {
+            let mut st = s_noscript.borrow_mut();
+            st.skip_depth += 1;
+            st.noscript = Some(NoscriptText::default());
+            drop(st);
+            let st = Rc::clone(&s_noscript);
+            on_end(el, move || st.borrow_mut().close_noscript())
+        }))
+        .append_element_content_handler(element!(MOUNT_SELECTOR, move |el| {
+            let mut st = s_mount.borrow_mut();
+            if st.mount.is_some() {
+                return Ok(());
+            }
+            st.mount = Some(mount_point(el));
+            st.mount_open = true;
+            drop(st);
+            let st = Rc::clone(&s_mount);
+            on_end(el, move || st.borrow_mut().mount_open = false)
+        }))
+        .append_element_content_handler(element!("main, article, [role=main]", move |el| {
+            s_main.borrow_mut().main_depth += 1;
+            let st = Rc::clone(&s_main);
+            on_end(el, move || {
+                let mut st = st.borrow_mut();
+                st.main_depth = st.main_depth.saturating_sub(1);
+                st.main_words.in_word = false;
+            })
+        }))
+        .append_element_content_handler(element!("style, template", move |el| {
             s_skip.borrow_mut().skip_depth += 1;
             let st = Rc::clone(&s_skip);
             on_end(el, move || st.borrow_mut().skip_depth -= 1)
@@ -442,6 +505,63 @@ impl SnippetWords {
     }
 }
 
+/// Which framework's mount element `el` is (it matched [`MOUNT_SELECTOR`]).
+fn mount_point(el: &Element<'_, '_>) -> MountPoint {
+    if el.tag_name().eq_ignore_ascii_case("app-root") {
+        return MountPoint::AppRoot;
+    }
+    match el.get_attribute("id").as_deref() {
+        Some("app") => MountPoint::App,
+        Some("__next") => MountPoint::Next,
+        Some("__nuxt") => MountPoint::Nuxt,
+        Some("___gatsby") => MountPoint::Gatsby,
+        Some("q-app") => MountPoint::QApp,
+        Some("svelte") => MountPoint::Svelte,
+        _ => MountPoint::Root,
+    }
+}
+
+/// The start of one `<noscript>` block's text. lol_html reads `<noscript>` as raw text (as a
+/// browser with scripting on does), so markup inside arrives as text and is dropped here.
+#[derive(Default)]
+struct NoscriptText {
+    text: String,
+    in_tag: bool,
+}
+
+impl NoscriptText {
+    fn feed(&mut self, raw: &str) {
+        for ch in raw.chars() {
+            match ch {
+                '<' => self.in_tag = true,
+                '>' if self.in_tag => {
+                    self.in_tag = false;
+                    self.push(' ');
+                }
+                _ if self.in_tag => {}
+                _ => self.push(ch),
+            }
+        }
+    }
+
+    fn push(&mut self, ch: char) {
+        if self.text.len() + ch.len_utf8() <= MAX_NOSCRIPT_BYTES {
+            self.text.push(ch);
+        }
+    }
+
+    /// The text asks the visitor to turn JavaScript on.
+    fn asks_for_javascript(&self) -> bool {
+        let text = self
+            .text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        NOSCRIPT_JS_PHRASES.iter().any(|p| text.contains(p))
+    }
+}
+
 /// Lower-cased names of the `<meta name>` tags that address one crawler.
 fn bot_meta_names() -> &'static HashSet<String> {
     static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
@@ -492,6 +612,21 @@ struct State {
     /// Open elements that carry `data-nosnippet`; their text is counted once however deep.
     nosnippet_depth: u32,
     nosnippet: SnippetWords,
+    /// The first app mount element, while its content streams in and once it has ended.
+    mount: Option<MountPoint>,
+    mount_open: bool,
+    /// The mount element got a child element or non-whitespace text.
+    mount_filled: bool,
+    /// Open `main`, `article` and `[role=main]` elements; their text is counted once however deep.
+    main_depth: u32,
+    main_words: SnippetWords,
+    /// Inside a `<script>` without `src` that isn't JSON-LD.
+    inline_script: bool,
+    script_bytes: u32,
+    scripts_external: u16,
+    /// The open `<noscript>` block's text.
+    noscript: Option<NoscriptText>,
+    noscript_js: bool,
 }
 
 impl State {
@@ -533,10 +668,30 @@ impl State {
             tdm_policy: None,
             nosnippet_depth: 0,
             nosnippet: SnippetWords::default(),
+            mount: None,
+            mount_open: false,
+            mount_filled: false,
+            main_depth: 0,
+            main_words: SnippetWords::default(),
+            inline_script: false,
+            script_bytes: 0,
+            scripts_external: 0,
+            noscript: None,
+            noscript_js: false,
         }
     }
 
     fn on_text(&mut self, raw: &str) {
+        if self.mount_open && !self.mount_filled && raw.chars().any(|c| !c.is_whitespace()) {
+            self.mount_filled = true;
+        }
+        if self.inline_script {
+            let len = u32::try_from(raw.len()).unwrap_or(u32::MAX);
+            self.script_bytes = self.script_bytes.saturating_add(len);
+        }
+        if let Some(noscript) = &mut self.noscript {
+            noscript.feed(raw);
+        }
         if let Some(buf) = &mut self.jsonld_buf {
             if !self.jsonld_overflow {
                 if buf.len() + raw.len() > MAX_JSONLD_BYTES {
@@ -566,6 +721,9 @@ impl State {
         self.words.feed(raw);
         if self.nosnippet_depth > 0 {
             self.nosnippet.feed(raw);
+        }
+        if self.main_depth > 0 {
+            self.main_words.feed(raw);
         }
     }
 
@@ -676,8 +834,16 @@ impl State {
         }
     }
 
+    fn close_noscript(&mut self) {
+        self.skip_depth = self.skip_depth.saturating_sub(1);
+        if let Some(noscript) = self.noscript.take() {
+            self.noscript_js |= noscript.asks_for_javascript();
+        }
+    }
+
     fn close_script(&mut self) {
         self.skip_depth = self.skip_depth.saturating_sub(1);
+        self.inline_script = false;
         if let Some(buf) = self.jsonld_buf.take() {
             if std::mem::take(&mut self.jsonld_overflow) {
                 self.jsonld_too_large = true;
@@ -694,6 +860,9 @@ impl State {
         self.close_heading();
         if self.jsonld_buf.is_some() {
             self.close_script();
+        }
+        if self.noscript.is_some() {
+            self.close_noscript();
         }
     }
 
@@ -753,8 +922,15 @@ impl State {
                 tdm_reservation: self.tdm_reservation.take(),
                 tdm_policy: self.tdm_policy.take(),
             },
-            // Filled once the extractor reads the raw-HTML signals.
-            raw: RawSignals::default(),
+            raw: RawSignals {
+                main_words: self.main_words.count,
+                script_bytes: self.script_bytes,
+                scripts_external: self.scripts_external,
+                mount: self.mount,
+                // A mount left open at the end of the document counts as it stands.
+                mount_empty: self.mount.is_some() && !self.mount_filled,
+                noscript_js: self.noscript_js,
+            },
         };
         Extracted { fields, links }
     }

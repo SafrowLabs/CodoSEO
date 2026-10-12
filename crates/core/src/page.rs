@@ -81,7 +81,8 @@ pub struct PageFields {
 /// Counts and markers read from the raw HTML of a page, before any script has run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawSignals {
-    /// Words of visible text in the raw `<body>`, outside scripts and styles.
+    /// Words of visible text inside `<main>`, `<article>` and `[role=main]` elements, nested ones
+    /// once.
     #[serde(default)]
     pub main_words: u32,
     /// Bytes of inline `<script>` content, capped by the extractor.
