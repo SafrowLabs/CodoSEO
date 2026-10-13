@@ -439,7 +439,7 @@ DATABASE_URL=postgres://localhost/codoseo codoseo all
 - [docs/configuration.md](docs/configuration.md): every environment variable
 - [docs/deploy-coolify.md](docs/deploy-coolify.md): Coolify template and the two-container layout
 - [docs/operations.md](docs/operations.md): logs, metrics, health checks, upgrades
-- [docs/mcp.md](docs/mcp.md) and [docs/api.md](docs/api.md): agent access
+- [docs/mcp.md](docs/mcp.md) and [docs/api.md](docs/api.md): agent access, and the [deploy webhook](docs/api.md#deploy-webhook) that rechecks a monitored site after each deploy
 - [docs/ai-access.md](docs/ai-access.md): AI access monitoring, the synthetic fetch checks, content in raw HTML, llms.txt, fixing and rechecking incidents, the intent model and the public AI bot registry
 - [RELEASING.md](RELEASING.md): how releases are cut
 

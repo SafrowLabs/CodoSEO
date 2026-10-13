@@ -10,6 +10,7 @@ pub mod channels;
 pub mod crawl_queue;
 pub mod crawls;
 mod dbenum;
+pub mod deploy_hooks;
 pub mod digest;
 pub mod events;
 pub mod explorer;
