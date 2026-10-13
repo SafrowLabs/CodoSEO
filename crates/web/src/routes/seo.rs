@@ -66,6 +66,7 @@ pub async fn sitemap(State(state): State<AppState>) -> Result<Response, AppError
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
          \x20 <url><loc>{origin}/</loc></url>\n\
+         \x20 <url><loc>{origin}/demo</loc></url>\n\
          \x20 <url><loc>{origin}/bot</loc></url>\n\
          \x20 <url><loc>{origin}/ai-bots</loc></url>\n\
          \x20 <url><loc>{origin}/terms</loc></url>\n\

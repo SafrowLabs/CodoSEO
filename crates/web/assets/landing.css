@@ -156,3 +156,18 @@
   .reg-table .reg-op th, .reg-table tbody + tbody .reg-op th { padding: 0; border: 0; }
   .reg-table tbody:first-of-type tr.reg-op { border-top: 0; }
 }
+
+/* ---- /demo: the sample site audit ---- */
+.demo { padding-top: 8px; padding-bottom: 64px; }
+.demo-banner { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin: 4px 0 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.demo-banner .badge { flex: none; }
+.demo-panel { padding: 0; }
+.demo-fixes { margin-top: 24px; }
+.demo-fixes > h2 { margin: 0 0 4px; }
+.demo-fix { border-top: 1px solid var(--line-soft); padding-top: 16px; margin-top: 16px; }
+.demo-fix-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.demo-fix-head h3 { margin: 0; font-size: 16px; }
+.demo-fix h4 { margin: 14px 0 6px; font-size: 13px; }
+.demo-fix pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border-radius: 8px; background: var(--surface-sunk); font-size: 12.5px; margin: 0; }
+.demo-fix ul { margin: 0; padding-left: 18px; }
+.demo-sources { font-size: 12px; overflow-wrap: anywhere; }

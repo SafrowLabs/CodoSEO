@@ -11,6 +11,7 @@ pub mod billing;
 pub mod bot;
 pub mod changes;
 pub mod crawls;
+pub mod demo;
 pub mod explorer;
 pub mod export;
 pub mod landing;
@@ -57,6 +58,7 @@ pub fn router() -> Router<AppState> {
         .merge(admin::routes())
         .merge(rankorg::routes())
         .merge(legal::routes())
+        .merge(demo::routes())
         .route("/bot", get(bot::page))
         .route("/robots.txt", get(seo::robots))
         .route("/llms.txt", get(seo::llms))

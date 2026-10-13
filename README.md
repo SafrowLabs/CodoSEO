@@ -373,7 +373,7 @@ The web app lets you add sites, run crawls, and work through them in a URL explo
 
 ![The site audit: the AI & search · GEO section, the headline KPIs, the health score trend and the top fixes](docs/images/site-audit/site-audit-light.png)
 
-More: [dark theme](docs/images/site-audit/site-audit-dark.png), [on a phone](docs/images/site-audit/site-audit-mobile.png), [after the first crawl](docs/images/site-audit/site-audit-first-light.png).
+More: [dark theme](docs/images/site-audit/site-audit-dark.png), [on a phone](docs/images/site-audit/site-audit-mobile.png), [after the first crawl](docs/images/site-audit/site-audit-first-light.png). Or open the [live demo](https://codoseo.com/demo): the site audit of a sample site with the fix for each AI access issue, read-only and without sign-up (cloud only; its data is a fixture compiled into the app, so it never crawls).
 
 Self-host with Docker Compose in three commands:
 
