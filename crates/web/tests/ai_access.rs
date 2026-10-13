@@ -823,7 +823,7 @@ async fn the_bots_table_opens_on_what_needs_attention() {
     );
     assert!(body.contains(r#"id="aia-f-all" value="all" aria-controls="aia-bots-table" checked>"#));
     assert!(body.contains(&format!(r#"All bots<span class="n">{total}</span>"#)));
-    assert!(!body.contains(r#"class="is-attn"#));
+    assert!(!body.contains(r#"class="aia-row is-attn"#));
 
     app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
         .await;
@@ -837,9 +837,12 @@ async fn the_bots_table_opens_on_what_needs_attention() {
         )
     );
     assert!(body.contains(r#"Needs attention<span class="n">1</span>"#));
-    assert!(body.contains(r#"<tr class="is-attn is-attn-last">"#));
-    assert_eq!(body.matches(r#"<tr class="is-attn"#).count(), 1);
-    assert_eq!(body.matches(r#"<tr class="is-ok">"#).count(), total - 1);
+    assert!(body.contains(r#"<tr class="aia-row is-attn is-attn-last" style="#));
+    assert_eq!(body.matches(r#"<tr class="aia-row is-attn"#).count(), 1);
+    assert_eq!(
+        body.matches(r#"<tr class="aia-row is-ok" style="#).count(),
+        total - 1
+    );
     // The group says how many conflict; the others say none do (shown while filtered).
     assert!(body.contains(r#"<span class="aia-group-flag">1 conflict</span>"#));
     assert!(body.contains(r#"<tbody class="is-clear">"#));
@@ -1907,6 +1910,16 @@ async fn rechecking_queues_one_and_the_card_says_so() {
         "{}",
         res.body
     );
+    // The card's state changed, and the page polls until the result is in.
+    let c = card(&res.body, id);
+    assert!(
+        c.contains(r#"data-state="Recheck queued · results in a minute or two|""#),
+        "{c}"
+    );
+    assert!(
+        c.contains(r#"is-pending" role="status" data-recheck-pending>"#),
+        "{c}"
+    );
     // A plain form post is sent back to the page.
     let res = app
         .post(&action(&site, id, "recheck"), "", Some(&cookie))
@@ -2268,7 +2281,7 @@ async fn copy_payloads_escape_hostile_site_strings() {
     let c = card(&body, id);
     assert!(c.contains("Copy prompt"), "{c}");
     assert!(!body.contains("<img src=x"), "{c}");
-    assert!(!body.contains(r#""><img"#), "{c}");
+    assert!(!body.contains(r#""><img src=x"#), "{c}");
     // The copy payloads carry it, escaped in their attribute.
     assert!(
         c.contains("&#34;&#62;&#60;img src=x onerror=alert(1)&#62;"),
@@ -2682,4 +2695,59 @@ async fn a_blocked_search_bot_reads_blocked_in_the_audit_and_an_intended_block_s
     let row = audit_bot_row(&body, "OAI-SearchBot");
     assert!(row.contains("Blocked · intended"), "{row}");
     assert!(row.contains("t-intent"), "{row}");
+}
+
+#[tokio::test]
+async fn operator_logos_sit_beside_their_bots() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let openai = codoseo_web::operator_logo::logo("OpenAI").unwrap();
+    let tile = |size: &str, src: &str| {
+        format!(
+            r#"<span class="op-logo op-logo-{size}" aria-hidden="true"><img src="{src}" alt="" width="14" height="14" loading="lazy" decoding="async"></span>"#
+        )
+    };
+    // The bots table: a tile, then the token and the operator's name as text.
+    assert!(
+        body.contains(&format!(
+            r#"<span class="aia-op">{}<span class="aia-op-text"><span class="aia-token">GPTBot</span>"#,
+            tile("sm", openai)
+        )),
+        "{body}"
+    );
+    // Every operator with a logo shows it; Common Crawl, without one, shows its initials.
+    for b in &registry().bots {
+        if let Some(src) = codoseo_web::operator_logo::logo(&b.operator) {
+            assert!(body.contains(&tile("sm", src)), "{}", b.operator);
+        }
+    }
+    assert!(body.contains(
+        r#"<span class="op-logo op-logo-sm" aria-hidden="true"><b>CC</b></span><span class="aia-op-text"><span class="aia-token">CCBot</span>"#
+    ));
+    // The issue names its bot with the operator's tile.
+    let c = card(&body, id);
+    assert!(
+        c.contains(&format!(
+            r#"<span class="aia-bot">{}OAI-SearchBot"#,
+            tile("xs", openai)
+        )),
+        "{c}"
+    );
+    // Rows fade in one after another; each bot's status is keyed for the swap pulse.
+    assert!(body.contains(r#"<tr class="aia-row is-ok" style="--i:0">"#));
+    assert!(body.contains(r#"data-state-key="bot-GPTBot" data-state="#));
+    // The answer engines take their crawler's operator.
+    let google = codoseo_web::operator_logo::logo("Google").unwrap();
+    assert!(body.contains(&format!(
+        r#"{}<span class="aia-op-text"><span class="aia-engine">Google Search"#,
+        tile("sm", google)
+    )));
+
+    // The intent form shows the same tiles.
+    let intent = app
+        .get(&format!("/s/{}/ai-access/intent", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(intent.contains(&tile("sm", openai)), "{intent}");
+    assert!(intent.contains(r#"<b>CC</b>"#), "{intent}");
 }

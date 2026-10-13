@@ -1199,6 +1199,33 @@ body.solo { overflow: auto; }
 .aia-token { font: 500 12.5px var(--mono); color: var(--ink); }
 .aia-bot-cell .tag { margin-left: 6px; vertical-align: 1px; }
 .aia-sub { display: block; font-size: 12px; color: var(--faint-2); margin-top: 1px; }
+/* Operator tiles beside each bot (partials/operator_logo.html): the logo in brand colours on a
+   white tile, as in the site audit, or the operator's initials. */
+.aia-op { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
+.aia-op-text { min-width: 0; }
+.op-logo { flex: none; display: inline-grid; place-items: center; background: #ffffff; border: 1px solid var(--line); }
+.op-logo img { display: block; }
+.op-logo b { font: 600 9px var(--mono); color: #111613; letter-spacing: 0.02em; }
+.op-logo-sm { width: 24px; height: 24px; border-radius: 7px; margin-top: 1px; }
+.op-logo-xs { width: 16px; height: 16px; border-radius: 4px; margin-right: 5px; vertical-align: -3px; }
+.op-logo-xs img { width: 11px; height: 11px; }
+.op-logo-xs b { font-size: 6.5px; letter-spacing: 0; }
+/* Rows fade in one after another on load, and a state an htmx swap changed (app.js adds
+   `is-changed`: a recheck queued or done, a probe result in) pulses once; a page that replaced
+   itself (`aia-settled`) doesn't fade its rows in again. Opacity, transform and box-shadow only,
+   so nothing shifts; none of it under reduced motion. */
+@keyframes aia-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 65%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+@keyframes aia-swap { 0% { opacity: 0.25; transform: scale(0.94); } 100% { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not(.aia-settled) .aia-row { animation: rise 0.32s var(--ease) both; animation-delay: calc(min(var(--i, 0), 14) * 22ms); }
+  .aia-status.is-changed .badge, .aia-status.is-changed > span { display: inline-block; animation: aia-swap 0.45s var(--ease) both, aia-pulse 0.9s var(--ease) 0.1s; }
+  .aia-issue.is-changed { animation: aia-pulse 0.9s var(--ease); }
+  .aia-issue.is-changed .aia-progress { animation: fade-in 0.4s var(--ease) both; }
+  .aia-progress.is-pending:not(.is-recovered) .icon { animation: spin 1.6s linear infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aia-row, .aia-status.is-changed .badge, .aia-status.is-changed > span, .aia-issue.is-changed, .aia-issue.is-changed .aia-progress, .aia-progress .icon { animation: none; }
+}
 .aia-bots-table td:nth-child(3), .aia-bots-table td:nth-child(5) { white-space: nowrap; }
 .aia-inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .aia-chips { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; }

@@ -1,5 +1,8 @@
-{#- One open incident on the AI access screen. Expects `i: IncidentView` and `base`. -#}
-<article class="card aia-issue is-{{ i.severity }}{% if i.accepted || i.snoozed %} is-muted{% endif %}" id="issue-{{ i.id }}" aria-labelledby="issue-{{ i.id }}-title">
+{#- One open incident on the AI access screen. Expects `i: IncidentView` and `base`. Its
+    data-state changes when a recheck is queued, runs or finishes; app.js pulses the card when
+    an htmx swap changes it. -#}
+{%- import "partials/operator_logo.html" as op -%}
+<article class="card aia-issue is-{{ i.severity }}{% if i.accepted || i.snoozed %} is-muted{% endif %}" id="issue-{{ i.id }}" aria-labelledby="issue-{{ i.id }}-title" data-state-key="issue-{{ i.id }}" data-state="{% if let Some(p) = i.progress %}{{ p.text }}{% endif %}|{% if let Some(l) = i.last_recheck %}{{ l }}{% endif %}">
   <div class="aia-issue-head">
     <span class="aia-issue-badges"><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span>{% if i.synthetic %}<span class="badge aia-synthetic">Synthetic</span>{% endif %}</span>
     <h3 class="aia-issue-title" id="issue-{{ i.id }}-title">{{ i.title }}</h3>
@@ -8,7 +11,7 @@
   <p class="aia-summary">{% for s in i.summary %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</p>
 
   {% if let Some(p) = i.progress %}
-  <div class="aia-progress{% if p.recovered %} is-recovered{% endif %}" role="status">
+  <div class="aia-progress{% if p.recovered %} is-recovered{% endif %}{% if p.pending %} is-pending{% endif %}" role="status"{% if p.pending %} data-recheck-pending{% endif %}>
     <svg class="icon"><use href="#{% if p.recovered %}i-check{% else %}i-refresh{% endif %}"/></svg>
     <div>
       <b>{{ p.text }}</b>
@@ -29,7 +32,7 @@
     {% for g in i.bots %}
     <div class="aia-ev">
       <div class="aia-ev-line">
-        {% for b in g.bots %}<span class="aia-bot">{{ b.token }}<span> · {{ b.operator }}</span>{% if b.control %}<span class="aia-bot-tag" title="Never fetches pages: a robots.txt token that controls how content is used">control token</span>{% endif %}</span>{% endfor %}
+        {% for b in g.bots %}<span class="aia-bot">{% call op::tile(b.operator, "xs") %}{% endcall %}{{ b.token }}<span> · {{ b.operator }}</span>{% if b.control %}<span class="aia-bot-tag" title="Never fetches pages: a robots.txt token that controls how content is used">control token</span>{% endif %}</span>{% endfor %}
         <span class="aia-ev-detail">{{ g.detail }}</span>
       </div>
       {% if let Some(rule) = g.rule %}<div class="aia-rule">{{ rule }}</div>{% endif %}
