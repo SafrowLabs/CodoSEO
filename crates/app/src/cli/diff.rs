@@ -25,7 +25,7 @@ pub struct DiffArgs {
     fail_on: Option<FailOn>,
 }
 
-fn load(path: &Path) -> Result<Audit, CliError> {
+pub(super) fn load(path: &Path) -> Result<Audit, CliError> {
     let bytes = std::fs::read(path)
         .map_err(|e| CliError::msg(format!("cannot read {}: {e}", path.display())))?;
     Audit::from_json(&bytes).map_err(|e| CliError::msg(format!("{}: {e}", path.display())))

@@ -51,6 +51,8 @@ assert_cmd = "2.2.0"
 predicates = "3.1.0"
 tempfile = "3.27.0"
 insta = { version = "1.49.0", features = ["yaml"] }
+# Validates the SARIF the CLI writes (and the MCP registry server.json) against their published schemas, in tests.
+jsonschema = { version = "0.58.6", default-features = false }
 rmcp = { version = "3.5.0", features = ["transport-io"] }
 schemars = "1.1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
