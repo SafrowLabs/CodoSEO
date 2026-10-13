@@ -38,9 +38,10 @@ async fn migrate_creates_every_table() {
             .expect("count tables")
             .get(0);
     // 14 data tables from 0001, instance_settings from 0002, billing_events from 0008,
-    // api_usage from 0010, ai_reports and ai_incidents from 0011, ai_rechecks from 0014, and sqlx's own
+    // api_usage from 0010, ai_reports and ai_incidents from 0011, ai_rechecks from 0014,
+    // deploy_hooks from 0016, and sqlx's own
     // _sqlx_migrations bookkeeping table.
-    assert_eq!(count, 21);
+    assert_eq!(count, 22);
 
     // 0012: the per-site switch for synthetic agent fetch probes, on unless switched off.
     let (nullable, default): (String, Option<String>) = sqlx::query_as(
