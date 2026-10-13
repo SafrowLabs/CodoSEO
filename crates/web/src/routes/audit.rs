@@ -75,6 +75,8 @@ pub struct AuditBody {
     pub live: Option<AuditLive>,
     /// Why the latest crawl failed, when nothing has finished yet.
     pub failure: Option<String>,
+    /// The public demo: sample data and no actions (no Run crawl, export or links into a site).
+    pub demo: bool,
 }
 
 impl AuditBody {
@@ -399,6 +401,7 @@ async fn load_body(
         done: None,
         live: None,
         failure: None,
+        demo: false,
     };
     match latest {
         Some(crawl) => {
@@ -423,12 +426,14 @@ async fn load_body(
 }
 
 /// What the AI & GEO parts of the screen read, loaded once.
-struct GeoData {
+pub(crate) struct GeoData {
     checks: Option<GeoChecks>,
     block: GeoBlock,
     /// Open incidents asking for attention, and how many fixes are being verified.
     open: Option<(u32, u32, u32)>,
 }
+
+const GEO_EMPTY: &str = "Each crawl checks robots.txt for every known AI bot, what your pages hold in their HTML and which answer engines may quote them. The first report appears with the next crawl.";
 
 async fn geo_data(
     pool: &sqlx::PgPool,
@@ -441,7 +446,7 @@ async fn geo_data(
             checks: None,
             block: GeoBlock {
                 section: None,
-                empty: "Each crawl checks robots.txt for every known AI bot, what your pages hold in their HTML and which answer engines may quote them. The first report appears with the next crawl.",
+                empty: GEO_EMPTY,
                 panel: None,
             },
             open: None,
@@ -450,22 +455,43 @@ async fn geo_data(
     let intent = geo::get_intent(pool, site.id).await?;
     let open = geo::open_incidents(pool, site.id).await?;
     let rechecks = geo::latest_rechecks(pool, site.id).await?;
-    let now = time::OffsetDateTime::now_utc();
-    let counts = ai_incident::panel_counts(&open, &rechecks, now);
+    Ok(geo_view(
+        &base,
+        &latest.report,
+        &intent,
+        &open,
+        &rechecks,
+        probes,
+        time::OffsetDateTime::now_utc(),
+    ))
+}
+
+/// The AI & GEO parts of the screen from an access report and the site's incidents, without the
+/// database (the public demo draws it from a fixture).
+pub(crate) fn geo_view(
+    base: &str,
+    report: &codoseo_geo::report::AccessReport,
+    intent: &codoseo_geo::Intent,
+    open: &[geo::Incident],
+    rechecks: &std::collections::HashMap<i64, geo::Recheck>,
+    probes: ProbeSetting,
+    now: time::OffsetDateTime,
+) -> GeoData {
+    let counts = ai_incident::panel_counts(open, rechecks, now);
     let mut panel = ai_panel_view(&counts);
-    panel.links = audit_ai::incident_links(&base, &open, now);
+    panel.links = audit_ai::incident_links(base, open, now);
     let asking = counts.open.total();
     panel.more = (asking as usize > panel.links.len())
         .then(|| format!("and {} more", asking as usize - panel.links.len()));
-    Ok(GeoData {
-        checks: Some(GeoChecks::of(&latest.report, &intent)),
+    GeoData {
+        checks: Some(GeoChecks::of(report, intent)),
         block: GeoBlock {
-            section: Some(audit_ai::section(&latest.report, &intent, probes)),
+            section: Some(audit_ai::section(report, intent, probes)),
             empty: "",
             panel: Some(panel),
         },
         open: Some((asking, counts.open.critical, counts.verifying)),
-    })
+    }
 }
 
 async fn done_audit(
@@ -475,18 +501,8 @@ async fn done_audit(
     probes_installed: bool,
 ) -> Result<DoneAudit, AppError> {
     let pool = &state.pool;
-    let base = format!("/s/{}", site.id);
-    let stored = crawl.summary();
-    let summary = stored
-        .as_ref()
-        .map(|s| s.report_summary.clone())
-        .unwrap_or_default();
     // Oldest first, ending with `crawl` (both are the latest finished crawl, chosen alike).
     let recent = crawls::recent_done(pool, site.id, TREND_CRAWLS).await?;
-    let previous = recent
-        .iter()
-        .rev()
-        .find(|c| c.id != crawl.id && c.finished_at <= crawl.finished_at);
     let changes = reports::change_kind_counts(pool, crawl.id).await?;
     let times = reports::response_time_buckets(pool, crawl.id).await?;
     let next = sites::next_crawl_at(pool, site.id).await?;
@@ -499,6 +515,52 @@ async fn done_audit(
         },
     )
     .await?;
+    Ok(done_view(DoneInput {
+        base: format!("/s/{}", site.id),
+        crawl,
+        recent: &recent,
+        changes: &changes,
+        times: &times,
+        next,
+        geo,
+    }))
+}
+
+/// What a finished audit is drawn from: the database loads it ([`done_audit`]); the public demo
+/// builds it from a fixture.
+pub(crate) struct DoneInput<'a> {
+    /// `/s/{site}`, which the screen's links hang off.
+    pub base: String,
+    /// The latest finished crawl.
+    pub crawl: &'a Crawl,
+    /// Up to [`TREND_CRAWLS`] finished crawls, oldest first, ending with `crawl`.
+    pub recent: &'a [Crawl],
+    pub changes: &'a ChangeCounts,
+    pub times: &'a ResponseBuckets,
+    /// The next scheduled crawl.
+    pub next: Option<time::OffsetDateTime>,
+    pub geo: GeoData,
+}
+
+pub(crate) fn done_view(input: DoneInput<'_>) -> DoneAudit {
+    let DoneInput {
+        base,
+        crawl,
+        recent,
+        changes,
+        times,
+        next,
+        geo,
+    } = input;
+    let stored = crawl.summary();
+    let summary = stored
+        .as_ref()
+        .map(|s| s.report_summary.clone())
+        .unwrap_or_default();
+    let previous = recent
+        .iter()
+        .rev()
+        .find(|c| c.id != crawl.id && c.finished_at <= crawl.finished_at);
 
     let total = i64::from(crawl.checks_total.unwrap_or(0));
     let passed = i64::from(crawl.checks_passed.unwrap_or(0));
@@ -566,7 +628,7 @@ async fn done_audit(
     let history: Vec<(i64, &StoredSummary)> = summaries.iter().map(|(n, s)| (*n, s)).collect();
     let window = &history[history.len().saturating_sub(SEVERITY_CRAWLS)..];
 
-    Ok(DoneAudit {
+    DoneAudit {
         seo_chip,
         geo_chip,
         stop_chip,
@@ -597,14 +659,14 @@ async fn done_audit(
             n => format!("last {n} crawls"),
         },
         categories: stored.as_ref().map(category_bars).unwrap_or_default(),
-        changes: changes_card(&base, &changes, previous.map(|p| p.number)),
+        changes: changes_card(&base, changes, previous.map(|p| p.number)),
         geo: geo.block,
         codes: segments(&summary),
         pages_label: format!("{} URLs", fmt::thousands(summary.pages)),
         depth: depth_bars(&summary),
-        times: time_bars(&times),
+        times: time_bars(times),
         times_aside: format!("avg {} ms", fmt::thousands(summary.avg_response_ms)),
-    })
+    }
 }
 
 /// `3.1 URL/s`

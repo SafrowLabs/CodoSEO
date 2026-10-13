@@ -1,0 +1,993 @@
+{
+ "_comment": "Sample data for the public /demo page (crates/web/src/routes/demo.rs): a crawl of a local fixture site, its address replaced by www.example.com. Not a real site.",
+ "summary": {
+  "stop_reason": {
+   "kind": "completed"
+  },
+  "report_summary": {
+   "pages": 15,
+   "indexable": 12,
+   "status": {
+    "ok": 12,
+    "redirect": 0,
+    "client_error": 3,
+    "server_error": 0,
+    "failed": 0,
+    "blocked": 0
+   },
+   "depth": [
+    1,
+    9,
+    4,
+    1
+   ],
+   "no_depth": 0,
+   "avg_response_ms": 3
+  },
+  "counts": [
+   [
+    "http_4xx",
+    3
+   ],
+   [
+    "title_too_short",
+    6
+   ],
+   [
+    "title_duplicate",
+    2
+   ],
+   [
+    "description_missing",
+    3
+   ],
+   [
+    "description_too_short",
+    9
+   ],
+   [
+    "h1_missing",
+    2
+   ],
+   [
+    "h1_duplicate",
+    2
+   ],
+   [
+    "thin_content",
+    12
+   ],
+   [
+    "images_missing_alt",
+    1
+   ],
+   [
+    "links_to_broken",
+    3
+   ],
+   [
+    "no_internal_outlinks",
+    1
+   ],
+   [
+    "sitemap_non_200",
+    1
+   ],
+   [
+    "og_missing",
+    12
+   ]
+  ]
+ },
+ "access_report": {
+  "bots": [
+   {
+    "blocked": [
+     {
+      "rule": 0,
+      "url": 0
+     },
+     {
+      "rule": 0,
+      "url": 1
+     },
+     {
+      "rule": 0,
+      "url": 2
+     },
+     {
+      "rule": 0,
+      "url": 3
+     },
+     {
+      "rule": 0,
+      "url": 4
+     },
+     {
+      "rule": 0,
+      "url": 5
+     },
+     {
+      "rule": 0,
+      "url": 6
+     },
+     {
+      "rule": 0,
+      "url": 7
+     },
+     {
+      "rule": 0,
+      "url": 8
+     },
+     {
+      "rule": 0,
+      "url": 9
+     },
+     {
+      "rule": 0,
+      "url": 10
+     },
+     {
+      "rule": 0,
+      "url": 11
+     },
+     {
+      "rule": 0,
+      "url": 12
+     },
+     {
+      "rule": 0,
+      "url": 13
+     },
+     {
+      "rule": 0,
+      "url": 14
+     }
+    ],
+    "group": "named",
+    "home_allowed": false,
+    "home_rule": {
+     "allow": false,
+     "line": 5,
+     "pattern": "/"
+    },
+    "token": "GPTBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "OAI-SearchBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "ChatGPT-User"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "OAI-AdsBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "ClaudeBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Claude-SearchBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Claude-User"
+   },
+   {
+    "blocked": [
+     {
+      "rule": 1,
+      "url": 0
+     },
+     {
+      "rule": 1,
+      "url": 1
+     },
+     {
+      "rule": 1,
+      "url": 2
+     },
+     {
+      "rule": 1,
+      "url": 3
+     },
+     {
+      "rule": 1,
+      "url": 4
+     },
+     {
+      "rule": 1,
+      "url": 5
+     },
+     {
+      "rule": 1,
+      "url": 6
+     },
+     {
+      "rule": 1,
+      "url": 7
+     },
+     {
+      "rule": 1,
+      "url": 8
+     },
+     {
+      "rule": 1,
+      "url": 9
+     },
+     {
+      "rule": 1,
+      "url": 10
+     },
+     {
+      "rule": 1,
+      "url": 11
+     },
+     {
+      "rule": 1,
+      "url": 12
+     },
+     {
+      "rule": 1,
+      "url": 13
+     },
+     {
+      "rule": 1,
+      "url": 14
+     }
+    ],
+    "group": "named",
+    "home_allowed": false,
+    "home_rule": {
+     "allow": false,
+     "line": 2,
+     "pattern": "/"
+    },
+    "token": "PerplexityBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Perplexity-User"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Googlebot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Google-Extended"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Google-Agent"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Applebot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Applebot-Extended"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "meta-externalagent"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "meta-webindexer"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "meta-externalfetcher"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "meta-externalads"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Amazonbot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Amzn-SearchBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Amzn-User"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "Bingbot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "DuckAssistBot"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "MistralAI-Index"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "MistralAI-User"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "MistralAI-Training"
+   },
+   {
+    "group": "wildcard",
+    "home_allowed": true,
+    "home_rule": {
+     "allow": true,
+     "line": 8,
+     "pattern": "/"
+    },
+    "token": "CCBot"
+   }
+  ],
+  "content": {
+   "pages": [
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 10,
+     "title": true,
+     "url": 0,
+     "verdict": "present",
+     "words": 169
+    },
+    {
+     "canonical": true,
+     "mount": "root",
+     "mount_empty": true,
+     "noscript_js": true,
+     "scripts_external": 2,
+     "signals": [
+      "mount_empty",
+      "noscript_js"
+     ],
+     "title": true,
+     "url": 1,
+     "verdict": "shell"
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 6,
+     "title": true,
+     "url": 2,
+     "verdict": "present",
+     "words": 165
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 8,
+     "title": true,
+     "url": 3,
+     "verdict": "present",
+     "words": 165
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 6,
+     "robots": true,
+     "title": true,
+     "url": 4,
+     "verdict": "present",
+     "words": 165
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 10,
+     "title": true,
+     "url": 5,
+     "verdict": "present",
+     "words": 167
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 6,
+     "title": true,
+     "url": 6,
+     "verdict": "present",
+     "words": 167
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 7,
+     "title": true,
+     "url": 7,
+     "verdict": "present",
+     "words": 166
+    },
+    {
+     "canonical": true,
+     "h1": true,
+     "links_internal": 6,
+     "title": true,
+     "url": 8,
+     "verdict": "present",
+     "words": 163
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 7,
+     "title": true,
+     "url": 9,
+     "verdict": "present",
+     "words": 166
+    },
+    {
+     "canonical": true,
+     "links_internal": 6,
+     "title": true,
+     "url": 12,
+     "verdict": "thin",
+     "words": 8
+    },
+    {
+     "canonical": true,
+     "description": true,
+     "h1": true,
+     "links_internal": 6,
+     "title": true,
+     "url": 14,
+     "verdict": "present",
+     "words": 164
+    }
+   ]
+  },
+  "declared": {
+   "content_signals": [],
+   "content_usage": [],
+   "headers": {
+    "content_signal": [],
+    "content_usage": [],
+    "tdm_policy": null,
+    "tdm_reservation": null
+   },
+   "home_read": true,
+   "tdm_meta": {
+    "policy": null,
+    "reservation": null
+   },
+   "tdmrep": {
+    "entries": [],
+    "error": null,
+    "status": 404
+   }
+  },
+  "engines": [
+   {
+    "engine": "google",
+    "groups": [
+     {
+      "causes": [
+       {
+        "detail": "nosnippet",
+        "directive": "nosnippet",
+        "effect": "excluded",
+        "source": {
+         "meta": {
+          "name": "robots"
+         }
+        }
+       }
+      ],
+      "effect": "excluded",
+      "urls": [
+       4
+      ]
+     }
+    ],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [
+      [
+       "nosnippet",
+       1
+      ]
+     ],
+     "excluded": 1,
+     "limited": 0,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "bing",
+    "groups": [
+     {
+      "causes": [
+       {
+        "detail": "nosnippet",
+        "directive": "nosnippet",
+        "effect": "limited",
+        "source": {
+         "meta": {
+          "name": "robots"
+         }
+        }
+       }
+      ],
+      "effect": "limited",
+      "urls": [
+       4
+      ]
+     }
+    ],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [
+      [
+       "nosnippet",
+       1
+      ]
+     ],
+     "excluded": 0,
+     "limited": 1,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "apple",
+    "groups": [
+     {
+      "causes": [
+       {
+        "detail": "nosnippet",
+        "directive": "nosnippet",
+        "effect": "limited",
+        "source": {
+         "meta": {
+          "name": "robots"
+         }
+        }
+       }
+      ],
+      "effect": "limited",
+      "urls": [
+       4
+      ]
+     }
+    ],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [
+      [
+       "nosnippet",
+       1
+      ]
+     ],
+     "excluded": 0,
+     "limited": 1,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "amazon",
+    "groups": [],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [],
+     "excluded": 0,
+     "limited": 0,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "chat_gpt",
+    "groups": [],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [],
+     "excluded": 0,
+     "limited": 0,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "claude",
+    "groups": [],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [],
+     "excluded": 0,
+     "limited": 0,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "perplexity",
+    "groups": [
+     {
+      "effect": "eligible",
+      "robots_blocked": true,
+      "urls": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       12,
+       14
+      ]
+     }
+    ],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [],
+     "excluded": 0,
+     "limited": 0,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "meta_ai",
+    "groups": [],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [],
+     "excluded": 0,
+     "limited": 0,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "duck_duck_go",
+    "groups": [],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [],
+     "excluded": 0,
+     "limited": 0,
+     "pages": 12
+    }
+   },
+   {
+    "engine": "mistral",
+    "groups": [],
+    "html_pages": 12,
+    "site": {
+     "by_cause": [],
+     "excluded": 0,
+     "limited": 0,
+     "pages": 12
+    }
+   }
+  ],
+  "important": [
+   {
+    "html_ok": true,
+    "reason": "home",
+    "status": 200,
+    "url": "https://www.example.com/"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/app/"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/about.html"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/blog/"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/pricing.html"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/products/"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/blog/glazes.html"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/products/mug.html"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/products/plate.html"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/blog/firing.html"
+   },
+   {
+    "html_ok": false,
+    "reason": "most_linked",
+    "status": 404,
+    "url": "https://www.example.com/blog/missing-post.html"
+   },
+   {
+    "html_ok": false,
+    "reason": "most_linked",
+    "status": 404,
+    "url": "https://www.example.com/old-catalogue.html"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/products/bowl.html"
+   },
+   {
+    "html_ok": false,
+    "reason": "most_linked",
+    "status": 404,
+    "url": "https://www.example.com/products/discontinued.html"
+   },
+   {
+    "html_ok": true,
+    "reason": "most_linked",
+    "status": 200,
+    "url": "https://www.example.com/products/vase.html"
+   }
+  ],
+  "llms_txt": {
+   "adopted": true,
+   "checks": [
+    {
+     "detail": "Starts with the H1 \"Example Ceramics\".",
+     "id": "h1",
+     "ok": true
+    },
+    {
+     "detail": "A `>` summary follows the H1.",
+     "id": "summary",
+     "ok": true
+    },
+    {
+     "detail": "1 H2 section lists links as `- [name](url)` items.",
+     "id": "sections",
+     "ok": true
+    },
+    {
+     "detail": "2 Markdown links.",
+     "id": "links",
+     "ok": true
+    },
+    {
+     "detail": "220 characters.",
+     "id": "length",
+     "ok": true
+    },
+    {
+     "detail": "1 KiB.",
+     "id": "size",
+     "ok": true
+    },
+    {
+     "detail": "Served as text/plain.",
+     "id": "mime",
+     "ok": true
+    },
+    {
+     "detail": "All 2 checked links answer.",
+     "id": "links_resolve",
+     "ok": true
+    }
+   ],
+   "link_summary": {
+    "checked": 2,
+    "failing": 0,
+    "not_checked": 0
+   },
+   "optional_section": false,
+   "state": "available",
+   "status": 200,
+   "title": "Example Ceramics"
+  },
+  "registry_version": 2,
+  "robots": {
+   "availability": "ok",
+   "status": 200
+  },
+  "rules": [
+   {
+    "allow": false,
+    "line": 5,
+    "pattern": "/"
+   },
+   {
+    "allow": false,
+    "line": 2,
+    "pattern": "/"
+   }
+  ],
+  "version": 1
+ }
+}

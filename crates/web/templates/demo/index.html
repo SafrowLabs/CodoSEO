@@ -1,0 +1,51 @@
+{% extends "solo_base.html" %}
+{#- The public demo at /demo: the site audit of a sample site from a fixture, read-only. -#}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/seo.html" as seo -%}
+{% block title %}Live demo: a sample site audit — CodoSEO{% endblock %}
+{% block robots %}<meta name="robots" content="index, follow">
+<meta name="description" content="A CodoSEO site audit of a sample site: health score, top fixes, AI bot access, AI answer eligibility and the fix for each AI access issue. Sample data, no sign-up.">
+{% call seo::social(base, "/demo", "CodoSEO demo: a sample site audit", "Health score, top fixes and AI search access for a sample site, with the fix for each issue.") %}{% endcall %}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% include "partials/analytics.html" %}
+{% endblock %}
+{% block body %}
+<header class="l-top l-wrap">
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
+  <nav class="l-nav"><a class="btn btn-sm" href="/">Audit your own site</a></nav>
+</header>
+<main class="l-wrap demo">
+  <div class="demo-banner" role="note">
+    <span class="badge t-warn">Sample data</span>
+    <span><b>www.example.com</b> is a sample site. These results come from a fixed crawl of a test site, not from a live crawl, and nothing on this page can be changed. Audit your own site from the <a href="/">home page</a>.</span>
+  </div>
+  <div class="panel demo-panel">
+{{ body|safe }}
+  </div>
+  <section class="card card-pad demo-fixes" id="ai-fixes" aria-labelledby="demo-fixes-h">
+    <h2 id="demo-fixes-h">AI access issues and their fixes</h2>
+    <p class="muted">What the AI access screen gives for each issue: why it matters, the change to make, and how to check it took. Not part of the health score.</p>
+    {% for f in fixes %}
+    <article class="demo-fix" id="{{ f.anchor }}">
+      <div class="demo-fix-head">
+        <span class="badge sev-{{ f.severity() }}">{{ f.severity() }}</span>
+        <h3>{{ f.finding.title }}</h3>
+        <span class="mono muted">evidence grade {{ f.finding.grade.label() }}</span>
+      </div>
+      <p>{{ f.finding.summary }}</p>
+      <h4>The change</h4>
+      <pre class="mono">{{ f.remedy.fix }}</pre>
+      {% if !f.remedy.verify.is_empty() %}
+      <h4>Check it took</h4>
+      <ul>{% for v in f.remedy.verify %}<li>{{ v }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if !f.remedy.sources.is_empty() %}
+      <p class="muted demo-sources">Sources: {% for s in f.remedy.sources %}<a href="{{ s }}" rel="nofollow noopener">{{ s }}</a>{% if !loop.last %} · {% endif %}{% endfor %}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+</main>
+{% include "partials/legal_foot.html" %}
+{% endblock %}
