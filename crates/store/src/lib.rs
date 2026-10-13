@@ -27,3 +27,4 @@ pub mod retention;
 pub mod schedule;
 pub mod search;
 pub mod sites;
+pub mod stats;

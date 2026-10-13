@@ -126,6 +126,11 @@ mark { background: linear-gradient(transparent 64%, var(--mark) 64%); color: var
 .btn.dis, .btn.dis:hover { cursor: default; background: transparent; color: var(--ink-3); border: 1px dashed var(--line-strong); box-shadow: none; transform: none; }
 .notes { display: flex; gap: 10px 20px; flex-wrap: wrap; margin-top: 14px; font-size: 13.5px; color: var(--ink-3); }
 .notes a { color: var(--link); } .notes a:hover { text-decoration: underline; }
+/* the public "pages crawled" counter under the audit box, refreshed by home.js */
+.crawled-count { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13.5px; color: var(--ink-3); }
+.crawled-count b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-ok); flex: none; animation: live-pulse 2s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* the hero mascot peeks over the sample-crawl panel */
 .stage { position: relative; padding-top: 92px; min-width: 0; }

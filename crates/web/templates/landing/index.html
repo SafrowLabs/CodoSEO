@@ -84,6 +84,7 @@
       </form>
       {% if let Some(err) = error %}<p class="err" role="alert">{{ err }}</p>{% endif %}
       <div class="notes" id="audit-hint"><span>Free · first {{ quick_pages }} pages · no signup</span><span>Prefer the terminal? <a href="#install-options">Install the CLI</a></span></div>
+      {% if let Some(n) = pages_crawled %}<p class="crawled-count"><i class="live-dot" aria-hidden="true"></i><b id="pages-crawled" class="mono" data-poll="/stats/pages-crawled">{{ n }}</b> pages crawled so far, free audits included</p>{% endif %}
     </div>
 
     <div class="stage">

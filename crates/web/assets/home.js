@@ -1,5 +1,6 @@
 // The cloud landing page (templates/landing/index.html): theme toggle, the mascot eyes, scroll
-// reveal and the sample crawl. The theme is applied before paint by an inline script in <head>.
+// reveal, the live pages-crawled counter and the sample crawl. The theme is applied before paint
+// by an inline script in <head>.
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var doc = document.documentElement;
@@ -154,6 +155,18 @@
       box.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' });
       box.focus({ preventScroll: true });
     });
+  }
+
+  /* ---------- live "pages crawled" counter: the stored total, re-read every 20 s while visible ---------- */
+  var counter = $('pages-crawled');
+  if (counter && window.fetch) {
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch(counter.getAttribute('data-poll'), { headers: { Accept: 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d && d.label) counter.textContent = d.label; })
+        .catch(function () {});
+    }, 20000);
   }
 
   /* ---------- sample crawl feed ---------- */

@@ -39,9 +39,9 @@ async fn migrate_creates_every_table() {
             .get(0);
     // 14 data tables from 0001, instance_settings from 0002, billing_events from 0008,
     // api_usage from 0010, ai_reports and ai_incidents from 0011, ai_rechecks from 0014,
-    // deploy_hooks from 0016, and sqlx's own
+    // deploy_hooks from 0016, crawl_stats and crawled_websites from 0017, and sqlx's own
     // _sqlx_migrations bookkeeping table.
-    assert_eq!(count, 22);
+    assert_eq!(count, 24);
 
     // 0012: the per-site switch for synthetic agent fetch probes, on unless switched off.
     let (nullable, default): (String, Option<String>) = sqlx::query_as(
@@ -260,6 +260,85 @@ async fn the_plan_rename_maps_old_pro_to_lite_and_agency_to_pro() {
         5,
         "Lite keeps the old Pro's 5 sites"
     );
+    pool.close().await;
+
+    admin
+        .execute(format!(r#"DROP DATABASE "{name}" WITH (FORCE)"#).as_str())
+        .await
+        .expect("drop test database");
+}
+
+/// 0017 starts the crawl totals from the finished crawls still in the database: their stored page
+/// counts, and each domain once. Queued and failed crawls count for nothing.
+#[tokio::test]
+async fn the_crawl_totals_start_from_the_finished_crawls() {
+    let name = format!("codoseo_cli_test_{}", uuid::Uuid::new_v4().simple());
+    let mut admin = PgConnection::connect(&admin_url())
+        .await
+        .expect("connect to admin database");
+    admin
+        .execute(format!(r#"CREATE DATABASE "{name}""#).as_str())
+        .await
+        .expect("create test database");
+    let mut db_url = url::Url::parse(&admin_url()).expect("valid admin url");
+    db_url.set_path(&format!("/{name}"));
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(db_url.as_str())
+        .await
+        .expect("connect to test database");
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../store/migrations");
+    let all = sqlx::migrate::Migrator::new(dir.clone())
+        .await
+        .expect("read migrations");
+    let mut before = sqlx::migrate::Migrator::new(dir)
+        .await
+        .expect("read migrations");
+    before.migrations = before
+        .migrations
+        .iter()
+        .filter(|m| m.version < 17)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into();
+    before.run(&pool).await.expect("migrate to 0016");
+
+    // Two finished crawls of one domain, one of another, a failed and a queued crawl.
+    for (domain, status, pages) in [
+        ("a.test", "done", Some(120)),
+        ("a.test", "done", Some(80)),
+        ("b.test", "done", Some(7)),
+        ("c.test", "failed", None),
+        ("d.test", "queued", None),
+    ] {
+        let site: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO sites (domain, start_url) VALUES ($1, 'https://' || $1 || '/') RETURNING id",
+        )
+        .bind(domain)
+        .fetch_one(&pool)
+        .await
+        .expect("insert site");
+        sqlx::query(
+            "INSERT INTO crawls (site_id, domain, trigger, priority, status, summary) \
+             VALUES ($1, $2, 'quick', 0, $3::crawl_status, $4)",
+        )
+        .bind(site)
+        .bind(domain)
+        .bind(status)
+        .bind(pages.map(|p: i64| serde_json::json!({"report_summary": {"pages": p}})))
+        .execute(&pool)
+        .await
+        .expect("insert crawl");
+    }
+    all.run(&pool).await.expect("migrate to the newest");
+
+    let totals: (i64, i64, i64) =
+        sqlx::query_as("SELECT pages_crawled, crawls, websites FROM crawl_stats")
+            .fetch_one(&pool)
+            .await
+            .expect("read totals");
+    assert_eq!(totals, (207, 3, 2));
     pool.close().await;
 
     admin

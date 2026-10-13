@@ -9,6 +9,11 @@
       <div class="card-pad"><b class="mono" data-queue-depth="{{ queue_depth }}">{{ queue_depth }}</b> <span class="muted">audit{% if queue_depth != 1 %}s{% endif %} waiting for a crawler</span></div>
     </div>
 
+    <div class="card">
+      <div class="card-head"><span class="card-title">Crawled so far</span><span class="card-aside">finished crawls, free audits included · only the pages are public</span></div>
+      <div class="card-pad" style="display:flex;flex-wrap:wrap;gap:8px 28px">{% for (label, value) in totals %}<span><b class="mono" data-total="{{ label }}">{{ value }}</b> <span class="muted">{{ label }}</span></span>{% endfor %}</div>
+    </div>
+
     <div class="card-grid">
       {% for t in tables %}
       <div class="card">

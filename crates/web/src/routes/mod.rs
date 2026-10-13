@@ -60,6 +60,7 @@ pub fn router() -> Router<AppState> {
         .merge(legal::routes())
         .merge(demo::routes())
         .route("/bot", get(bot::page))
+        .route("/stats/pages-crawled", get(landing::pages_crawled))
         .route("/robots.txt", get(seo::robots))
         .route("/llms.txt", get(seo::llms))
         .route("/sitemap.xml", get(seo::sitemap))
@@ -73,7 +74,7 @@ async fn home(
 ) -> Result<Response, AppError> {
     let Some(user) = user else {
         return if state.config.mode == Mode::Cloud {
-            landing::page(&state)
+            landing::page(&state).await
         } else {
             Ok(Redirect::to("/login?next=%2F").into_response())
         };
