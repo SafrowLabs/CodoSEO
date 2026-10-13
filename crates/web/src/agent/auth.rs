@@ -33,6 +33,12 @@ pub fn bearer_key(headers: &HeaderMap) -> Result<Option<&str>, AgentError> {
     };
     let bad = || AgentError::Unauthorized(BAD_KEY.to_owned());
     let value = value.to_str().map_err(|_| bad())?;
+    // `Bearer` with nothing after it is no key at all: what an MCP client config sends when it
+    // fills the header from an empty variable (`Bearer ${CODOSEO_API_KEY:-}`). The anonymous
+    // tools answer it; anything that is there but isn't a key is still refused below.
+    if value.trim().eq_ignore_ascii_case("bearer") {
+        return Ok(None);
+    }
     let (scheme, key) = value.split_once(' ').ok_or_else(bad)?;
     if !scheme.eq_ignore_ascii_case("bearer") {
         return Err(AgentError::Unauthorized(

@@ -1,6 +1,6 @@
 # MCP
 
-CodoSEO speaks the [Model Context Protocol](https://modelcontextprotocol.io) in two ways: a **local** server you run on your machine over stdio, and a **hosted** server at `https://codoseo.com/mcp` (any self-hosted web app serves the same endpoint at `<BASE_URL>/mcp`).
+CodoSEO speaks the [Model Context Protocol](https://modelcontextprotocol.io) in two ways: a **local** server you run on your machine over stdio, and a **hosted** server at `https://codoseo.com/mcp` (any self-hosted web app serves the same endpoint at `<BASE_URL>/mcp`). The Claude Code plugin, the `codoseo-audit` Agent Skill, the MCP Registry entry and configs for Codex and Cursor are in [agents.md](agents.md).
 
 ## Local server (stdio)
 
@@ -98,7 +98,7 @@ Or in a JSON config that supports HTTP servers:
 }
 ```
 
-A malformed, unknown or revoked key is a `401`, never a silent fall-back to the no-key tools. The keyed tools:
+A malformed, unknown or revoked key is a `401`, never a silent fall-back to the no-key tools. A header with `Bearer` and nothing after it (a config that fills it from an empty variable) counts as no key. The keyed tools:
 
 | Tool | Arguments | What it does |
 |---|---|---|

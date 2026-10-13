@@ -180,6 +180,39 @@ async fn self_hosted_without_a_key_is_a_401_and_the_cloud_app_router_serves_the_
     assert!(res.body.contains("quick_audit"));
 }
 
+/// A client config that fills the header from an unset variable (`Bearer ${CODOSEO_API_KEY:-}`,
+/// as the Claude Code plugin docs suggest) sends `Bearer` and no key: that is no key, so the free
+/// tools answer. A header that holds something other than a key is still a 401.
+#[tokio::test]
+async fn an_empty_bearer_is_no_key_and_anything_else_is_still_refused() {
+    let cloud = cloud().await;
+    let call = |auth: &'static str| {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header(header::HOST, HOST)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header("mcp-protocol-version", PROTOCOL)
+            .header(header::AUTHORIZATION, auth)
+            .body(Body::from(jsonrpc("tools/list", json!({})).to_string()))
+            .unwrap()
+    };
+    for empty in ["Bearer", "Bearer ", "bearer  "] {
+        let res = cloud.send(call(empty)).await;
+        assert_eq!(res.status, StatusCode::OK, "{empty:?}: {}", res.body);
+        assert!(res.body.contains("quick_audit"), "{empty:?}");
+    }
+    for bad in [
+        "Bearer x",
+        "Bearer ${CODOSEO_API_KEY}",
+        "Basic dXNlcjpwYXNz",
+    ] {
+        let res = cloud.send(call(bad)).await;
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED, "{bad:?}");
+    }
+}
+
 // ---- quick_audit, get_audit ----
 
 #[tokio::test]
