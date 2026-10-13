@@ -471,6 +471,9 @@ pub struct Progress {
     pub lag_source: Option<SourceLink>,
     /// A recovery is being verified or awaited (the honest line is stressed).
     pub recovered: bool,
+    /// A recheck is queued or running: its result is a minute or two away, so the page asks
+    /// for itself again until it lands (app.js).
+    pub pending: bool,
 }
 
 /// The "Fetch check" section: what the synthetic probes with each AI bot's user agent got.
@@ -575,6 +578,8 @@ pub struct CauseChip {
 pub struct EngineRow {
     pub name: &'static str,
     pub crawler: &'static str,
+    /// Who runs the crawler, from the registry, for the logo; the engine's name when unlisted.
+    pub operator: &'static str,
     /// `intent: Allow`
     pub stance: &'static str,
     pub page_controls: bool,
@@ -1531,6 +1536,7 @@ fn progress(i: &Incident, ev: &Evidence, latest: Option<&Recheck>) -> Option<Pro
                     href: href.to_owned(),
                 }),
                 recovered: true,
+                pending: false,
             }
         }
         Phase::Rechecking {
@@ -1543,6 +1549,7 @@ fn progress(i: &Incident, ev: &Evidence, latest: Option<&Recheck>) -> Option<Pro
             ),
             lag_source: None,
             recovered: true,
+            pending: true,
         },
         Phase::Rechecking { running, .. } => Progress {
             text: if running {
@@ -1552,11 +1559,13 @@ fn progress(i: &Incident, ev: &Evidence, latest: Option<&Recheck>) -> Option<Pro
             },
             lag_source: None,
             recovered: false,
+            pending: true,
         },
         Phase::Waiting => Progress {
             text: "Waiting for the next crawl · the fix was seen, but its follow-up couldn't confirm it".to_owned(),
             lag_source: None,
             recovered: true,
+            pending: false,
         },
     })
 }
@@ -2033,6 +2042,11 @@ fn engine_rows(report: &AccessReport, intent: &Intent) -> Vec<EngineRow> {
             EngineRow {
                 name: e.name,
                 crawler: e.crawler,
+                operator: registry()
+                    .bots
+                    .iter()
+                    .find(|b| b.token == e.crawler)
+                    .map_or(e.name, |b| b.operator.as_str()),
                 stance: stance_label(stance),
                 page_controls: e.page_controls,
                 reach,

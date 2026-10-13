@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {%- import "partials/mascot.html" as m -%}
+{%- import "partials/operator_logo.html" as op -%}
 {% block main %}
 <div class="page aia">
 {% if let Some(e) = empty %}
@@ -93,10 +94,10 @@
         </thead>
         <tbody>
           {% for r in v.fetch.rows %}
-          <tr>
-            <th scope="row" class="aia-bot-cell"><span class="aia-token">{{ r.token }}</span><span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></th>
+          <tr class="aia-row" style="--i:{{ loop.index0 }}">
+            <th scope="row" class="aia-bot-cell"><span class="aia-op">{% call op::tile(r.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-token">{{ r.token }}</span><span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></span></span></th>
             <td data-label="Intent"><span class="badge {{ r.stance_class }}">{{ r.stance }}</span></td>
-            <td class="aia-status">{% if r.result_class.is_empty() %}<span class="c-muted"{% if !r.result_tip.is_empty() %} title="{{ r.result_tip }}"{% endif %}>{{ r.result }}</span>{% else %}<span class="badge {{ r.result_class }}" title="{{ r.result_tip }}">{{ r.result }}</span>{% endif %}</td>
+            <td class="aia-status" data-state-key="probe-{{ r.token }}" data-state="{{ r.result }}">{% if r.result_class.is_empty() %}<span class="c-muted"{% if !r.result_tip.is_empty() %} title="{{ r.result_tip }}"{% endif %}>{{ r.result }}</span>{% else %}<span class="badge {{ r.result_class }}" title="{{ r.result_tip }}">{{ r.result }}</span>{% endif %}</td>
             <td data-label="Affected" class="r num"><span class="{{ r.pages_class }}">{{ r.pages }}</span></td>
             <td data-label="Detail" class="aia-wide aia-probe-detail"><span class="aia-lines"><span>{{ r.detail }}</span>{% if let Some(t) = r.title %}<span class="aia-probe-title">“{{ t }}”</span>{% endif %}{% if let Some(x) = r.extra %}<span class="mono aia-probe-extra">{{ x }}</span>{% endif %}</span></td>
           </tr>
@@ -203,13 +204,13 @@
         <tbody{% if g.conflicts.is_empty() %} class="is-clear"{% endif %}>
           <tr class="aia-group"><th colspan="6" scope="colgroup"><span class="aia-group-name">{{ g.label }}</span><span class="aia-group-meta">intent <span class="badge {{ g.stance_class }}">{{ g.stance }}</span><span class="aia-dot">·</span>{{ g.count }}{% if g.conflicts.is_empty() %}<span class="aia-group-none"><span class="aia-dot">·</span>no conflicts</span>{% else %}<span class="aia-dot">·</span><span class="aia-group-flag">{{ g.conflicts }}</span>{% endif %}</span></th></tr>
           {% for r in g.rows %}
-          <tr class="{% if r.attention %}is-attn{% if r.last_attention %} is-attn-last{% endif %}{% else %}is-ok{% endif %}">
-            <th scope="row" class="aia-bot-cell"><span class="aia-token">{{ r.token }}</span>{% if r.control %}<span class="tag" title="{{ r.notes }}">control token</span>{% endif %}<span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></th>
+          <tr class="aia-row {% if r.attention %}is-attn{% if r.last_attention %} is-attn-last{% endif %}{% else %}is-ok{% endif %}" style="--i:{{ loop.index0 }}">
+            <th scope="row" class="aia-bot-cell"><span class="aia-op">{% call op::tile(r.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-token">{{ r.token }}</span>{% if r.control %}<span class="tag" title="{{ r.notes }}">control token</span>{% endif %}<span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></span></span></th>
             <td data-label="Intent"><span class="aia-inline"><span class="badge {{ r.stance_class }}">{{ r.stance }}</span>{% if r.overridden %}<span class="tag" title="Set for this bot, not by its purpose">override</span>{% endif %}</span></td>
             <td data-label="Home"><span class="{{ r.home_class }}"{% if !r.home_tip.is_empty() %} title="{{ r.home_tip }}"{% endif %}>{{ r.home }}</span></td>
             <td data-label="Blocked" class="r num"><span class="{{ r.blocked_class }}">{{ r.blocked }}</span></td>
             <td data-label="Follows robots.txt"><span class="{{ r.honours_class }}">{{ r.honours }}</span></td>
-            <td class="aia-status">{% if r.status == "—" %}<span class="c-ghost" title="{{ r.status_tip }}">—</span>{% else %}<span class="badge {{ r.status_class }}" title="{{ r.status_tip }}">{{ r.status }}</span>{% endif %}</td>
+            <td class="aia-status" data-state-key="bot-{{ r.token }}" data-state="{{ r.status }}">{% if r.status == "—" %}<span class="c-ghost" title="{{ r.status_tip }}">—</span>{% else %}<span class="badge {{ r.status_class }}" title="{{ r.status_tip }}">{{ r.status }}</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -229,8 +230,8 @@
         </thead>
         <tbody>
           {% for e in v.engines %}
-          <tr>
-            <th scope="row" class="aia-bot-cell"><span class="aia-engine">{{ e.name }}</span><span class="aia-sub"><span class="mono">{{ e.crawler }}</span> · intent {{ e.stance }}</span></th>
+          <tr class="aia-row" style="--i:{{ loop.index0 }}">
+            <th scope="row" class="aia-bot-cell"><span class="aia-op">{% call op::tile(e.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-engine">{{ e.name }}</span><span class="aia-sub"><span class="mono">{{ e.crawler }}</span> · intent {{ e.stance }}</span></span></span></th>
             <td data-label="Reach"><span class="{{ e.reach_class }}">{{ e.reach }}</span></td>
             {% if e.page_controls %}
             <td data-label="Eligible" class="r num"><span class="{{ e.eligible_class }}">{{ e.eligible }}</span></td>

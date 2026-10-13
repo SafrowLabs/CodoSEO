@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{%- import "partials/operator_logo.html" as op -%}
 {% block main %}
 <div class="page aia-intent">
   <div class="page-head">
@@ -25,8 +26,8 @@
           <summary><svg class="icon chev"><use href="#i-chev"/></svg>Per-bot overrides <span class="faint">({{ c.overrides }} set)</span><span class="grow"></span><span class="faint aia-default">{{ c.default_label }}</span></summary>
           <div class="aia-picks">
             {% for b in c.bots %}
-            <div class="aia-pick{% if b.overridden %} is-set{% endif %}">
-              <label for="{{ b.id }}"><span class="aia-token">{{ b.token }}</span>{% if b.control %}<span class="tag">control token</span>{% endif %}{% if b.overridden %}<span class="tag is-set">override</span>{% endif %}<span class="aia-sub">{{ b.operator }} · {{ b.product }}</span></label>
+            <div class="aia-pick aia-row{% if b.overridden %} is-set{% endif %}" style="--i:{{ loop.index0 }}">
+              <label for="{{ b.id }}" class="aia-op">{% call op::tile(b.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-token">{{ b.token }}</span>{% if b.control %}<span class="tag">control token</span>{% endif %}{% if b.overridden %}<span class="tag is-set">override</span>{% endif %}<span class="aia-sub">{{ b.operator }} · {{ b.product }}</span></span></label>
               <select class="select" id="{{ b.id }}" name="{{ b.name }}">{% for o in b.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
             </div>
             {% endfor %}

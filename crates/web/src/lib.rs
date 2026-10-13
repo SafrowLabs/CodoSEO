@@ -16,6 +16,7 @@ pub mod health;
 pub mod layout;
 pub mod live;
 pub mod metrics;
+pub mod operator_logo;
 pub mod rankorg;
 pub mod render;
 pub mod routes;

@@ -22,6 +22,7 @@ use codoseo_store::geo::Incident;
 use time::OffsetDateTime;
 
 use crate::ai_incident::asks_attention;
+use crate::operator_logo::{logo, monogram};
 use crate::routes::ai_access::{bot_row, skip_label, stance_label};
 
 /// The AI & GEO checks: one per kind of finding.
@@ -477,38 +478,6 @@ fn fetch_cell(
     }
 }
 
-fn logo(operator: &str) -> Option<&'static str> {
-    let name = match operator {
-        "OpenAI" => "logo-openai.svg",
-        "Anthropic" => "logo-anthropic.svg",
-        "Google" => "logo-google.svg",
-        "Perplexity" => "logo-perplexity.svg",
-        "Microsoft" => "logo-microsoft.svg",
-        "Apple" => "logo-apple.svg",
-        "Meta" => "logo-meta.svg",
-        "Amazon" => "logo-amazon.svg",
-        "DuckDuckGo" => "logo-duckduckgo.svg",
-        "Mistral" => "logo-mistral.svg",
-        _ => return None,
-    };
-    Some(crate::assets::url(name))
-}
-
-/// `Common Crawl` -> `CC`, `Acme` -> `AC`.
-fn monogram(operator: &str) -> String {
-    let words: Vec<&str> = operator.split_whitespace().collect();
-    let letters: String = if words.len() > 1 {
-        words
-            .iter()
-            .filter_map(|w| w.chars().next())
-            .take(2)
-            .collect()
-    } else {
-        operator.chars().take(2).collect()
-    };
-    letters.to_uppercase()
-}
-
 fn operator_cards(report: &AccessReport, intent: &Intent) -> Vec<OperatorCard> {
     let mut names: Vec<&str> = OPERATOR_ORDER
         .iter()
@@ -807,11 +776,5 @@ mod tests {
         let blocked = GeoChecks::of(&report(&["OAI-SearchBot"]), &Intent::default());
         assert_eq!(blocked.failing, 1);
         assert_eq!(blocked.passed, 3);
-    }
-
-    #[test]
-    fn monograms_take_initials() {
-        assert_eq!(monogram("Common Crawl"), "CC");
-        assert_eq!(monogram("acme"), "AC");
     }
 }

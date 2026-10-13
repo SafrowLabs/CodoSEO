@@ -143,11 +143,35 @@
       const cur = $("#main");
       if (!next || !cur) return;
       syncChrome(doc);
+      const before = snapshotStates();
       cur.replaceWith(next);
       htmx.process(next);
       countUp(next);
+      markChanged(before);
     } catch {}
   }
+
+  // ── AI access: state changes ─────────────────────────
+  // Its bot rows and issues carry `data-state-key` and `data-state`. When the page is replaced by
+  // itself (a recheck, a finished crawl, the poll below), whatever changed state gets `is-changed`
+  // for one pulse, and `aia-settled` keeps the rows from fading in again (app.css).
+  function snapshotStates() {
+    const els = $$("[data-state-key]");
+    root.classList.toggle("aia-settled", els.length > 0);
+    return els.length ? new Map(els.map((el) => [el.dataset.stateKey, el.dataset.state])) : null;
+  }
+  function markChanged(before) {
+    if (!before) return;
+    $$("[data-state-key]").forEach((el) => {
+      const was = before.get(el.dataset.stateKey);
+      if (was !== undefined && was !== el.dataset.state) el.classList.add("is-changed");
+    });
+  }
+  let states = null;
+  document.addEventListener("htmx:beforeSwap", (e) => { if (!e.detail.isError) states = snapshotStates(); });
+  document.addEventListener("htmx:afterSettle", () => { markChanged(states); states = null; });
+  // A recheck queued or running: look again every 10 seconds until its result is in.
+  setInterval(() => { if (!document.hidden && $("[data-recheck-pending]")) refresh(); }, 10000);
 
   // Programmatic navigation that goes through the same boosted path as a click.
   function go(href) {

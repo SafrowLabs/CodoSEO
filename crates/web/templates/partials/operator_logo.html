@@ -1,0 +1,13 @@
+{#- An AI operator's tile, beside its name: the logo, or its initials when there is none
+    (crate::operator_logo). Decoration only, since the name is always written next to it.
+    Import with {% import "partials/operator_logo.html" as op %}; size is "sm" (table rows) or
+    "xs" (inline bot chips). -#}
+{% macro tile(operator, size) -%}
+<span class="op-logo op-logo-{{ size }}" aria-hidden="true">
+{%- if let Some(src) = crate::operator_logo::logo(operator) -%}
+<img src="{{ src }}" alt="" width="14" height="14" loading="lazy" decoding="async">
+{%- else -%}
+<b>{{ crate::operator_logo::monogram(operator) }}</b>
+{%- endif -%}
+</span>
+{%- endmacro %}
