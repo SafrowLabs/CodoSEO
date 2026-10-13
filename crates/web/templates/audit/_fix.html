@@ -1,0 +1,16 @@
+{#- One Top fixes row. Expects `f: FixRow`. -#}
+{% if let Some(href) = f.href %}
+<a class="au-fix" href="{{ href }}">
+  <span class="badge sev-{{ f.severity }}">{{ f.severity_label }}</span>
+  <span class="au-fix-text"><span class="au-fix-title">{{ f.title }}</span><span class="mono muted">{{ f.pages }} · {{ f.category }}</span></span>
+  <span class="au-gain mono">{{ f.gain }} pts</span>
+  <span class="au-go">View pages<svg class="icon"><use href="#i-arrow"/></svg></span>
+</a>
+{% else %}
+<div class="au-fix">
+  <span class="badge sev-{{ f.severity }}">{{ f.severity_label }}</span>
+  <span class="au-fix-text"><span class="au-fix-title">{{ f.title }} <span class="tag">site-wide</span></span><span class="mono muted">{{ f.pages }} · {{ f.category }}</span></span>
+  <span class="au-gain mono">{{ f.gain }} pts</span>
+  <span></span>
+</div>
+{% endif %}
