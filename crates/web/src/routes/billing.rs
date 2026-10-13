@@ -4,7 +4,7 @@
 
 use askama::Template;
 use axum::body::Bytes;
-use axum::extract::{FromRequestParts, Query, State};
+use axum::extract::{FromRequestParts, RawQuery, State};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -145,17 +145,20 @@ async fn render_page(
     Ok(res)
 }
 
-#[derive(Deserialize)]
-struct PageQuery {
-    status: Option<String>,
+/// Whether the query marks a return from Dodo's checkout. Read pair by pair because Dodo
+/// appends its own `status`, `subscription_id`, `email`... to the return URL, so a typed query
+/// would refuse the duplicate `status` of a URL that carried ours too.
+fn returned_from_checkout(query: Option<&str>) -> bool {
+    url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
+        .any(|(k, v)| (k == "checkout" && v == "done") || (k == "status" && v == "success"))
 }
 
 async fn page(
     State(state): State<AppState>,
     CloudUser(user): CloudUser,
-    Query(q): Query<PageQuery>,
+    RawQuery(query): RawQuery,
 ) -> Result<Response, AppError> {
-    let success = q.status.as_deref() == Some("success");
+    let success = returned_from_checkout(query.as_deref());
     render_page(&state, &user, StatusCode::OK, success, None).await
 }
 
@@ -197,7 +200,7 @@ async fn checkout(
     let return_url = state
         .config
         .base_url
-        .join("billing?status=success")
+        .join("billing?checkout=done")
         .map_err(AppError::internal)?;
     match dodo::create_checkout(
         &state.http,
