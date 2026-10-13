@@ -33,6 +33,8 @@ pub struct Card {
     pub sent: bool,
     pub github: bool,
     pub dev_hint: bool,
+    /// On the cloud: signing in accepts the Terms and Privacy Policy, so the card links them.
+    pub legal: bool,
 }
 
 #[derive(Template)]
@@ -75,6 +77,7 @@ fn card(state: &AppState, email: String, next: String, error: Option<String>, se
         sent,
         github: state.config.github.is_some(),
         dev_hint: state.config.mode == crate::config::Mode::SelfHost,
+        legal: state.config.mode == crate::config::Mode::Cloud,
     }
 }
 

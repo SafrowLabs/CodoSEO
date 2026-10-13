@@ -122,6 +122,8 @@ pub struct Shell {
     pub crawler: Option<CrawlerView>,
     pub version: &'static str,
     pub can_add_site: bool,
+    /// On the cloud, the account menu links the Terms, Privacy Policy and Refund Policy.
+    pub legal: bool,
 }
 
 impl Shell {
@@ -271,6 +273,7 @@ impl Shell {
             crawler,
             version: env!("CARGO_PKG_VERSION"),
             can_add_site,
+            legal: state.config.mode == Mode::Cloud,
         })
     }
 }

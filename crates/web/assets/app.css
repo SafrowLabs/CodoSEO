@@ -403,6 +403,10 @@ kbd {
 .menu .is-active::after { content: ""; margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .menu hr { border: 0; border-top: 1px solid var(--line-soft); margin: 5px 2px; }
 .menu .avatar { width: 20px; height: 20px; font-size: 10.5px; border-radius: 5px; }
+/* The legal links at the foot of the account menu, as one quiet line. */
+.menu .menu-legal { display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 0 8px 4px; font-size: 11px; }
+.menu .menu-legal a { display: inline; width: auto; padding: 0; color: var(--faint-2); }
+.menu .menu-legal a:hover { background: none; color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 
 /* Crawler status card */
 .crawler {
@@ -840,6 +844,10 @@ body.solo { overflow: auto; }
 .sent { text-align: left; }
 .sent .mail { width: 48px; height: 48px; border-radius: 14px; background: var(--accent); display: grid; place-items: center; margin-bottom: 18px; animation: pop-in 0.4s var(--spring); color: #0e1a17; }
 .auth-foot { font-size: 12px; color: var(--faint-2); }
+.auth-legal { margin-top: 16px; line-height: 1.5; }
+/* The Terms and Privacy links where someone signs up or pays. */
+.auth-foot a, .auth-legal a, .legal-note a { text-decoration: underline; text-underline-offset: 2px; }
+.auth-foot a:hover, .auth-legal a:hover, .legal-note a:hover { color: var(--ink); }
 .auth-show {
   margin: 12px; border-radius: 18px; background: #0e1a17; color: #e8ece7; position: relative; overflow: hidden;
   display: flex; flex-direction: column; justify-content: flex-end; padding: 36px; min-height: 520px;
@@ -1000,6 +1008,7 @@ body.solo { overflow: auto; }
 .plan-features .icon { flex: none; margin-top: 3px; color: var(--ok); }
 .callout-error { border-color: color-mix(in oklab, var(--err) 45%, var(--line)); background: var(--err-soft); }
 .plan-banner { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--warn-bar) 55%, var(--line)); border-radius: var(--r); background: var(--warn-bg); color: var(--warn); }
+.billing-legal { margin-top: 16px; max-width: 80ch; line-height: 1.55; }
 .plan-banner .icon { flex: none; margin-top: 3px; }
 .billing-manage { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .plan-banner a { text-decoration: underline; }

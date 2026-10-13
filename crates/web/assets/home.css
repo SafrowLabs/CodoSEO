@@ -292,7 +292,7 @@ code.k { font-family: var(--mono); font-size: .88em; }
 
 /* ---------- footer ---------- */
 footer { padding: 112px 0 40px; }
-.fgrid { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr)); gap: 36px 32px; padding-top: 44px; border-top: 1px solid var(--line); }
+.fgrid { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(5, minmax(0, 1fr)); gap: 36px 32px; padding-top: 44px; border-top: 1px solid var(--line); }
 .fbrand .wm { font-size: 20px; }
 .fbrand p { font-size: 14px; line-height: 1.55; color: var(--ink-3); margin-top: 14px; max-width: 34ch; }
 .fh { font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 12px; }
@@ -306,7 +306,7 @@ footer a:hover { color: var(--ink); text-decoration: underline; text-underline-o
 .js .reveal.in { opacity: 1; transform: none; }
 
 @media (max-width: 1020px) {
-  .fgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .fbrand { grid-column: 1 / -1; }
+  .fgrid { grid-template-columns: repeat(5, minmax(0, 1fr)); } .fbrand { grid-column: 1 / -1; }
 }
 @media (max-width: 860px) {
   nav { display: none; } .bar { gap: 12px; } .hero .wrap { padding-top: 48px; padding-bottom: 64px; gap: 40px; }

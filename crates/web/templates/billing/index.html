@@ -52,5 +52,8 @@
     {% endfor %}
     {% endif %}
   </div>
+  {% if configured %}
+  <p class="hint legal-note billing-legal">Payments are processed by Dodo Payments, our merchant of record, which also charges any taxes and issues invoices. By upgrading you agree to the <a href="/terms">Terms</a>, <a href="/privacy">Privacy Policy</a> and <a href="/refunds">Refund Policy</a>: plans renew monthly until you cancel, and a new subscription is refundable in full within 7 days of its first payment.</p>
+  {% endif %}
 </div>
 {% endblock %}

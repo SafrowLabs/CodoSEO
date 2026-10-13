@@ -6,7 +6,7 @@
   <div class="auth-side">
     <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
     <div class="auth-form">{% include "auth/_card.html" %}</div>
-    <div class="auth-foot">Open source under AGPL-3.0 · <a href="https://codoseo.com" style="text-decoration:underline">codoseo.com</a></div>
+    <div class="auth-foot">Open source under AGPL-3.0 · <a href="https://codoseo.com" style="text-decoration:underline">codoseo.com</a>{% if card.legal %} · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a>{% endif %}</div>
   </div>
   <div class="auth-show" aria-hidden="true">
     <div class="ticker"><div>
