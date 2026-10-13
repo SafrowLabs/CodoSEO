@@ -121,9 +121,12 @@ codoseo diff baseline.json audit.json
 | `--max-pages N` | 500 | Stop after N pages |
 | `--max-time SECS` | 600 | Stop after N seconds |
 | `--rps N` | 5 | Requests per second (1–50) |
-| `--format table\|json\|md\|csv` | table | Output format |
+| `--format table\|json\|md\|csv\|sarif\|github` | table | Output format (`sarif`: SARIF 2.1.0 for code scanning; `github`: GitHub Actions annotations) |
 | `-o FILE` | — | Write output to a file |
-| `--fail-on critical\|warning` | — | Exit 1 if threshold is reached |
+| `--save FILE` | — | Also write the report to FILE in the format its extension names (`.json`, `.sarif`, `.md`, `.csv`, `.txt`); repeatable |
+| `--fail-on GATES` | — | Exit 1 when a gate fails: `critical`, `warning`, `geo`, `geo:critical\|warning\|notice` or an AI access finding kind such as `bots_blocked:search` (comma-separated; see [docs/ci.md](docs/ci.md)) |
+| `--baseline AUDIT.json` | — | Count only what is new or worse since this earlier audit |
+| `--probes` | off | Also fetch up to 5 important pages as each AI search and user-triggered bot (synthetic) |
 
 **`check`**
 
@@ -251,7 +254,7 @@ Every crawled page is evaluated against these checks. Severity: **C** = Critical
 
 ## The 7 AI & GEO checks
 
-Next to the 44 SEO checks, every crawl runs 7 AI & GEO checks, one per kind of [AI access](docs/ai-access.md) finding: 44 + 7 = 51 checks in all. They are judged against your intent (which bots you want in or out) and are **not part of the health score**, which stays SEO-only.
+Next to the 44 SEO checks, every crawl runs 7 AI & GEO checks, one per kind of [AI access](docs/ai-access.md) finding: 44 + 7 = 51 checks in all. They are judged against your intent (which bots you want in or out) and are **not part of the health score**, which stays SEO-only. In CI, `--fail-on geo` (or a single kind) can still fail a build on them ([docs/ci.md](docs/ci.md)).
 
 | Check | Slug |
 |---|---|
@@ -275,6 +278,15 @@ codoseo crawl https://example.com --format json -o audit.json --fail-on critical
 
 Exit codes: `0` success · `1` fail-on threshold reached · `2` usage error or crawl could not start (unreachable, blocked, or `robots.txt` disallows the whole site).
 
+### Fail on SEO and GEO regressions only
+
+```sh
+codoseo crawl https://example.com --fail-on critical,geo --baseline before.json \
+  --save codoseo.sarif --save after.json
+```
+
+`geo` fails on the regressions that take a site out of AI answers: robots.txt answering 5xx, an AI search bot newly blocked, `nosnippet`/`noarchive` added, raw HTML content missing. With `--baseline` only what is new since that audit fails the build. Every gate, the SARIF layout and the GitHub Action are in [docs/ci.md](docs/ci.md).
+
 ### Catch regressions between deploys
 
 ```sh
@@ -288,14 +300,21 @@ codoseo diff before.json after.json --fail-on critical
 
 `diff` reports new and resolved issues, score changes, and URL-level changes (added, removed, status change, title change, redirect chain changes, robots rule changes). If either crawl stopped early, `diff` notes that and skips new/removed URL comparisons.
 
-### GitHub Actions example
+### GitHub Action
 
 ```yaml
-- name: SEO audit
-  run: |
-    cargo install codoseo
-    codoseo crawl ${{ env.SITE_URL }} --format json -o audit.json --fail-on critical
+- uses: SafrowLabs/CodoSEO@<release commit SHA> # vX.Y.Z
+  with:
+    url: https://example.com/
+    fail-on: critical,geo
+    baseline: codoseo-baseline.json
+- uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+  if: always()
+  with:
+    sarif_file: codoseo.sarif
 ```
+
+The action installs the release binary (checksum verified), annotates the run and writes SARIF and the audit for the next baseline. A full workflow, with the baseline kept from `main`, is in [examples/github-action/codoseo.yml](examples/github-action/codoseo.yml); inputs and outputs are in [docs/ci.md](docs/ci.md#github-action).
 
 ---
 
