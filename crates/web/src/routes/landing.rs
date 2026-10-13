@@ -44,6 +44,8 @@ pub struct Landing {
     pub billing: bool,
     /// Every page crawled so far, `1,284,302`; `None` while the totals can't be read.
     pub pages_crawled: Option<String>,
+    /// The hosted vs self-hosted cost comparison under the pricing cards.
+    pub selfhost: SelfHostView,
 }
 
 pub struct CategoryView {
@@ -234,6 +236,280 @@ pub fn plan_features(plan: Plan) -> Vec<String> {
     out
 }
 
+// ---- Hosted vs self-hosted ----
+//
+// What it costs to run CodoSEO yourself at the size of the Lite and Pro plans. Every price
+// below was read from the linked page in the month `PRICES_AS_OF`; update the table, its
+// sources and that date together.
+//
+// Sizing: the per-page data keeps only each site's latest 2 crawls (`codoseo_store::finalize`),
+// so a Pro-sized install holds about 10 sites x 10,000 pages x 2 crawls = 200,000 page rows
+// plus their inlinks, a few GB of Postgres at most, and a Lite-sized one a quarter of that.
+// The worker reserves about 1.5 KB of memory per page of a running crawl. A 2 GB server runs
+// the app and Postgres at Lite size; Pro size gets 4 GB so Postgres can cache its pages.
+// Every plan listed has 40 GB of disk or more.
+
+/// The month the self-host prices were checked.
+pub const PRICES_AS_OF: &str = "2026-10";
+
+/// Where a price comes from.
+pub struct Source {
+    pub label: &'static str,
+    pub url: &'static str,
+}
+
+/// One VPS plan: its name, its size and its monthly price in US cents, before tax.
+pub struct Tier {
+    pub plan: &'static str,
+    pub spec: &'static str,
+    pub cents: u32,
+}
+
+/// A provider's cheapest plan for a Lite-sized install (2 GB or more) and a Pro-sized one
+/// (4 GB or more).
+pub struct VpsOffer {
+    pub provider: &'static str,
+    pub lite: Tier,
+    pub pro: Tier,
+    /// The catch, if any, said next to the price.
+    pub note: &'static str,
+    pub sources: &'static [Source],
+}
+
+/// A cost of self-hosting besides the server.
+pub struct OtherCost {
+    pub item: &'static str,
+    pub cost: &'static str,
+    pub sources: &'static [Source],
+}
+
+const fn src(label: &'static str, url: &'static str) -> Source {
+    Source { label, url }
+}
+
+const fn tier(plan: &'static str, spec: &'static str, cents: u32) -> Tier {
+    Tier { plan, spec, cents }
+}
+
+const HETZNER: Source = src(
+    "Hetzner, price adjustment of 15 June 2026",
+    "https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/",
+);
+const OVH: Source = src("OVHcloud VPS", "https://us.ovhcloud.com/vps/");
+const VULTR: Source = src("Vultr pricing", "https://www.vultr.com/pricing/");
+const VULTR_BACKUPS: Source = src(
+    "Vultr automatic backups",
+    "https://docs.vultr.com/vps-automatic-backups",
+);
+const DIGITALOCEAN: Source = src(
+    "DigitalOcean Droplet pricing",
+    "https://www.digitalocean.com/pricing/droplets",
+);
+const AKAMAI: Source = src(
+    "Akamai (Linode) shared CPU pricing",
+    "https://www.akamai.com/cloud/pricing/cpu",
+);
+const AKAMAI_BACKUPS: Source = src(
+    "Akamai (Linode) backups pricing",
+    "https://www.akamai.com/cloud/pricing/backups",
+);
+
+pub const VPS_OFFERS: [VpsOffer; 5] = [
+    VpsOffer {
+        provider: "Hetzner",
+        lite: tier("CX23", "2 vCPU, 4 GB, 40 GB", 649),
+        pro: tier("CX23", "2 vCPU, 4 GB, 40 GB", 649),
+        note: "EU only, plus IPv4; often out of stock (the regular CPX22 is $22.99)",
+        sources: &[HETZNER],
+    },
+    VpsOffer {
+        provider: "OVHcloud",
+        lite: tier("VPS-1", "2 vCPU, 4 GB, 40 GB", 454),
+        pro: tier("VPS-1", "2 vCPU, 4 GB, 40 GB", 454),
+        note: "paid 12 months upfront; daily backup included",
+        sources: &[OVH],
+    },
+    VpsOffer {
+        provider: "Vultr",
+        lite: tier("Regular 2 GB", "1 vCPU, 2 GB, 55 GB", 1000),
+        pro: tier("Regular 4 GB", "2 vCPU, 4 GB, 80 GB", 2000),
+        note: "",
+        sources: &[VULTR],
+    },
+    VpsOffer {
+        provider: "DigitalOcean",
+        lite: tier("Basic 2 GB", "1 vCPU, 2 GB, 50 GB", 1200),
+        pro: tier("Basic 4 GB", "2 vCPU, 4 GB, 80 GB", 2400),
+        note: "",
+        sources: &[DIGITALOCEAN],
+    },
+    VpsOffer {
+        provider: "Akamai (Linode)",
+        lite: tier("Linode 2 GB", "1 vCPU, 2 GB, 50 GB", 1200),
+        pro: tier("Linode 4 GB", "2 vCPU, 4 GB, 80 GB", 2400),
+        note: "",
+        sources: &[AKAMAI],
+    },
+];
+
+pub const OTHER_COSTS: [OtherCost; 5] = [
+    OtherCost {
+        item: "Backups",
+        cost: "20% on top of the server at DigitalOcean and Vultr, $2.50 to $5 a month at \
+               Akamai, a daily copy included at OVHcloud. Or pg_dump to storage you already have.",
+        sources: &[DIGITALOCEAN, VULTR_BACKUPS, AKAMAI_BACKUPS],
+    },
+    OtherCost {
+        item: "Bandwidth",
+        cost: "$0. Crawling is mostly inbound traffic, and every plan above includes 2 TB or \
+               more a month.",
+        sources: &[],
+    },
+    OtherCost {
+        item: "Domain and TLS",
+        cost: "$0 on a subdomain you already own, or $10.46 a year for a new .com at \
+               Cloudflare's at-cost price. TLS certificates are free from Let's Encrypt.",
+        sources: &[
+            src(
+                "Cloudflare Registrar prices (cfdomainpricing.com)",
+                "https://cfdomainpricing.com/",
+            ),
+            src("Let's Encrypt", "https://letsencrypt.org/"),
+        ],
+    },
+    OtherCost {
+        item: "Alert email",
+        cost: "$0 on a free tier, for example Resend's 3,000 emails a month (100 a day).",
+        sources: &[src("Resend pricing", "https://resend.com/pricing")],
+    },
+    OtherCost {
+        item: "Your time",
+        cost: "Our estimate: 2 to 3 hours to set up (server, Docker, DNS, TLS, SMTP), then \
+               about 1 hour a month for image and OS updates, a backup check and watching \
+               health and disk.",
+        sources: &[],
+    },
+];
+
+/// A source in the footnotes, numbered in order of first use.
+pub struct Footnote {
+    pub n: usize,
+    pub label: &'static str,
+    pub url: &'static str,
+}
+
+pub struct TierView {
+    pub price: String,
+    pub plan: &'static str,
+    pub spec: &'static str,
+}
+
+pub struct VpsRow {
+    pub provider: &'static str,
+    pub lite: TierView,
+    pub pro: TierView,
+    pub note: &'static str,
+    pub refs: Vec<usize>,
+}
+
+pub struct OtherRow {
+    pub item: &'static str,
+    pub cost: &'static str,
+    pub refs: Vec<usize>,
+}
+
+pub struct SelfHostView {
+    pub as_of: &'static str,
+    /// `5 sites × 5,000 pages`, from the plan limits.
+    pub lite_size: String,
+    pub pro_size: String,
+    /// `$4.54 to $12`: the cheapest and dearest server for each size.
+    pub lite_range: String,
+    pub pro_range: String,
+    pub vps: Vec<VpsRow>,
+    pub other: Vec<OtherRow>,
+    pub notes: Vec<Footnote>,
+}
+
+/// `$9`, `$4.54`: whole dollars without cents.
+fn dollars(cents: u32) -> String {
+    if cents.is_multiple_of(100) {
+        format!("${}", cents / 100)
+    } else {
+        format!("${}.{:02}", cents / 100, cents % 100)
+    }
+}
+
+fn plan_size(plan: Plan) -> String {
+    let l = PlanLimits::for_plan(plan);
+    format!(
+        "{} × {} pages",
+        plural(l.max_sites.unwrap_or(0), "site", "sites"),
+        fmt::thousands(l.max_pages.unwrap_or(0))
+    )
+}
+
+fn price_range(cents: impl Iterator<Item = u32> + Clone) -> String {
+    let lo = cents.clone().min().unwrap_or(0);
+    let hi = cents.max().unwrap_or(0);
+    format!("{} to {}", dollars(lo), dollars(hi))
+}
+
+/// The comparison as the landing shows it, with each source numbered once.
+pub fn selfhost_view() -> SelfHostView {
+    let mut notes: Vec<Footnote> = Vec::new();
+    let mut cite = |sources: &'static [Source]| -> Vec<usize> {
+        sources
+            .iter()
+            .map(|s| match notes.iter().find(|f| f.url == s.url) {
+                Some(f) => f.n,
+                None => {
+                    let n = notes.len() + 1;
+                    notes.push(Footnote {
+                        n,
+                        label: s.label,
+                        url: s.url,
+                    });
+                    n
+                }
+            })
+            .collect()
+    };
+    let tier_view = |t: &Tier| TierView {
+        price: dollars(t.cents),
+        plan: t.plan,
+        spec: t.spec,
+    };
+    let vps = VPS_OFFERS
+        .iter()
+        .map(|o| VpsRow {
+            provider: o.provider,
+            lite: tier_view(&o.lite),
+            pro: tier_view(&o.pro),
+            note: o.note,
+            refs: cite(o.sources),
+        })
+        .collect();
+    let other = OTHER_COSTS
+        .iter()
+        .map(|c| OtherRow {
+            item: c.item,
+            cost: c.cost,
+            refs: cite(c.sources),
+        })
+        .collect();
+    SelfHostView {
+        as_of: PRICES_AS_OF,
+        lite_size: plan_size(Plan::Lite),
+        pro_size: plan_size(Plan::Pro),
+        lite_range: price_range(VPS_OFFERS.iter().map(|o| o.lite.cents)),
+        pro_range: price_range(VPS_OFFERS.iter().map(|o| o.pro.cents)),
+        vps,
+        other,
+        notes,
+    }
+}
+
 fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) -> Landing {
     let base = state.config.origin();
     Landing {
@@ -256,6 +532,7 @@ fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) 
         pro_price: monthly_price(Plan::Pro).unwrap_or(0),
         billing: state.config.billing.is_some(),
         pages_crawled: pages.map(fmt::thousands),
+        selfhost: selfhost_view(),
     }
 }
 
@@ -364,6 +641,39 @@ mod tests {
         assert_eq!(monthly_price(Plan::Lite), Some(9));
         assert_eq!(monthly_price(Plan::Pro), Some(19));
         assert_eq!(monthly_price(Plan::SelfHosted), None);
+    }
+
+    #[test]
+    fn the_self_host_comparison_reads_from_the_price_table() {
+        let v = selfhost_view();
+        assert_eq!(v.as_of, "2026-10");
+        assert_eq!(v.lite_size, "5 sites × 5,000 pages");
+        assert_eq!(v.pro_size, "10 sites × 10,000 pages");
+        assert_eq!(v.lite_range, "$4.54 to $12");
+        assert_eq!(v.pro_range, "$4.54 to $24");
+        assert_eq!(v.vps.len(), VPS_OFFERS.len());
+        assert_eq!(v.vps[2].lite.price, "$10");
+        assert_eq!(v.other.len(), OTHER_COSTS.len());
+        // Each source is numbered once, in order, and every priced row cites one.
+        let urls: Vec<&str> = v.notes.iter().map(|f| f.url).collect();
+        let mut unique = urls.clone();
+        unique.dedup();
+        assert_eq!(urls.len(), unique.len());
+        assert!(v.notes.iter().enumerate().all(|(i, f)| f.n == i + 1));
+        assert!(urls.iter().all(|u| u.starts_with("https://")));
+        assert!(v.vps.iter().all(|r| !r.refs.is_empty()));
+        assert_eq!(
+            v.vps[3].refs,
+            v.other[0].refs[..1],
+            "DigitalOcean cited once"
+        );
+    }
+
+    #[test]
+    fn dollars_drop_whole_cents() {
+        assert_eq!(dollars(900), "$9");
+        assert_eq!(dollars(454), "$4.54");
+        assert_eq!(dollars(1005), "$10.05");
     }
 
     #[test]

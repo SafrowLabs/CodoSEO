@@ -260,6 +260,29 @@ code.k { font-family: var(--mono); font-size: .88em; }
 .price .btn { width: 100%; }
 .fine { font-size: 13.5px; color: var(--ink-3); margin-top: 18px; }
 .fine a { color: var(--link); } .fine a:hover { text-decoration: underline; }
+/* hosted vs self-hosted, under the pricing cards */
+.sh { background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 26px; }
+.sh h3 { font-size: 19px; font-weight: 600; letter-spacing: -.02em; }
+.sh-lead { font-size: 15px; line-height: 1.5; color: var(--ink-2); margin-top: 8px; max-width: 760px; }
+.sh-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 18px; }
+.sh-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+.sh-card h4 { font-size: 16px; font-weight: 600; }
+.sh-card .ph { flex-wrap: wrap; }
+.sh-card p { font-size: 14.5px; line-height: 1.5; color: var(--ink-2); margin-top: 8px; }
+.sh-scroll { overflow-x: auto; margin-top: 18px; }
+.sh-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sh-table caption { text-align: left; font-size: 13px; color: var(--ink-3); padding-bottom: 8px; }
+.sh-table th, .sh-table td { text-align: left; vertical-align: top; padding: 9px 10px 9px 0; border-top: 1px solid var(--line-2); }
+.sh-table thead th { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; border-top: 0; }
+.sh-table tbody th { font-weight: 600; color: var(--ink); }
+.sh-table b { font-weight: 600; color: var(--ink-strong); }
+.sh-table small { display: block; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); font-weight: 400; margin-top: 2px; }
+.sh sup { font-size: 10px; margin-left: 2px; } .sh sup a { color: var(--link); }
+.sh-other { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 10px 24px; margin-top: 18px; }
+.sh-other dt { font-size: 14px; font-weight: 600; color: var(--ink); }
+.sh-other dd { font-size: 14px; line-height: 1.5; color: var(--ink-2); margin: 2px 0 0; }
+.sh-notes { margin: 14px 0 0; padding-left: 20px; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); }
+.sh-notes a { color: var(--link); overflow-wrap: anywhere; } .sh-notes a:hover { text-decoration: underline; }
 
 /* ---------- docs ---------- */
 .docs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
@@ -322,6 +345,7 @@ footer a:hover { color: var(--ink); text-decoration: underline; text-underline-o
   .cta { margin-top: 120px; }
   .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .faq details p { padding-right: 0; }
+  .sh { padding: 18px 16px; }
 }
 @media (max-width: 480px) {
   .gh { display: none; } .brand { font-size: 19px; }

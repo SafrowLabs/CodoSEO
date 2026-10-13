@@ -371,7 +371,47 @@ claude mcp add --transport http codoseo \
       <a class="btn out" href="mailto:contact@codoseo.com" data-umami-event="contact-enterprise">contact@codoseo.com</a>
     </div>
   </div>
-  <p class="fine"><b>Self-host free:</b> the full web app runs on your own servers under AGPL-3.0, with no plan caps and your data on your machines. <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Read the self-hosting guide</a>.</p>
+  {#- Hosted vs self-hosted: every number comes from the table in routes/landing.rs. #}
+  <div class="sh mt" id="self-host">
+    <h3>Hosted or self-hosted?</h3>
+    <p class="sh-lead">Self-hosting is the same app with every feature, free under AGPL-3.0, with no plan caps and your data on your machines. You pay for the server and run it yourself.</p>
+    <div class="sh-cards">
+      <div class="sh-card">
+        <div class="ph"><h4>Hosted</h4><span class="tag ship">Lite ${{ lite_price }} · Pro ${{ pro_price }}</span></div>
+        <p>The crawler, alerts, backups and upgrades are run for you. Your time: none.</p>
+      </div>
+      <div class="sh-card">
+        <div class="ph"><h4>Self-hosted</h4><span class="tag plan">Software $0</span></div>
+        <p>A server for {{ selfhost.lite_size }} costs {{ selfhost.lite_range }} a month, and for {{ selfhost.pro_size }} {{ selfhost.pro_range }}, plus backups. Your time: about an hour a month.</p>
+      </div>
+    </div>
+    <div class="sh-scroll">
+      <table class="sh-table">
+        <caption>Cheapest VPS that fits, per month before tax, as of {{ selfhost.as_of }}</caption>
+        <thead><tr><th scope="col">Provider</th><th scope="col">Lite size (2 GB+)</th><th scope="col">Pro size (4 GB+)</th></tr></thead>
+        <tbody>
+          {%- for r in selfhost.vps %}
+          <tr>
+            <th scope="row">{{ r.provider }}{% if !r.refs.is_empty() %}<sup>{% for n in r.refs %}{% if !loop.first %},{% endif %}<a href="#sh-src-{{ n }}">{{ n }}</a>{% endfor %}</sup>{% endif %}{% if !r.note.is_empty() %}<small>{{ r.note }}</small>{% endif %}</th>
+            <td><b>{{ r.lite.price }}</b><small>{{ r.lite.plan }}: {{ r.lite.spec }}</small></td>
+            <td><b>{{ r.pro.price }}</b><small>{{ r.pro.plan }}: {{ r.pro.spec }}</small></td>
+          </tr>
+          {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+    <dl class="sh-other">
+      {%- for c in selfhost.other %}
+      <div><dt>{{ c.item }}</dt><dd>{{ c.cost }}{% if !c.refs.is_empty() %}<sup>{% for n in c.refs %}{% if !loop.first %},{% endif %}<a href="#sh-src-{{ n }}">{{ n }}</a>{% endfor %}</sup>{% endif %}</dd></div>
+      {%- endfor %}
+    </dl>
+    <p class="fine"><b>The honest version:</b> a small VPS undercuts Lite and Pro on price. What hosted buys is the setup and the hour a month, with the managed crawler, alerts and backups included. <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Self-host guide</a>.</p>
+    <ol class="sh-notes" aria-label="Sources, prices as of {{ selfhost.as_of }}">
+      {%- for f in selfhost.notes %}
+      <li id="sh-src-{{ f.n }}"><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.label }}</a>, as of {{ selfhost.as_of }}</li>
+      {%- endfor %}
+    </ol>
+  </div>
   <p class="fine">Want to try it first? Run a one-off audit of up to {{ quick_pages }} pages <a href="#audit">from the box at the top</a>, no signup needed. The CLI is free and has no page cap of its own.</p>
 </section>
 

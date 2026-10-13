@@ -123,7 +123,7 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         "Unlimited manual crawls, 1 running per site",
         "Checkout opens soon",
         r#"href="mailto:contact@codoseo.com""#,
-        "Self-host free",
+        "Hosted or self-hosted?",
         r#""name":"Lite","price":"9""#,
         "Free · first 100 pages · no signup",
         "https://codoseo.com/mcp",
