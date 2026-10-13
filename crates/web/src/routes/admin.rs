@@ -1,6 +1,6 @@
-//! `/admin`: the funnel, the quick-audit queue and failed jobs, for the people running the
-//! instance. In the cloud that is whoever is listed in `ADMIN_EMAILS`; self-hosted, the owner.
-//! Everyone else gets the same 404 as a page that doesn't exist.
+//! `/admin`: the funnel, the quick-audit queue, the crawl totals and failed jobs, for the people
+//! running the instance. In the cloud that is whoever is listed in `ADMIN_EMAILS`; self-hosted,
+//! the owner. Everyone else gets the same 404 as a page that doesn't exist.
 
 use askama::Template;
 use axum::Router;
@@ -10,7 +10,7 @@ use axum::routing::get;
 use codoseo_store::accounts::Account;
 use codoseo_store::events::{self, EventKind, FunnelCount};
 use codoseo_store::jobs::{self, FailedJob};
-use codoseo_store::quick;
+use codoseo_store::{quick, stats};
 
 use crate::auth::{CurrentUser, email};
 use crate::config::Mode;
@@ -68,6 +68,8 @@ pub struct AdminPage {
     pub shell: Shell,
     pub tables: Vec<FunnelTable>,
     pub queue_depth: i64,
+    /// Everything crawled so far, as `(label, value)`; the website count is shown only here.
+    pub totals: Vec<(&'static str, String)>,
     pub jobs: Vec<JobRow>,
 }
 
@@ -138,6 +140,7 @@ async fn page(State(state): State<AppState>, user: CurrentUser) -> Result<Respon
     let month = events::funnel_counts(pool, 30).await?;
     let agents = events::agent_funnel_counts(pool, 30).await?;
     let jobs = jobs::failed_jobs(pool, FAILED_JOBS_SHOWN).await?;
+    let totals = stats::totals(pool).await?;
     Ok(html(&AdminPage {
         shell,
         tables: vec![
@@ -148,6 +151,11 @@ async fn page(State(state): State<AppState>, user: CurrentUser) -> Result<Respon
             table("Agents, last 30 days", &agents),
         ],
         queue_depth: quick::queue_depth(pool).await?,
+        totals: vec![
+            ("pages crawled", fmt::thousands(totals.pages_crawled)),
+            ("crawls", fmt::thousands(totals.crawls)),
+            ("websites", fmt::thousands(totals.websites)),
+        ],
         jobs: jobs.iter().map(job_row).collect(),
     })?
     .into_response())

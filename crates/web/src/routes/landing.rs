@@ -1,9 +1,13 @@
 //! The cloud landing page at `/`: the marketing page, with one URL box that starts a no-signup
 //! audit. Its numbers (checks per category, the plan limits, the size of the quick audit) come
-//! from the code, so the page can't promise something the app doesn't enforce.
+//! from the code, so the page can't promise something the app doesn't enforce. Its "pages
+//! crawled" counter is the stored running total (`codoseo_store::stats`), cached for a few
+//! seconds per process and refreshed by `home.js` from `/stats/pages-crawled`.
 
 use askama::Template;
-use axum::http::StatusCode;
+use axum::Json;
+use axum::extract::State;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use codoseo_checks::{CHECKS, Category};
 use codoseo_core::plan::{ManualAllowance, Plan, PlanLimits, Schedule};
@@ -12,6 +16,7 @@ use crate::config::UmamiConfig;
 use crate::error::AppError;
 use crate::fmt;
 use crate::render::html;
+use crate::routes::quick::require_cloud;
 use crate::state::AppState;
 
 #[derive(Template)]
@@ -37,6 +42,8 @@ pub struct Landing {
     pub pro_price: u32,
     /// Dodo checkout is configured: the paid cards lead to `/billing` (through sign-in).
     pub billing: bool,
+    /// Every page crawled so far, `1,284,302`; `None` while the totals can't be read.
+    pub pages_crawled: Option<String>,
 }
 
 pub struct CategoryView {
@@ -227,7 +234,7 @@ pub fn plan_features(plan: Plan) -> Vec<String> {
     out
 }
 
-fn view(state: &AppState, url: &str, error: Option<String>) -> Landing {
+fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) -> Landing {
     let base = state.config.origin();
     Landing {
         url: url.to_owned(),
@@ -248,12 +255,35 @@ fn view(state: &AppState, url: &str, error: Option<String>) -> Landing {
         lite_price: monthly_price(Plan::Lite).unwrap_or(0),
         pro_price: monthly_price(Plan::Pro).unwrap_or(0),
         billing: state.config.billing.is_some(),
+        pages_crawled: pages.map(fmt::thousands),
     }
 }
 
 /// The landing page for a signed-out visitor.
-pub fn page(state: &AppState) -> Result<Response, AppError> {
-    Ok(html(&view(state, "", None))?.into_response())
+pub async fn page(state: &AppState) -> Result<Response, AppError> {
+    let pages = state
+        .crawl_stats
+        .totals(&state.pool)
+        .await
+        .map(|t| t.pages_crawled);
+    Ok(html(&view(state, "", None, pages))?.into_response())
+}
+
+/// `/stats/pages-crawled` (cloud only): the landing counter's live number, polled by `home.js`.
+/// Served from the same cache as the page; only the page total, never the website count.
+pub async fn pages_crawled(State(state): State<AppState>) -> Result<Response, AppError> {
+    require_cloud(&state)?;
+    let Some(totals) = state.crawl_stats.totals(&state.pool).await else {
+        return Err(AppError::Unavailable);
+    };
+    Ok((
+        [(header::CACHE_CONTROL, "public, max-age=10")],
+        Json(serde_json::json!({
+            "pages_crawled": totals.pages_crawled,
+            "label": fmt::thousands(totals.pages_crawled),
+        })),
+    )
+        .into_response())
 }
 
 /// The landing page again with a message under the box, for a submit we turned away.
@@ -263,7 +293,13 @@ pub fn refuse(
     status: StatusCode,
     message: String,
 ) -> Result<Response, AppError> {
-    Ok((status, html(&view(state, url.trim(), Some(message)))?).into_response())
+    // The cached total, however old: a refused submit never waits on the database for it.
+    let pages = state.crawl_stats.cached().map(|t| t.pages_crawled);
+    Ok((
+        status,
+        html(&view(state, url.trim(), Some(message), pages))?,
+    )
+        .into_response())
 }
 
 #[cfg(test)]

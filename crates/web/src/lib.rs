@@ -9,6 +9,7 @@ pub mod auth;
 pub mod billing;
 pub mod config;
 pub mod crawl_policy;
+pub mod crawl_stats;
 pub mod error;
 pub mod fmt;
 pub mod health;

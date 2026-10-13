@@ -573,6 +573,62 @@ async fn finalize_records_the_funnel_events_for_quick_and_first_crawls_only() {
 }
 
 #[tokio::test]
+async fn every_finished_crawl_adds_to_the_crawl_totals() {
+    let db = TestDb::new().await;
+    let totals = || codoseo_store::stats::totals(&db.pool);
+    assert_eq!(totals().await.unwrap(), Default::default());
+
+    // A no-signup audit, a monitored crawl of the same domain, then another site.
+    for (domain, trigger, pages) in [
+        ("shop.example", "quick", 37),
+        ("shop.example", "manual", 120),
+        ("blog.example", "schedule", 8),
+    ] {
+        let site_id = make_site(&db.pool, domain).await;
+        let crawl_id = make_crawl_with_trigger(&db.pool, site_id, domain, trigger).await;
+        let out = empty_output(vec![sample_page(1)], StopReason::Completed);
+        let mut report = empty_report();
+        report.summary.pages = pages;
+        finalize(
+            &db.pool,
+            crawl_id,
+            site_id,
+            WORKER_ID,
+            &out,
+            &report,
+            &[],
+            None,
+        )
+        .await
+        .expect("finalize");
+    }
+    let t = totals().await.unwrap();
+    assert_eq!((t.pages_crawled, t.crawls, t.websites), (165, 3, 2));
+
+    // A finalize that rolls back counts for nothing.
+    let site_id = make_site(&db.pool, "late.example").await;
+    let crawl_id = make_crawl_with_trigger(&db.pool, site_id, "late.example", "quick").await;
+    let mut report = empty_report();
+    report.summary.pages = 50;
+    let out = empty_output(vec![sample_page(1)], StopReason::Completed);
+    assert!(
+        finalize(
+            &db.pool,
+            crawl_id,
+            site_id,
+            "someone-else",
+            &out,
+            &report,
+            &[],
+            None
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(totals().await.unwrap(), t);
+}
+
+#[tokio::test]
 async fn a_failed_finalize_leaves_no_funnel_event() {
     let db = TestDb::new().await;
     let site_id = make_site(&db.pool, "stolen.example").await;

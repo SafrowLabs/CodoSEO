@@ -1,7 +1,7 @@
 //! Writing a finished crawl in one transaction: pages and inlinks via `COPY` (batched, so
 //! memory stays flat on a large crawl), one `site_files` row, `changes`, the crawl's own
 //! `done`/summary update, the 2-crawl retention cleanup, the AI access report and its incidents
-//! (see [`crate::geo`]), and the alert planning job. A
+//! (see [`crate::geo`]), the alert planning job and the public crawl totals ([`crate::stats`]). A
 //! failure partway rolls the whole transaction back, so a crawl never ends up half-written.
 
 use std::collections::HashSet;
@@ -19,6 +19,7 @@ use crate::dbenum::enum_slug;
 use crate::events::{self, EventKind};
 use crate::geo::{self, GeoInput};
 use crate::hash;
+use crate::stats;
 
 /// Rows per `COPY` chunk, per spec ("COPY in batches of 500").
 const COPY_BATCH: usize = 500;
@@ -91,6 +92,12 @@ pub async fn finalize(
     )
     .await?;
     record_funnel_event(&mut tx, crawl_id, site_id, report).await?;
+    // Last, so the one totals row stays locked only until the commit just below.
+    let domain: String = sqlx::query_scalar("SELECT domain FROM crawls WHERE id = $1")
+        .bind(crawl_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    stats::record_crawl(&mut tx, &domain, report.summary.pages).await?;
 
     tx.commit().await?;
     Ok(())

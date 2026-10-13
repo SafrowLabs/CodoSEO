@@ -30,6 +30,8 @@ pub struct AppState {
     pub shutdown: tokio_util::sync::CancellationToken,
     /// Calls per minute of the no-key MCP tools, per client address.
     pub anon_calls: Arc<crate::agent::limiter::CallLimiter>,
+    /// The landing page's crawl totals, read from the database at most every few seconds.
+    pub crawl_stats: Arc<crate::crawl_stats::StatsCache>,
 }
 
 impl AppState {
@@ -46,6 +48,7 @@ impl AppState {
             mailer,
             shutdown: tokio_util::sync::CancellationToken::new(),
             anon_calls: Arc::new(crate::agent::limiter::CallLimiter::for_anon_tools()),
+            crawl_stats: Arc::default(),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .user_agent(concat!("CodoSEO/", env!("CARGO_PKG_VERSION")))
