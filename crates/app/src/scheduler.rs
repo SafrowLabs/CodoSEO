@@ -302,7 +302,7 @@ fn to_timestamp(t: OffsetDateTime) -> Timestamp {
 pub fn crawl_priority(plan: Plan) -> i16 {
     match plan {
         Plan::Free => FREE_SCHEDULED_PRIORITY,
-        Plan::Pro | Plan::Agency | Plan::SelfHosted => PAID_SCHEDULED_PRIORITY,
+        Plan::Lite | Plan::Pro | Plan::SelfHosted => PAID_SCHEDULED_PRIORITY,
     }
 }
 

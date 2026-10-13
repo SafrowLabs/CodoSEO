@@ -126,7 +126,7 @@ async fn free_plan_history_boundary_at_30_days() {
 #[tokio::test]
 async fn pro_plan_history_boundary_at_365_days() {
     let db = TestDb::new().await;
-    let account = seed_account(&db.pool, "pro").await;
+    let account = seed_account(&db.pool, "lite").await;
     let site = seed_site(&db.pool, Some(account), 0.0).await;
 
     let young = seed_done_crawl(&db.pool, site, "b.example", 364.0 * DAY, true).await;
@@ -443,7 +443,7 @@ async fn incident_exists(pool: &PgPool, id: i64) -> bool {
 async fn resolved_ai_incidents_follow_the_plans_history_window() {
     let db = TestDb::new().await;
     let free = seed_account(&db.pool, "free").await;
-    let pro = seed_account(&db.pool, "pro").await;
+    let pro = seed_account(&db.pool, "lite").await;
     let free_site = seed_site(&db.pool, Some(free), 0.0).await;
     let pro_site = seed_site(&db.pool, Some(pro), 0.0).await;
 
@@ -561,7 +561,7 @@ async fn recheck_ids(pool: &PgPool, incident: i64) -> Vec<i64> {
 #[tokio::test]
 async fn an_open_incidents_rechecks_are_pruned_to_the_newest_twenty() {
     let db = TestDb::new().await;
-    let pro = seed_account(&db.pool, "pro").await;
+    let pro = seed_account(&db.pool, "lite").await;
     let site = seed_site(&db.pool, Some(pro), 0.0).await;
     let open = seed_incident(&db.pool, site, "a", None).await;
     let old = seed_rechecks(&db.pool, site, open, 25, 48).await;

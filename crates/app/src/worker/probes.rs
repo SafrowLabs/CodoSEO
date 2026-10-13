@@ -193,7 +193,7 @@ mod tests {
             ProbeSettings::default().probe_urls(Some(Plan::SelfHosted), &self_hosted),
             5
         );
-        for plan in [Plan::Free, Plan::Pro, Plan::Agency] {
+        for plan in [Plan::Free, Plan::Lite, Plan::Pro] {
             let limits = PlanLimits::for_plan(plan);
             assert_eq!(eight.probe_urls(Some(plan), &limits), limits.probe_urls);
         }

@@ -18,29 +18,42 @@ fn free_plan_matches_spec() {
 }
 
 #[test]
-fn pro_plan_matches_spec() {
-    let l = PlanLimits::for_plan(Plan::Pro);
+fn lite_plan_matches_spec() {
+    let l = PlanLimits::for_plan(Plan::Lite);
     assert_eq!(l.max_sites, Some(5));
-    assert_eq!(l.max_pages, Some(10_000));
-    assert_eq!(l.max_duration, Some(Duration::from_secs(2 * HOUR)));
+    assert_eq!(l.max_pages, Some(5_000));
+    assert_eq!(l.max_duration, Some(Duration::from_secs(HOUR)));
     assert_eq!(l.fastest_schedule, Some(Schedule::Daily));
     assert_eq!(l.manual_crawls, ManualAllowance::PerDay(1));
     assert_eq!(l.history_days, Some(365));
-    assert_eq!(l.api_calls_per_day, Some(2_000));
+    assert_eq!(l.api_calls_per_day, Some(1_000));
     assert!(!l.email_alerts_only);
 }
 
 #[test]
-fn agency_plan_matches_spec() {
-    let l = PlanLimits::for_plan(Plan::Agency);
-    assert_eq!(l.max_sites, Some(25));
-    assert_eq!(l.max_pages, Some(50_000));
-    assert_eq!(l.max_duration, Some(Duration::from_secs(6 * HOUR)));
+fn pro_plan_matches_spec() {
+    let l = PlanLimits::for_plan(Plan::Pro);
+    assert_eq!(l.max_sites, Some(10));
+    assert_eq!(l.max_pages, Some(10_000));
+    assert_eq!(l.max_duration, Some(Duration::from_secs(2 * HOUR)));
     assert_eq!(l.fastest_schedule, Some(Schedule::Daily));
     assert_eq!(l.manual_crawls, ManualAllowance::Unlimited);
     assert_eq!(l.history_days, Some(365));
-    assert_eq!(l.api_calls_per_day, Some(10_000));
+    assert_eq!(l.api_calls_per_day, Some(5_000));
     assert!(!l.email_alerts_only);
+}
+
+#[test]
+fn plans_serialize_as_the_database_labels() {
+    // The Postgres `plan` enum uses the same labels (renamed in migration 0015).
+    for (plan, slug) in [
+        (Plan::Free, "free"),
+        (Plan::Lite, "lite"),
+        (Plan::Pro, "pro"),
+        (Plan::SelfHosted, "self_hosted"),
+    ] {
+        assert_eq!(serde_json::to_value(plan).unwrap(), slug);
+    }
 }
 
 #[test]
@@ -72,7 +85,7 @@ fn quick_audit_is_100_pages_in_2_minutes_and_nothing_else() {
 fn llms_txt_link_checks_are_5_on_free_and_20_elsewhere() {
     assert_eq!(PlanLimits::quick_audit().llms_link_checks, 0);
     assert_eq!(PlanLimits::for_plan(Plan::Free).llms_link_checks, 5);
-    for plan in [Plan::Pro, Plan::Agency, Plan::SelfHosted] {
+    for plan in [Plan::Lite, Plan::Pro, Plan::SelfHosted] {
         assert_eq!(PlanLimits::for_plan(plan).llms_link_checks, 20);
     }
 }
@@ -83,8 +96,8 @@ fn synthetic_probe_caps_match_the_b1_table() {
     for (limits, urls, budget, max_requests) in [
         (PlanLimits::quick_audit(), 0, secs(0), 0),
         (PlanLimits::for_plan(Plan::Free), 1, secs(45), 30),
-        (PlanLimits::for_plan(Plan::Pro), 3, secs(90), 70),
-        (PlanLimits::for_plan(Plan::Agency), 5, secs(120), 120),
+        (PlanLimits::for_plan(Plan::Lite), 3, secs(90), 70),
+        (PlanLimits::for_plan(Plan::Pro), 5, secs(120), 120),
         (PlanLimits::for_plan(Plan::SelfHosted), 5, secs(180), 160),
     ] {
         assert_eq!(limits.probe_urls, urls);
@@ -100,11 +113,11 @@ fn manual_ai_rechecks_per_day_follow_the_plan() {
         Some(3)
     );
     assert_eq!(
-        PlanLimits::for_plan(Plan::Pro).ai_rechecks_per_day,
+        PlanLimits::for_plan(Plan::Lite).ai_rechecks_per_day,
         Some(20)
     );
     assert_eq!(
-        PlanLimits::for_plan(Plan::Agency).ai_rechecks_per_day,
+        PlanLimits::for_plan(Plan::Pro).ai_rechecks_per_day,
         Some(60)
     );
     assert_eq!(

@@ -310,7 +310,7 @@ impl World {
     async fn request(&self, incident: i64) -> Result<i64, RecheckError> {
         let limits = PlanLimits {
             ai_rechecks_per_day: None,
-            ..PlanLimits::for_plan(Plan::Pro)
+            ..PlanLimits::for_plan(Plan::Lite)
         };
         geo::request_recheck(self.pool(), self.site_id, incident, self.account, &limits)
             .await
@@ -441,7 +441,7 @@ async fn changes_of(w: &World, crawl: Uuid) -> Vec<String> {
 
 #[tokio::test]
 async fn a_fixed_robots_txt_recovers_then_the_follow_up_resolves_it() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let incident = blocked_bot(&w, "OAI-SearchBot").await;
     let last_seen: Uuid =
         sqlx::query_scalar("SELECT last_seen_crawl_id FROM ai_incidents WHERE id = $1")
@@ -512,7 +512,7 @@ async fn a_fixed_robots_txt_recovers_then_the_follow_up_resolves_it() {
 
 #[tokio::test]
 async fn a_duckassistbot_fix_is_followed_up_after_72_hours() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let incident = blocked_bot(&w, "DuckAssistBot").await;
     w.site.set(|k| k.robots_body = ALLOW_ALL.to_owned());
     let manual = w.request(incident.id).await.unwrap();
@@ -526,7 +526,7 @@ async fn a_duckassistbot_fix_is_followed_up_after_72_hours() {
 
 #[tokio::test]
 async fn a_robots_txt_that_still_blocks_is_still_failing() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let incident = blocked_bot(&w, "OAI-SearchBot").await;
     let manual = w.request(incident.id).await.unwrap();
     w.run(manual).await;
@@ -547,7 +547,7 @@ async fn a_recheck_reads_robots_txt_where_the_crawl_did_after_a_redirect() {
     use axum::http::{StatusCode, Uri, header};
     use axum::response::IntoResponse;
 
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     // The site's address is an "apex" with a robots.txt of its own that redirects every page to
     // the "www" host the crawl ends up on.
     let www = w.site.server.base();
@@ -597,7 +597,7 @@ async fn a_recheck_reads_robots_txt_where_the_crawl_did_after_a_redirect() {
 
 #[tokio::test]
 async fn an_inconclusive_follow_up_tries_again_six_hours_on_at_most_three_times() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let incident = blocked_bot(&w, "OAI-SearchBot").await;
     w.site.set(|k| k.robots_body = ALLOW_ALL.to_owned());
     let manual = w.request(incident.id).await.unwrap();
@@ -633,7 +633,7 @@ async fn an_inconclusive_follow_up_tries_again_six_hours_on_at_most_three_times(
 
 #[tokio::test]
 async fn a_crawl_under_way_supersedes_the_recheck() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let incident = blocked_bot(&w, "OAI-SearchBot").await;
     let manual = w.request(incident.id).await.unwrap();
     CrawlQueue::new(w.db.pool.clone())
@@ -673,7 +673,7 @@ async fn failure_of(w: &World, recheck: i64) -> Option<String> {
 
 #[tokio::test]
 async fn a_site_that_does_not_answer_fails_the_recheck_and_frees_the_incident() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let incident = blocked_bot(&w, "OAI-SearchBot").await;
 
     // The site no longer answers in time: robots.txt hangs past the request limit.
@@ -742,7 +742,7 @@ async fn a_site_that_does_not_answer_fails_the_recheck_and_frees_the_incident() 
 
 #[tokio::test]
 async fn a_page_server_rendered_again_is_clean_and_only_it_is_fetched() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     w.crawl().await;
     w.site.set(|k| k.shells = vec!["/"]);
     w.crawl().await;
@@ -768,7 +768,7 @@ async fn a_page_server_rendered_again_is_clean_and_only_it_is_fetched() {
 
 #[tokio::test]
 async fn a_page_robots_txt_keeps_codoseobot_off_is_not_fetched() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     w.crawl().await;
     w.site.set(|k| k.shells = vec!["/", "/a"]);
     w.crawl().await;
@@ -802,7 +802,7 @@ async fn a_page_robots_txt_keeps_codoseobot_off_is_not_fetched() {
 
 #[tokio::test]
 async fn an_llms_txt_serving_again_is_clean() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     w.site.set(|k| k.llms_status = 200);
     w.crawl().await;
     w.site.set(|k| k.llms_status = 503);

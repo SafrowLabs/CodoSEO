@@ -18,7 +18,7 @@ use crate::accounts::parse_plan;
 pub async fn downgrade_expired(pool: &PgPool, now: OffsetDateTime) -> Result<u64, sqlx::Error> {
     let due: Vec<Uuid> = sqlx::query_scalar(
         "SELECT id FROM accounts \
-         WHERE plan IN ('pro', 'agency') AND plan_expires_at < $1 ORDER BY plan_expires_at",
+         WHERE plan IN ('lite', 'pro') AND plan_expires_at < $1 ORDER BY plan_expires_at",
     )
     .bind(now)
     .fetch_all(pool)
@@ -30,7 +30,7 @@ pub async fn downgrade_expired(pool: &PgPool, now: OffsetDateTime) -> Result<u64
         // list was read) leaves the account alone.
         let changed = sqlx::query(
             "UPDATE accounts SET plan = 'free', plan_expires_at = NULL, plan_cancelled_at = NULL \
-             WHERE id = $1 AND plan IN ('pro', 'agency') AND plan_expires_at < $2",
+             WHERE id = $1 AND plan IN ('lite', 'pro') AND plan_expires_at < $2",
         )
         .bind(id)
         .bind(now)
@@ -79,7 +79,7 @@ pub async fn apply_plan_limits(
         // Paying is what makes a site daily (a Free site is weekly even though the Free
         // limits are checked here too), so only the paid plans are moved up. Self-hosted
         // sites keep whatever schedule their owner chose.
-        Some(Schedule::Daily) if matches!(plan, Plan::Pro | Plan::Agency) => {
+        Some(Schedule::Daily) if matches!(plan, Plan::Lite | Plan::Pro) => {
             sqlx::query(
                 "UPDATE sites SET schedule = 'daily', next_crawl_at = NULL \
                  WHERE account_id = $1 AND monitoring_active AND schedule IS DISTINCT FROM 'daily'",

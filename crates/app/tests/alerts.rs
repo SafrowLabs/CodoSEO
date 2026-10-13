@@ -278,7 +278,7 @@ impl Hook {
 
 #[tokio::test]
 async fn four_hundred_changes_on_two_channels_make_two_messages_of_twenty_and_380_more() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let (server, hook) = Hook::start(200).await;
     let email = w.email_channel().await;
     let webhook = w.http_channel("webhook", server.url("/hook")).await;
@@ -336,7 +336,7 @@ async fn four_hundred_changes_on_two_channels_make_two_messages_of_twenty_and_38
 
 #[tokio::test]
 async fn a_retried_delivery_does_not_resend_to_the_channel_that_already_got_it() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let (server, hook) = Hook::start(500).await;
     w.email_channel().await;
     let webhook = w.http_channel("webhook", server.url("/hook")).await;
@@ -593,7 +593,7 @@ async fn a_free_accounts_slack_channel_is_skipped_and_its_email_alerted() {
 
 #[tokio::test]
 async fn a_pro_accounts_slack_channel_is_alerted() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let (server, hook) = Hook::start(200).await;
     w.email_channel().await;
     w.http_channel("slack", server.url("/slack")).await;
@@ -614,7 +614,7 @@ async fn a_pro_accounts_slack_channel_is_alerted() {
 
 #[tokio::test]
 async fn muted_and_disabled_channels_get_nothing_and_their_changes_wait_for_the_digest() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let email = w.email_channel().await;
     channels::set_muted(w.pool(), w.account, email, true)
         .await
@@ -632,7 +632,7 @@ async fn muted_and_disabled_channels_get_nothing_and_their_changes_wait_for_the_
 
 #[tokio::test]
 async fn a_delivery_to_a_channel_that_is_gone_muted_or_off_is_dropped_quietly() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let (server, hook) = Hook::start(200).await;
     let muted = w.http_channel("webhook", server.url("/a")).await;
     let off = w.http_channel("webhook", server.url("/b")).await;
@@ -674,7 +674,7 @@ async fn a_site_with_no_rules_or_email_channel_yet_still_gets_the_default_alert(
 
 #[tokio::test]
 async fn planning_covers_a_slack_channel_added_before_the_site_had_rules() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let (server, hook) = Hook::start(200).await;
     // A channel with no rules on this site (it was added before the site was).
     let target = ChannelTarget::Slack {
@@ -699,7 +699,7 @@ async fn planning_covers_a_slack_channel_added_before_the_site_had_rules() {
 
 #[tokio::test]
 async fn planning_twice_does_not_queue_a_second_delivery() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     w.email_channel().await;
     w.change(ChangeKind::ErrorSpike, None).await;
     alerts::plan_alert(&w.ctx, w.crawl).await.unwrap();
@@ -709,7 +709,7 @@ async fn planning_twice_does_not_queue_a_second_delivery() {
 
 #[tokio::test]
 async fn a_quick_audit_or_an_unowned_site_never_alerts() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     w.email_channel().await;
     let quick = new_crawl(w.pool(), w.site, "quick").await;
     insert_change(w.pool(), quick, w.site, ChangeKind::ErrorSpike, None).await;
@@ -732,7 +732,7 @@ async fn a_quick_audit_or_an_unowned_site_never_alerts() {
 
 #[tokio::test]
 async fn the_second_failed_crawl_alerts_every_allowed_enabled_channel() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let (server, hook) = Hook::start(200).await;
     let email = w.email_channel().await;
     let webhook = w.http_channel("webhook", server.url("/hook")).await;
@@ -815,7 +815,7 @@ async fn the_unreachable_alert_on_a_free_plan_goes_to_email_only() {
 
 #[tokio::test]
 async fn a_delivery_that_fails_five_times_turns_the_channel_off_and_emails_once() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let (server, hook) = Hook::start(500).await;
     let channel = w.http_channel("slack", server.url("/slack")).await;
     w.change(ChangeKind::ErrorSpike, None).await;
@@ -895,7 +895,7 @@ fn notices(w: &World) -> Vec<Email> {
 
 #[tokio::test]
 async fn a_target_that_cannot_be_decrypted_is_ours_to_fix_not_the_channels_fault() {
-    let mut w = World::new("pro").await;
+    let mut w = World::new("lite").await;
     let (server, hook) = Hook::start(200).await;
     let channel = w.http_channel("slack", server.url("/slack")).await;
     let change = w.change(ChangeKind::ErrorSpike, None).await;
@@ -932,7 +932,7 @@ async fn a_target_that_cannot_be_decrypted_is_ours_to_fix_not_the_channels_fault
 
 #[tokio::test]
 async fn the_default_email_channel_is_never_switched_off_by_failures() {
-    let mut w = World::new("pro").await;
+    let mut w = World::new("lite").await;
     // Nothing listens on port 9, so every send fails, like an SMTP outage.
     w.ctx.mailer =
         Mailer::from_config(Some("smtp://127.0.0.1:9"), "CodoSEO <hello@codoseo.test>").unwrap();
@@ -972,7 +972,7 @@ async fn the_default_email_channel_is_never_switched_off_by_failures() {
 
 #[tokio::test]
 async fn an_ai_access_change_on_a_failed_crawl_is_planned_to_the_instant_channel() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     let email = w.email_channel().await;
     // The crawl failed (robots.txt returned 503): its changes are still the owner's to hear about.
     sqlx::query("UPDATE crawls SET status = 'failed', failure_reason = 'site blocked: robots' WHERE id = $1")
@@ -1021,7 +1021,7 @@ async fn an_ai_access_change_on_a_failed_crawl_is_planned_to_the_instant_channel
 
 #[tokio::test]
 async fn alerts_link_to_ai_access_when_every_change_is_an_ai_one() {
-    let w = World::new("pro").await;
+    let w = World::new("lite").await;
     w.email_channel().await;
     w.change(ChangeKind::AiBotBlocked, None).await;
     w.change(ChangeKind::AiIssueResolved, None).await;
