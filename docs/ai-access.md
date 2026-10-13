@@ -294,7 +294,14 @@ Three ways to say "I know":
 
 ## The AI access panel and exports
 
-The site overview shows an **AI access** panel next to the health score: open incidents by severity, the accepted and snoozed ones set aside, the weakest evidence grade among the open ones and how many of their fixes are being verified, with a link to the AI access screen. It is not part of the health score. With nothing open, accepted or snoozed it says so.
+The site audit opens on an **AI & search · GEO audit** section, above the health score and labelled as access and checks, not traffic, and not part of the score. It shows:
+
+- the **AI & GEO checks** passed out of 7 (one per kind of finding, judged on the latest report; kinds that report couldn't judge are not counted as passed) next to the 44 SEO checks in the page head; the failing-checks KPI counts both, out of 51;
+- tiles for search bots allowed, training bots blocked against your intent, the synthetic fetch checks, content in raw HTML and llms.txt (informational);
+- one card per operator with its logo, each of its registry bots, its purpose, what robots.txt says (with **Blocked · intended** when your intent asks for it) and what the synthetic fetch saw (**Not probed** where none ran). On a phone each operator is one summary line;
+- **Can AI answers quote you?**: the important pages each answer engine may quote;
+- the **Open AI issues** panel: open incidents by severity, the accepted and snoozed ones set aside, the weakest evidence grade among the open ones and how many of their fixes are being verified, and the first open incidents by name, each linked to its card on the AI access screen where Fix and Recheck are;
+- a placeholder for **real bot activity**, which arrives with log ingestion (C1). Until then nothing on the page is traffic.
 
 **Issues CSV** and **JSON** on the AI access screen download the site's open incidents and those resolved in the last 90 days: `kind`, `subject`, `severity`, `grade`, `title`, `state`, `first_seen`, `last_seen`, `resolved_at`, `resolved_by` (`crawl`, `recheck` or `intent`), `verified_at`, `affected_urls` and `sources`. The same rows come from the API ([`GET .../ai-access/incidents`](api.md#ai-access-incidents)). Text cells that start like a spreadsheet formula get a leading `'` in the CSV, since titles and URLs come from the crawled site.
 
@@ -312,7 +319,7 @@ Accepted and snoozed incidents are set aside:
 
 ![The Accepted section and a snoozed incident](images/ai-access/ai-access-accepted-light.png)
 
-![The AI access panel on the overview, next to the health score](images/ai-access/overview-ai-access-light.png)
+![The AI & search · GEO audit section at the top of the site audit](images/ai-access/overview-ai-access-light.png)
 
 ## The public registry
 

@@ -2347,7 +2347,8 @@ async fn the_overview_has_an_ai_access_panel_beside_the_health_score_and_not_in_
     let kpi = &body[kpi_start..kpi_start + body[kpi_start..].find("kpi-delta").unwrap()];
     assert!(kpi.contains(&format!(r#"data-count="{score}""#)), "{kpi}");
     assert!(!kpi.contains("AI access"), "{kpi}");
-    assert!(body.find("Health score").unwrap() < body.find(r#"id="ai-access-panel""#).unwrap());
+    // The AI & GEO section comes first on the page, above the score's KPIs.
+    assert!(body.find(r#"id="ai-access-panel""#).unwrap() < body.find("Health score").unwrap());
     // The score is what it is without the incident: both crawls hold the same pages.
     let scores: Vec<i16> = sqlx::query_scalar(
         "SELECT health_score FROM crawls WHERE site_id = $1 ORDER BY created_at",
@@ -2586,4 +2587,99 @@ async fn the_incident_exports_are_the_signed_in_owners_only() {
         .body;
     assert!(body.contains(&format!("/s/{}/ai-access/incidents.csv", site.id)));
     assert!(body.contains(&format!("/s/{}/ai-access/incidents.json", site.id)));
+}
+
+// ---- the site audit's AI & GEO section ------------------------------------------------------
+
+async fn audit_body(app: &TestApp, site: &Site, cookie: &str) -> String {
+    app.get(&format!("/s/{}/audit", site.id), Some(cookie))
+        .await
+        .body
+}
+
+/// The audit's row for one bot, up to its closing `</li>`.
+fn audit_bot_row(body: &str, token: &str) -> String {
+    let at = body
+        .find(&format!(">{token}</span>"))
+        .expect("the bot's row");
+    body[at..at + body[at..].find("</li>").unwrap()].to_owned()
+}
+
+#[tokio::test]
+async fn the_audit_opens_on_the_geo_section_with_operators_fetch_results_and_incidents() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
+        .await;
+    let body = audit_body(&app, &site, &cookie).await;
+    let start = body
+        .find(r#"aria-labelledby="au-geo-h""#)
+        .expect("the GEO section");
+    let end = body.find("Headline metrics").expect("the KPIs");
+    assert!(start < end, "GEO first");
+    let geo = &body[start..end];
+    for needle in [
+        "Access &amp; checks · not traffic",
+        "Not part of the health score",
+        // One card per operator, with its logo on a tile, or a monogram.
+        "/assets/logo-openai.",
+        "/assets/logo-mistral.",
+        ">CC</b>",
+        "Common Crawl",
+        // OpenAI's search bot is challenged by the WAF; ChatGPT-User gets the same page.
+        "Challenged · Cloudflare",
+        "Same page",
+        "Needs a look",
+        // Control tokens and training bots are never probed.
+        "Training control",
+        "Not probed",
+        // The KPIs, with the grades the ledger gives.
+        "Search bots allowed",
+        "2 treated worse",
+        "synthetic · grade B",
+        "Content in HTML",
+        "informational · not scored",
+        // Eligibility per engine, the incidents panel and the C1 placeholder.
+        "Can AI answers quote you?",
+        "Bing / Copilot",
+        r#"id="ai-access-panel""#,
+        "Real bot activity",
+        "Coming with log ingestion (C1)",
+    ] {
+        assert!(geo.contains(needle), "missing {needle:?} in {geo}");
+    }
+    // Every registry bot has a row.
+    for b in &registry().bots {
+        assert!(geo.contains(&format!(">{}</span>", b.token)), "{}", b.token);
+    }
+    assert!(audit_bot_row(geo, "OAI-SearchBot").contains("Challenged · Cloudflare"));
+    // The open incident links to its card, where Fix and Recheck are.
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    assert!(
+        geo.contains(&format!(r#"href="/s/{}/ai-access#issue-{id}""#, site.id)),
+        "{geo}"
+    );
+    // The header counts the AI & GEO checks apart from the SEO ones; failing checks count both.
+    assert!(body.contains("/ 7 AI &#38; GEO checks passed"), "{body}");
+    assert!(body.contains("<span>of 51</span>"), "{body}");
+    assert!(body.contains(" SEO · 1 AI &#38; GEO"), "{body}");
+}
+
+#[tokio::test]
+async fn a_blocked_search_bot_reads_blocked_in_the_audit_and_an_intended_block_says_so() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let body = audit_body(&app, &site, &cookie).await;
+    let row = audit_bot_row(&body, "OAI-SearchBot");
+    assert!(row.contains(r#"<span class="badge t-err""#), "{row}");
+    assert!(row.contains(">Blocked</span>"), "{row}");
+    assert!(body.contains("Needs a look"), "{body}");
+
+    // Marked intended: the same block is now the owner's choice.
+    let res = app
+        .post_hx(&action(&site, id, "intended"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let body = audit_body(&app, &site, &cookie).await;
+    let row = audit_bot_row(&body, "OAI-SearchBot");
+    assert!(row.contains("Blocked · intended"), "{row}");
+    assert!(row.contains("t-intent"), "{row}");
 }

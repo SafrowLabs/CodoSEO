@@ -19,7 +19,7 @@ use codoseo_core::report::CrawlReport;
 pub use inlinks::MAX_INLINK_SAMPLES;
 pub use page::page_issues;
 pub use registry::{CHECKS, Category, CheckDef, Scope, def};
-pub use score::health_score;
+pub use score::{health_score, points_regained};
 
 /// Runs the page checks only, replacing the page's issue bits. For `codoseo check` and
 /// callers that have one page and no crawl.

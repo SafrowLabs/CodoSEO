@@ -107,6 +107,24 @@ pub async fn latest_done_for_account(
     .await
 }
 
+/// The site's last `limit` finished crawls, oldest first, chosen like [`latest_done`]: the
+/// site audit's trend charts read their score and stored summary, nothing per page.
+pub async fn recent_done(
+    pool: &PgPool,
+    site_id: Uuid,
+    limit: i64,
+) -> Result<Vec<Crawl>, sqlx::Error> {
+    let mut rows: Vec<Crawl> = sqlx::query_as(&format!(
+        "{SELECT} WHERE status = 'done' ORDER BY finished_at DESC, number DESC LIMIT $2"
+    ))
+    .bind(site_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    rows.reverse();
+    Ok(rows)
+}
+
 /// The finished crawl before `crawl_id` (what the changes screen compares against).
 pub async fn previous_done(
     pool: &PgPool,

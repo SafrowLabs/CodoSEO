@@ -98,6 +98,45 @@ const SOURCES: &[Source] = &[
         content_type: "text/javascript; charset=utf-8",
         bytes: include_bytes!("../assets/home.js"),
     },
+    // AI operator logos for the site audit's GEO section, in brand colours on a white tile. Paths
+    // from simple-icons (CC0); Microsoft's four squares and Mistral's pixel M are drawn here.
+    logo(
+        "logo-openai.svg",
+        include_bytes!("../assets/logos/openai.svg"),
+    ),
+    logo(
+        "logo-anthropic.svg",
+        include_bytes!("../assets/logos/anthropic.svg"),
+    ),
+    logo(
+        "logo-google.svg",
+        include_bytes!("../assets/logos/google.svg"),
+    ),
+    logo(
+        "logo-perplexity.svg",
+        include_bytes!("../assets/logos/perplexity.svg"),
+    ),
+    logo(
+        "logo-microsoft.svg",
+        include_bytes!("../assets/logos/microsoft.svg"),
+    ),
+    logo(
+        "logo-apple.svg",
+        include_bytes!("../assets/logos/apple.svg"),
+    ),
+    logo("logo-meta.svg", include_bytes!("../assets/logos/meta.svg")),
+    logo(
+        "logo-amazon.svg",
+        include_bytes!("../assets/logos/amazon.svg"),
+    ),
+    logo(
+        "logo-duckduckgo.svg",
+        include_bytes!("../assets/logos/duckduckgo.svg"),
+    ),
+    logo(
+        "logo-mistral.svg",
+        include_bytes!("../assets/logos/mistral.svg"),
+    ),
     // Last, so its font URLs can be rewritten to the fonts' hashed names.
     Source {
         name: "app.css",
@@ -105,6 +144,14 @@ const SOURCES: &[Source] = &[
         bytes: include_bytes!("../assets/app.css"),
     },
 ];
+
+const fn logo(name: &'static str, bytes: &'static [u8]) -> Source {
+    Source {
+        name,
+        content_type: "image/svg+xml",
+        bytes,
+    }
+}
 
 pub struct Asset {
     pub name: &'static str,
@@ -295,7 +342,7 @@ mod tests {
 
     #[test]
     fn only_text_and_svg_are_gzipped() {
-        for name in ["app.css", "app.js", "favicon.svg"] {
+        for name in ["app.css", "app.js", "favicon.svg", "logo-openai.svg"] {
             assert!(ASSETS.by_name(name).unwrap().gzip.is_some(), "{name}");
         }
         for name in [

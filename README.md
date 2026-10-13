@@ -7,7 +7,7 @@
 [![License: AGPL-3.0](https://img.shields.io/crates/l/codoseo)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![CI](https://github.com/SafrowLabs/CodoSEO/actions/workflows/ci.yml/badge.svg)](https://github.com/SafrowLabs/CodoSEO/actions/workflows/ci.yml)
 
-CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in Rust. It crawls a site, runs **44 SEO checks** across response health, indexability, on-page factors, content, links, schema and more, scores the result 0-100, and compares each crawl with the one before so a regression shows up the day it ships. It comes in four forms:
+CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in Rust. It crawls a site, runs **44 SEO checks** across response health, indexability, on-page factors, content, links, schema and more plus **7 AI & GEO checks** (51 in all), scores the SEO side 0-100, and compares each crawl with the one before so a regression shows up the day it ships. It comes in four forms:
 
 - **A CLI** for one-off audits and CI gates (`codoseo crawl`, `codoseo diff`).
 - **A local MCP server** (`codoseo mcp`) so an AI agent such as Claude Code can audit sites from your machine.
@@ -97,7 +97,7 @@ codoseo diff baseline.json audit.json
 
 | Command | Description |
 |---|---|
-| `codoseo crawl <URL>` | Crawl a site, run all 44 checks, print a report |
+| `codoseo crawl <URL>` | Crawl a site, run all 44 SEO checks and the 7 AI & GEO checks, print a report |
 | `codoseo check <URL>` | Inspect one page: fields, raw HTML content, redirect chain, page-level issues |
 | `codoseo robots <URL>` | Show the site's `robots.txt`, test whether CodoSEObot may fetch a path and what it says to each AI bot |
 | `codoseo bots` | List the AI crawlers, fetchers and control tokens CodoSEO knows (`--format json` prints the public registry file) |
@@ -249,6 +249,20 @@ Every crawled page is evaluated against these checks. Severity: **C** = Critical
 | Open Graph title or image is missing | N | `og_missing` |
 | Hreflang has no entry for the page itself | N | `hreflang_missing_self` |
 
+## The 7 AI & GEO checks
+
+Next to the 44 SEO checks, every crawl runs 7 AI & GEO checks, one per kind of [AI access](docs/ai-access.md) finding: 44 + 7 = 51 checks in all. They are judged against your intent (which bots you want in or out) and are **not part of the health score**, which stays SEO-only.
+
+| Check | Slug |
+|---|---|
+| robots.txt answers 5xx or 429, so bots stay out | `robots_unavailable` |
+| AI search or answer bots you want are blocked by robots.txt | `bots_blocked` |
+| Bots you want kept out can still crawl | `bots_not_blocked` |
+| Page markup keeps pages out of an engine's AI answers | `answers_restricted` |
+| A synthetic fetch with a bot's user agent is blocked, challenged or diverted | `fetch_blocked` |
+| Important pages are an empty app shell in the HTML as served | `content_missing` |
+| An adopted llms.txt stopped serving | `llms_txt_unavailable` |
+
 ---
 
 ## CI integration
@@ -296,7 +310,7 @@ codoseo diff before.json after.json --fail-on critical
 
 ### Health score
 
-The score is 0–100. Each check carries a weight proportional to its severity (critical > warning > notice) and the fraction of affected pages. A site where every page fails every check scores 0; a site with no failures scores 100.
+The score is 0–100 and reads only the 44 SEO checks. Each check carries a weight proportional to its severity (critical > warning > notice) and the fraction of affected pages. A site where every page fails every check scores 0; a site with no failures scores 100. The site audit's **Top fixes** ranks failing checks by the points fixing each one alone would give back, from the same formula (`codoseo_checks::points_regained`).
 
 ---
 
@@ -355,7 +369,11 @@ Details, JSON config and the tool list are in [docs/mcp.md](docs/mcp.md); the sa
 
 ## Web app and self-hosting
 
-The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview; inlinks; reconstructed headers), a site audit with your health score and issues, and a changes view that compares each crawl with the one before. It can crawl on a schedule and alert you by email, Slack, Discord or webhook. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
+The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview; inlinks; reconstructed headers), a site audit (AI & GEO section first, then the health score and its trend, the fixes that would raise it most, issues by severity and category), and a changes view that compares each crawl with the one before. It can crawl on a schedule and alert you by email, Slack, Discord or webhook. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
+
+![The site audit: the AI & search · GEO section, the headline KPIs, the health score trend and the top fixes](docs/images/site-audit/site-audit-light.png)
+
+More: [dark theme](docs/images/site-audit/site-audit-dark.png), [on a phone](docs/images/site-audit/site-audit-mobile.png), [after the first crawl](docs/images/site-audit/site-audit-first-light.png).
 
 Self-host with Docker Compose in three commands:
 
@@ -393,7 +411,7 @@ The project is a Cargo workspace:
 crates/
   core/       — shared types: URLs, page records, check IDs, audit format
   crawler/    — fetcher, robots.txt, sitemaps, politeness, crawl loop
-  checks/     — the 44 check definitions, scoring, site-wide analysis
+  checks/     — the 44 SEO check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
   geo/        — AI bot registry (CC0 data), robots.txt verdicts, AI access report and findings
   mcp/        — MCP server: the 11 local tools and the hosted tools, over rmcp

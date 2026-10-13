@@ -139,7 +139,7 @@ fn purpose_blurb(p: Purpose) -> &'static str {
     }
 }
 
-fn stance_label(s: Stance) -> &'static str {
+pub(crate) fn stance_label(s: Stance) -> &'static str {
     match s {
         Stance::Allow => "Allow",
         Stance::Block => "Block",
@@ -1000,7 +1000,7 @@ fn inconclusive_tip(r: InconclusiveReason) -> &'static str {
     }
 }
 
-fn skip_label(r: SkipReason) -> &'static str {
+pub(crate) fn skip_label(r: SkipReason) -> &'static str {
     match r {
         SkipReason::NoUserAgent => "Not probed: no documented user agent",
         SkipReason::VerifiedSearchEngine => "Not probed: verified search engine",
@@ -1854,7 +1854,7 @@ fn bot_groups(report: &AccessReport, intent: &Intent) -> Vec<BotGroup> {
         .collect()
 }
 
-fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
+pub(crate) fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
     let access = report.bot(&bot.token);
     let stance = intent.effective(bot);
     let total = report.important.len();
