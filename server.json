@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.safrowlabs/codoseo",
+  "title": "CodoSEO",
+  "description": "SEO and AI search (GEO) audits: 44 SEO checks, AI bot access, fixes to copy.",
+  "version": "0.1.0-rc.1",
+  "websiteUrl": "https://codoseo.com",
+  "repository": {
+    "url": "https://github.com/SafrowLabs/CodoSEO",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "codoseo",
+      "version": "0.1.0-rc.1",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://codoseo.com/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional: \"Bearer \" and a CodoSEO API key (cdo_...) from Settings, API keys, for your monitored sites. Without it the server offers free audits of public sites.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
