@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Args;
-use codoseo_checks::{def, run_checks};
+use codoseo_checks::run_checks;
 use codoseo_core::audit::{AUDIT_FORMAT_VERSION, Audit};
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
 use codoseo_core::output::CrawlOutput;
@@ -19,8 +19,9 @@ use codoseo_geo::report::{build_report, important_urls};
 use codoseo_geo::robots::RobotsTxt;
 use url::Url;
 
+use super::gate::{Gate, judge, parse_gate, summary_lines};
 use super::output::write_crawl;
-use super::{CrawlFormat, EXIT_FAIL_ON, EXIT_OK, EXIT_RUNTIME, FailOn, Outcome, open_output};
+use super::{CliError, CrawlFormat, EXIT_FAIL_ON, EXIT_OK, EXIT_RUNTIME, Outcome, open_output};
 const MIN_RPS: u32 = 1;
 const MAX_RPS: u32 = 50;
 /// Pages `--probes` checks, and its budget and request cap: the self-hosted defaults.
@@ -46,9 +47,20 @@ pub struct CrawlArgs {
     /// Write the report to this file instead of stdout
     #[arg(short, long)]
     output: Option<PathBuf>,
-    /// Exit with 1 when a check at this severity or worse fails
-    #[arg(long, value_enum)]
-    fail_on: Option<FailOn>,
+    /// Exit with 1 when one of these fails (comma-separated or repeated): critical or warning (SEO
+    /// checks at that severity or worse); geo (robots.txt failing, wanted bots blocked, nosnippet
+    /// or noarchive, empty app shells); geo:critical|warning|notice; or an AI access finding kind
+    /// such as bots_blocked or answers_restricted:nosnippet
+    #[arg(long, value_delimiter = ',', value_parser = parse_gate)]
+    fail_on: Vec<Gate>,
+    /// A saved audit (`--format json`) from an earlier run: --fail-on then counts only what is
+    /// new or worse since it, and SARIF marks each result's baselineState
+    #[arg(long, value_name = "AUDIT.json")]
+    baseline: Option<PathBuf>,
+    /// Also write the report to FILE, in the format its extension names (.json, .sarif, .md,
+    /// .csv, .txt); repeatable
+    #[arg(long, value_name = "FILE")]
+    save: Vec<PathBuf>,
     /// After the crawl, fetch up to 5 important pages as each AI search and user-triggered bot
     /// and compare with CodoSEObot (a synthetic check; off by default)
     #[arg(long)]
@@ -107,7 +119,22 @@ impl ProgressLine {
 
 pub async fn run(args: CrawlArgs) -> Outcome {
     let cfg = args.config();
-    // Opened first, so a bad path fails at once instead of after a long crawl.
+    // Read and opened first, so a bad path fails at once instead of after a long crawl.
+    let baseline = args
+        .baseline
+        .as_deref()
+        .map(super::diff::load)
+        .transpose()?;
+    let mut saves = Vec::new();
+    for path in &args.save {
+        let format = CrawlFormat::from_extension(path).ok_or_else(|| {
+            CliError::msg(format!(
+                "--save {}: name the format with the extension .json, .sarif, .md, .csv or .txt",
+                path.display()
+            ))
+        })?;
+        saves.push((format, open_output(Some(path))?));
+    }
     let mut w = open_output(args.output.as_ref())?;
     let progress = ProgressLine {
         enabled: std::io::stderr().is_terminal(),
@@ -118,8 +145,8 @@ pub async fn run(args: CrawlArgs) -> Outcome {
 
     let report = run_checks(&mut out);
     let duration_ms = out.duration_ms;
-    // GEO stays out of the health score and `--fail-on`: it is a section of its own, judged under
-    // the default intent because the CLI has nowhere to keep an owner's.
+    // GEO stays out of the health score: it is a section of its own, judged under the default
+    // intent because the CLI has nowhere to keep an owner's. `--fail-on` may gate on it.
     let ai_access = if args.probes && stop_message(&out.stop).is_none() {
         assess_with_probes(&out).await
     } else {
@@ -138,22 +165,30 @@ pub async fn run(args: CrawlArgs) -> Outcome {
         ai_access: Some(ai_access),
     };
 
-    write_crawl(&mut w, args.format, &audit)?;
+    let verdict = judge(&audit, baseline.as_ref(), &args.fail_on);
+    write_crawl(&mut w, args.format, &audit, &verdict)?;
     w.flush()?;
+    for (format, mut file) in saves {
+        write_crawl(&mut file, format, &audit, &verdict)?;
+        file.flush()?;
+    }
 
-    // A crawl that could not run says so after its report, and that wins over --fail-on.
+    // A crawl that could not run says so after its report, and that wins over --fail-on, except
+    // for a failing robots.txt a gate asked about: finding that is the gate's job.
     if let Some(message) = stop_message(&audit.snapshot.stop) {
         eprintln!("crawl stopped: {}", super::clean(&message));
-        return Ok(EXIT_RUNTIME);
+        if !verdict.robots_tripped() {
+            return Ok(EXIT_RUNTIME);
+        }
     }
-    let failed = args.fail_on.is_some_and(|threshold| {
-        audit
-            .report
-            .counts
-            .iter()
-            .any(|(id, _)| threshold.reached_by(def(*id).severity))
-    });
-    Ok(if failed { EXIT_FAIL_ON } else { EXIT_OK })
+    for line in summary_lines(&verdict) {
+        eprintln!("{line}");
+    }
+    Ok(if verdict.failed() {
+        EXIT_FAIL_ON
+    } else {
+        EXIT_OK
+    })
 }
 
 /// [`assess_with_defaults`] plus the synthetic fetch probes of up to [`PROBE_URLS`] important

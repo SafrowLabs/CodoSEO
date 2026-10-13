@@ -12,12 +12,15 @@ use codoseo_geo::probe::{InconclusiveReason, ProbeFetch, ProbeReport, SkipReason
 use serde::Serialize;
 use url::Url;
 
+use super::gate::Verdict as GateVerdict;
 use super::llms::{LlmsFormat, LlmsOutput};
 use super::probe::{ProbeFormat, ProbeOutput};
 use super::{CliError, CrawlFormat, DiffFormat};
 
 mod csv_rows;
+mod github;
 mod markdown;
+pub mod sarif;
 mod table;
 
 /// Examples listed per failing check.
@@ -83,11 +86,20 @@ pub fn stop_text(stop: &StopReason) -> String {
     }
 }
 
-pub fn write_crawl(w: &mut impl Write, format: CrawlFormat, audit: &Audit) -> Result<(), CliError> {
+/// One crawl report. `verdict` is what `--fail-on` and `--baseline` made of it, which the SARIF and
+/// GitHub formats mark on each result.
+pub fn write_crawl(
+    w: &mut impl Write,
+    format: CrawlFormat,
+    audit: &Audit,
+    verdict: &GateVerdict,
+) -> Result<(), CliError> {
     match format {
         CrawlFormat::Table => table::crawl(w, audit)?,
         CrawlFormat::Md => markdown::crawl(w, audit)?,
         CrawlFormat::Csv => csv_rows::crawl(w, audit)?,
+        CrawlFormat::Sarif => sarif::crawl(w, audit, verdict)?,
+        CrawlFormat::Github => github::crawl(w, audit, verdict)?,
         CrawlFormat::Json => {
             serde_json::to_writer(&mut *w, audit)?;
             writeln!(w)?;

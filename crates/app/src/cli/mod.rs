@@ -5,6 +5,7 @@ mod bots;
 mod check;
 mod crawl;
 mod diff;
+mod gate;
 mod healthcheck;
 mod llms;
 mod mcp;
@@ -149,6 +150,25 @@ pub enum CrawlFormat {
     Json,
     Md,
     Csv,
+    /// SARIF 2.1.0, for GitHub code scanning.
+    Sarif,
+    /// GitHub Actions annotations (`::error ...`) and a short summary.
+    Github,
+}
+
+impl CrawlFormat {
+    /// The format a `--save` file's extension names.
+    pub fn from_extension(path: &std::path::Path) -> Option<CrawlFormat> {
+        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+        Some(match ext.as_str() {
+            "json" => CrawlFormat::Json,
+            "sarif" => CrawlFormat::Sarif,
+            "md" | "markdown" => CrawlFormat::Md,
+            "csv" => CrawlFormat::Csv,
+            "txt" => CrawlFormat::Table,
+            _ => return None,
+        })
+    }
 }
 
 /// `--format` for `diff`.
@@ -166,8 +186,8 @@ pub enum PlainFormat {
     Json,
 }
 
-/// The `--fail-on` threshold: a failing check or a change at this severity or worse
-/// ends the command with exit code 1.
+/// `diff --fail-on`: a change at this severity or worse ends the command with exit code 1.
+/// (`crawl --fail-on` takes more; see `gate`.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum FailOn {
     Critical,
