@@ -43,9 +43,10 @@ restricting tokens that bypass 2FA for direct publishing, so the token fallback 
 
 ## Before tagging
 
-1. Set the same version in three places: `[workspace.package] version` and every `codoseo-*` entry in
-   `[workspace.dependencies]` of `Cargo.toml`, plus `npm/package.json` (and `npm/package-lock.json`).
-   Refresh `Cargo.lock` (`cargo update -w`).
+1. Set the same version everywhere: `[workspace.package] version` and every `codoseo-*` entry in
+   `[workspace.dependencies]` of `Cargo.toml`, `npm/package.json` (and `npm/package-lock.json`),
+   `version` and `packages[0].version` in `server.json` (the MCP Registry entry), and `version` in
+   `.claude-plugin/plugin.json`. Refresh `Cargo.lock` (`cargo update -w`).
 2. `python3 packaging/check-version.py vX.Y.Z` must print the version. The release workflow runs the
    same script and fails before building anything if the tag, the workspace version or the npm
    version disagree.
@@ -91,6 +92,14 @@ that already exist, so if it failed part-way, publish the remaining crates by ha
 `cargo publish -p <crate>` in dependency order (core, checks, crawler, diff, mcp, notify, store, web,
 codoseo) and re-run the other jobs. Published crates.io and npm versions cannot be replaced, only
 yanked or deprecated; fix forward with a new patch version.
+
+## MCP Registry (by hand, not in the workflow)
+
+After npm has the release (the registry reads `mcpName` from the published package): `mcp-publisher
+login github` as an owner of the SafrowLabs organization, then `mcp-publisher publish` from the
+repository root. Each `server.json` version can be published once. Details in
+[docs/agents.md](docs/agents.md#mcp-registry). The Claude Code plugin needs no publishing: users add
+the repository as a marketplace (`/plugin marketplace add SafrowLabs/CodoSEO`).
 
 ## Nightly
 

@@ -1,0 +1,20 @@
+{
+  "name": "codoseo",
+  "displayName": "CodoSEO",
+  "version": "0.1.0-rc.1",
+  "description": "SEO and AI search (GEO) audits from Claude Code: the CodoSEO MCP server (local, no account) and the codoseo-audit skill to run an audit, read the findings and copy the fixes.",
+  "author": {
+    "name": "SafrowLabs",
+    "url": "https://codoseo.com"
+  },
+  "homepage": "https://codoseo.com",
+  "repository": "https://github.com/SafrowLabs/CodoSEO",
+  "license": "AGPL-3.0-only",
+  "keywords": ["seo", "geo", "ai-search", "audit", "robots-txt", "mcp"],
+  "mcpServers": {
+    "codoseo": {
+      "command": "npx",
+      "args": ["-y", "codoseo", "mcp"]
+    }
+  }
+}

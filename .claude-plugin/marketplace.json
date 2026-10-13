@@ -1,0 +1,15 @@
+{
+  "name": "codoseo",
+  "owner": {
+    "name": "SafrowLabs",
+    "url": "https://codoseo.com"
+  },
+  "description": "CodoSEO for Claude Code: SEO and AI search (GEO) audits.",
+  "plugins": [
+    {
+      "name": "codoseo",
+      "source": ".",
+      "description": "The CodoSEO MCP server and the codoseo-audit skill."
+    }
+  ]
+}

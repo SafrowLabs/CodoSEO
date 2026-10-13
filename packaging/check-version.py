@@ -6,6 +6,7 @@ Prints the release version on stdout and exits 0 when everything agrees:
   * the version on each internal `codoseo-*` entry of [workspace.dependencies] (cargo publish
     needs them to match the version being published),
   * npm/package.json,
+  * server.json (the MCP Registry entry, and its npm package) and .claude-plugin/plugin.json,
   * the tag, when one is given (it must be `v` + that version).
 Anything else prints the mismatches on stderr and exits 1. Run from anywhere in the repo.
 """
@@ -27,6 +28,17 @@ for name, spec in cargo["workspace"]["dependencies"].items():
 npm_version = json.loads((root / "npm" / "package.json").read_text())["version"]
 if npm_version != version:
     problems.append(f"npm/package.json is {npm_version}, workspace version is {version}")
+
+# The MCP Registry entry and the Claude Code plugin name the release they describe.
+server = json.loads((root / "server.json").read_text())
+for label, value in [
+    ("server.json version", server["version"]),
+    ("server.json packages[0].version", server["packages"][0]["version"]),
+    (".claude-plugin/plugin.json version",
+     json.loads((root / ".claude-plugin" / "plugin.json").read_text())["version"]),
+]:
+    if value != version:
+        problems.append(f"{label} is {value}, workspace version is {version}")
 
 if len(sys.argv) > 1 and sys.argv[1] and sys.argv[1] != f"v{version}":
     problems.append(f"tag {sys.argv[1]} is not v{version}")

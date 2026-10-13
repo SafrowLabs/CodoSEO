@@ -2,6 +2,7 @@
   "name": "codoseo",
   "version": "0.1.0-rc.1",
   "description": "CodoSEO SEO crawler and site auditor CLI",
+  "mcpName": "io.github.safrowlabs/codoseo",
   "bin": {
     "codoseo": "bin/codoseo.js"
   },

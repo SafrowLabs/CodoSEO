@@ -384,6 +384,10 @@ claude mcp add --transport http codoseo https://codoseo.com/mcp --header "Author
 
 Details, JSON config and the tool list are in [docs/mcp.md](docs/mcp.md); the same data is available over REST ([docs/api.md](docs/api.md)).
 
+### Plugin, skill and registry
+
+This repository is also a Claude Code plugin marketplace: `/plugin marketplace add SafrowLabs/CodoSEO`, then `/plugin install codoseo@codoseo` gives Claude Code the local MCP server and the [`codoseo-audit`](skills/codoseo-audit/SKILL.md) Agent Skill (run an audit, read the findings, copy the fixes). [`server.json`](server.json) is the MCP Registry entry. Configs for Codex, Cursor and other clients are in [docs/agents.md](docs/agents.md).
+
 ---
 
 ## Web app and self-hosting
