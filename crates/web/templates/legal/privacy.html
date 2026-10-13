@@ -1,0 +1,129 @@
+{% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/seo.html" as seo -%}
+{% block title %}Privacy Policy — CodoSEO{% endblock %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block head %}
+<meta name="description" content="What the hosted CodoSEO service collects, why, who processes it, how long it is kept, which cookies it sets, and how to see, correct, export or delete your data.">
+{% call seo::social(base, "/privacy", "Privacy Policy — CodoSEO", "What the hosted CodoSEO service collects, how long it keeps it, and your rights.") %}{% endcall %}
+<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% include "partials/analytics.html" %}
+{% endblock %}
+{% block body %}
+<header class="l-top l-wrap">
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
+  <nav class="l-nav"><a class="btn btn-sm" href="/">Audit your site</a></nav>
+</header>
+<main class="l-wrap q-page prose">
+  <p class="l-eyebrow">Legal</p>
+  <h1 class="q-title">Privacy Policy</h1>
+  {% let here = "privacy" %}{% include "legal/_tabs.html" %}
+
+  <section class="lg-summary" aria-labelledby="summary">
+    <h2 id="summary">Plain-language summary</h2>
+    <ul>
+      <li>We collect what it takes to run the service: your email, the sites you add and what we find on their public pages.</li>
+      <li>We do not sell your data, show ads or use tracking cookies. Card details go to Dodo Payments, never to us.</li>
+      <li>Alert destinations are stored encrypted, and sign-in links, sessions and API keys only as hashes.</li>
+      <li>Email <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a> to see, correct, export or delete your data.</li>
+    </ul>
+  </section>
+
+  <h2>1. Who we are</h2>
+  <p>The hosted CodoSEO service at <a href="/">codoseo.com</a> is run by <strong>RankOrg</strong>, a business in India. RankOrg decides how and why your personal data is processed for the service, so it is the data fiduciary (or "controller") for it. This policy covers the hosted service only. A self-hosted copy of CodoSEO is run by whoever hosts it, and sends nothing to us.</p>
+  <p>We wrote this policy with India's Digital Personal Data Protection Act, 2023 in mind, and we offer the rights below to everyone, wherever you live.</p>
+
+  <h2>2. What we collect</h2>
+  <h3>Your account</h3>
+  <ul>
+    <li>Your email address, plus a normalised form of it so the same inbox cannot open several accounts.</li>
+    <li>If you sign in with GitHub: your GitHub user ID and the email address GitHub gives us.</li>
+    <li>Your plan, when you signed up and last signed in, and when you last opened a link in one of our emails.</li>
+  </ul>
+  <h3>Sign-in and sessions</h3>
+  <p>Sign-in links and session tokens are random values that we store only as a SHA-256 hash, so a copy of our database cannot be used to sign in. A sign-in link works once and expires after 15 minutes; a session lasts 30 days.</p>
+  <h3>Sites you add and crawl data</h3>
+  <p>The domains you add, their crawl settings, and what CodoSEObot finds on their <strong>public</strong> pages: addresses, status codes, response times, redirects, titles, meta tags, headings, links, structured data, and files such as robots.txt, sitemaps and llms.txt. We also keep check results, health scores, the changes between crawls, and the AI access (GEO) results for each site. We do not store the full HTML of pages.</p>
+  <h3>Alerts</h3>
+  <p>The places you ask us to send alerts: email addresses, Slack and Discord webhook URLs, and your own webhook URLs and their signing secrets. These are <strong>stored encrypted</strong> (AES-256-GCM, with a key that is not kept in the database). We also keep the alert rules you set, and a short-lived queue of the alerts and emails we send.</p>
+  <h3>API and MCP</h3>
+  <p>API keys are shown to you once and stored <strong>only as a SHA-256 hash</strong>, with a short prefix so you can tell them apart. We count API and MCP calls per key and per day to apply your plan's limits.</p>
+  <h3>Audits without an account</h3>
+  <p>When you audit a site from the home page without signing in, we keep the site's address and results, and a cookie that lets you claim the audit later. To limit abuse we keep a hashed form of your IP address, with a salt that changes every day, rather than the address itself. The audit form may use Cloudflare Turnstile to tell people from bots.</p>
+  <h3>Billing</h3>
+  <p>For paid plans we keep your plan, its status and renewal dates, your Dodo Payments customer and subscription IDs, and the notifications Dodo Payments sends us about your subscription. <strong>We never receive or store card numbers</strong>: Dodo Payments collects payment details on its own checkout.</p>
+  <h3>Server logs and analytics</h3>
+  <ul>
+    <li>Like any website, our servers and network process technical data such as IP addresses, browser user agents and the pages requested, to deliver the service, keep it secure and fix problems. These logs are kept for a short time.</li>
+    <li>On the public pages (such as the home page, audit reports and these legal pages), we use <a href="https://umami.is" rel="noopener">Umami</a>, a privacy-focused analytics tool that does not use cookies, to count visits. The signed-in app does not load it.</li>
+  </ul>
+
+  <h2>3. Why we use it</h2>
+  <ul>
+    <li>To provide the service you asked for: sign you in, crawl your sites, run checks, send alerts and digests, and answer API and MCP calls. This is needed to perform our agreement with you.</li>
+    <li>To bill you through Dodo Payments and apply your plan's limits.</li>
+    <li>To keep the service safe: rate limits, stopping abuse, and handling complaints from site owners.</li>
+    <li>To email you about your account and the service, such as sign-in links, alerts, a weekly digest, and a note before we pause monitoring on an inactive Free account.</li>
+    <li>To meet legal duties, such as keeping payment records and answering lawful requests from authorities.</li>
+  </ul>
+  <p><strong>We do not sell your personal data</strong>, share it for advertising, or use it to train AI models.</p>
+
+  <h2>4. Who processes it for us</h2>
+  <p>We share data only with the service providers we need to run CodoSEO, and only what they need:</p>
+  <ul>
+    <li><strong>Dodo Payments</strong>, our merchant of record, for checkout, payments, taxes, invoices and subscription management.</li>
+    <li><strong>Our email delivery provider</strong>, to send sign-in links, alerts and other service emails.</li>
+    <li><strong>Our hosting provider</strong>, which runs the servers and database the service lives on.</li>
+    <li><strong>Cloudflare</strong>, for the Turnstile check on the audit form.</li>
+    <li><strong>GitHub</strong>, only if you choose to sign in with GitHub.</li>
+    <li><strong>Umami</strong> analytics, for cookie-free visit counts on the public pages.</li>
+    <li><strong>Slack, Discord or your own webhook endpoints</strong>, only when you set them up as alert channels: alerts about your sites go to them.</li>
+  </ul>
+  <p>If you click "Take this site to RankOrg" on an audit, the link carries the domain and its top pages to rankorg.com. Some of these providers may process data outside India; where they do, we rely on their contractual and legal safeguards.</p>
+  <p>We may also disclose data when the law requires it, for example to law enforcement, or to protect the service and others from abuse.</p>
+
+  <h2>5. How long we keep it</h2>
+  <ul>
+    <li><strong>Crawl history</strong>: per-page data for each site's latest two crawls. Older crawl results, changes and AI access incidents are deleted automatically after <strong>30 days on the Free plan</strong> and <strong>one year on paid plans</strong>.</li>
+    <li><strong>Audits without an account</strong>: deleted after <strong>7 days</strong> if no one claims them by signing in.</li>
+    <li><strong>Sign-in links and sessions</strong>: deleted once they expire (15 minutes and 30 days).</li>
+    <li><strong>API usage counts</strong>: 35 days. <strong>Revoked API keys</strong>: deleted 90 days after you revoke them.</li>
+    <li><strong>Queued alerts and emails</strong>: deleted 14 days after they are sent, or 30 days after they fail.</li>
+    <li><strong>Your account, sites and alert settings</strong>: for as long as you keep your account. When you delete it, we delete them, except records we must keep by law, such as payment records.</li>
+  </ul>
+
+  <h2>6. Cookies and local storage</h2>
+  <p>We use no advertising or tracking cookies. The service sets only these, all HttpOnly and limited to codoseo.com:</p>
+  <ul>
+    <li><code>codoseo_session</code>: keeps you signed in, for up to 30 days.</li>
+    <li><code>codoseo_audit</code>: links audits you start without an account to your browser so you can claim them, for up to 7 days.</li>
+    <li><code>codoseo_oauth</code>: protects GitHub sign-in, for 10 minutes.</li>
+  </ul>
+  <p>Your browser's local storage also remembers your theme and whether the sidebar is collapsed. That never leaves your device. Cloudflare Turnstile, when shown on the audit form, may store its own technical data to tell people from bots.</p>
+
+  <h2>7. Your rights</h2>
+  <p>Wherever you live, you can ask us to:</p>
+  <ul>
+    <li><strong>access</strong> the personal data we hold about you and learn how we use it;</li>
+    <li><strong>correct</strong> or update it;</li>
+    <li><strong>delete</strong> it, including closing your account;</li>
+    <li><strong>export</strong> it in a common format (you can also download crawl data as CSV from the app);</li>
+    <li><strong>withdraw consent</strong> where we rely on it, and object to how we use your data;</li>
+    <li><strong>nominate</strong> someone to act for you if you die or cannot act yourself.</li>
+  </ul>
+  <p>Email <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a> from your account's email address so we can confirm it is you. We aim to reply within 30 days. This address is also where to raise a grievance about how we handle your data. If you are not satisfied with our answer, you can complain to the Data Protection Board of India or your local data protection authority.</p>
+
+  <h2>8. Security</h2>
+  <p>The service runs over HTTPS. Sign-in links, sessions and API keys are stored only as hashes, alert destinations are encrypted, and access to production systems is limited. No system is perfectly secure; if a breach affects your data, we will tell you and the authorities as the law requires.</p>
+
+  <h2>9. Children</h2>
+  <p>The service is not meant for children under 18, and we do not knowingly collect their data. If you think a child has given us data, write to us and we will delete it.</p>
+
+  <h2>10. Changes to this policy</h2>
+  <p>We may update this policy. When we make a material change, we tell you by email or with a notice on the site, and update the date at the top.</p>
+
+  <h2>11. Contact</h2>
+  <p>Questions or requests about privacy: <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a>. See also our <a href="/terms">Terms of Service</a>.</p>
+</main>
+{% include "partials/legal_foot.html" %}
+{% endblock %}

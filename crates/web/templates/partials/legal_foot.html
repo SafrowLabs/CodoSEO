@@ -1,0 +1,14 @@
+{#- The small footer on the public cloud pages (bot, audit report, legal pages): the legal links
+    and how to reach us. Needs landing.css. -#}
+<footer class="l-wrap">
+  <div class="l-foot">
+    <span>CodoSEO · open source under AGPL-3.0</span>
+    <nav aria-label="Legal">
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/refunds">Refunds</a>
+      <a href="/bot">CodoSEObot</a>
+      <a href="mailto:{{ crate::routes::legal::CONTACT }}">Contact</a>
+    </nav>
+  </div>
+</footer>

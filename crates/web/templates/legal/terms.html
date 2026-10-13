@@ -1,0 +1,113 @@
+{% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/seo.html" as seo -%}
+{% block title %}Terms of Service — CodoSEO{% endblock %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block head %}
+<meta name="description" content="The terms for using the hosted CodoSEO service at codoseo.com: accounts, plans, acceptable use, crawling only the sites you may monitor, payments and liability.">
+{% call seo::social(base, "/terms", "Terms of Service — CodoSEO", "The terms for using the hosted CodoSEO service at codoseo.com.") %}{% endcall %}
+<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% include "partials/analytics.html" %}
+{% endblock %}
+{% block body %}
+<header class="l-top l-wrap">
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
+  <nav class="l-nav"><a class="btn btn-sm" href="/">Audit your site</a></nav>
+</header>
+<main class="l-wrap q-page prose">
+  <p class="l-eyebrow">Legal</p>
+  <h1 class="q-title">Terms of Service</h1>
+  {% let here = "terms" %}{% include "legal/_tabs.html" %}
+
+  <section class="lg-summary" aria-labelledby="summary">
+    <h2 id="summary">Plain-language summary</h2>
+    <ul>
+      <li>Only add and crawl websites you own or are allowed to monitor. You are responsible for every site you add.</li>
+      <li>Site owners can block CodoSEObot with robots.txt or their firewall, and we follow robots.txt. We stop crawls and close accounts that cause complaints or abuse.</li>
+      <li>Paid plans renew monthly until you cancel. Payments go through Dodo Payments, our merchant of record. See the <a href="/refunds">Refund Policy</a>.</li>
+      <li>The service comes as is. Our checks and AI access results are estimates, not guarantees.</li>
+    </ul>
+  </section>
+
+  <h2>1. Who we are and what these terms cover</h2>
+  <p>CodoSEO cloud, the hosted service at <a href="/">codoseo.com</a> (the "service"), is run by <strong>RankOrg</strong>, a business in India ("we", "us"). These terms are an agreement between you and RankOrg about your use of the service, including the website, the web app, the REST API and the hosted MCP server.</p>
+  <p>CodoSEO is also open-source software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html" rel="noopener">GNU AGPL-3.0</a>. These terms cover only the hosted service. If you run CodoSEO yourself, the software license in the <a href="https://github.com/SafrowLabs/CodoSEO" rel="noopener">repository</a> applies instead, and these terms do not.</p>
+
+  <h2>2. Accepting these terms</h2>
+  <p>By signing in, starting an audit, or otherwise using the service, you agree to these terms and to our <a href="/privacy">Privacy Policy</a>. If you use the service for a company or another organisation, you agree on its behalf and confirm you are allowed to. If you do not agree, do not use the service.</p>
+
+  <h2>3. Your account</h2>
+  <ul>
+    <li>You sign in with a one-time link we email to you (a "magic link"), or with GitHub where we offer it. There is no password, so your email inbox is the key to your account: keep it secure.</li>
+    <li>Give us an email address you control and keep it current. We send sign-in links, alerts and service notices to it.</li>
+    <li>You are responsible for everything that happens under your account and its API keys. Tell us at <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a> straight away if you think someone else has access.</li>
+    <li>You must be old enough to form a binding contract where you live.</li>
+  </ul>
+
+  <h2>4. The service and plan limits</h2>
+  <p>The service crawls the websites you add, runs SEO and AI access (GEO) checks, keeps a history of results, and alerts you when something changes. Each plan has limits, such as the number of sites, pages per crawl, how often crawls run, how long history is kept and how many API calls you can make. The limits that apply are the ones for your plan shown on the pricing page at the time of purchase and in your account.</p>
+  <p>We keep improving the service, so features may change. If a Free account stays inactive for a long time, we may email you and then pause its scheduled crawls; you can switch them back on.</p>
+
+  <h2>5. Acceptable use</h2>
+  <h3>Crawl only what you may monitor</h3>
+  <ul>
+    <li><strong>You may only add, audit and crawl websites you own or are authorised to monitor.</strong> If you add a site for a client or employer, you must have their permission.</li>
+    <li><strong>You are solely responsible for every site you add and for any crawling we do on your behalf.</strong> When you add a site, CodoSEO's crawler, CodoSEObot, fetches its public pages for you, as described on the <a href="/bot">CodoSEObot page</a>.</li>
+    <li>Site owners can block CodoSEObot at any time with robots.txt or their firewall. We honour robots.txt, and we do not try to get around a block.</li>
+    <li>We may pause or stop any crawl, and suspend or close any account, if we see abuse or receive a complaint from a site owner, a hosting provider or anyone else affected. Where we reasonably can, we tell you first.</li>
+    <li>We keep payment and account records, and we may share them with law enforcement or other authorities when the law requires us to.</li>
+  </ul>
+  <p>Site owners who want to report a crawl can write to <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a> with their domain.</p>
+
+  <h3>Do not misuse the service</h3>
+  <p>You must not:</p>
+  <ul>
+    <li>use the service to attack, probe for weaknesses in, or overload any website, network or system, including ours;</li>
+    <li>scrape or collect data through the service to resell it, or to build a competing data set;</li>
+    <li>get around plan limits, rate limits, robots.txt or other technical limits, for example with multiple free accounts or by sharing an account;</li>
+    <li>resell, sublicense or give others access to the service without a written agreement with us;</li>
+    <li>use the service for anything unlawful, or to infringe anyone's rights;</li>
+    <li>try to break into accounts, systems or data that are not yours.</li>
+  </ul>
+
+  <h2>6. API, MCP and API keys</h2>
+  <p>You can reach your data through the REST API and the hosted MCP server, using API keys you create in your account. Keep your keys secret, as you would a password: anyone holding a key can act as your account within that key's reach. Revoke a key you no longer need or think has leaked. API and MCP calls count toward your plan's limits, and the same acceptable-use rules apply to them as to the web app. The service also offers some MCP tools without a key; their use is limited and covered by these terms too.</p>
+
+  <h2>7. AI access (GEO) and other results</h2>
+  <p>Our AI access checks look at what your robots.txt, headers, firewall responses and pages tell AI crawlers and fetchers, and our SEO checks look at how search engines are likely to see your pages. These results are <strong>checks and estimates, not guarantees</strong>. AI companies and search engines change their bots and rules, and do not always behave as they document. We do not promise any ranking, traffic, citation or inclusion in any AI answer or search result, and you decide what to do with the results.</p>
+
+  <h2>8. Your content and data</h2>
+  <p>You keep all rights to your sites and to the data the service gathers about them. You give us permission to store and process that data only to run the service for you, as the <a href="/privacy">Privacy Policy</a> describes. We do not sell your data.</p>
+
+  <h2>9. Payments, renewals and refunds</h2>
+  <ul>
+    <li>Paid plans are billed monthly in advance, at the price shown on the pricing page at the time of purchase, and renew automatically each month until you cancel.</li>
+    <li><strong>Dodo Payments is our merchant of record.</strong> It processes the payments, handles your card details, charges any applicable taxes and issues your invoices. Its own terms apply to the payment. We never see your card number.</li>
+    <li>You can cancel at any time from Billing in your account. Cancelling stops the next renewal; your plan stays active until the end of the period you have paid for.</li>
+    <li>Refunds follow our <a href="/refunds">Refund Policy</a>.</li>
+    <li>If we change the price of your plan, we tell you by email before the change, and it applies from your next renewal after that notice.</li>
+  </ul>
+
+  <h2>10. No warranty</h2>
+  <p>The service is provided <strong>"as is" and "as available"</strong>. To the extent the law allows, we make no warranties of any kind, express or implied, including that the service will be uninterrupted, error-free or fit for a particular purpose, or that its results will be complete or accurate.</p>
+
+  <h2>11. Limitation of liability</h2>
+  <p>To the extent the law allows, RankOrg is not liable for any indirect, incidental, special, consequential or punitive damages, or for lost profits, revenue, traffic, rankings or data, arising from your use of the service. Our total liability for any claim about the service is limited to the fees you paid us for the service in the <strong>3 months</strong> before the event that gave rise to the claim. Nothing in these terms limits liability that cannot be limited by law.</p>
+  <p>You agree to cover RankOrg against claims by third parties, such as the owner of a site you crawled, that arise from your breach of these terms or your misuse of the service.</p>
+
+  <h2>12. Ending your use of the service</h2>
+  <p>You can stop using the service at any time. To close your account and delete its data, email <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a> from the account's email address. Cancel any paid plan first.</p>
+  <p>We may suspend or close your account if you break these terms, if the law requires it, or if your use puts the service or others at risk. Where we reasonably can, we tell you by email first.</p>
+  <p>The sections on acceptable-use records, no warranty, limitation of liability and governing law continue after your account ends.</p>
+
+  <h2>13. Changes to these terms</h2>
+  <p>We may update these terms. When we make a material change, we tell you by email or with a notice on the site before it takes effect, and we update the date at the top. If you keep using the service after a change takes effect, you accept the new terms. If you do not, stop using the service and cancel your plan.</p>
+
+  <h2>14. Governing law</h2>
+  <p>These terms are governed by the laws of <strong>India</strong>. Any dispute about them or the service is subject to the jurisdiction of the courts of India. If any part of these terms cannot be enforced, the rest still applies.</p>
+
+  <h2>15. Contact</h2>
+  <p>For support, legal notices, privacy requests and crawl or abuse complaints, write to <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a>.</p>
+</main>
+{% include "partials/legal_foot.html" %}
+{% endblock %}
