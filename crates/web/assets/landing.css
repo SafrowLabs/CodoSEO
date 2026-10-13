@@ -52,7 +52,7 @@
 .q-notice h2 { font-size: 21px; margin-bottom: 8px; }
 .q-notice p { color: var(--muted); line-height: 1.55; margin-bottom: 16px; max-width: 34em; }
 
-/* ── Long-form pages (bot) ─────────────────────────── */
+/* ── Long-form pages (bot, legal) ─────────────────── */
 
 .prose { line-height: 1.65; color: var(--ink-2); }
 .prose .q-title { color: var(--ink); }
@@ -66,6 +66,25 @@
 @media (prefers-reduced-motion: reduce) {
   .l-wrap * { animation: none !important; }
 }
+
+/* ── The legal pages (terms, privacy, refunds) ────── */
+
+.lg-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 22px; }
+.lg-tabs a { font-size: 13px; color: var(--muted); text-decoration: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.lg-tabs a:hover { color: var(--ink); }
+.lg-tabs a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: color-mix(in oklab, var(--accent) 55%, var(--line)); }
+.lg-date { font: 12.5px var(--mono); color: var(--faint-2); margin-bottom: 20px; }
+.lg-summary { padding: 16px 20px; margin: 0 0 8px; background: var(--accent-soft); border: 1px solid color-mix(in oklab, var(--accent-strong) 40%, var(--line)); border-radius: var(--r-lg); }
+.lg-summary h2 { margin-top: 0; font-size: 15px; }
+.prose .lg-summary ul { margin-bottom: 0; }
+.prose h3 { font-size: 15.5px; font-weight: 600; margin: 20px 0 6px; color: var(--ink); }
+.prose strong { color: var(--ink); font-weight: 600; }
+
+/* The small footer on the public pages: the legal links and how to reach us. */
+.l-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; padding-top: 22px; padding-bottom: 40px; border-top: 1px solid var(--line); font-size: 13px; color: var(--faint-2); }
+.l-foot nav { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.l-foot a { color: var(--muted); }
+.l-foot a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 
 .q-rankorg { margin-top: 18px; font-size: 13.5px; }
 .q-rankorg a { text-decoration: underline; text-underline-offset: 2px; }

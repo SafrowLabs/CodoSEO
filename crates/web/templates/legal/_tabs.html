@@ -1,0 +1,8 @@
+{#- The three legal pages side by side, and the date they last changed. The including page sets
+    `here`. -#}
+<nav class="lg-tabs" aria-label="Legal pages">
+  <a href="/terms"{% if here == "terms" %} aria-current="page"{% endif %}>Terms of Service</a>
+  <a href="/privacy"{% if here == "privacy" %} aria-current="page"{% endif %}>Privacy Policy</a>
+  <a href="/refunds"{% if here == "refunds" %} aria-current="page"{% endif %}>Refund Policy</a>
+</nav>
+<p class="lg-date">Last updated <time datetime="{{ crate::routes::legal::LAST_UPDATED_ISO }}">{{ crate::routes::legal::LAST_UPDATED }}</time></p>

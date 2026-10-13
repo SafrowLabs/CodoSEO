@@ -93,6 +93,7 @@
         <form method="post" action="/logout" hx-boost="false"><button type="submit" role="menuitem"><svg class="icon"><use href="#i-logout"/></svg>Sign out</button></form>
         <hr>
         <span class="faint mono" style="display:block;padding:4px 8px;font-size:11px">CodoSEO v{{ shell.version }}</span>
+        {% if shell.legal %}<span class="menu-legal"><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/refunds">Refunds</a></span>{% endif %}
       </div>
     </details>
   </aside>

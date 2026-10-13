@@ -26,5 +26,6 @@
     <input type="hidden" name="next" value="{{ card.next }}">
     <button class="btn btn-primary btn-lg btn-block" type="submit">Email me a sign-in link<span class="spinner"></span></button>
   </form>
+  {% if card.legal %}<p class="hint auth-legal">By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>{% endif %}
 {% endif %}
 </div>

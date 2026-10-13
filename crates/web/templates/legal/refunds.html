@@ -1,0 +1,52 @@
+{% extends "solo_base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/seo.html" as seo -%}
+{% block title %}Refund Policy — CodoSEO{% endblock %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block head %}
+<meta name="description" content="Cancel a CodoSEO plan any time, and get a full refund if you ask within 7 days of your first payment. How cancelling and refunds work.">
+{% call seo::social(base, "/refunds", "Refund Policy — CodoSEO", "Cancel any time, and get a full refund within 7 days of your first payment.") %}{% endcall %}
+<link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
+{% include "partials/analytics.html" %}
+{% endblock %}
+{% block body %}
+<header class="l-top l-wrap">
+  <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
+  <nav class="l-nav"><a class="btn btn-sm" href="/">Audit your site</a></nav>
+</header>
+<main class="l-wrap q-page prose">
+  <p class="l-eyebrow">Legal</p>
+  <h1 class="q-title">Refund Policy</h1>
+  {% let here = "refunds" %}{% include "legal/_tabs.html" %}
+
+  <section class="lg-summary" aria-labelledby="summary">
+    <h2 id="summary">Plain-language summary</h2>
+    <ul>
+      <li>Cancel any time. Your plan keeps working until the end of the period you paid for.</li>
+      <li>New subscription? Ask within <strong>7 days of your first payment</strong> for a full refund.</li>
+      <li>Renewals are not refunded.</li>
+    </ul>
+  </section>
+
+  <p>This policy covers paid plans of the hosted CodoSEO service at codoseo.com, run by RankOrg. Payments are handled by <strong>Dodo Payments</strong>, our merchant of record, which also issues your invoices.</p>
+
+  <h2>Cancelling</h2>
+  <p>You can cancel at any time from <strong>Billing</strong> in your account (Manage billing). Cancelling stops the next renewal. Your plan stays active until the end of the period you have already paid for, and then your account moves to the Free plan and its limits apply.</p>
+
+  <h2>Full refund within 7 days</h2>
+  <p>If you are not happy with a new subscription, ask for a refund <strong>within 7 days of its first payment</strong> and we refund that payment in full. Your paid plan ends when the refund is made.</p>
+
+  <h2>Renewals</h2>
+  <p>Monthly <strong>renewals are not refunded</strong>, in full or in part. To avoid the next charge, cancel before your renewal date; the date is shown under Billing in your account.</p>
+
+  <h2>How to ask for a refund</h2>
+  <p>Email <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a> <strong>from the email address on your CodoSEO account</strong>, and tell us you would like a refund. We confirm the request and issue the refund through Dodo Payments.</p>
+
+  <h2>Where the money goes</h2>
+  <p>Refunds go back through Dodo Payments to the <strong>original payment method</strong>. How long it takes to show on your statement depends on your bank or card provider.</p>
+
+  <h2>Questions</h2>
+  <p>Write to <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a>. See also our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>.</p>
+</main>
+{% include "partials/legal_foot.html" %}
+{% endblock %}
