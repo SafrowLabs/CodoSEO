@@ -145,7 +145,7 @@ Each entry of `open_incidents` in `ai-access` (and the answer to snooze and acce
 
 `GET .../ai-access/incidents` returns one record per incident, as JSON or `?format=csv` (`text/csv`). The columns are `kind`, `subject`, `severity`, `grade`, `title`, `state` (`resolved`, or what `state` says of an open one), `first_seen`, `last_seen`, `resolved_at`, `resolved_by` (`crawl`, `recheck` or `intent`), `verified_at`, `affected_urls` and `sources`. A `format` other than `csv` or `json` is a `400` ("format must be csv or json."). The export is the one the app's **Issues CSV** and **JSON** buttons download.
 
-The fix, recheck, snooze and accept routes follow the rules of the app's buttons, so the same limits apply: a recheck counts against the account's daily rechecks (Free 3, Pro 20, Agency 60, unlimited self-hosted, over a trailing 24 hours) and each call counts against the API allowance. An `{id}` that is not a number is the same `404` as an unknown one. A snooze without a body, or with a number of days other than 1, 7 or 30, is a `400`.
+The fix, recheck, snooze and accept routes follow the rules of the app's buttons, so the same limits apply: a recheck counts against the account's daily rechecks (Free 3, Lite 20, Pro 60, unlimited self-hosted, over a trailing 24 hours) and each call counts against the API allowance. An `{id}` that is not a number is the same `404` as an unknown one. A snooze without a body, or with a number of days other than 1, 7 or 30, is a `400`.
 
 `POST .../crawls` follows the same rules as the Run crawl button: the plan's manual crawl allowance applies and only one crawl runs per site at a time.
 
@@ -188,7 +188,7 @@ Errors from the incident routes, with their messages (the incident-specific ones
 
 ## Rate limits
 
-Each authenticated call counts once against the account's daily allowance, whether it succeeds or not (only `GET /api/v1/usage` is free). The count resets at 00:00 UTC. Allowances: Free 100, Pro 2,000, Agency 10,000 calls per day; a self-hosted install has no limit.
+Each authenticated call counts once against the account's daily allowance, whether it succeeds or not (only `GET /api/v1/usage` is free). The count resets at 00:00 UTC. Allowances: Free 100, Lite 1,000, Pro 5,000 calls per day; a self-hosted install has no limit.
 
 Responses on a limited plan carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`. Both are left out when there is no limit. A `429` adds `Retry-After` (seconds until 00:00 UTC) and sets `X-RateLimit-Remaining: 0`.
 
