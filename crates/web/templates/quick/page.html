@@ -4,6 +4,8 @@
 {% block head %}
 <link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
 {% include "partials/analytics.html" %}
+{#- Without JavaScript nothing polls, so the page reloads itself until the audit is over. #}
+{% if main.polling %}<noscript><meta http-equiv="refresh" content="5"></noscript>{% endif %}
 {% endblock %}
 {% block body %}
 <header class="l-top l-wrap">

@@ -242,6 +242,20 @@ async fn audit_empty_state_without_crawls() {
     );
 }
 
+/// What the worker's heartbeat stores on a running crawl: the counters and the newest pages.
+fn live_progress(pages_done: u32, newest: &[(u32, u16, &str)]) -> serde_json::Value {
+    let recent: Vec<_> = newest
+        .iter()
+        .map(|&(n, status, path)| {
+            serde_json::json!({"n": n, "url": format!("https://{DOMAIN}{path}"), "status": status})
+        })
+        .collect();
+    serde_json::json!({
+        "pages_done": pages_done, "queued": 30, "failures": 0, "depth": 3, "elapsed_ms": 42_000,
+        "errors": 1, "recent": recent,
+    })
+}
+
 #[tokio::test]
 async fn audit_shows_first_crawl_progress() {
     let (app, _, cookie, site) = setup().await;
@@ -267,43 +281,148 @@ async fn audit_shows_first_crawl_progress() {
     assert!(body.contains("data-quiet"), "{body}");
     assert!(body.contains("queued"), "{body}");
 
-    // Running with progress: the live fragment shows pages and elapsed time.
+    // Running with progress: the live fragment shows the counters and the newest pages,
+    // newest first, and asks for what is new since the newest one on the next poll.
     sqlx::query(
         "UPDATE crawls SET status = 'running', started_at = now(), worker_id = 'w', \
          progress = $2 WHERE id = $1",
     )
     .bind(crawl_id)
-    .bind(serde_json::json!({"pages_done": 142, "queued": 30, "failures": 0, "depth": 3, "elapsed_ms": 42_000}))
+    .bind(live_progress(
+        142,
+        &[
+            (142, 404, "/gone"),
+            (141, 200, "/about"),
+            (140, 301, "/old"),
+        ],
+    ))
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let live = format!("/s/{}/audit/live", site.id);
+    let res = app.get_hx(&live, Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(!res.body.contains("<html"), "{}", res.body);
+    assert!(res.body.contains("Crawling example.com"), "{}", res.body);
+    for counter in [
+        "<dt>Pages crawled</dt><dd class=\"num \">142</dd>",
+        "<dt>Queued</dt><dd class=\"num \">30</dd>",
+        "<dt>Errors</dt><dd class=\"num c-err\">1</dd>",
+        "<dt>Elapsed</dt><dd class=\"num \">42s</dd>",
+    ] {
+        assert!(res.body.contains(counter), "{counter}: {}", res.body);
+    }
+    let gone = res.body.find(">/gone<").expect("the newest page");
+    let about = res.body.find(">/about<").expect("an older page");
+    assert!(gone < about, "newest first");
+    assert!(res.body.contains(r#"<span class="code t-err">404</span>"#));
+    assert!(res.body.contains(r#"<span class="code t-warn">301</span>"#));
+    assert!(
+        res.body.contains(&format!(r#"hx-get="{live}?seen=142""#)),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains(r#"hx-trigger="every 2s""#));
+    assert!(
+        !res.body.contains("is-new"),
+        "a first render animates nothing"
+    );
+
+    // The next poll: the pages after the one it already shows fade in.
+    sqlx::query("UPDATE crawls SET progress = $2 WHERE id = $1")
+        .bind(crawl_id)
+        .bind(live_progress(
+            144,
+            &[(144, 200, "/a"), (143, 200, "/b"), (142, 404, "/gone")],
+        ))
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let res = app.get_hx(&format!("{live}?seen=142"), Some(&cookie)).await;
+    assert_eq!(res.body.matches("is-new").count(), 2, "{}", res.body);
+    assert!(res.body.contains(&format!(r#"hx-get="{live}?seen=144""#)));
+
+    // The crawl finishes: the fragment stops polling and loads the audit in its place, which
+    // is now the finished audit, with no live panel left.
+    app.finalize_crawl(
+        crawl_id,
+        fixture_pages(),
+        Vec::new(),
+        codoseo_core::output::StopReason::Completed,
+    )
+    .await;
+    let res = app.get_hx(&live, Some(&cookie)).await;
+    assert!(!res.body.contains("every 2s"), "{}", res.body);
+    assert!(
+        res.body
+            .contains(&format!(r#"hx-get="/s/{}/audit""#, site.id)),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains(r##"hx-target="#audit-body""##));
+    let res = app
+        .get_hx(&format!("/s/{}/audit", site.id), Some(&cookie))
+        .await;
+    assert!(res.body.contains("Health score"), "{}", res.body);
+    assert!(!res.body.contains("live-crawl"), "{}", res.body);
+}
+
+#[tokio::test]
+async fn audit_live_fragment_stops_polling_once_the_crawl_failed() {
+    let (app, _, cookie, site) = setup().await;
+    sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, started_at, worker_id, progress) \
+         VALUES ($1, $2, 'first', 1, 'running', now(), 'w', $3)",
+    )
+    .bind(site.id)
+    .bind(DOMAIN)
+    .bind(live_progress(3, &[(3, 200, "/")]))
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let live = format!("/s/{}/audit/live", site.id);
+    assert!(
+        app.get_hx(&live, Some(&cookie))
+            .await
+            .body
+            .contains("every 2s")
+    );
+
+    sqlx::query("UPDATE crawls SET status = 'failed', finished_at = now(), failure_reason = 'x'")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let res = app.get_hx(&live, Some(&cookie)).await;
+    assert!(!res.body.contains("every 2s"), "{}", res.body);
+}
+
+#[tokio::test]
+async fn the_rerun_banner_carries_the_counters() {
+    let (app, _, cookie, site) = setup().await;
+    app.finished_crawl(&site, fixture_pages(), Vec::new()).await;
+    sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, started_at, worker_id, progress) \
+         VALUES ($1, $2, 'manual', 1, 'running', now(), 'w', $3)",
+    )
+    .bind(site.id)
+    .bind(DOMAIN)
+    .bind(live_progress(142, &[(142, 404, "/gone")]))
     .execute(app.pool())
     .await
     .unwrap();
     let res = app
-        .get_hx(&format!("/s/{}/audit/live", site.id), Some(&cookie))
+        .get_hx(
+            &format!("/s/{}/audit/live?view=banner", site.id),
+            Some(&cookie),
+        )
         .await;
-    assert_eq!(res.status, StatusCode::OK);
-    assert!(!res.body.contains("<html"), "{}", res.body);
     assert!(
-        res.body.contains("Crawling example.com · 142 pages · 42s"),
+        res.body
+            .contains("Crawl #2 running · 142 pages · 30 queued · 1 error · 42s"),
         "{}",
         res.body
     );
-    assert!(res.body.contains("shimmer"), "{}", res.body);
-    assert!(
-        res.body.contains(r#"hx-trigger="every 2s""#),
-        "{}",
-        res.body
-    );
-
-    // Once the crawl is over the fragment stops polling.
-    sqlx::query("UPDATE crawls SET status = 'failed', finished_at = now(), failure_reason = 'x' WHERE id = $1")
-        .bind(crawl_id)
-        .execute(app.pool())
-        .await
-        .unwrap();
-    let res = app
-        .get_hx(&format!("/s/{}/audit/live", site.id), Some(&cookie))
-        .await;
-    assert!(!res.body.contains("every 2s"), "{}", res.body);
+    assert!(!res.body.contains("live-pages"), "the banner stays slim");
 }
 
 #[tokio::test]

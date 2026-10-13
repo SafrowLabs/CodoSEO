@@ -7,7 +7,7 @@
 //! same domain within 24 hours. Only `quick` crawls are ever served here.
 
 use askama::Template;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -24,6 +24,7 @@ use codoseo_store::quick::{
 };
 use serde::Deserialize;
 use serde_json::json;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::sites::{FIRST_CRAWL_PRIORITY, check_public_target, parse_start_url, schedule_for};
@@ -33,6 +34,7 @@ use crate::auth::{email, session};
 use crate::config::{Mode, UmamiConfig};
 use crate::error::AppError;
 use crate::fmt;
+use crate::live::LiveCrawl;
 use crate::render::{Hx, html, hx_redirect};
 use crate::state::AppState;
 use crate::turnstile::{self, Verdict};
@@ -268,6 +270,8 @@ pub struct MainView {
     /// Waiting vs running, for the headline.
     pub running: bool,
     pub pages_done: u32,
+    /// The counters and newest pages, while it runs.
+    pub panel: Option<LiveCrawl>,
     /// `You're #3 in line.`, while waiting behind other audits.
     pub line: Option<String>,
     pub done: Option<DoneView>,
@@ -322,15 +326,20 @@ fn line_text(position: Option<i64>) -> Option<String> {
     }
 }
 
-async fn main_view(state: &AppState, audit: &Audit) -> Result<MainView, AppError> {
-    let mut view = build_main(audit);
+/// `seen` is the newest page the poller already shows (see [`LiveCrawl`]).
+async fn main_view(
+    state: &AppState,
+    audit: &Audit,
+    seen: Option<u32>,
+) -> Result<MainView, AppError> {
+    let mut view = build_main(audit, seen);
     if view.polling && !view.running {
         view.line = line_text(quick::queue_position(&state.pool, audit.crawl.id).await?);
     }
     Ok(view)
 }
 
-fn build_main(audit: &Audit) -> MainView {
+fn build_main(audit: &Audit, seen: Option<u32>) -> MainView {
     let crawl = &audit.crawl;
     let mut view = MainView {
         id: crawl.id,
@@ -339,6 +348,7 @@ fn build_main(audit: &Audit) -> MainView {
         polling: false,
         running: false,
         pages_done: 0,
+        panel: None,
         line: None,
         done: None,
         notice: None,
@@ -348,6 +358,7 @@ fn build_main(audit: &Audit) -> MainView {
             view.polling = true;
             view.running = crawl.status == CrawlStatus::Running;
             view.pages_done = crawl.progress().map_or(0, |p| p.pages_done);
+            view.panel = LiveCrawl::for_crawl(crawl, seen, OffsetDateTime::now_utc());
         }
         CrawlStatus::Failed | CrawlStatus::Done => {
             view.notice = no_report_notice(crawl);
@@ -511,17 +522,27 @@ async fn report(
 ) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
     let page = ReportPage {
-        main: main_view(&state, &audit).await?,
+        main: main_view(&state, &audit, None).await?,
         unlock: UnlockCard::new(audit.crawl.id),
         umami: state.config.umami.clone(),
     };
     Ok((report_headers(), html(&page)?).into_response())
 }
 
-async fn live(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+#[derive(Deserialize)]
+struct LiveQuery {
+    /// The newest page the report shows.
+    seen: Option<u32>,
+}
+
+async fn live(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<LiveQuery>,
+) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
     let part = MainPartial {
-        main: main_view(&state, &audit).await?,
+        main: main_view(&state, &audit, q.seen).await?,
         unlock: UnlockCard::new(audit.crawl.id),
     };
     Ok((report_headers(), html(&part)?).into_response())
@@ -601,7 +622,7 @@ async fn unlock(
         return Ok((status, html(&UnlockPartial { unlock: card })?).into_response());
     }
     let page = ReportPage {
-        main: main_view(&state, &audit).await?,
+        main: main_view(&state, &audit, None).await?,
         unlock: card,
         umami: state.config.umami.clone(),
     };

@@ -22,6 +22,7 @@ use codoseo_store::geo;
 use codoseo_store::reports::{self, ChangeCounts, ResponseBuckets};
 use codoseo_store::sites::{self, Site};
 use serde::Deserialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::ai_incident;
@@ -29,6 +30,7 @@ use crate::auth::{CurrentUser, load_site};
 use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{Screen, Shell};
+use crate::live::LiveCrawl;
 use crate::render::{Hx, html};
 use crate::routes::audit_ai::{
     self, GEO_CHECKS, GeoChecks, GeoSection, IncidentLink, ProbeSetting,
@@ -294,10 +296,13 @@ pub struct AuditLive {
     pub state: &'static str,
     pub line: String,
     pub sub: String,
+    /// The counters and newest pages of the running first crawl (never on the banner).
+    pub panel: Option<LiveCrawl>,
 }
 
 impl AuditLive {
-    fn new(site: &Site, banner: bool, active: Option<&Crawl>) -> AuditLive {
+    /// `seen` is the newest page the poller already shows (see [`LiveCrawl`]).
+    fn new(site: &Site, banner: bool, active: Option<&Crawl>, seen: Option<u32>) -> AuditLive {
         let base = format!("/s/{}", site.id);
         let Some(c) = active else {
             return AuditLive {
@@ -307,31 +312,23 @@ impl AuditLive {
                 state: "idle",
                 line: "Crawl finished".to_owned(),
                 sub: "Loading the audit…".to_owned(),
+                panel: None,
             };
         };
         let running = c.status == CrawlStatus::Running;
-        let progress = c.progress();
-        let pages = progress.map_or(0, |p| p.pages_done);
+        let panel = LiveCrawl::for_crawl(c, seen, OffsetDateTime::now_utc());
         let (line, sub) = match (banner, running) {
             (true, true) => (
-                format!(
-                    "Crawl #{} running · {} pages",
-                    c.number,
-                    fmt::thousands(pages)
-                ),
+                match &panel {
+                    Some(p) => format!("Crawl #{} running · {}", c.number, p.summary()),
+                    None => format!("Crawl #{} running", c.number),
+                },
                 String::new(),
             ),
             (true, false) => (format!("Crawl #{} queued", c.number), String::new()),
+            // The counters and pages are in the panel below the line.
             (false, true) => (
-                match progress {
-                    Some(p) => format!(
-                        "Crawling {} · {} pages · {}",
-                        site.domain,
-                        fmt::thousands(p.pages_done),
-                        fmt::millis(p.elapsed_ms)
-                    ),
-                    None => format!("Crawling {} · starting", site.domain),
-                },
+                format!("Crawling {}", site.domain),
                 "Your audit appears here the moment the crawl finishes.".to_owned(),
             ),
             (false, false) => (
@@ -349,6 +346,7 @@ impl AuditLive {
             state: if running { "running" } else { "queued" },
             line,
             sub,
+            panel: panel.filter(|_| !banner),
         }
     }
 }
@@ -372,6 +370,8 @@ async fn page(
 #[derive(Deserialize)]
 struct LiveQuery {
     view: Option<String>,
+    /// The newest page the poller shows.
+    seen: Option<u32>,
 }
 
 /// The live line on its own, polled every 2 s (`?view=banner` for the slim banner).
@@ -384,7 +384,7 @@ async fn live(
     let site = load_site(&state, &user, site_id(&site)?).await?;
     let active = crawls::active(&state.pool, site.id).await?;
     let banner = q.view.as_deref() == Some("banner");
-    Ok(html(&AuditLive::new(&site, banner, active.as_ref()))?.into_response())
+    Ok(html(&AuditLive::new(&site, banner, active.as_ref(), q.seen))?.into_response())
 }
 
 async fn load_body(
@@ -406,10 +406,10 @@ async fn load_body(
     match latest {
         Some(crawl) => {
             body.done = Some(done_audit(state, site, &crawl, probes_installed).await?);
-            body.live = Some(AuditLive::new(site, true, active.as_ref()));
+            body.live = Some(AuditLive::new(site, true, active.as_ref(), None));
         }
         None if active.is_some() => {
-            body.live = Some(AuditLive::new(site, false, active.as_ref()));
+            body.live = Some(AuditLive::new(site, false, active.as_ref(), None));
         }
         None => {
             let last = crawls::history(pool, site.id, 1).await?;

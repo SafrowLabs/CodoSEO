@@ -48,16 +48,26 @@ pub async fn crawl(
     cfg: CrawlConfig,
     on_progress: impl Fn(Progress) + Send + Sync,
 ) -> Result<CrawlOutput, CrawlError> {
+    crawl_watched(cfg, |p, _| on_progress(p)).await
+}
+
+/// [`crawl`], with the pages recorded so far, in order, passed to `on_progress` too, so a
+/// caller can show the newest ones while the crawl runs.
+pub async fn crawl_watched(
+    cfg: CrawlConfig,
+    on_progress: impl Fn(Progress, &[PageRecord]) + Send + Sync,
+) -> Result<CrawlOutput, CrawlError> {
     let global = Arc::new(Semaphore::new(cfg.politeness.max_in_flight.max(1) as usize));
     crawl_shared(cfg, global, on_progress).await
 }
 
 /// Crawls `cfg.start_url`, taking a slot of `global` for every request, so several
-/// crawls can share one in-flight cap. `on_progress` is called after each recorded page.
+/// crawls can share one in-flight cap. `on_progress` is called after each recorded page, with
+/// the pages recorded so far.
 pub async fn crawl_shared(
     cfg: CrawlConfig,
     global: Arc<Semaphore>,
-    on_progress: impl Fn(Progress) + Send + Sync,
+    on_progress: impl Fn(Progress, &[PageRecord]) + Send + Sync,
 ) -> Result<CrawlOutput, CrawlError> {
     let started = Instant::now();
     let start = valid_start(&cfg)?;
@@ -104,7 +114,7 @@ pub async fn crawl_shared(
     run.stop = stop;
     if let Some((url, result)) = start {
         run.record_start(url, result);
-        on_progress(run.progress(0));
+        on_progress(run.progress(0), &run.pages);
     }
     if run.stop.is_none() {
         run.crawl(&fetcher, &limiter, sitemap_urls, deadline, &on_progress)
@@ -294,7 +304,7 @@ impl Run {
         limiter: &Limiter,
         sitemap_urls: Vec<Url>,
         deadline: Instant,
-        on_progress: &(impl Fn(Progress) + Send + Sync),
+        on_progress: &(impl Fn(Progress, &[PageRecord]) + Send + Sync),
     ) {
         let mut in_flight = FuturesUnordered::new();
         // Sitemap-only URLs join once link exploration is over, so linked pages keep
@@ -309,7 +319,7 @@ impl Run {
                     let in_sitemap = self.is_in_sitemap(&q.url);
                     self.pages
                         .push(record::robots_blocked(&q.url, q.depth, in_sitemap));
-                    on_progress(self.progress(in_flight.len()));
+                    on_progress(self.progress(in_flight.len()), &self.pages);
                 }
             }
             if in_flight.is_empty() {
@@ -337,7 +347,7 @@ impl Run {
                         // Too late to count, and no new work may start.
                         self.stop = Some(StopReason::TimeLimit);
                     } else if self.on_result(limiter, q, res) {
-                        on_progress(self.progress(in_flight.len()));
+                        on_progress(self.progress(in_flight.len()), &self.pages);
                     }
                 }
             }

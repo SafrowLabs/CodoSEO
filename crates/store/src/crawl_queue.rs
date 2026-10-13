@@ -4,10 +4,10 @@
 
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
-use codoseo_core::output::{Progress, SiteFault, StopReason, robots_failure};
+use codoseo_core::output::{SiteFault, StopReason, robots_failure};
 use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::snapshot::Snapshot;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool, Row};
 use time::OffsetDateTime;
 use url::Url;
@@ -135,8 +135,11 @@ impl CrawlQueue {
     /// Records progress on a still-`running` crawl. A crawl that has already been requeued by
     /// `requeue_stale` (e.g. after a dead worker) silently ignores a late heartbeat from the
     /// old worker, since the `WHERE status = 'running'` guard then matches nothing.
-    pub async fn heartbeat(&self, id: Uuid, progress: &Progress) -> Result<(), sqlx::Error> {
-        let progress = serde_json::to_value(progress).expect("Progress always serializes");
+    ///
+    /// Takes a plain `Progress` or a `LiveProgress` with the newest pages; both are stored
+    /// as the same flat JSON.
+    pub async fn heartbeat(&self, id: Uuid, progress: &impl Serialize) -> Result<(), sqlx::Error> {
+        let progress = serde_json::to_value(progress).expect("progress always serializes");
         sqlx::query(
             "UPDATE crawls SET heartbeat_at = now(), progress = $2 WHERE id = $1 AND status = 'running'",
         )
@@ -144,6 +147,16 @@ impl CrawlQueue {
         .bind(progress)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    /// A liveness heartbeat: like [`CrawlQueue::heartbeat`] but it keeps the stored progress, so
+    /// a crawl stuck on one slow page, or past its pages in the probes, doesn't read as zero.
+    pub async fn touch(&self, id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE crawls SET heartbeat_at = now() WHERE id = $1 AND status = 'running'")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

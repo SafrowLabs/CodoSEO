@@ -9,10 +9,11 @@ use std::time::Duration;
 use codoseo_checks::run_checks;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
 use codoseo_core::output::{
-    BLOCKED_REASON_PREFIX, Progress, StopReason, UNREACHABLE_REASON_PREFIX,
+    BLOCKED_REASON_PREFIX, LiveProgress, Progress, StopReason, UNREACHABLE_REASON_PREFIX,
 };
+use codoseo_core::page::PageRecord;
 use codoseo_core::plan::{Plan, PlanLimits};
-use codoseo_crawler::crawl::crawl;
+use codoseo_crawler::crawl::crawl_watched;
 use codoseo_diff::{diff, key_pages};
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::{RobotsAvailability, availability};
@@ -361,7 +362,7 @@ async fn run_one_crawl(
     let on_progress = {
         let last_heartbeat_ms = Arc::clone(&last_heartbeat_ms);
         let crawl_queue = crawl_queue.clone();
-        move |progress: Progress| {
+        move |progress: Progress, pages: &[PageRecord]| {
             let now = now_millis();
             let prev = last_heartbeat_ms.load(Ordering::Relaxed);
             if now - prev < HEARTBEAT_THROTTLE.as_millis() as i64 {
@@ -371,6 +372,9 @@ async fn run_one_crawl(
                 .compare_exchange(prev, now, Ordering::Relaxed, Ordering::Relaxed)
                 .is_ok()
             {
+                // The newest pages ride along on the same throttled write, for the live views:
+                // no extra writes, and nothing is copied between heartbeats.
+                let progress = LiveProgress::new(progress, pages);
                 let crawl_queue = crawl_queue.clone();
                 tokio::spawn(async move {
                     let _ = crawl_queue.heartbeat(crawl_id, &progress).await;
@@ -387,23 +391,16 @@ async fn run_one_crawl(
     let liveness = AbortOnDrop({
         let crawl_queue = crawl_queue.clone();
         tokio::spawn(async move {
-            let idle = Progress {
-                pages_done: 0,
-                queued: 0,
-                failures: 0,
-                depth: 0,
-                elapsed_ms: 0,
-            };
             loop {
                 tokio::time::sleep(liveness_interval).await;
-                if crawl_queue.heartbeat(crawl_id, &idle).await.is_err() {
+                if crawl_queue.touch(crawl_id).await.is_err() {
                     return;
                 }
             }
         })
     });
 
-    let crawl_result = crawl(cfg, on_progress).await;
+    let crawl_result = crawl_watched(cfg, on_progress).await;
     if let Ok(out) = &crawl_result {
         metrics::pages_crawled(out.pages.len() as u64);
     }
