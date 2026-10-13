@@ -104,7 +104,7 @@ async fn the_page_needs_a_sign_in() {
 async fn the_page_lists_the_default_email_channel_and_the_default_rules() {
     let app = cloud().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     let site = app.site(&account, "example.com").await;
 
@@ -136,22 +136,22 @@ async fn the_free_plan_is_offered_email_only_with_an_upgrade_hint() {
         .await;
     let res = app.get("/settings/alerts", Some(&free)).await;
     assert!(!res.body.contains("value=\"slack\""));
-    assert!(res.body.contains("Upgrade to Pro"));
+    assert!(res.body.contains("Upgrade to Lite"));
     assert!(
         res.body
-            .contains(r#"<a href="/billing">Upgrade to Pro</a>"#),
+            .contains(r#"<a href="/billing">Upgrade to Lite</a>"#),
         "the hint links to billing: {}",
         res.body
     );
 
     let (_, pro) = app
-        .login_with_plan("pro@example.com", Some(Plan::Pro))
+        .login_with_plan("pro@example.com", Some(Plan::Lite))
         .await;
     let res = app.get("/settings/alerts", Some(&pro)).await;
     for kind in ["email", "slack", "discord", "webhook"] {
         assert!(res.body.contains(&format!("value=\"{kind}\"")), "{kind}");
     }
-    assert!(!res.body.contains("Upgrade to Pro"));
+    assert!(!res.body.contains("Upgrade to Lite"));
 }
 
 // ---- adding channels -----------------------------------------------------------------------
@@ -160,7 +160,7 @@ async fn the_free_plan_is_offered_email_only_with_an_upgrade_hint() {
 async fn adding_a_slack_channel_stores_it_encrypted_and_shows_only_the_host() {
     let app = cloud().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     let one = app.site(&account, "one.example.com").await;
     let two = app.site(&account, "two.example.com").await;
@@ -205,7 +205,7 @@ async fn a_free_account_cannot_add_slack_in_the_cloud_but_can_add_another_email(
 
     let res = add_channel(&app, &cookie, "slack", SLACK).await;
     assert_eq!(res.status, StatusCode::FORBIDDEN);
-    assert!(res.body.contains("Upgrade to Pro"), "{}", res.body);
+    assert!(res.body.contains("Upgrade to Lite"), "{}", res.body);
     assert!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM alert_channels WHERE kind = 'slack'")
             .fetch_one(app.pool())
@@ -256,7 +256,7 @@ async fn self_hosted_can_add_every_kind_including_private_addresses() {
 async fn bad_targets_are_refused_with_a_friendly_inline_error() {
     let app = cloud().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     for (kind, target) in [
         ("slack", "https://example.com/not-slack"),
@@ -297,7 +297,7 @@ async fn bad_targets_are_refused_with_a_friendly_inline_error() {
 async fn a_webhook_shows_its_signing_secret_once() {
     let app = cloud().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     let res = add_channel(&app, &cookie, "webhook", "https://alerts.example.com/hook").await;
     assert_eq!(res.status, StatusCode::OK);
@@ -560,7 +560,7 @@ async fn send_test_is_refused_for_an_address_the_cloud_guard_blocks() {
     // the test button goes through the same guard as delivery.
     let app = cloud().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     let (server, seen) = hook_server(200).await;
     let id = channels::create(
@@ -821,7 +821,7 @@ async fn adding_a_site_turns_on_the_default_rules_for_the_default_email_channel(
 async fn a_site_added_after_a_slack_channel_gets_its_default_rules_too() {
     let app = cloud().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     app.site(&account, "one.example.com").await;
     add_channel(&app, &cookie, "slack", SLACK).await;

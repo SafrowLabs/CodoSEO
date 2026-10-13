@@ -10,7 +10,7 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
-use codoseo_core::plan::{ManualAllowance, Plan, PlanLimits};
+use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_store::billing::{self, SetMonitored};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -23,6 +23,7 @@ use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{Screen, Shell};
 use crate::render::html;
+use crate::routes::landing;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -59,6 +60,8 @@ impl FromRequestParts<AppState> for CloudUser {
 pub struct PlanCard {
     pub slug: &'static str,
     pub name: &'static str,
+    /// US dollars a month.
+    pub price: u32,
     pub features: Vec<String>,
     /// `upgrade` (checkout), `current`, or `portal` (a paying account changes plan there).
     pub action: &'static str,
@@ -85,35 +88,10 @@ pub struct BillingPage {
 fn plan_name(plan: Plan) -> &'static str {
     match plan {
         Plan::Free => "Free",
+        Plan::Lite => "Lite",
         Plan::Pro => "Pro",
-        Plan::Agency => "Agency",
         Plan::SelfHosted => "Self-hosted",
     }
-}
-
-fn features(plan: Plan) -> Vec<String> {
-    let l = PlanLimits::for_plan(plan);
-    let mut out = Vec::new();
-    if let Some(n) = l.max_sites {
-        out.push(format!(
-            "{n} monitored site{}",
-            if n == 1 { "" } else { "s" }
-        ));
-    }
-    if let Some(n) = l.max_pages {
-        out.push(format!("Up to {} pages per crawl", fmt::thousands(n)));
-    }
-    out.push("A crawl every day".to_owned());
-    out.push(match l.manual_crawls {
-        ManualAllowance::PerDay(n) => format!("{n} manual crawl a day"),
-        ManualAllowance::PerWeek(n) => format!("{n} manual crawl a week"),
-        ManualAllowance::Unlimited => "Unlimited manual crawls".to_owned(),
-    });
-    if let Some(d) = l.history_days {
-        out.push(format!("{d} days of history"));
-    }
-    out.push("Email, Slack, Discord and webhook alerts".to_owned());
-    out
 }
 
 async fn render_page(
@@ -126,13 +104,14 @@ async fn render_page(
     let shell = Shell::load(state, user, None, Screen::Billing).await?;
     let info = billing::account_billing(&state.pool, user.id()).await?;
     let plan = user.account.plan;
-    let paid = matches!(plan, Plan::Pro | Plan::Agency);
+    let paid = matches!(plan, Plan::Lite | Plan::Pro);
     let configured = state.config.billing.is_some();
     let sites = codoseo_store::sites::list_for_account(&state.pool, user.id()).await?;
     let card = |p: Plan, slug, name| PlanCard {
         slug,
         name,
-        features: features(p),
+        price: landing::monthly_price(p).unwrap_or(0),
+        features: landing::plan_features(p),
         action: if plan == p {
             "current"
         } else if paid {
@@ -154,8 +133,8 @@ async fn render_page(
         cancelled: info.as_ref().is_some_and(|i| i.cancelled_at.is_some()),
         has_customer: info.as_ref().is_some_and(|i| i.customer_id.is_some()),
         cards: vec![
+            card(Plan::Lite, "lite", "Lite"),
             card(Plan::Pro, "pro", "Pro"),
-            card(Plan::Agency, "agency", "Agency"),
         ],
         success,
         error,
@@ -205,11 +184,11 @@ async fn checkout(
         .await;
     };
     let plan = match form.plan.as_str() {
+        "lite" => Plan::Lite,
         "pro" => Plan::Pro,
-        "agency" => Plan::Agency,
-        _ => return Err(AppError::BadRequest("Choose Pro or Agency.".to_owned())),
+        _ => return Err(AppError::BadRequest("Choose Lite or Pro.".to_owned())),
     };
-    if matches!(user.account.plan, Plan::Pro | Plan::Agency) {
+    if matches!(user.account.plan, Plan::Lite | Plan::Pro) {
         return Err(AppError::Conflict(
             "You already have a paid plan. Change or cancel it with Manage billing.".to_owned(),
         ));

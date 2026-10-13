@@ -31,7 +31,12 @@ pub struct Landing {
     /// Pages in the no-signup audit.
     pub quick_pages: u32,
     pub free: Vec<String>,
-    pub self_hosted: Vec<String>,
+    pub lite: Vec<String>,
+    pub pro: Vec<String>,
+    pub lite_price: u32,
+    pub pro_price: u32,
+    /// Dodo checkout is configured: the paid cards lead to `/billing` (through sign-in).
+    pub billing: bool,
 }
 
 pub struct CategoryView {
@@ -149,6 +154,27 @@ fn plural(n: u32, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
+/// The monthly price of a cloud plan in US dollars, as the pricing cards and `/billing` show
+/// it; `None` for self-hosted. Dodo charges what its product says, so keep the two in step.
+pub fn monthly_price(plan: Plan) -> Option<u32> {
+    match plan {
+        Plan::Free => Some(0),
+        Plan::Lite => Some(9),
+        Plan::Pro => Some(19),
+        Plan::SelfHosted => None,
+    }
+}
+
+/// `10 minutes`, `1 hour`, `2 hours`: a crawl's time limit in whole minutes or hours.
+fn crawl_time(d: std::time::Duration) -> String {
+    let mins = u32::try_from(d.as_secs() / 60).unwrap_or(u32::MAX);
+    if mins % 60 == 0 {
+        plural(mins / 60, "hour", "hours")
+    } else {
+        plural(mins, "minute", "minutes")
+    }
+}
+
 /// What a plan includes, in the words the pricing cards use.
 pub fn plan_features(plan: Plan) -> Vec<String> {
     let l = PlanLimits::for_plan(plan);
@@ -158,6 +184,9 @@ pub fn plan_features(plan: Plan) -> Vec<String> {
     }];
     if let Some(n) = l.max_pages {
         out.push(format!("Up to {} pages per crawl", fmt::thousands(n)));
+    }
+    if let Some(d) = l.max_duration {
+        out.push(format!("Crawls of up to {}", crawl_time(d)));
     }
     match l.fastest_schedule {
         Some(Schedule::Weekly) => out.push("A scheduled crawl every week".to_owned()),
@@ -171,10 +200,13 @@ pub fn plan_features(plan: Plan) -> Vec<String> {
         ManualAllowance::PerDay(n) => {
             format!("{} a day", plural(n, "manual crawl", "manual crawls"))
         }
-        ManualAllowance::Unlimited => "Unlimited manual crawls".to_owned(),
+        // One crawl runs per site at a time on every plan.
+        ManualAllowance::Unlimited => "Unlimited manual crawls, 1 running per site".to_owned(),
     });
-    if let Some(d) = l.history_days {
-        out.push(format!("{d} days of history"));
+    match l.history_days {
+        Some(365) => out.push("A year of history".to_owned()),
+        Some(d) => out.push(format!("{d} days of history")),
+        None => {}
     }
     out.push(if l.email_alerts_only {
         "Email alerts".to_owned()
@@ -184,6 +216,13 @@ pub fn plan_features(plan: Plan) -> Vec<String> {
     out.push(match l.api_calls_per_day {
         Some(n) => format!("{} API calls a day", fmt::thousands(n)),
         None => "No API call limit".to_owned(),
+    });
+    out.push(match l.ai_rechecks_per_day {
+        Some(n) => format!(
+            "{} a day",
+            plural(u32::from(n), "AI incident recheck", "AI incident rechecks")
+        ),
+        None => "Unlimited AI incident rechecks".to_owned(),
     });
     out
 }
@@ -204,7 +243,11 @@ fn view(state: &AppState, url: &str, error: Option<String>) -> Landing {
         categories: categories(),
         quick_pages: PlanLimits::quick_audit().max_pages.unwrap_or(100),
         free: plan_features(Plan::Free),
-        self_hosted: plan_features(Plan::SelfHosted),
+        lite: plan_features(Plan::Lite),
+        pro: plan_features(Plan::Pro),
+        lite_price: monthly_price(Plan::Lite).unwrap_or(0),
+        pro_price: monthly_price(Plan::Pro).unwrap_or(0),
+        billing: state.config.billing.is_some(),
     }
 }
 
@@ -240,13 +283,51 @@ mod tests {
             [
                 "1 monitored site",
                 "Up to 500 pages per crawl",
+                "Crawls of up to 10 minutes",
                 "A scheduled crawl every week",
                 "1 manual crawl a week",
                 "30 days of history",
                 "Email alerts",
                 "100 API calls a day",
+                "3 AI incident rechecks a day",
             ]
         );
+    }
+
+    #[test]
+    fn the_paid_cards_match_the_paid_plans() {
+        assert_eq!(
+            plan_features(Plan::Lite),
+            [
+                "5 monitored sites",
+                "Up to 5,000 pages per crawl",
+                "Crawls of up to 1 hour",
+                "A scheduled crawl every day",
+                "1 manual crawl a day",
+                "A year of history",
+                "Email, Slack, Discord and webhook alerts",
+                "1,000 API calls a day",
+                "20 AI incident rechecks a day",
+            ]
+        );
+        assert_eq!(
+            plan_features(Plan::Pro),
+            [
+                "10 monitored sites",
+                "Up to 10,000 pages per crawl",
+                "Crawls of up to 2 hours",
+                "A scheduled crawl every day",
+                "Unlimited manual crawls, 1 running per site",
+                "A year of history",
+                "Email, Slack, Discord and webhook alerts",
+                "5,000 API calls a day",
+                "60 AI incident rechecks a day",
+            ]
+        );
+        assert_eq!(monthly_price(Plan::Free), Some(0));
+        assert_eq!(monthly_price(Plan::Lite), Some(9));
+        assert_eq!(monthly_price(Plan::Pro), Some(19));
+        assert_eq!(monthly_price(Plan::SelfHosted), None);
     }
 
     #[test]

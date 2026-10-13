@@ -234,7 +234,7 @@ async fn a_session_cookie_alone_never_authenticates() {
 
 #[tokio::test]
 async fn a_post_from_a_foreign_origin_with_a_key_works() {
-    let f = setup(Plan::Agency).await;
+    let f = setup(Plan::Pro).await;
     let mut req = request(
         Method::POST,
         &format!("/api/v1/sites/{}/crawls", f.site.id),
@@ -270,7 +270,7 @@ async fn an_unknown_endpoint_is_a_json_404() {
 
 #[tokio::test]
 async fn list_sites_lists_only_this_accounts_sites_with_their_latest_score() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let (other, _) = f.app.login("other@example.com").await;
     let theirs = f.app.site(&other, "other.example").await;
     // Another account's finished crawl, scored and failing, must not leak into this list.
@@ -298,7 +298,7 @@ async fn list_sites_lists_only_this_accounts_sites_with_their_latest_score() {
 
 #[tokio::test]
 async fn site_health_has_the_score_failing_checks_with_three_examples_and_the_audit_link() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let health: SiteHealth =
         parsed(&get(&f.app, &format!("/api/v1/sites/{}", f.site.id), &f.key).await);
     assert_eq!(health.id, f.site.id);
@@ -350,7 +350,7 @@ async fn site_health_has_the_score_failing_checks_with_three_examples_and_the_au
 
 #[tokio::test]
 async fn the_next_crawl_shows_only_while_monitoring_is_on() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     sqlx::query("UPDATE sites SET next_crawl_at = now() + interval '2 days' WHERE id = $1")
         .bind(f.site.id)
         .execute(f.app.pool())
@@ -400,7 +400,7 @@ async fn failing_checks_list_three_examples_however_many_pages_fail() {
 
 #[tokio::test]
 async fn site_health_shows_the_crawl_in_flight_and_a_site_without_a_crawl() {
-    let f = setup(Plan::Agency).await;
+    let f = setup(Plan::Pro).await;
     let fresh = f.app.site(&f.account, "fresh.example").await;
     let res = get(&f.app, &format!("/api/v1/sites/{}", fresh.id), &f.key).await;
     let health: SiteHealth = parsed(&res);
@@ -427,7 +427,7 @@ async fn site_health_shows_the_crawl_in_flight_and_a_site_without_a_crawl() {
 
 #[tokio::test]
 async fn issue_urls_pages_through_the_failing_pages() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let base = format!("/api/v1/sites/{}/issues/title_missing", f.site.id);
 
     let all: IssueUrlsPage = parsed(&get(&f.app, &base, &f.key).await);
@@ -479,7 +479,7 @@ async fn issue_urls_pages_through_the_failing_pages() {
 
 #[tokio::test]
 async fn an_unknown_check_or_a_bad_query_is_a_400() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let res = get(
         &f.app,
         &format!("/api/v1/sites/{}/issues/no_such_check", f.site.id),
@@ -506,7 +506,7 @@ async fn an_unknown_check_or_a_bad_query_is_a_400() {
 
 #[tokio::test]
 async fn a_site_without_a_crawl_gives_empty_pages() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let fresh = f.app.site(&f.account, "fresh.example").await;
     let issues: IssueUrlsPage = parsed(
         &get(
@@ -539,7 +539,7 @@ async fn a_site_without_a_crawl_gives_empty_pages() {
 
 #[tokio::test]
 async fn page_finds_a_url_however_it_is_written() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let base = format!("/api/v1/sites/{}/page", f.site.id);
     let by_absolute: PageInfo = parsed(
         &get(
@@ -582,7 +582,7 @@ async fn page_finds_a_url_however_it_is_written() {
 
 #[tokio::test]
 async fn changes_are_most_severe_first_and_can_be_filtered() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let base = format!("/api/v1/sites/{}/changes", f.site.id);
     let all: ChangesPage = parsed(&get(&f.app, &base, &f.key).await);
     assert_eq!(all.crawl_number, Some(1));
@@ -616,7 +616,7 @@ async fn changes_are_most_severe_first_and_can_be_filtered() {
 
 #[tokio::test]
 async fn ai_access_is_empty_before_a_report_then_summarises_bots_engines_and_incidents() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
     let before = get(&f.app, &path, &f.key).await;
     assert_eq!(before.status, StatusCode::OK);
@@ -685,7 +685,7 @@ async fn ai_access_is_empty_before_a_report_then_summarises_bots_engines_and_inc
 
 #[tokio::test]
 async fn ai_access_shows_the_synthetic_fetch_check_and_its_incidents() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
     let before = json(&get(&f.app, &path, &f.key).await);
     assert_eq!(before["probes_enabled"], true);
@@ -801,7 +801,7 @@ fn llms(status: u16, body: &str) -> codoseo_core::output::LlmsTxtFetch {
 
 #[tokio::test]
 async fn ai_access_carries_raw_html_content_and_llms_txt() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
     let file =
         "# Example\n\n> A site about examples.\n\n## Docs\n\n- [About](/about): who we are\n";
@@ -852,7 +852,7 @@ async fn ai_access_carries_raw_html_content_and_llms_txt() {
 
 #[tokio::test]
 async fn ai_access_llms_txt_that_is_absent_is_reported_plainly_and_old_reports_have_neither() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
     f.app
         .finished_crawl_with_llms(
@@ -902,7 +902,7 @@ async fn ai_access_is_metered_like_the_other_calls() {
 
 #[tokio::test]
 async fn another_accounts_site_is_indistinguishable_from_an_unknown_one() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let (other, _) = f.app.login("other@example.com").await;
     let theirs = f.app.site(&other, "other.example").await;
     f.app
@@ -1023,15 +1023,15 @@ async fn the_call_after_the_limit_is_a_429_with_retry_after_and_costs_nothing() 
 
 #[tokio::test]
 async fn usage_reports_the_count_the_limit_and_the_next_reset() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     for _ in 0..3 {
         get(&f.app, "/api/v1/sites", &f.key).await;
     }
     let res = get(&f.app, "/api/v1/usage", &f.key).await;
     let usage: Usage = parsed(&res);
     assert_eq!(usage.calls_today, 3);
-    assert_eq!(usage.limit, Some(2_000));
-    assert_eq!(usage.remaining, Some(1_997));
+    assert_eq!(usage.limit, Some(1_000));
+    assert_eq!(usage.remaining, Some(997));
     let now = time::OffsetDateTime::now_utc();
     assert!(usage.resets_at > now);
     assert!(usage.resets_at - now <= time::Duration::days(1));
@@ -1085,7 +1085,7 @@ async fn self_hosted_has_no_limit_but_still_counts() {
 
 #[tokio::test]
 async fn run_crawl_queues_one_then_conflicts_while_it_is_queued() {
-    let f = setup(Plan::Agency).await;
+    let f = setup(Plan::Pro).await;
     let path = format!("/api/v1/sites/{}/crawls", f.site.id);
     let res = post(&f.app, &path, &f.key).await;
     assert_eq!(res.status, StatusCode::ACCEPTED, "{}", res.body);
@@ -1093,8 +1093,8 @@ async fn run_crawl_queues_one_then_conflicts_while_it_is_queued() {
     assert_eq!(queued.site_id, f.site.id);
     assert_eq!(queued.number, 2);
     assert_eq!(queued.status, "queued");
-    // Same lane as the button: priority 2 on a paid plan, manual trigger. (Agency, because the
-    // fixture crawl is itself a manual one and Pro's daily allowance is a single crawl.)
+    // Same lane as the button: priority 2 on a paid plan, manual trigger. (Pro, because the
+    // fixture crawl is itself a manual one and Lite's daily allowance is a single crawl.)
     let (priority, trigger): (i16, String) =
         sqlx::query_as("SELECT priority, trigger::text FROM crawls WHERE id = $1")
             .bind(queued.crawl_id)
@@ -1207,7 +1207,7 @@ async fn a_malformed_query_is_a_400_that_costs_one_call_and_a_401_costs_none() {
 
 #[tokio::test]
 async fn the_wrong_method_is_a_json_405() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     for (method, path) in [
         (Method::POST, "/api/v1/sites".to_owned()),
         (Method::DELETE, format!("/api/v1/sites/{}", f.site.id)),
@@ -1297,7 +1297,7 @@ async fn a_redirecting_page_lists_its_hops_as_objects() {
 
 #[tokio::test]
 async fn ai_access_says_why_llms_txt_was_not_fetched() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let path = format!("/api/v1/sites/{}/ai-access", f.site.id);
     f.app
         .finished_crawl_with_llms(
@@ -1400,7 +1400,7 @@ async fn incident_json(f: &Fixture, id: i64) -> Value {
 
 #[tokio::test]
 async fn incidents_carry_grade_sources_state_lag_and_affected_urls() {
-    let (f, blocked, fetch) = with_incidents(Plan::Pro).await;
+    let (f, blocked, fetch) = with_incidents(Plan::Lite).await;
     let i = incident_json(&f, fetch).await;
     assert_eq!(i["grade"], "B");
     assert!(
@@ -1429,10 +1429,10 @@ async fn incidents_carry_grade_sources_state_lag_and_affected_urls() {
 
 #[tokio::test]
 async fn the_fix_is_the_remedy_and_the_three_ready_made_texts() {
-    let (f, blocked, fetch) = with_incidents(Plan::Pro).await;
+    let (f, blocked, fetch) = with_incidents(Plan::Lite).await;
     let res = get(&f.app, &incident_path(&f, blocked, "fix"), &f.key).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("999"));
     let v = json(&res);
     let r = &v["remedy"];
     for key in [
@@ -1470,7 +1470,7 @@ async fn the_fix_is_the_remedy_and_the_three_ready_made_texts() {
 
 #[tokio::test]
 async fn snoozing_and_accepting_move_the_incident_through_its_states() {
-    let (f, blocked, fetch) = with_incidents(Plan::Pro).await;
+    let (f, blocked, fetch) = with_incidents(Plan::Lite).await;
     let snooze = incident_path(&f, fetch, "snooze");
     let res = send_json(
         &f.app,
@@ -1519,9 +1519,9 @@ async fn snoozing_and_accepting_move_the_incident_through_its_states() {
 
 #[tokio::test]
 async fn a_snooze_is_one_of_the_three_choices_and_every_attempt_is_metered() {
-    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    let (f, _, fetch) = with_incidents(Plan::Lite).await;
     let path = incident_path(&f, fetch, "snooze");
-    let mut left = 2000;
+    let mut left = 1000;
     for body in [
         Some(r#"{"days": 5}"#),
         Some(r#"{"days": 0}"#),
@@ -1559,11 +1559,11 @@ async fn a_snooze_is_one_of_the_three_choices_and_every_attempt_is_metered() {
 
 #[tokio::test]
 async fn a_recheck_is_queued_with_202_and_refused_while_one_is_queued() {
-    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    let (f, _, fetch) = with_incidents(Plan::Lite).await;
     let path = incident_path(&f, fetch, "recheck");
     let res = post(&f.app, &path, &f.key).await;
     assert_eq!(res.status, StatusCode::ACCEPTED, "{}", res.body);
-    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("999"));
     let v = json(&res);
     assert!(v["recheck_id"].is_i64() || v["recheck_id"].is_u64(), "{v}");
     assert!(v["due_at"].is_string());
@@ -1608,7 +1608,7 @@ async fn a_recheck_past_the_plans_daily_allowance_is_a_plan_limit() {
 
 #[tokio::test]
 async fn a_recovered_incident_says_it_is_being_verified_until_a_time() {
-    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    let (f, _, fetch) = with_incidents(Plan::Lite).await;
     sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
         .bind(fetch)
         .execute(f.app.pool())
@@ -1641,7 +1641,7 @@ async fn a_recovered_incident_says_it_is_being_verified_until_a_time() {
 
 #[tokio::test]
 async fn repair_actions_on_another_accounts_incident_are_a_404() {
-    let (f, _, fetch) = with_incidents(Plan::Pro).await;
+    let (f, _, fetch) = with_incidents(Plan::Lite).await;
     let (other, _) = f.app.login("other@example.com").await;
     let (other_key, _) = make_key(&f.app, &other).await;
     let theirs = f.app.site(&other, "other.example").await;
@@ -1722,7 +1722,7 @@ async fn repair_calls_count_against_the_quota_and_stop_at_the_limit() {
 
 #[tokio::test]
 async fn the_incident_export_is_json_by_default_or_csv_and_is_metered() {
-    let (f, blocked, _) = with_incidents(Plan::Pro).await;
+    let (f, blocked, _) = with_incidents(Plan::Lite).await;
     sqlx::query("UPDATE ai_incidents SET title = '=1+1' WHERE id = $1")
         .bind(blocked)
         .execute(f.app.pool())
@@ -1732,7 +1732,7 @@ async fn the_incident_export_is_json_by_default_or_csv_and_is_metered() {
 
     let res = get(&f.app, &path, &f.key).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("999"));
     let rows = json(&res);
     let rows = rows.as_array().unwrap();
     assert!(rows.len() >= 2, "{rows:?}");
@@ -1746,7 +1746,7 @@ async fn the_incident_export_is_json_by_default_or_csv_and_is_metered() {
 
     let res = get(&f.app, &format!("{path}?format=csv"), &f.key).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    assert_eq!(res.header("x-ratelimit-remaining"), Some("1997"));
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("997"));
     assert_eq!(res.header("content-type"), Some("text/csv; charset=utf-8"));
     let mut lines = res.body.lines();
     assert_eq!(
@@ -1759,11 +1759,11 @@ async fn the_incident_export_is_json_by_default_or_csv_and_is_metered() {
 
 #[tokio::test]
 async fn an_unknown_export_format_is_a_counted_400_and_another_accounts_site_is_a_404() {
-    let (f, _, _) = with_incidents(Plan::Pro).await;
+    let (f, _, _) = with_incidents(Plan::Lite).await;
     let path = format!("/api/v1/sites/{}/ai-access/incidents", f.site.id);
     let res = get(&f.app, &format!("{path}?format=xml"), &f.key).await;
     assert_eq!(res.status, StatusCode::BAD_REQUEST);
-    assert_eq!(res.header("x-ratelimit-remaining"), Some("1999"));
+    assert_eq!(res.header("x-ratelimit-remaining"), Some("999"));
     assert_eq!(
         json(&res)["error"]["message"],
         "format must be csv or json."

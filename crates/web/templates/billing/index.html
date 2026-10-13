@@ -39,6 +39,7 @@
     <div class="card plan-card{% if c.action == "current" %} is-current{% endif %}">
       <div class="card-head"><span class="card-title">{{ c.name }}</span>{% if c.action == "current" %}<span class="badge t-ok">Current plan</span>{% endif %}</div>
       <div class="card-pad" style="display:grid;gap:14px">
+        <div class="plan-price"><b>${{ c.price }}</b><span>a month</span></div>
         <ul class="plan-features">
           {% for f in c.features %}<li><svg class="icon" style="width:14px;height:14px"><use href="#i-check"/></svg>{{ f }}</li>{% endfor %}
         </ul>

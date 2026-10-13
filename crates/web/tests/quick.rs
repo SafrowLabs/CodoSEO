@@ -115,6 +115,16 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         "44 checks after every crawl",
         "Up to 500 pages per crawl",
         "A scheduled crawl every week",
+        // The paid plans, Enterprise and self-hosting; checkout is off without Dodo keys.
+        "<b>$9</b>",
+        "<b>$19</b>",
+        "Up to 5,000 pages per crawl",
+        "Up to 10,000 pages per crawl",
+        "Unlimited manual crawls, 1 running per site",
+        "Checkout opens soon",
+        r#"href="mailto:contact@codoseo.com""#,
+        "Self-host free",
+        r#""name":"Lite","price":"9""#,
         "Free · first 100 pages · no signup",
         "https://codoseo.com/mcp",
         r#"href="https://rankorg.com/""#,
@@ -122,6 +132,11 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
     ] {
         assert!(res.body.contains(needle), "{needle}: {}", res.body);
     }
+    assert!(!res.body.contains("Agency"), "the old plan name is gone");
+    assert!(
+        !res.body.contains(r#"data-umami-event="choose-lite""#),
+        "no checkout link without billing"
+    );
     // The GitHub Actions example keeps its expression rather than being read as a template.
     assert!(res.body.contains("${{ env.SITE_URL }}"));
     assert!(

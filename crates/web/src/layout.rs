@@ -346,8 +346,8 @@ fn user_view(user: &CurrentUser) -> UserView {
     };
     let plan = match user.account.plan {
         Plan::Free => "cloud · free",
+        Plan::Lite => "cloud · lite",
         Plan::Pro => "cloud · pro",
-        Plan::Agency => "cloud · agency",
         Plan::SelfHosted if user.account.is_owner => "self-hosted · owner",
         Plan::SelfHosted => "self-hosted",
     };
