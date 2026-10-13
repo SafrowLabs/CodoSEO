@@ -12,10 +12,12 @@
       <div class="au-meta mono" title="Finished {{ d.finished }}">{{ d.meta }}</div>
     </div>
     <span class="grow"></span>
+    {% if !demo %}
     <div class="au-actions">
       <a class="btn" href="{{ base }}/export.csv" hx-boost="false" download><svg class="icon"><use href="#i-download"/></svg>Export CSV</a>
       <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>
     </div>
+    {% endif %}
   </div>
   {% if let Some(live) = live %}{{ live|safe }}{% endif %}
 
@@ -29,7 +31,7 @@
         </div>
         <p class="muted">What each operator's bots may fetch (robots.txt), what our synthetic fetch saw, and which answers can quote you.</p>
       </div>
-      <a class="btn au-open" href="{{ base }}/ai-access">Open AI access<svg class="icon"><use href="#i-arrow"/></svg></a>
+      {% if demo %}<a class="btn au-open" href="#ai-fixes">See the fixes<svg class="icon"><use href="#i-arrow"/></svg></a>{% else %}<a class="btn au-open" href="{{ base }}/ai-access">Open AI access<svg class="icon"><use href="#i-arrow"/></svg></a>{% endif %}
     </div>
     {% if let Some(g) = d.geo.section %}
     <div class="au-aikpis">
@@ -85,7 +87,7 @@
         {% if ai.weakest.is_some() || ai.verifying.is_some() %}
         <p class="muted au-small">{% if let Some(w) = ai.weakest %}{{ w }}{% endif %}{% if ai.weakest.is_some() && ai.verifying.is_some() %} · {% endif %}{% if let Some(v) = ai.verifying %}{{ v }}{% endif %}</p>
         {% endif %}
-        <p class="au-small"><a class="au-link" href="{{ base }}/ai-access">View AI access</a> to fix, recheck, accept or snooze.</p>
+        {% if demo %}<p class="au-small"><a class="au-link" href="#ai-fixes">See each fix</a> below.</p>{% else %}<p class="au-small"><a class="au-link" href="{{ base }}/ai-access">View AI access</a> to fix, recheck, accept or snooze.</p>{% endif %}
       </div>
       {% endif %}
       <div class="au-box au-soon">
@@ -179,7 +181,7 @@
 
   <div class="au-three">
     <section class="card au-card" aria-labelledby="au-chg-h">
-      <div class="au-card-head"><h2 id="au-chg-h">Changed since last crawl</h2><a class="au-link" href="{{ d.changes.href }}">All changes</a></div>
+      <div class="au-card-head"><h2 id="au-chg-h">Changed since last crawl</h2>{% if !demo %}<a class="au-link" href="{{ d.changes.href }}">All changes</a>{% endif %}</div>
       {% if let Some(e) = d.changes.empty %}
       <p class="au-empty">{{ e }}</p>
       {% else %}
