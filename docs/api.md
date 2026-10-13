@@ -1,10 +1,10 @@
 # REST API
 
-A small JSON API over your monitored sites (reads, plus POST and DELETE routes to queue a crawl and repair AI access incidents), at `/api/v1` on the hosted app (`https://codoseo.com/api/v1`) and on any self-hosted install (`<BASE_URL>/api/v1`). It returns the same data as the keyed [MCP tools](mcp.md) and shares their daily allowance.
+A small JSON API over your monitored sites (reads, plus POST and DELETE routes to queue a crawl, trigger one from a deploy and repair AI access incidents), at `/api/v1` on the hosted app (`https://codoseo.com/api/v1`) and on any self-hosted install (`<BASE_URL>/api/v1`). It returns the same data as the keyed [MCP tools](mcp.md) and shares their daily allowance.
 
 ## Authentication
 
-Create an API key under **Settings, API keys** (`/settings/api-keys`). Keys look like `cdo_` followed by 43 URL-safe characters, are shown once, and can be revoked. Send it as a bearer token. Nothing else authenticates the API; cookies are ignored.
+Create an API key under **Settings, API keys** (`/settings/api-keys`). Keys look like `cdo_` followed by 43 URL-safe characters, are shown once, and can be revoked. Send it as a bearer token. Nothing else authenticates the API (the one exception is a site's [secret deploy URL](#the-secret-url), which can only queue a crawl of that site); cookies are ignored.
 
 ```sh
 curl -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites
@@ -32,6 +32,9 @@ All routes are scoped to the key's account. A site id that is unknown or belongs
 | `POST /api/v1/sites/{site}/ai-access/incidents/{id}/accept` | | Accepts the incident as it is (`fetch_blocked`, `content_missing` and `llms_txt_unavailable` only). Answers with the incident. |
 | `DELETE /api/v1/sites/{site}/ai-access/incidents/{id}/accept` | | Takes the acceptance back. Answers with the incident. |
 | `POST /api/v1/sites/{site}/crawls` | | Queues a crawl. `202` with `{site_id, crawl_id, number, status:"queued"}`. |
+| `POST /api/v1/sites/{site}/deploy` | | The [deploy webhook](#deploy-webhook): queues a crawl, or answers with the one already covering the deploy. `202` with `{site_id, crawl_id, number, status, deduplicated}`. |
+| `GET`, `POST`, `DELETE /api/v1/sites/{site}/deploy-hook` | | The site's [secret deploy URL](#the-secret-url): whether it has one, a new one (`201`, shown once, replacing the old), or none. |
+| `POST /api/v1/hooks/deploy/{secret}` | | The deploy webhook without a key: the secret URL authenticates. |
 | `GET /api/v1/usage` | | `calls_today`, `limit`, `remaining`, `resets_at`. Not counted against the allowance. |
 
 `{site}` is the site's UUID from `GET /api/v1/sites`. Times are RFC 3339 in UTC. Responses carry `Cache-Control: no-store`. A path that does not exist is a JSON `404`, and the wrong method on a real path is a JSON `405`. List endpoints with more rows return `next_offset`; pass it as `offset` for the next page.
@@ -148,6 +151,77 @@ Each entry of `open_incidents` in `ai-access` (and the answer to snooze and acce
 The fix, recheck, snooze and accept routes follow the rules of the app's buttons, so the same limits apply: a recheck counts against the account's daily rechecks (Free 3, Lite 20, Pro 60, unlimited self-hosted, over a trailing 24 hours) and each call counts against the API allowance. An `{id}` that is not a number is the same `404` as an unknown one. A snooze without a body, or with a number of days other than 1, 7 or 30, is a `400`.
 
 `POST .../crawls` follows the same rules as the Run crawl button: the plan's manual crawl allowance applies and only one crawl runs per site at a time.
+
+## Deploy webhook
+
+After a deploy, ask for an immediate crawl of the site so its SEO checks and AI access (robots.txt for every AI bot, page directives, raw HTML content, llms.txt) are checked against what just shipped, instead of at the next scheduled crawl. Alerts and incidents follow from that crawl as from any other.
+
+There are two ways in:
+
+| | Authentication | For |
+|---|---|---|
+| `POST /api/v1/sites/{site}/deploy` | `Authorization: Bearer cdo_...` | Pipelines that can send a header: GitHub Actions, GitLab CI, a deploy script. |
+| `POST /api/v1/hooks/deploy/{secret}` | the secret in the URL | Platforms whose deploy notifications can't send headers: Vercel, Netlify. |
+
+Both answer `202` with:
+
+```json
+{ "site_id": "8f0c…", "crawl_id": "2b7e…", "number": 49, "status": "queued", "deduplicated": false }
+```
+
+- **Idempotent.** While the site has a crawl queued or running, or a manual or deploy crawl was queued in the last 5 minutes, the call answers with that crawl (`deduplicated: true`, its `status`: `queued`, `running` or `done`) and queues nothing. A pipeline that retries, or a monorepo that deploys several projects at once, crawls once.
+- **Plan limits.** A deploy crawl is a manual crawl: it counts against the plan's manual crawls like the Run crawl button, and past them the answer is the `403 plan_limit` error with the time the next one frees up. It does not use the AI access rechecks (Free 3, Lite 20, Pro 60 a day); the crawl rechecks every AI access incident it can see. A deduplicated call costs no manual crawl.
+- **Allowance.** Each call counts once against the account's daily API calls, the secret URL included.
+- The request body is ignored, so a platform's own payload (Vercel's or Netlify's deploy JSON) is fine.
+
+### The secret URL
+
+Make one with your API key. The answer holds the URL once; only its hash is kept. Making another replaces it (the old URL stops working), and `DELETE` removes it.
+
+```sh
+curl -X POST -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/deploy-hook
+# {"site_id":"8f0c…","url":"https://codoseo.com/api/v1/hooks/deploy/cdh_…","created_at":"2026-10-13T09:00:00Z"}
+
+curl -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/deploy-hook
+# {"site_id":"8f0c…","active":true,"created_at":"…","last_used_at":"…"}
+
+curl -X DELETE -H "Authorization: Bearer cdo_..." https://codoseo.com/api/v1/sites/{site}/deploy-hook
+```
+
+Treat the URL like a password: anyone holding it can queue crawls of that one site (and nothing else: it reads no data and is bound to the site). An unknown or replaced secret is a `404`.
+
+### curl
+
+```sh
+curl -fsS -X POST -H "Authorization: Bearer $CODOSEO_API_KEY" \
+  https://codoseo.com/api/v1/sites/$CODOSEO_SITE/deploy
+```
+
+### GitHub Actions
+
+After the deploy step, with the key and the site id as repository secrets:
+
+```yaml
+- name: Recheck SEO and AI access on CodoSEO
+  env:
+    CODOSEO_API_KEY: ${{ secrets.CODOSEO_API_KEY }}
+    CODOSEO_SITE: ${{ secrets.CODOSEO_SITE }}
+  run: |
+    curl -fsS -X POST -H "Authorization: Bearer $CODOSEO_API_KEY" \
+      "https://codoseo.com/api/v1/sites/$CODOSEO_SITE/deploy"
+```
+
+To gate the pull request itself on SEO and GEO regressions before it deploys, run `codoseo crawl --fail-on` on the preview in CI instead; the webhook rechecks the live site after a deploy.
+
+### Vercel
+
+Vercel's webhooks send no custom headers, so use the secret URL. In the Vercel dashboard: Team Settings, Webhooks (Pro and Enterprise teams), Create Webhook, pick the event **Deployment Promoted** (or **Deployment Succeeded**) and your project, and paste the secret URL as the endpoint. CodoSEO ignores Vercel's payload and its `x-vercel-signature`; the secret in the URL is the authentication. Preview deployments fire the same events: since the hook crawls the site's own start URL, a preview deploy only rechecks production.
+
+On a Hobby team, call the keyed endpoint from a GitHub Actions workflow on `deployment_status` instead.
+
+### Netlify
+
+Site configuration, Notifications, Deploy notifications, Add notification, **HTTP POST request**, event **Deploy succeeded**, and the secret URL as the URL. The JWS secret field can stay empty: CodoSEO does not read Netlify's signature, the secret URL authenticates.
 
 ## Errors
 
