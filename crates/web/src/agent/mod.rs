@@ -4,6 +4,7 @@
 
 pub mod anon;
 pub mod auth;
+pub mod deploy;
 pub mod error;
 pub mod keys;
 pub mod limiter;

@@ -27,6 +27,7 @@ use codoseo_mcp::cloud::types::{
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
+use codoseo_store::accounts::Account;
 use codoseo_store::api_keys::{self, Charge};
 use codoseo_store::crawls::{self, Crawl, CrawlStatus, ManualOutcome, ManualWindow};
 use codoseo_store::explorer::{self, PageFilter};
@@ -74,7 +75,7 @@ impl<T> Reply<T> {
 }
 
 pub struct AgentService<'a> {
-    state: &'a AppState,
+    pub(super) state: &'a AppState,
 }
 
 impl<'a> AgentService<'a> {
@@ -84,13 +85,23 @@ impl<'a> AgentService<'a> {
 
     /// Counts one call, then runs `work`. `work` is a future that hasn't started: nothing in it
     /// runs when the charge is refused.
-    async fn metered<T>(
+    pub(super) async fn metered<T>(
         &self,
         caller: &ApiCaller,
         work: impl Future<Output = Result<T, AgentError>>,
     ) -> Reply<T> {
-        let limit = PlanLimits::for_plan(caller.account.plan).api_calls_per_day;
-        match api_keys::charge(&self.state.pool, caller.account.id, limit).await {
+        self.metered_account(&caller.account, work).await
+    }
+
+    /// [`Self::metered`] for a call that carries no key but acts for an account (a deploy hook's
+    /// secret URL): the account's daily allowance is the same.
+    pub(super) async fn metered_account<T>(
+        &self,
+        account: &Account,
+        work: impl Future<Output = Result<T, AgentError>>,
+    ) -> Reply<T> {
+        let limit = PlanLimits::for_plan(account.plan).api_calls_per_day;
+        match api_keys::charge(&self.state.pool, account.id, limit).await {
             Err(e) => Reply {
                 quota: None,
                 outcome: Err(e.into()),
@@ -333,7 +344,7 @@ impl<'a> AgentService<'a> {
     }
 
     /// One of the caller's sites; another account's looks exactly like an unknown id.
-    async fn site(&self, caller: &ApiCaller, raw: &str) -> Result<Site, AgentError> {
+    pub(super) async fn site(&self, caller: &ApiCaller, raw: &str) -> Result<Site, AgentError> {
         let id: Uuid = raw
             .trim()
             .parse()

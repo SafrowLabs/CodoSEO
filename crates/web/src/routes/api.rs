@@ -55,6 +55,14 @@ pub fn routes() -> Router<AppState> {
             post(accept_incident).delete(unaccept_incident),
         )
         .route("/sites/{site}/crawls", post(run_crawl))
+        .route("/sites/{site}/deploy", post(deploy))
+        .route(
+            "/sites/{site}/deploy-hook",
+            get(deploy_hook_status)
+                .post(create_deploy_hook)
+                .delete(delete_deploy_hook),
+        )
+        .route("/hooks/deploy/{secret}", post(deploy_by_secret))
         .route("/usage", get(usage))
         .fallback(unknown)
         .method_not_allowed_fallback(wrong_method);
@@ -405,6 +413,66 @@ async fn run_crawl(
     respond(
         StatusCode::ACCEPTED,
         AgentService::new(&state).run_crawl(&caller, &site).await,
+    )
+}
+
+/// A deploy finished: crawl now (or answer with the crawl that already covers it). Any request
+/// body (a platform's deploy payload) is ignored.
+async fn deploy(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+) -> Response {
+    respond(
+        StatusCode::ACCEPTED,
+        AgentService::new(&state).deploy(&caller, &site).await,
+    )
+}
+
+/// The same for a platform that can't send a header: the site's secret URL authenticates.
+async fn deploy_by_secret(State(state): State<AppState>, Path(secret): Path<String>) -> Response {
+    respond(
+        StatusCode::ACCEPTED,
+        AgentService::new(&state).deploy_by_secret(&secret).await,
+    )
+}
+
+async fn create_deploy_hook(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+) -> Response {
+    respond(
+        StatusCode::CREATED,
+        AgentService::new(&state)
+            .create_deploy_hook(&caller, &site)
+            .await,
+    )
+}
+
+async fn deploy_hook_status(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+) -> Response {
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .deploy_hook_status(&caller, &site)
+            .await,
+    )
+}
+
+async fn delete_deploy_hook(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+) -> Response {
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .delete_deploy_hook(&caller, &site)
+            .await,
     )
 }
 
