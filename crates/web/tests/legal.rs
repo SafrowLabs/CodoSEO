@@ -161,8 +161,8 @@ async fn checkout_names_the_merchant_of_record_and_the_terms() {
     let app = TestApp::with_config(cloud_config_with(&[
         ("DODO_API_KEY", "dodo_key_123"),
         ("DODO_WEBHOOK_SECRET", "whsec_dGVzdC13ZWJob29rLXNlY3JldA=="),
+        ("DODO_PRODUCT_LITE", "pdt_lite"),
         ("DODO_PRODUCT_PRO", "pdt_pro"),
-        ("DODO_PRODUCT_AGENCY", "pdt_agency"),
     ]))
     .await;
     let (_, cookie) = app.login("me@example.com").await;

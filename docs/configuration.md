@@ -39,7 +39,7 @@ These are read in every long-running role but only take effect in cloud mode (th
 | `MCP_ANON_DAILY_AUDITS` | `200` | Fresh audits that no-key MCP agents may start in any 24 hours, over all of them. Cached and joined audits do not count. A whole number, 0 or more. |
 | `MCP_ANON_DAILY_EMAILS` | `200` | Start-monitoring emails the no-key MCP tool may send in any 24 hours. |
 | `MCP_SHARED_CLIENTS` | `claude-user,chatgpt,openai-mcp` | Comma-separated, case-insensitive fragments of the `User-Agent` of hosted connectors that call from shared servers. Per-IP limits are not applied to them, since everyone behind the connector shares an address. |
-| `DODO_API_KEY`, `DODO_WEBHOOK_SECRET`, `DODO_PRODUCT_PRO`, `DODO_PRODUCT_AGENCY` | none | Billing through Dodo Payments. All four are needed; with some but not all set, billing stays off and a warning is logged. `DODO_WEBHOOK_SECRET` is the `whsec_...` value from Dodo. |
+| `DODO_API_KEY`, `DODO_WEBHOOK_SECRET`, `DODO_PRODUCT_LITE`, `DODO_PRODUCT_PRO` | none | Billing through Dodo Payments. All four are needed; with some but not all set, billing stays off and a warning is logged. `DODO_WEBHOOK_SECRET` is the `whsec_...` value from Dodo. `DODO_PRODUCT_LITE` is the product for Lite ($9 a month) and `DODO_PRODUCT_PRO` the one for Pro ($19 a month); the two must differ, or billing stays off. `DODO_PRODUCT_AGENCY` is no longer read: a server that still sets it logs a warning at startup. Before Lite existed, `DODO_PRODUCT_PRO` held the $9 product, so move that value to `DODO_PRODUCT_LITE` and put the $19 product (the old `DODO_PRODUCT_AGENCY`) in `DODO_PRODUCT_PRO`. |
 | `DODO_ENV` | `test` | `test` or `live`; picks the Dodo API host. |
 | `DODO_API_URL` | derived from `DODO_ENV` | Overrides the API URL. Must be `https` (`http` only for localhost). Meant for tests. |
 
@@ -60,7 +60,7 @@ After each monitored crawl the worker fetches a few important pages as the AI se
 | Variable | Default | Roles | Meaning |
 |---|---|---|---|
 | `CODOSEO_PROBE_FROM` | `hello@codoseo.com` | worker, all | The `From` header on every probe request and its baseline. An empty value is ignored, and an invalid one (anything but visible ASCII and spaces) is logged and ignored. The CLI (`codoseo probe`, `crawl --probes`) and the local MCP server's `probe_ai_fetch` read it too, with the same warning, and report the `from` actually sent. |
-| `CODOSEO_PROBE_URLS` | `5` | web, worker, all | Pages probed per crawl on a self-hosted install (plan `self_hosted`), at most `10`. `0` turns the probes off for the whole install: the worker sends none, and the web app shows the switch in **Edit intent** disabled and says on the AI access screen that fetch checks are turned off on this install. Set it to the same value for the web and worker roles. Cloud plans keep their own caps (Free 1, Pro 3, Agency 5). An invalid value is ignored (the worker logs it). |
+| `CODOSEO_PROBE_URLS` | `5` | web, worker, all | Pages probed per crawl on a self-hosted install (plan `self_hosted`), at most `10`. `0` turns the probes off for the whole install: the worker sends none, and the web app shows the switch in **Edit intent** disabled and says on the AI access screen that fetch checks are turned off on this install. Set it to the same value for the web and worker roles. Cloud plans keep their own caps (Free 1, Lite 3, Pro 5). An invalid value is ignored (the worker logs it). |
 
 ## Logging, metrics and error reporting
 
