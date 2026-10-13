@@ -235,7 +235,7 @@ code.k { font-family: var(--mono); font-size: .88em; }
 .facts span { display: block; font-size: 14.5px; line-height: 1.5; color: var(--ink-3); margin-top: 6px; }
 
 /* ---------- pricing ---------- */
-.prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 16px; }
 .price { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 26px; display: flex; flex-direction: column; }
 .price.hl { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow), var(--shadow-1); }
 .price.soon { background: var(--surface-2); border-style: dashed; border-color: var(--line-strong); }

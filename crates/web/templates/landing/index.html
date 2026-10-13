@@ -23,9 +23,9 @@
 {"@type":"Organization","@id":"{{ base }}/#organization","name":"SafrowLabs","url":"https://safrow.com","logo":{"@type":"ImageObject","url":"{{ base }}{{ crate::assets::url("icon-512.png") }}","width":512,"height":512},"image":"{{ base }}/og.png","sameAs":["https://github.com/SafrowLabs"],"brand":{"@id":"{{ base }}/#brand"}},
 {"@type":"Brand","@id":"{{ base }}/#brand","name":"CodoSEO","logo":"{{ base }}{{ crate::assets::url("icon-512.png") }}"},
 {"@type":"WebSite","@id":"{{ base }}/#website","name":"CodoSEO","url":"{{ base }}/","inLanguage":"en","publisher":{"@id":"{{ base }}/#organization"}},
-{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","alternateName":["codoseo","CodoSEO CLI"],"applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","description":"Open-source SEO crawler and site monitor built in Rust. Crawls a site, runs {{ checks }} SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema, scores the site 0–100, tracks changes between crawls and alerts on regressions. Ships as a CLI, a web app, an MCP server and a REST API.","url":"{{ base }}/","image":"{{ base }}/og.png","screenshot":"{{ base }}/og.png","downloadUrl":"https://crates.io/crates/codoseo","installUrl":"https://github.com/SafrowLabs/CodoSEO/releases","license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"brand":{"@id":"{{ base }}/#brand"},"author":{"@id":"{{ base }}/#organization"},"publisher":{"@id":"{{ base }}/#organization"},"offers":{"@type":"Offer","name":"Free","price":"0","priceCurrency":"USD"},"keywords":"SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker, MCP server"},
+{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","alternateName":["codoseo","CodoSEO CLI"],"applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","description":"Open-source SEO crawler and site monitor built in Rust. Crawls a site, runs {{ checks }} SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema, scores the site 0–100, tracks changes between crawls and alerts on regressions. Ships as a CLI, a web app, an MCP server and a REST API.","url":"{{ base }}/","image":"{{ base }}/og.png","screenshot":"{{ base }}/og.png","downloadUrl":"https://crates.io/crates/codoseo","installUrl":"https://github.com/SafrowLabs/CodoSEO/releases","license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"brand":{"@id":"{{ base }}/#brand"},"author":{"@id":"{{ base }}/#organization"},"publisher":{"@id":"{{ base }}/#organization"},"offers":[{"@type":"Offer","name":"Free","price":"0","priceCurrency":"USD"},{"@type":"Offer","name":"Lite","price":"{{ lite_price }}","priceCurrency":"USD"},{"@type":"Offer","name":"Pro","price":"{{ pro_price }}","priceCurrency":"USD"}],"keywords":"SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker, MCP server"},
 {"@type":"FAQPage","mainEntity":[
-{"@type":"Question","name":"Is CodoSEO free?","acceptedAnswer":{"@type":"Answer","text":"Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site. Paid plans for more sites and bigger crawls are coming soon."}},
+{"@type":"Question","name":"Is CodoSEO free?","acceptedAnswer":{"@type":"Answer","text":"Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site; Lite (${{ lite_price }} a month) and Pro (${{ pro_price }} a month) add more sites and bigger, daily crawls."}},
 {"@type":"Question","name":"Do I need an account?","acceptedAnswer":{"@type":"Answer","text":"Not for the CLI or the local MCP server, and not for a one-off audit of up to {{ quick_pages }} pages in the hosted app. A free account lets you monitor a site on a schedule and get alerts."}},
 {"@type":"Question","name":"How do I install the CLI?","acceptedAnswer":{"@type":"Answer","text":"Run brew install safrowlabs/codoseo/codoseo, npx codoseo, or cargo install codoseo (Rust 1.88 or newer). Prebuilt binaries for Linux, macOS and Windows are on the GitHub releases page, and a Docker image is at ghcr.io/safrowlabs/codoseo."}},
 {"@type":"Question","name":"What does CodoSEO check?","acceptedAnswer":{"@type":"Answer","text":"{{ checks }} checks across {{ categories.len() }} categories: response codes and redirects, indexability (noindex, canonicals, robots.txt), on-page (titles, meta descriptions, H1s), content (thin and duplicate pages, image alt text), links (broken links, orphan pages, click depth), technical (HTTPS, mixed content, slow responses), sitemaps, Open Graph and structured data (JSON-LD, hreflang)."}},
@@ -312,14 +312,14 @@ claude mcp add --transport http codoseo \
 
 <section class="blk wrap reveal" id="pricing">
   <div class="shead">
-    <div><div class="eyebrow">Pricing</div><h2>Start free. Stay free if you like.</h2></div>
-    <p>The hosted free plan monitors one site. The CLI, the MCP server and the self-hosted web app are free and open source. Paid plans for more sites and bigger crawls are coming soon.</p>
+    <div><div class="eyebrow">Pricing</div><h2>Start free. Pay when you need more.</h2></div>
+    <p>The hosted free plan monitors one site. Lite and Pro add sites, daily crawls up to 10,000 pages per site, and alerts in Slack, Discord or a webhook. The CLI, the MCP server and the self-hosted web app are free and open source.</p>
   </div>
   <div class="prices mt">
-    <div class="price hl">
-      <div class="ph"><h3>Free</h3><span class="tag ship">Available now</span></div>
+    <div class="price">
+      <div class="ph"><h3>Free</h3><span class="tag ship">Hosted</span></div>
       <div class="amt"><b>$0</b><span>forever</span></div>
-      <p>Hosted monitoring for one site.</p>
+      <p>Weekly monitoring for one site.</p>
       <ul>
         {%- for f in free %}
         <li>{{ f }}</li>
@@ -327,33 +327,49 @@ claude mcp add --transport http codoseo \
       </ul>
       <a class="btn" href="/login" data-umami-event="signup-free">Create a free account <span class="ar" aria-hidden="true">→</span></a>
     </div>
-    <div class="price soon">
-      <div class="ph"><h3>Pro and Agency</h3><span class="tag plan">Coming soon</span></div>
-      <div class="amt"><b class="tbd">Coming soon</b></div>
-      <p>For agencies and growing teams.</p>
+    <div class="price hl">
+      <div class="ph"><h3>Lite</h3><span class="tag ship">Hosted</span></div>
+      <div class="amt"><b>${{ lite_price }}</b><span>a month</span></div>
+      <p>Daily monitoring for a handful of sites.</p>
       <ul>
-        <li>More monitored sites</li>
-        <li>Larger and longer crawls</li>
-        <li>Daily scheduled crawls</li>
-        <li>Slack, Discord and webhook alerts</li>
-        <li>A year of history</li>
-        <li>Higher API limits</li>
-      </ul>
-      <span class="btn dis" aria-disabled="true">Pricing coming soon</span>
-    </div>
-    <div class="price">
-      <div class="ph"><h3>Self-hosted</h3><span class="tag ship">Open source</span></div>
-      <div class="amt"><b>$0</b><span>AGPL-3.0</span></div>
-      <p>The full web app on your own servers.</p>
-      <ul>
-        {%- for f in self_hosted %}
+        {%- for f in lite %}
         <li>{{ f }}</li>
         {%- endfor %}
-        <li>Your data stays on your servers</li>
       </ul>
-      <a class="btn out" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Read the self-hosting guide</a>
+      {%- if billing %}
+      <a class="btn" href="/billing" data-umami-event="choose-lite">Choose Lite <span class="ar" aria-hidden="true">→</span></a>
+      {%- else %}
+      <span class="btn dis" aria-disabled="true">Checkout opens soon</span>
+      {%- endif %}
+    </div>
+    <div class="price">
+      <div class="ph"><h3>Pro</h3><span class="tag ship">Hosted</span></div>
+      <div class="amt"><b>${{ pro_price }}</b><span>a month</span></div>
+      <p>More sites, bigger crawls, no manual crawl cap.</p>
+      <ul>
+        {%- for f in pro %}
+        <li>{{ f }}</li>
+        {%- endfor %}
+      </ul>
+      {%- if billing %}
+      <a class="btn out" href="/billing" data-umami-event="choose-pro">Choose Pro <span class="ar" aria-hidden="true">→</span></a>
+      {%- else %}
+      <span class="btn dis" aria-disabled="true">Checkout opens soon</span>
+      {%- endif %}
+    </div>
+    <div class="price soon">
+      <div class="ph"><h3>Enterprise</h3><span class="tag plan">Custom</span></div>
+      <div class="amt"><b class="tbd">Contact us</b></div>
+      <p>Need more than Pro? Tell us about your sites.</p>
+      <ul>
+        <li>More sites than Pro</li>
+        <li>Larger or longer crawls</li>
+        <li>Terms that fit your team</li>
+      </ul>
+      <a class="btn out" href="mailto:contact@codoseo.com" data-umami-event="contact-enterprise">contact@codoseo.com</a>
     </div>
   </div>
+  <p class="fine"><b>Self-host free:</b> the full web app runs on your own servers under AGPL-3.0, with no plan caps and your data on your machines. <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Read the self-hosting guide</a>.</p>
   <p class="fine">Want to try it first? Run a one-off audit of up to {{ quick_pages }} pages <a href="#audit">from the box at the top</a>, no signup needed. The CLI is free and has no page cap of its own.</p>
 </section>
 
@@ -408,7 +424,7 @@ docker run --rm ghcr.io/safrowlabs/codoseo crawl https://example.com</pre>
   <div class="faq mt">
     <details open>
       <summary>Is CodoSEO free?</summary>
-      <p>Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site. Paid plans for more sites and bigger crawls are coming soon.</p>
+      <p>Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site; Lite (${{ lite_price }} a month) and Pro (${{ pro_price }} a month) add more sites and bigger, daily crawls.</p>
     </details>
     <details>
       <summary>Do I need an account?</summary>

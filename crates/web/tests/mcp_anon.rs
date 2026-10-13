@@ -596,7 +596,7 @@ async fn get_issue_urls_pages_through_a_finished_quick_audit() {
 async fn only_quick_audits_can_be_read_by_id() {
     let app = cloud().await;
     let (account, _) = app
-        .login_with_plan("owner@example.com", Some(Plan::Pro))
+        .login_with_plan("owner@example.com", Some(Plan::Lite))
         .await;
     let site = app.site(&account, "private.example.com").await;
     let keyed_crawl = app

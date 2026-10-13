@@ -131,14 +131,14 @@ fn assert_clean(report: &TickReport) {
 async fn due_sites_get_a_crawl_in_the_lane_of_their_plan() {
     let db = TestDb::new().await;
     let free = account(&db, "free@example.test", "free", "UTC", 1).await;
+    let lite = account(&db, "lite@example.test", "lite", "UTC", 1).await;
     let pro = account(&db, "pro@example.test", "pro", "UTC", 1).await;
-    let agency = account(&db, "agency@example.test", "agency", "UTC", 1).await;
     let selfhost = account(&db, "self@example.test", "self_hosted", "UTC", 1).await;
     let mut sites = Vec::new();
     for (acct, domain) in [
         (free, "f.test"),
+        (lite, "l.test"),
         (pro, "p.test"),
-        (agency, "a.test"),
         (selfhost, "s.test"),
     ] {
         sites.push(site(&db, acct, domain, "weekly", 5).await);
@@ -160,7 +160,7 @@ async fn due_sites_get_a_crawl_in_the_lane_of_their_plan() {
 #[tokio::test]
 async fn a_site_three_weeks_overdue_gets_one_crawl_and_a_future_slot() {
     let db = TestDb::new().await;
-    let pro = account(&db, "pro@example.test", "pro", "UTC", 90).await;
+    let pro = account(&db, "lite@example.test", "lite", "UTC", 90).await;
     let s = site(&db, pro, "late.test", "daily", 21 * 24 * 60).await;
     let c = ctx(&db, Mode::Cloud);
 
@@ -191,7 +191,7 @@ async fn a_free_site_marked_daily_runs_weekly() {
 #[tokio::test]
 async fn a_paid_daily_site_runs_at_its_hour_in_the_account_time_zone() {
     let db = TestDb::new().await;
-    let pro = account(&db, "pro@example.test", "pro", "Europe/Berlin", 1).await;
+    let pro = account(&db, "lite@example.test", "lite", "Europe/Berlin", 1).await;
     let s = site(&db, pro, "berlin.test", "daily", 1).await;
     sqlx::query("UPDATE sites SET scheduled_hour = 6 WHERE id = $1")
         .bind(s)
@@ -209,7 +209,7 @@ async fn a_paid_daily_site_runs_at_its_hour_in_the_account_time_zone() {
 #[tokio::test]
 async fn a_site_with_a_queued_or_running_crawl_gets_no_second_one() {
     let db = TestDb::new().await;
-    let pro = account(&db, "pro@example.test", "pro", "UTC", 1).await;
+    let pro = account(&db, "lite@example.test", "lite", "UTC", 1).await;
     let queued = site(&db, pro, "q.test", "daily", 5).await;
     let running = site(&db, pro, "r.test", "daily", 5).await;
     sqlx::query(
@@ -231,7 +231,7 @@ async fn a_site_with_a_queued_or_running_crawl_gets_no_second_one() {
 #[tokio::test]
 async fn two_schedulers_ticking_at_once_queue_each_crawl_once() {
     let db = TestDb::new().await;
-    let pro = account(&db, "pro@example.test", "pro", "UTC", 1).await;
+    let pro = account(&db, "lite@example.test", "lite", "UTC", 1).await;
     let mut sites = Vec::new();
     for i in 0..30 {
         sites.push(site(&db, pro, &format!("s{i}.test"), "daily", 5).await);
@@ -256,7 +256,7 @@ async fn paused_accounts_and_stopped_sites_are_not_scheduled() {
         .await
         .unwrap();
     let ps = site(&db, paused, "paused.test", "weekly", 5).await;
-    let pro = account(&db, "pro@example.test", "pro", "UTC", 1).await;
+    let pro = account(&db, "lite@example.test", "lite", "UTC", 1).await;
     let stopped = site(&db, pro, "stopped.test", "daily", 5).await;
     sqlx::query("UPDATE sites SET monitoring_active = false WHERE id = $1")
         .bind(stopped)
@@ -293,7 +293,7 @@ async fn a_site_without_a_slot_gets_one_but_no_crawl() {
 #[tokio::test]
 async fn an_expired_plan_is_downgraded_by_the_tick() {
     let db = TestDb::new().await;
-    let pro = account(&db, "pro@example.test", "pro", "UTC", 100).await;
+    let pro = account(&db, "lite@example.test", "lite", "UTC", 100).await;
     sqlx::query("UPDATE accounts SET plan_expires_at = $2::timestamptz WHERE id = $1")
         .bind(pro)
         .bind((noon() - SignedDuration::from_hours(1)).to_string())
@@ -395,10 +395,10 @@ async fn a_recheck_whose_worker_died_is_failed_so_its_incident_is_not_left_busy(
 #[tokio::test]
 async fn the_digest_is_queued_once_on_monday_morning_local_time() {
     let db = TestDb::new().await;
-    let acct = account(&db, "ana@example.test", "pro", "Asia/Kolkata", 60).await;
+    let acct = account(&db, "ana@example.test", "lite", "Asia/Kolkata", 60).await;
     let s = site(&db, acct, "ana.test", "weekly", -600).await;
     done_crawl_at(&db, s, "ana.test", noon() - SignedDuration::from_hours(80)).await;
-    let utc_acct = account(&db, "utc@example.test", "pro", "UTC", 60).await;
+    let utc_acct = account(&db, "utc@example.test", "lite", "UTC", 60).await;
     let s2 = site(&db, utc_acct, "utc.test", "weekly", -600).await;
     done_crawl_at(&db, s2, "utc.test", noon() - SignedDuration::from_hours(80)).await;
     let c = ctx(&db, Mode::Cloud);
@@ -669,7 +669,7 @@ async fn a_click_inside_the_week_keeps_the_account_running() {
 #[tokio::test]
 async fn paid_and_self_hosted_accounts_are_never_warned_or_paused() {
     let db = TestDb::new().await;
-    let pro = account(&db, "pro@example.test", "pro", "UTC", 120).await;
+    let pro = account(&db, "lite@example.test", "lite", "UTC", 120).await;
     site(&db, pro, "pro.test", "daily", -10_000).await;
     let selfhost = account(&db, "self@example.test", "self_hosted", "UTC", 120).await;
     site(&db, selfhost, "self.test", "daily", -10_000).await;
@@ -709,13 +709,13 @@ async fn a_free_account_with_nothing_monitored_is_not_asked_to_keep_monitoring()
 #[tokio::test]
 async fn active_after_4_weeks_is_recorded_once_per_account() {
     let db = TestDb::new().await;
-    let veteran = account(&db, "vet@example.test", "pro", "UTC", 29).await;
+    let veteran = account(&db, "vet@example.test", "lite", "UTC", 29).await;
     let s = site(&db, veteran, "vet.test", "daily", -600).await;
     done_crawl_at(&db, s, "vet.test", noon() - SignedDuration::from_hours(24)).await;
-    let newcomer = account(&db, "new@example.test", "pro", "UTC", 10).await;
+    let newcomer = account(&db, "new@example.test", "lite", "UTC", 10).await;
     let s2 = site(&db, newcomer, "new.test", "daily", -600).await;
     done_crawl_at(&db, s2, "new.test", noon() - SignedDuration::from_hours(24)).await;
-    let stale = account(&db, "stale@example.test", "pro", "UTC", 90).await;
+    let stale = account(&db, "stale@example.test", "lite", "UTC", 90).await;
     let s3 = site(&db, stale, "stale.test", "daily", -600).await;
     done_crawl_at(
         &db,

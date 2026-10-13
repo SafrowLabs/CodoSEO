@@ -37,7 +37,7 @@ pub async fn run(
 ) -> Result<RetentionReport, sqlx::Error> {
     let mut crawls_trimmed = 0;
     let mut ai_incidents_trimmed = 0;
-    for plan in [Plan::Free, Plan::Pro, Plan::Agency, Plan::SelfHosted] {
+    for plan in [Plan::Free, Plan::Lite, Plan::Pro, Plan::SelfHosted] {
         let days = match plan {
             Plan::SelfHosted => self_hosted_history_days.unwrap_or_else(|| {
                 PlanLimits::for_plan(Plan::SelfHosted)

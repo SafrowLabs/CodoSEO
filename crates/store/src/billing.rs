@@ -114,8 +114,8 @@ pub async fn apply_plan(
 fn plan_slug(plan: Plan) -> &'static str {
     match plan {
         Plan::Free => "free",
+        Plan::Lite => "lite",
         Plan::Pro => "pro",
-        Plan::Agency => "agency",
         Plan::SelfHosted => "self_hosted",
     }
 }
@@ -220,7 +220,7 @@ pub async fn handle_event(
     // A different subscription must not take over an account that is paid up on one already
     // (a forged or misdirected `metadata.account_id` would otherwise swap the ids). Once the
     // paid period has run out, a new subscription is welcome.
-    let paid_up = matches!(parse_plan(&account.plan), Plan::Pro | Plan::Agency)
+    let paid_up = matches!(parse_plan(&account.plan), Plan::Lite | Plan::Pro)
         && account.plan_expires_at.is_some_and(|expires| expires > now);
     if other_subscription && paid_up && matches!(action, Action::Activate { .. }) {
         tracing::warn!(

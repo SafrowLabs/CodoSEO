@@ -2224,7 +2224,7 @@ use codoseo_store::geo::{RecheckError, RecheckOrigin, RecheckOutcome, RecheckSta
 fn limits_with(cap: Option<u16>) -> PlanLimits {
     PlanLimits {
         ai_rechecks_per_day: cap,
-        ..PlanLimits::for_plan(Plan::Pro)
+        ..PlanLimits::for_plan(Plan::Lite)
     }
 }
 

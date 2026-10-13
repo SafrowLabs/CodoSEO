@@ -83,8 +83,8 @@ async fn billing_app() -> (TestApp, Fake, TestServer) {
     let app = TestApp::with_config(cloud_config_with(&[
         ("DODO_API_KEY", "dodo_key_123"),
         ("DODO_WEBHOOK_SECRET", SECRET),
+        ("DODO_PRODUCT_LITE", "pdt_lite"),
         ("DODO_PRODUCT_PRO", "pdt_pro"),
-        ("DODO_PRODUCT_AGENCY", "pdt_agency"),
         ("DODO_API_URL", &server.base()),
     ]))
     .await;
@@ -203,13 +203,13 @@ async fn a_valid_active_event_sets_pro_with_daily_schedules_and_no_origin_is_nee
     assert_eq!(site_state(&app, site.id).await.1.as_deref(), Some("weekly"));
 
     let when = base();
-    let body = event_body("subscription.active", Some(account.id), "pdt_pro", when);
+    let body = event_body("subscription.active", Some(account.id), "pdt_lite", when);
     let hook = Hook::new("msg_1", &body);
     assert!(!hook.request().headers().contains_key(header::ORIGIN));
     assert_eq!(hook.send(&app).await, StatusCode::OK);
 
     let (plan, expires) = account_state(&app, account.id).await;
-    assert_eq!(plan, "pro");
+    assert_eq!(plan, "lite");
     let expected = (when + Duration::days(33)).unix_timestamp();
     assert_eq!(expires.unwrap().unix_timestamp(), expected);
     let (customer, sub): (Option<String>, Option<String>) =
@@ -225,33 +225,28 @@ async fn a_valid_active_event_sets_pro_with_daily_schedules_and_no_origin_is_nee
 }
 
 #[tokio::test]
-async fn the_agency_product_sets_agency() {
+async fn the_pro_product_sets_pro() {
     let (app, _, _server) = billing_app().await;
     let (account, _) = free_account(&app, "ana@example.com").await;
-    let body = event_body(
-        "subscription.active",
-        Some(account.id),
-        "pdt_agency",
-        base(),
-    );
+    let body = event_body("subscription.active", Some(account.id), "pdt_pro", base());
     assert_eq!(Hook::new("msg_1", &body).send(&app).await, StatusCode::OK);
-    assert_eq!(account_state(&app, account.id).await.0, "agency");
+    assert_eq!(account_state(&app, account.id).await.0, "pro");
 }
 
 #[tokio::test]
 async fn an_account_is_found_by_the_customers_email_when_the_metadata_is_missing() {
     let (app, _, _server) = billing_app().await;
     let (account, _) = free_account(&app, "Ana@Example.com").await;
-    let body = event_body("subscription.active", None, "pdt_pro", base());
+    let body = event_body("subscription.active", None, "pdt_lite", base());
     assert_eq!(Hook::new("msg_1", &body).send(&app).await, StatusCode::OK);
-    assert_eq!(account_state(&app, account.id).await.0, "pro");
+    assert_eq!(account_state(&app, account.id).await.0, "lite");
 }
 
 #[tokio::test]
 async fn forged_and_stale_requests_are_401_and_change_nothing() {
     let (app, _, _server) = billing_app().await;
     let (account, _) = free_account(&app, "ana@example.com").await;
-    let body = event_body("subscription.active", Some(account.id), "pdt_pro", base());
+    let body = event_body("subscription.active", Some(account.id), "pdt_lite", base());
 
     // A wrong secret.
     let wrong = Hook {
@@ -262,7 +257,7 @@ async fn forged_and_stale_requests_are_401_and_change_nothing() {
 
     // A body changed after signing.
     let mut req = Hook::new("msg_2", &body).request();
-    let tampered = body.replace("pdt_pro", "pdt_agency");
+    let tampered = body.replace("pdt_lite", "pdt_pro");
     *req.body_mut() = Body::from(tampered);
     assert_eq!(send_raw(&app, req).await.status(), StatusCode::UNAUTHORIZED);
 
@@ -305,7 +300,7 @@ async fn forged_and_stale_requests_are_401_and_change_nothing() {
 async fn several_signatures_where_one_is_valid_pass() {
     let (app, _, _server) = billing_app().await;
     let (account, _) = free_account(&app, "ana@example.com").await;
-    let body = event_body("subscription.active", Some(account.id), "pdt_pro", base());
+    let body = event_body("subscription.active", Some(account.id), "pdt_lite", base());
     let mut req = Hook::new("msg_1", &body).request();
     let good = req.headers()["webhook-signature"]
         .to_str()
@@ -323,19 +318,19 @@ async fn several_signatures_where_one_is_valid_pass() {
         format!("{bad} {good}").parse().unwrap(),
     );
     assert_eq!(send_raw(&app, req).await.status(), StatusCode::OK);
-    assert_eq!(account_state(&app, account.id).await.0, "pro");
+    assert_eq!(account_state(&app, account.id).await.0, "lite");
 }
 
 #[tokio::test]
 async fn a_replayed_event_id_changes_nothing_and_still_answers_200() {
     let (app, _, _server) = billing_app().await;
     let (account, _) = free_account(&app, "ana@example.com").await;
-    let body = event_body("subscription.active", Some(account.id), "pdt_pro", base());
+    let body = event_body("subscription.active", Some(account.id), "pdt_lite", base());
     assert_eq!(Hook::new("msg_1", &body).send(&app).await, StatusCode::OK);
-    set_plan(app.pool(), account.id, Plan::Agency).await;
+    set_plan(app.pool(), account.id, Plan::Pro).await;
 
     assert_eq!(Hook::new("msg_1", &body).send(&app).await, StatusCode::OK);
-    assert_eq!(account_state(&app, account.id).await.0, "agency");
+    assert_eq!(account_state(&app, account.id).await.0, "pro");
     assert_eq!(events_stored(&app).await, 1);
 }
 
@@ -344,12 +339,12 @@ async fn an_older_active_after_an_applied_expired_is_ignored() {
     let (app, _, _server) = billing_app().await;
     let (account, _) = free_account(&app, "ana@example.com").await;
     let t0 = base();
-    let active = event_body("subscription.active", Some(account.id), "pdt_pro", t0);
+    let active = event_body("subscription.active", Some(account.id), "pdt_lite", t0);
     assert_eq!(Hook::new("msg_1", &active).send(&app).await, StatusCode::OK);
     let expired = event_body(
         "subscription.expired",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(40),
     );
     assert_eq!(
@@ -365,7 +360,7 @@ async fn an_older_active_after_an_applied_expired_is_ignored() {
     let late = event_body(
         "subscription.active",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(20),
     );
     assert_eq!(Hook::new("msg_2", &late).send(&app).await, StatusCode::OK);
@@ -396,15 +391,15 @@ async fn cancelled_keeps_the_plan_and_expired_downgrades_and_the_owner_picks_the
         .unwrap();
 
     let t0 = base();
-    let active = event_body("subscription.active", Some(account.id), "pdt_pro", t0);
+    let active = event_body("subscription.active", Some(account.id), "pdt_lite", t0);
     Hook::new("msg_1", &active).send(&app).await;
     let before = account_state(&app, account.id).await;
-    assert_eq!(before.0, "pro");
+    assert_eq!(before.0, "lite");
 
     let cancelled = event_body(
         "subscription.cancelled",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(5),
     );
     assert_eq!(
@@ -416,7 +411,7 @@ async fn cancelled_keeps_the_plan_and_expired_downgrades_and_the_owner_picks_the
     let expired = event_body(
         "subscription.expired",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(10),
     );
     assert_eq!(
@@ -486,22 +481,22 @@ async fn failed_and_hold_events_and_unknown_ones_are_answered_200() {
     let (app, _, _server) = billing_app().await;
     let (account, _) = free_account(&app, "ana@example.com").await;
     let t0 = base();
-    let active = event_body("subscription.active", Some(account.id), "pdt_pro", t0);
+    let active = event_body("subscription.active", Some(account.id), "pdt_lite", t0);
     Hook::new("msg_1", &active).send(&app).await;
     let hold = event_body(
         "subscription.on_hold",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(1),
     );
     assert_eq!(Hook::new("msg_2", &hold).send(&app).await, StatusCode::OK);
-    assert_eq!(account_state(&app, account.id).await.0, "pro");
+    assert_eq!(account_state(&app, account.id).await.0, "lite");
     let odd = r#"{"type":"payment.succeeded","timestamp":"2026-01-01T00:00:00Z","data":{"payment_id":"pay_1"}}"#;
     assert_eq!(Hook::new("msg_3", odd).send(&app).await, StatusCode::OK);
     let failed = event_body(
         "subscription.failed",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(2),
     );
     assert_eq!(Hook::new("msg_4", &failed).send(&app).await, StatusCode::OK);
@@ -515,7 +510,7 @@ async fn an_event_for_nobody_is_stored_and_answered_200() {
     let body = event_body(
         "subscription.active",
         Some(Uuid::new_v4()),
-        "pdt_pro",
+        "pdt_lite",
         base(),
     );
     assert_eq!(Hook::new("msg_1", &body).send(&app).await, StatusCode::OK);
@@ -544,7 +539,7 @@ async fn only_the_webhook_skips_the_origin_check() {
             .uri(path)
             .header(header::COOKIE, &cookie)
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from("plan=pro"))
+            .body(Body::from("plan=lite"))
             .unwrap()
     };
     for path in [
@@ -576,7 +571,7 @@ async fn checkout_posts_the_right_body_and_redirects_to_the_checkout_url() {
     let (app, fake, _server) = billing_app().await;
     let (account, cookie) = free_account(&app, "ana@example.com").await;
 
-    let res = post_form(&app, "/billing/checkout", "plan=agency", &cookie).await;
+    let res = post_form(&app, "/billing/checkout", "plan=pro", &cookie).await;
     assert_eq!(res.status, StatusCode::SEE_OTHER);
     assert_eq!(
         res.location(),
@@ -594,18 +589,18 @@ async fn checkout_posts_the_right_body_and_redirects_to_the_checkout_url() {
     assert_eq!(
         call.body,
         serde_json::json!({
-            "product_cart": [{"product_id": "pdt_agency", "quantity": 1}],
+            "product_cart": [{"product_id": "pdt_pro", "quantity": 1}],
             "customer": {"email": "ana@example.com"},
             "return_url": "https://codoseo.com/billing?status=success",
             "metadata": {"account_id": account.id.to_string()},
         })
     );
 
-    let res = post_form(&app, "/billing/checkout", "plan=pro", &cookie).await;
+    let res = post_form(&app, "/billing/checkout", "plan=lite", &cookie).await;
     assert_eq!(res.status, StatusCode::SEE_OTHER);
     assert_eq!(
         fake.calls.lock().unwrap()[1].body["product_cart"][0]["product_id"],
-        "pdt_pro"
+        "pdt_lite"
     );
 }
 
@@ -613,14 +608,14 @@ async fn checkout_posts_the_right_body_and_redirects_to_the_checkout_url() {
 async fn checkout_refuses_unknown_plans_and_accounts_that_already_pay() {
     let (app, fake, _server) = billing_app().await;
     let (_, cookie) = free_account(&app, "ana@example.com").await;
-    for plan in ["free", "self_hosted", "gold", ""] {
+    for plan in ["free", "self_hosted", "agency", "gold", ""] {
         let res = post_form(&app, "/billing/checkout", &format!("plan={plan}"), &cookie).await;
         assert_eq!(res.status, StatusCode::BAD_REQUEST, "{plan}");
     }
     let (_, paid) = app
-        .login_with_plan("pro@example.com", Some(Plan::Pro))
+        .login_with_plan("pro@example.com", Some(Plan::Lite))
         .await;
-    let res = post_form(&app, "/billing/checkout", "plan=agency", &paid).await;
+    let res = post_form(&app, "/billing/checkout", "plan=pro", &paid).await;
     assert_eq!(res.status, StatusCode::CONFLICT);
     assert!(fake.calls.lock().unwrap().is_empty());
 }
@@ -630,7 +625,7 @@ async fn a_dodo_error_shows_a_friendly_message_on_the_billing_page() {
     let (app, fake, _server) = billing_app().await;
     let (_, cookie) = free_account(&app, "ana@example.com").await;
     *fake.broken.lock().unwrap() = true;
-    let res = post_form(&app, "/billing/checkout", "plan=pro", &cookie).await;
+    let res = post_form(&app, "/billing/checkout", "plan=lite", &cookie).await;
     assert_eq!(res.status, StatusCode::BAD_GATEWAY);
     assert!(res.body.contains("payment provider"), "{}", res.body);
     assert!(
@@ -644,7 +639,7 @@ async fn a_dodo_error_shows_a_friendly_message_on_the_billing_page() {
 async fn the_portal_redirects_to_the_link_and_needs_a_customer() {
     let (app, fake, _server) = billing_app().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
 
     // No customer yet: nothing to open.
@@ -678,7 +673,7 @@ async fn billing_needs_a_sign_in_and_checkout_works_for_nobody_else() {
         assert!(res.location().unwrap().starts_with("/login"));
     }
     for path in ["/billing/checkout", "/billing/portal", "/billing/sites"] {
-        let res = app.post(path, "plan=pro", None).await;
+        let res = app.post(path, "plan=lite", None).await;
         assert_eq!(res.status, StatusCode::SEE_OTHER, "{path}");
         assert!(res.location().unwrap().starts_with("/login"));
     }
@@ -688,15 +683,35 @@ async fn billing_needs_a_sign_in_and_checkout_works_for_nobody_else() {
 // ---- the screens ------------------------------------------------------------------------------
 
 #[tokio::test]
+async fn with_billing_on_the_landing_sends_the_paid_cards_to_billing() {
+    let (app, _, _server) = billing_app().await;
+    let res = app.get("/", None).await;
+    assert_eq!(res.status, StatusCode::OK);
+    for event in ["choose-lite", "choose-pro"] {
+        assert!(
+            res.body
+                .contains(&format!(r#"href="/billing" data-umami-event="{event}""#)),
+            "{event}: {}",
+            res.body
+        );
+    }
+    assert!(!res.body.contains("Checkout opens soon"));
+}
+
+#[tokio::test]
 async fn the_page_shows_the_plan_the_cards_and_the_nav_entry() {
     let (app, _, _server) = billing_app().await;
     let (_, cookie) = free_account(&app, "ana@example.com").await;
     let res = app.get("/billing", Some(&cookie)).await;
     assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("Free"));
-    assert!(res.body.contains("Pro") && res.body.contains("Agency"));
+    assert!(res.body.contains("Lite") && res.body.contains("Pro"));
+    assert!(res.body.contains("$9") && res.body.contains("$19"));
+    assert!(res.body.contains("Up to 5,000 pages per crawl"));
+    assert!(res.body.contains("Up to 10,000 pages per crawl"));
+    assert!(!res.body.contains("Agency"));
     assert!(res.body.contains("action=\"/billing/checkout\""));
-    assert!(res.body.contains("value=\"pro\"") && res.body.contains("value=\"agency\""));
+    assert!(res.body.contains("value=\"lite\"") && res.body.contains("value=\"pro\""));
     assert!(!res.body.contains("Manage billing"), "no customer yet");
     assert!(!res.body.contains("isn't configured"));
     assert!(
@@ -712,7 +727,7 @@ async fn a_paid_account_sees_its_renewal_date_and_manage_billing() {
     let body = event_body(
         "subscription.active",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         OffsetDateTime::now_utc(),
     );
     Hook::new("msg_1", &body).send(&app).await;
@@ -746,12 +761,12 @@ async fn without_dodo_keys_the_page_says_so_and_checkout_is_off() {
     assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("Billing isn't configured"));
     assert!(!res.body.contains("action=\"/billing/checkout\""));
-    let res = post_form(&app, "/billing/checkout", "plan=pro", &cookie).await;
+    let res = post_form(&app, "/billing/checkout", "plan=lite", &cookie).await;
     assert_eq!(res.status, StatusCode::SERVICE_UNAVAILABLE);
     let res = post_form(&app, "/billing/portal", "", &cookie).await;
     assert_eq!(res.status, StatusCode::SERVICE_UNAVAILABLE);
     // And the webhook has nothing to verify with.
-    let body = event_body("subscription.active", None, "pdt_pro", base());
+    let body = event_body("subscription.active", None, "pdt_lite", base());
     assert_eq!(
         Hook::new("msg_1", &body).send(&app).await,
         StatusCode::NOT_FOUND
@@ -772,7 +787,7 @@ async fn self_hosted_has_no_billing_at_all() {
         "/billing/sites",
         "/billing/webhook",
     ] {
-        let res = app.post(path, "plan=pro", Some(&cookie)).await;
+        let res = app.post(path, "plan=lite", Some(&cookie)).await;
         assert_eq!(res.status, StatusCode::NOT_FOUND, "{path}");
     }
     // Signed out, it is a 404 too (not a login redirect).
@@ -809,14 +824,14 @@ async fn a_cancelled_subscription_says_when_the_plan_ends_until_it_is_renewed() 
     let (app, _, _server) = billing_app().await;
     let (account, cookie) = free_account(&app, "ana@example.com").await;
     let t0 = OffsetDateTime::now_utc() - Duration::hours(1);
-    let active = event_body("subscription.active", Some(account.id), "pdt_pro", t0);
+    let active = event_body("subscription.active", Some(account.id), "pdt_lite", t0);
     Hook::new("msg_1", &active).send(&app).await;
     let date = codoseo_web::fmt::date(t0 + Duration::days(30));
 
     let cancelled = event_body(
         "subscription.cancelled",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(5),
     );
     assert_eq!(
@@ -834,7 +849,7 @@ async fn a_cancelled_subscription_says_when_the_plan_ends_until_it_is_renewed() 
     let renewed = event_body(
         "subscription.renewed",
         Some(account.id),
-        "pdt_pro",
+        "pdt_lite",
         t0 + Duration::minutes(10),
     );
     Hook::new("msg_3", &renewed).send(&app).await;
@@ -852,7 +867,7 @@ async fn a_verified_event_with_wrongly_typed_fields_is_stored_and_answered_200()
         "timestamp": 12345,
         "data": {
             "subscription_id": "sub_1",
-            "product_id": "pdt_pro",
+            "product_id": "pdt_lite",
             "status": 7,
             "customer": "cus_1",
             "metadata": {"account_id": account.id.to_string()},
@@ -862,7 +877,7 @@ async fn a_verified_event_with_wrongly_typed_fields_is_stored_and_answered_200()
     assert_eq!(Hook::new("msg_1", &body).send(&app).await, StatusCode::OK);
     assert_eq!(events_stored(&app).await, 1);
     // `status: 7` is unusable, so it counts as absent and an activating event takes it as active.
-    assert_eq!(account_state(&app, account.id).await.0, "pro");
+    assert_eq!(account_state(&app, account.id).await.0, "lite");
 
     // Only a body that isn't a JSON object is refused.
     for (n, bad) in ["[1,2]", "\"x\"", "42"].iter().enumerate() {
@@ -879,7 +894,7 @@ async fn a_verified_event_with_wrongly_typed_fields_is_stored_and_answered_200()
 #[tokio::test]
 async fn extreme_webhook_timestamps_are_401_not_a_panic() {
     let (app, _, _server) = billing_app().await;
-    let body = event_body("subscription.active", None, "pdt_pro", base());
+    let body = event_body("subscription.active", None, "pdt_lite", base());
     for ts in [i64::MIN, i64::MAX] {
         let mut req = Hook::new("msg_1", &body).request();
         req.headers_mut()

@@ -111,7 +111,7 @@ async fn free_plan_allows_one_site() {
 async fn pro_plan_allows_five_sites() {
     let app = TestApp::new().await;
     let (_, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     for i in 1..=5 {
         let res = add_site(&app, &cookie, &format!("site{i}.com")).await;
@@ -293,7 +293,7 @@ async fn only_manual_crawls_count_against_the_allowance() {
 async fn the_allowance_is_per_site() {
     let app = TestApp::new().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     let a = app.site(&account, "a.com").await;
     let b = app.site(&account, "b.com").await;
@@ -312,7 +312,7 @@ async fn the_allowance_is_per_site() {
 async fn pro_allows_one_manual_crawl_a_day() {
     let app = TestApp::new().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Pro))
+        .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     let site = app.site(&account, "example.com").await;
     let old = crawl_at(&app, &site, "manual", "done", "23 hours").await;
@@ -321,7 +321,7 @@ async fn pro_allows_one_manual_crawl_a_day() {
     assert_eq!(res.status, StatusCode::FORBIDDEN, "{}", res.body);
     assert!(
         res.body.contains(
-            "Your Pro plan includes 1 manual crawl a day. The next one is available in 1 hour."
+            "Your Lite plan includes 1 manual crawl a day. The next one is available in 1 hour."
         ),
         "{}",
         res.body
@@ -337,10 +337,10 @@ async fn pro_allows_one_manual_crawl_a_day() {
 }
 
 #[tokio::test]
-async fn agency_manual_crawls_are_unlimited() {
+async fn pro_manual_crawls_are_unlimited() {
     let app = TestApp::new().await;
     let (account, cookie) = app
-        .login_with_plan("ana@example.com", Some(Plan::Agency))
+        .login_with_plan("ana@example.com", Some(Plan::Pro))
         .await;
     let site = app.site(&account, "example.com").await;
     for _ in 0..3 {
@@ -420,8 +420,8 @@ async fn manual_priority_lanes() {
     let app = TestApp::new().await;
     for (i, (plan, lane)) in [
         (Plan::Free, 4),
+        (Plan::Lite, 2),
         (Plan::Pro, 2),
-        (Plan::Agency, 2),
         (Plan::SelfHosted, 2),
     ]
     .into_iter()

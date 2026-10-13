@@ -241,7 +241,7 @@ impl Fixture {
     }
 }
 
-/// A cloud app with an account on `plan`, a key, and a site with one finished crawl. (Agency
+/// A cloud app with an account on `plan`, a key, and a site with one finished crawl. (Pro
 /// where `run_crawl` must succeed: the fixture crawl is itself a manual one.)
 async fn setup(plan: Plan) -> Fixture {
     let app = cloud().await;
@@ -288,7 +288,7 @@ const WRITING_TOOLS: [(&str, bool); 6] = [
 
 #[tokio::test]
 async fn with_a_key_the_tool_list_is_exactly_the_keyed_tools() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let init = f.rpc().initialize().await;
     assert_eq!(init["protocolVersion"], PROTOCOL);
     assert_eq!(init["serverInfo"]["name"], "codoseo");
@@ -432,7 +432,7 @@ async fn with_a_key_the_tool_list_is_exactly_the_keyed_tools() {
 
 #[tokio::test]
 async fn a_keyed_caller_cannot_call_a_tool_of_the_no_key_tier() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let res = f
         .rpc()
         .post(jsonrpc(
@@ -449,7 +449,7 @@ async fn a_keyed_caller_cannot_call_a_tool_of_the_no_key_tier() {
 
 #[tokio::test]
 async fn every_read_tool_returns_what_rest_returns() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let site = f.site.id;
     let rpc = f.rpc();
     let rest = |path: String| {
@@ -539,7 +539,7 @@ async fn every_read_tool_returns_what_rest_returns() {
 
 #[tokio::test]
 async fn run_crawl_queues_one_then_reports_the_conflict() {
-    let f = setup(Plan::Agency).await;
+    let f = setup(Plan::Pro).await;
     let queued = f
         .rpc()
         .call_ok("run_crawl", json!({"site_id": f.site.id}))
@@ -596,7 +596,7 @@ async fn a_free_accounts_second_manual_crawl_is_a_tool_error_about_the_plan() {
 
 #[tokio::test]
 async fn get_ai_access_matches_rest_and_says_when_there_is_no_report() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let site = f.site.id;
     let rest = |path: String| {
         let (app, key) = (&f.app, &f.key);
@@ -673,7 +673,7 @@ async fn with_incidents(f: &Fixture) -> (i64, i64) {
 
 #[tokio::test]
 async fn get_fix_matches_rest_and_the_incidents_carry_what_the_fix_needs() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let (blocked, fetch) = with_incidents(&f).await;
     let site = f.site.id;
     for id in [blocked, fetch] {
@@ -724,7 +724,7 @@ async fn get_fix_matches_rest_and_the_incidents_carry_what_the_fix_needs() {
 
 #[tokio::test]
 async fn the_repair_tools_round_trip_and_each_call_is_counted() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let (_, fetch) = with_incidents(&f).await;
     let site = f.site.id;
     let args = json!({"site_id": site, "incident_id": fetch});
@@ -776,7 +776,7 @@ async fn the_repair_tools_round_trip_and_each_call_is_counted() {
 
 #[tokio::test]
 async fn the_repair_tools_refuse_in_the_same_words_as_rest() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let (blocked, fetch) = with_incidents(&f).await;
     let site = f.site.id;
     let rpc = f.rpc();
@@ -836,7 +836,7 @@ async fn the_repair_tools_refuse_in_the_same_words_as_rest() {
 
 #[tokio::test]
 async fn get_ai_access_carries_the_synthetic_fetch_check_like_rest() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let site = f.site.id;
     let tools = f.rpc().tools().await;
     let tool = tools.iter().find(|t| t["name"] == "get_ai_access").unwrap();
@@ -909,7 +909,7 @@ async fn get_ai_access_carries_the_synthetic_fetch_check_like_rest() {
 
 #[tokio::test]
 async fn get_ai_access_carries_content_and_llms_txt_like_rest() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let site = f.site.id;
     let tools = f.rpc().tools().await;
     let tool = tools.iter().find(|t| t["name"] == "get_ai_access").unwrap();
@@ -957,7 +957,7 @@ async fn get_ai_access_carries_content_and_llms_txt_like_rest() {
 
 #[tokio::test]
 async fn get_ai_access_says_why_llms_txt_was_not_fetched_like_rest() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let site = f.site.id;
     f.app
         .finished_crawl_with_llms(
@@ -995,7 +995,7 @@ async fn get_ai_access_says_why_llms_txt_was_not_fetched_like_rest() {
 
 #[tokio::test]
 async fn bad_arguments_are_tool_errors_the_agent_can_read() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let rpc = f.rpc();
     let site = f.site.id;
     let (is_error, text) = rpc
@@ -1039,7 +1039,7 @@ async fn bad_arguments_are_tool_errors_the_agent_can_read() {
 
 #[tokio::test]
 async fn another_accounts_site_reads_like_a_site_that_does_not_exist() {
-    let f = setup(Plan::Agency).await;
+    let f = setup(Plan::Pro).await;
     let (other, _) = f.app.login("other@example.com").await;
     let theirs = f.app.site(&other, "other.example").await;
     f.app
@@ -1084,7 +1084,7 @@ async fn another_accounts_site_reads_like_a_site_that_does_not_exist() {
 
 #[tokio::test]
 async fn initialize_listing_and_pings_are_free_and_every_tool_call_costs_one() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let rpc = f.rpc();
     rpc.initialize().await;
     rpc.tools().await;
@@ -1174,7 +1174,7 @@ async fn self_hosted_serves_keyed_tools_without_a_limit() {
 
 #[tokio::test]
 async fn a_revoked_malformed_or_unknown_key_is_a_401_never_no_key() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let (revoked, revoked_id) = make_key(&f.app, &f.account).await;
     assert!(
         api_keys::revoke(f.app.pool(), f.account.id, revoked_id)
@@ -1222,7 +1222,7 @@ fn rpc_init() -> Value {
 
 #[tokio::test]
 async fn a_session_cookie_without_a_key_is_not_a_keyed_caller() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let (_, cookie) = f.app.login("owner@example.com").await;
     // Cloud: no key means the no-key tier (four tools), which has none of the keyed tools.
     let rpc = Rpc {
@@ -1269,7 +1269,7 @@ async fn a_session_cookie_without_a_key_is_not_a_keyed_caller() {
 
 #[tokio::test]
 async fn a_foreign_host_is_refused_even_with_a_valid_key() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     for host in [
         "evil.example",
         "codoseo.com.evil.example",
@@ -1295,7 +1295,7 @@ async fn a_foreign_host_is_refused_even_with_a_valid_key() {
 
 #[tokio::test]
 async fn the_endpoint_takes_no_cookie_origin_check_and_only_posts() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     // A foreign Origin works with a key: no cookie reaches this route.
     let mut req = f.rpc().request(&rpc_call("list_sites"));
     req.headers_mut()
@@ -1336,7 +1336,7 @@ async fn a_real_mcp_client_lists_and_calls_tools_with_a_key_over_tcp() {
     use rmcp::transport::StreamableHttpClientTransport;
     use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -1510,7 +1510,7 @@ fn faulty_router(f: &Fixture, handler: CloudMcp<Faulty>) -> axum::Router {
 
 #[tokio::test]
 async fn a_panicking_tool_answers_with_a_generic_error_at_once() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let router = faulty_router(&f, CloudMcp::new(Faulty { panics: true }));
     let rpc = Rpc {
         router: Some(&router),
@@ -1531,7 +1531,7 @@ async fn a_panicking_tool_answers_with_a_generic_error_at_once() {
 
 #[tokio::test]
 async fn a_stalled_tool_is_cut_off_with_a_tool_error() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let router = faulty_router(
         &f,
         CloudMcp::new(Faulty { panics: false })
@@ -1585,7 +1585,7 @@ async fn a_cloud_request_without_a_key_is_refused_for_a_foreign_host_too() {
 
 #[tokio::test]
 async fn delete_is_not_allowed_and_a_big_body_is_refused() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let mut req = f.rpc().request(&rpc_init());
     *req.method_mut() = Method::DELETE;
     let res = f.app.send(req).await;
@@ -1600,7 +1600,7 @@ async fn delete_is_not_allowed_and_a_big_body_is_refused() {
 
 #[tokio::test]
 async fn shutdown_ends_an_open_call() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     // A call stuck in the backend is answered once shutdown begins, not left to hold it.
     let router = faulty_router(&f, CloudMcp::new(Faulty { panics: false }));
     let rpc = Rpc {
@@ -1638,7 +1638,7 @@ async fn serve_cancels_the_shutdown_token_when_it_begins_shutting_down() {
 
 #[tokio::test]
 async fn an_ai_access_incident_changes_neither_the_rest_nor_the_mcp_health_score() {
-    let f = setup(Plan::Pro).await;
+    let f = setup(Plan::Lite).await;
     let blocked = f.app.site(&f.account, "blocked.example").await;
     f.app
         .finished_crawl_with_robots(

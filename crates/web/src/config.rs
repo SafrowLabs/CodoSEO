@@ -70,8 +70,10 @@ pub struct DodoConfig {
     pub api_key: String,
     /// `whsec_<base64 key>` the webhooks are signed with (`DODO_WEBHOOK_SECRET`).
     pub webhook_secret: String,
+    /// The product that sells Lite, $9 a month (`DODO_PRODUCT_LITE`).
+    pub product_lite: String,
+    /// The product that sells Pro, $19 a month (`DODO_PRODUCT_PRO`).
     pub product_pro: String,
-    pub product_agency: String,
     /// `https://test.dodopayments.com` or `https://live.dodopayments.com` (`DODO_ENV`), or
     /// `DODO_API_URL` when set (tests point it at a fake).
     pub api_url: Url,
@@ -84,8 +86,8 @@ impl std::fmt::Debug for DodoConfig {
         f.debug_struct("DodoConfig")
             .field("api_key", &"<redacted>")
             .field("webhook_secret", &"<redacted>")
+            .field("product_lite", &self.product_lite)
             .field("product_pro", &self.product_pro)
-            .field("product_agency", &self.product_agency)
             .field("api_url", &self.api_url.as_str())
             .finish()
     }
@@ -94,10 +96,10 @@ impl std::fmt::Debug for DodoConfig {
 impl DodoConfig {
     /// The plan a Dodo product sells, or `None` for a product that isn't ours.
     pub fn plan_for_product(&self, product_id: &str) -> Option<Plan> {
-        if product_id == self.product_pro {
+        if product_id == self.product_lite {
+            Some(Plan::Lite)
+        } else if product_id == self.product_pro {
             Some(Plan::Pro)
-        } else if product_id == self.product_agency {
-            Some(Plan::Agency)
         } else {
             None
         }
@@ -106,8 +108,8 @@ impl DodoConfig {
     /// The Dodo product that sells `plan`.
     pub fn product_for(&self, plan: Plan) -> Option<&str> {
         match plan {
+            Plan::Lite => Some(&self.product_lite),
             Plan::Pro => Some(&self.product_pro),
-            Plan::Agency => Some(&self.product_agency),
             Plan::Free | Plan::SelfHosted => None,
         }
     }
@@ -447,9 +449,14 @@ fn umami_from(
 const DODO_KEYS: [&str; 4] = [
     "DODO_API_KEY",
     "DODO_WEBHOOK_SECRET",
+    "DODO_PRODUCT_LITE",
     "DODO_PRODUCT_PRO",
-    "DODO_PRODUCT_AGENCY",
 ];
+
+/// Read before the cloud plans became Lite and Pro, when `DODO_PRODUCT_PRO` sold the $9 plan and
+/// this one the $19 plan. A server that still sets it has most likely not moved its products
+/// over, so it gets a warning; with `DODO_PRODUCT_LITE` unset billing also stays off.
+const DODO_RETIRED_KEY: &str = "DODO_PRODUCT_AGENCY";
 
 /// The Dodo keys that are missing when some, but not all, of the four are set: a half-filled
 /// config silently turns billing off, which is worth a startup warning.
@@ -473,6 +480,12 @@ fn dodo_from(
     if mode != Mode::Cloud {
         return Ok(None);
     }
+    if get(DODO_RETIRED_KEY).is_some() {
+        tracing::warn!(
+            "DODO_PRODUCT_AGENCY is no longer read: set DODO_PRODUCT_LITE ($9) and \
+             DODO_PRODUCT_PRO ($19)"
+        );
+    }
     if let Some(missing) = dodo_missing_keys(get) {
         tracing::warn!(
             missing = %missing.join(", "),
@@ -481,14 +494,22 @@ fn dodo_from(
     }
     // Values pasted from a dashboard often carry a trailing newline or space.
     let get = |k: &str| get(k).map(|v| v.trim().to_owned());
-    let (Some(api_key), Some(webhook_secret), Some(product_pro), Some(product_agency)) = (
+    let (Some(api_key), Some(webhook_secret), Some(product_lite), Some(product_pro)) = (
         get("DODO_API_KEY"),
         get("DODO_WEBHOOK_SECRET"),
+        get("DODO_PRODUCT_LITE"),
         get("DODO_PRODUCT_PRO"),
-        get("DODO_PRODUCT_AGENCY"),
     ) else {
         return Ok(None);
     };
+    // One product for both plans would sell Pro at the Lite price (or the reverse): a sign the
+    // products weren't moved over, so billing stays off rather than guess.
+    if product_lite == product_pro {
+        tracing::warn!(
+            "Dodo billing is off: DODO_PRODUCT_LITE and DODO_PRODUCT_PRO name the same product"
+        );
+        return Ok(None);
+    }
     let invalid = |name, reason: &str| ConfigError::Invalid {
         name,
         reason: reason.to_owned(),
@@ -527,8 +548,8 @@ fn dodo_from(
     Ok(Some(DodoConfig {
         api_key,
         webhook_secret,
+        product_lite,
         product_pro,
-        product_agency,
         api_url,
     }))
 }
@@ -547,8 +568,8 @@ mod tests {
     const DODO: [(&str, &str); 4] = [
         ("DODO_API_KEY", "key_1"),
         ("DODO_WEBHOOK_SECRET", "whsec_c2VjcmV0LTAxMjM0NTY3ODlhYg=="),
+        ("DODO_PRODUCT_LITE", "pdt_lite"),
         ("DODO_PRODUCT_PRO", "pdt_pro"),
-        ("DODO_PRODUCT_AGENCY", "pdt_agency"),
     ];
 
     fn cloud_with(extra: &[(&str, &str)]) -> Result<Config, ConfigError> {
@@ -575,7 +596,7 @@ mod tests {
         let off = cfg(&[("CODOSEO_PROBE_URLS", "0")]).unwrap();
         assert_eq!(off.probe_urls_for(Plan::SelfHosted), 0);
         assert_eq!(
-            off.probe_urls_for(Plan::Pro),
+            off.probe_urls_for(Plan::Lite),
             3,
             "cloud plans keep their caps"
         );
@@ -785,10 +806,10 @@ mod tests {
     fn billing_needs_all_four_keys_and_the_cloud() {
         let d = cloud_with(&DODO).unwrap().billing.expect("configured");
         assert_eq!(d.api_key, "key_1");
+        assert_eq!(d.plan_for_product("pdt_lite"), Some(Plan::Lite));
         assert_eq!(d.plan_for_product("pdt_pro"), Some(Plan::Pro));
-        assert_eq!(d.plan_for_product("pdt_agency"), Some(Plan::Agency));
         assert_eq!(d.plan_for_product("pdt_other"), None);
-        assert_eq!(d.product_for(Plan::Pro), Some("pdt_pro"));
+        assert_eq!(d.product_for(Plan::Lite), Some("pdt_lite"));
         assert_eq!(d.product_for(Plan::Free), None);
         for skip in 0..DODO.len() {
             let some: Vec<_> = DODO
@@ -814,13 +835,13 @@ mod tests {
                 "DODO_WEBHOOK_SECRET",
                 " whsec_c2VjcmV0LTAxMjM0NTY3ODlhYg== ",
             ),
-            ("DODO_PRODUCT_PRO", " pdt_pro "),
-            ("DODO_PRODUCT_AGENCY", "\tpdt_agency"),
+            ("DODO_PRODUCT_LITE", " pdt_lite "),
+            ("DODO_PRODUCT_PRO", "\tpdt_pro"),
         ];
         let d = cloud_with(&spaced).unwrap().billing.expect("configured");
         assert_eq!(d.api_key, "key_1");
+        assert_eq!(d.product_lite, "pdt_lite");
         assert_eq!(d.product_pro, "pdt_pro");
-        assert_eq!(d.product_agency, "pdt_agency");
         assert_eq!(d.webhook_secret, "whsec_c2VjcmV0LTAxMjM0NTY3ODlhYg==");
     }
 
@@ -835,8 +856,8 @@ mod tests {
             }
         };
         assert_eq!(
-            dodo_missing_keys(&get(&[("DODO_API_KEY", "k"), ("DODO_PRODUCT_PRO", "p")])),
-            Some(vec!["DODO_WEBHOOK_SECRET", "DODO_PRODUCT_AGENCY"])
+            dodo_missing_keys(&get(&[("DODO_API_KEY", "k"), ("DODO_PRODUCT_LITE", "p")])),
+            Some(vec!["DODO_WEBHOOK_SECRET", "DODO_PRODUCT_PRO"])
         );
         // None set, or all set: nothing to warn about.
         assert_eq!(dodo_missing_keys(&get(&[])), None);
@@ -844,11 +865,52 @@ mod tests {
             dodo_missing_keys(&get(&[
                 ("DODO_API_KEY", "k"),
                 ("DODO_WEBHOOK_SECRET", "s"),
+                ("DODO_PRODUCT_LITE", "l"),
                 ("DODO_PRODUCT_PRO", "p"),
-                ("DODO_PRODUCT_AGENCY", "a"),
             ])),
             None
         );
+    }
+
+    #[test]
+    fn a_config_from_before_lite_keeps_billing_off() {
+        // The keys as the cloud set them when Pro was $9 and Agency $19: the old Pro product
+        // must not be sold as the new $19 Pro.
+        let stale = [
+            ("DODO_API_KEY", "key_1"),
+            ("DODO_WEBHOOK_SECRET", "whsec_c2VjcmV0LTAxMjM0NTY3ODlhYg=="),
+            ("DODO_PRODUCT_PRO", "pdt_old_pro_9"),
+            ("DODO_PRODUCT_AGENCY", "pdt_old_agency_19"),
+        ];
+        assert!(cloud_with(&stale).unwrap().billing.is_none());
+        let get = |k: &str| {
+            stale
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| (*v).to_owned())
+        };
+        assert_eq!(dodo_missing_keys(&get), Some(vec!["DODO_PRODUCT_LITE"]));
+        assert!(get(DODO_RETIRED_KEY).is_some(), "warned about");
+
+        // Half moved over: Lite set to the old $9 product, Pro still holding it too.
+        let half: Vec<_> = stale
+            .iter()
+            .copied()
+            .chain([("DODO_PRODUCT_LITE", "pdt_old_pro_9")])
+            .collect();
+        assert!(cloud_with(&half).unwrap().billing.is_none());
+
+        // Moved over, with the retired key left behind: billing on, the products as named.
+        let moved = [
+            ("DODO_API_KEY", "key_1"),
+            ("DODO_WEBHOOK_SECRET", "whsec_c2VjcmV0LTAxMjM0NTY3ODlhYg=="),
+            ("DODO_PRODUCT_LITE", "pdt_old_pro_9"),
+            ("DODO_PRODUCT_PRO", "pdt_old_agency_19"),
+            ("DODO_PRODUCT_AGENCY", "pdt_old_agency_19"),
+        ];
+        let d = cloud_with(&moved).unwrap().billing.expect("configured");
+        assert_eq!(d.plan_for_product("pdt_old_pro_9"), Some(Plan::Lite));
+        assert_eq!(d.plan_for_product("pdt_old_agency_19"), Some(Plan::Pro));
     }
 
     #[test]

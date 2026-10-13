@@ -62,7 +62,7 @@ async fn crawls_of(db: &TestDb, site: Uuid) -> Vec<(String, String, i16)> {
 #[tokio::test]
 async fn only_monitored_sites_of_active_accounts_with_a_schedule_are_due() {
     let db = TestDb::new().await;
-    let a = account(&db, "a@example.test", "pro", false).await;
+    let a = account(&db, "a@example.test", "lite", false).await;
     let paused = account(&db, "p@example.test", "free", true).await;
     let due = site(
         &db,
@@ -121,7 +121,7 @@ async fn only_monitored_sites_of_active_accounts_with_a_schedule_are_due() {
 
     let found = batch.sites.iter().find(|s| s.id == due).unwrap();
     assert_eq!(found.domain, "due.test");
-    assert_eq!(found.plan, Plan::Pro);
+    assert_eq!(found.plan, Plan::Lite);
     assert_eq!(found.schedule, Some(Schedule::Daily));
     assert_eq!(found.scheduled_hour, Some(7));
     assert_eq!(found.timezone, "Asia/Kolkata");
@@ -133,7 +133,7 @@ async fn only_monitored_sites_of_active_accounts_with_a_schedule_are_due() {
 #[tokio::test]
 async fn the_limit_caps_a_batch() {
     let db = TestDb::new().await;
-    let a = account(&db, "a@example.test", "pro", false).await;
+    let a = account(&db, "a@example.test", "lite", false).await;
     for i in 0..5 {
         site(
             &db,
@@ -153,7 +153,7 @@ async fn the_limit_caps_a_batch() {
 #[tokio::test]
 async fn two_schedulers_never_get_the_same_site() {
     let db = TestDb::new().await;
-    let a = account(&db, "a@example.test", "pro", false).await;
+    let a = account(&db, "a@example.test", "lite", false).await;
     for i in 0..6 {
         site(
             &db,
@@ -187,7 +187,7 @@ async fn two_schedulers_never_get_the_same_site() {
 #[tokio::test]
 async fn advance_queues_one_crawl_and_moves_the_slot_into_the_future() {
     let db = TestDb::new().await;
-    let a = account(&db, "a@example.test", "pro", false).await;
+    let a = account(&db, "a@example.test", "lite", false).await;
     let s = site(
         &db,
         Some(a),
@@ -225,7 +225,7 @@ async fn advance_queues_one_crawl_and_moves_the_slot_into_the_future() {
 #[tokio::test]
 async fn a_site_with_a_queued_or_running_crawl_gets_no_second_one() {
     let db = TestDb::new().await;
-    let a = account(&db, "a@example.test", "pro", false).await;
+    let a = account(&db, "a@example.test", "lite", false).await;
     let queued = site(
         &db,
         Some(a),
@@ -311,10 +311,10 @@ async fn done_crawl(db: &TestDb, site: Uuid, domain: &str, finished_days_ago: i3
 async fn digests_go_to_unpaused_accounts_with_a_finished_crawl_once() {
     use codoseo_store::schedule::{digest_candidates, enqueue_digest};
     let db = TestDb::new().await;
-    let ready = account(&db, "ready@example.test", "pro", false).await;
-    let no_crawl = account(&db, "none@example.test", "pro", false).await;
+    let ready = account(&db, "ready@example.test", "lite", false).await;
+    let no_crawl = account(&db, "none@example.test", "lite", false).await;
     let paused = account(&db, "paused@example.test", "free", true).await;
-    let recent = account(&db, "recent@example.test", "pro", false).await;
+    let recent = account(&db, "recent@example.test", "lite", false).await;
     for (acct, domain) in [
         (ready, "a.test"),
         (no_crawl, "b.test"),
@@ -447,7 +447,7 @@ async fn the_cleanup_day_only_moves_forward() {
 async fn signing_in_again_clears_the_warning_and_unpauses_free_accounts_only() {
     let db = TestDb::new().await;
     let free = account(&db, "free@example.test", "free", true).await;
-    let pro = account(&db, "pro@example.test", "pro", true).await;
+    let pro = account(&db, "lite@example.test", "lite", true).await;
     sqlx::query("UPDATE accounts SET keep_monitoring_sent_at = now() - interval '9 days'")
         .execute(&db.pool)
         .await

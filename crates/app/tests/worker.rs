@@ -228,30 +228,30 @@ async fn resolve_limits_uses_the_sites_account_plan_not_the_free_default() {
     let db = TestDb::new().await;
 
     let account_id: uuid::Uuid = sqlx::query_scalar(
-        "INSERT INTO accounts (email, plan) VALUES ('pro@example.com', 'pro') RETURNING id",
+        "INSERT INTO accounts (email, plan) VALUES ('lite@example.com', 'lite') RETURNING id",
     )
     .fetch_one(&db.pool)
     .await
-    .expect("insert pro account");
+    .expect("insert lite account");
     let site_id: uuid::Uuid = sqlx::query_scalar(
         "INSERT INTO sites (account_id, domain, start_url) \
-         VALUES ($1, 'pro.example', 'https://pro.example/') RETURNING id",
+         VALUES ($1, 'lite.example', 'https://lite.example/') RETURNING id",
     )
     .bind(account_id)
     .fetch_one(&db.pool)
     .await
-    .expect("insert site under the pro account");
+    .expect("insert site under the lite account");
 
     let limits = codoseo::worker::resolve_limits(&db.pool, site_id, &serde_json::json!({}))
         .await
         .expect("resolve_limits");
     assert_eq!(
         limits.max_pages,
-        Some(10_000),
-        "a Pro-plan site must use the Pro plan's page cap, not the Free-shaped default"
+        Some(5_000),
+        "a Lite-plan site must use the Lite plan's page cap, not the Free-shaped default"
     );
 
-    // An unclaimed site (no account) must fall back to the quick-audit limits, not Pro's.
+    // An unclaimed site (no account) must fall back to the quick-audit limits, not Lite's.
     let unclaimed_site = db
         .seed_site("unclaimed.example", "https://unclaimed.example/")
         .await;
@@ -277,7 +277,7 @@ async fn resolve_limits_uses_the_sites_account_plan_not_the_free_default() {
     .expect("resolve_limits with a widening override");
     assert_eq!(
         ignored_widening.max_pages,
-        Some(10_000),
+        Some(5_000),
         "crawl_settings must not be able to exceed the plan's cap"
     );
 }
@@ -1075,7 +1075,7 @@ async fn quick_audits_and_opted_out_sites_send_no_ai_requests() {
     let unclaimed = db.seed_site("example.test", server.url("/").as_str()).await;
     run_crawl_with(&db, unclaimed, CrawlTrigger::Quick, &fast_probes()).await;
     // A quick crawl of an owned site.
-    let owned = seed_owned_site(&db, server.url("/").as_str(), "pro").await;
+    let owned = seed_owned_site(&db, server.url("/").as_str(), "lite").await;
     run_crawl_with(&db, owned, CrawlTrigger::Quick, &fast_probes()).await;
     assert_eq!(ai_requests(&seen), 0, "quick audits never probe");
 
@@ -1123,12 +1123,12 @@ async fn a_throttling_waf_cannot_push_the_probes_past_the_plan_cap() {
     let db = TestDb::new().await;
     let (server, waf, seen) = waf_site().await;
     waf.lock().unwrap().throttle_bots = true;
-    let site_id = seed_owned_site(&db, server.url("/").as_str(), "pro").await;
+    let site_id = seed_owned_site(&db, server.url("/").as_str(), "lite").await;
     let before = seen.lock().unwrap().len();
     run_crawl_with(&db, site_id, CrawlTrigger::Manual, &fast_probes()).await;
     let probes = latest_probes(&db, site_id).await.expect("probes stored");
     let cap =
-        codoseo_core::plan::PlanLimits::for_plan(codoseo_core::plan::Plan::Pro).probe_max_requests;
+        codoseo_core::plan::PlanLimits::for_plan(codoseo_core::plan::Plan::Lite).probe_max_requests;
     assert!(probes.requests <= cap, "{} > {cap}", probes.requests);
     assert!(
         ai_requests(&seen) <= usize::from(cap),

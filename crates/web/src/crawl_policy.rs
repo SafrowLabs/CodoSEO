@@ -13,15 +13,15 @@ pub const FREE_MANUAL_PRIORITY: i16 = 4;
 pub fn manual_priority(plan: Plan) -> i16 {
     match plan {
         Plan::Free => FREE_MANUAL_PRIORITY,
-        Plan::Pro | Plan::Agency | Plan::SelfHosted => PAID_MANUAL_PRIORITY,
+        Plan::Lite | Plan::Pro | Plan::SelfHosted => PAID_MANUAL_PRIORITY,
     }
 }
 
 pub fn plan_name(plan: Plan) -> &'static str {
     match plan {
         Plan::Free => "Free",
+        Plan::Lite => "Lite",
         Plan::Pro => "Pro",
-        Plan::Agency => "Agency",
         Plan::SelfHosted => "self-hosted",
     }
 }
@@ -75,8 +75,8 @@ mod tests {
     #[test]
     fn manual_lanes() {
         assert_eq!(manual_priority(Plan::Free), 4);
+        assert_eq!(manual_priority(Plan::Lite), 2);
         assert_eq!(manual_priority(Plan::Pro), 2);
-        assert_eq!(manual_priority(Plan::Agency), 2);
         assert_eq!(manual_priority(Plan::SelfHosted), 2);
     }
 
@@ -109,8 +109,12 @@ mod tests {
             "Your Free plan includes 1 manual crawl a week. The next one is available in 3 days."
         );
         assert_eq!(
-            limit_message(Plan::Pro, ManualAllowance::PerDay(2), Duration::minutes(30)),
-            "Your Pro plan includes 2 manual crawls a day. The next one is available in 30 minutes."
+            limit_message(
+                Plan::Lite,
+                ManualAllowance::PerDay(2),
+                Duration::minutes(30)
+            ),
+            "Your Lite plan includes 2 manual crawls a day. The next one is available in 30 minutes."
         );
     }
 }

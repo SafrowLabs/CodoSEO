@@ -135,7 +135,131 @@ async fn migrate_creates_every_table() {
             .await
             .expect("read job_kind");
     assert!(job, "job_kind has ai_recheck");
+
+    // 0015: the cloud plans are Free, Lite and Pro.
+    let plans: Vec<String> = sqlx::query_scalar("SELECT unnest(enum_range(NULL::plan))::text")
+        .fetch_all(&mut check)
+        .await
+        .expect("read plan");
+    assert_eq!(plans, ["free", "lite", "pro", "self_hosted"]);
     drop(check);
+
+    admin
+        .execute(format!(r#"DROP DATABASE "{name}" WITH (FORCE)"#).as_str())
+        .await
+        .expect("drop test database");
+}
+
+/// Accounts made before 0015 keep what they pay for: the old $9 Pro becomes Lite and the old
+/// Agency becomes Pro. An Agency account over the new Pro's 10 sites keeps its 10 oldest
+/// monitored, and nothing is deleted.
+#[tokio::test]
+async fn the_plan_rename_maps_old_pro_to_lite_and_agency_to_pro() {
+    let name = format!("codoseo_cli_test_{}", uuid::Uuid::new_v4().simple());
+    let mut admin = PgConnection::connect(&admin_url())
+        .await
+        .expect("connect to admin database");
+    admin
+        .execute(format!(r#"CREATE DATABASE "{name}""#).as_str())
+        .await
+        .expect("create test database");
+    let mut db_url = url::Url::parse(&admin_url()).expect("valid admin url");
+    db_url.set_path(&format!("/{name}"));
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(db_url.as_str())
+        .await
+        .expect("connect to test database");
+
+    // Everything up to 0014, as on a server that hasn't deployed 0015 yet. (`migrations` is a
+    // hidden field of sqlx's migrator, and the only way to stop short of the newest.)
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../store/migrations");
+    let mut before = sqlx::migrate::Migrator::new(dir)
+        .await
+        .expect("read migrations");
+    before.migrations = before
+        .migrations
+        .iter()
+        .filter(|m| m.version < 15)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into();
+    before.run(&pool).await.expect("migrate to 0014");
+
+    let mut ids = Vec::new();
+    for (email, plan) in [
+        ("free@example.test", "free"),
+        ("pro@example.test", "pro"),
+        ("agency@example.test", "agency"),
+        ("self@example.test", "self_hosted"),
+    ] {
+        let id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO accounts (email, plan) VALUES ($1, $2::plan) RETURNING id",
+        )
+        .bind(email)
+        .bind(plan)
+        .fetch_one(&pool)
+        .await
+        .expect("insert account");
+        ids.push(id);
+    }
+    let (old_pro, agency) = (ids[1], ids[2]);
+    // 12 monitored sites on the Agency account and 5 on the old Pro, `s0` the oldest.
+    for (account, count) in [(agency, 12), (old_pro, 5)] {
+        for i in 0..count {
+            sqlx::query(
+                "INSERT INTO sites (account_id, domain, start_url, created_at) \
+                 VALUES ($1, $2, 'https://x/', now() - make_interval(days => $3))",
+            )
+            .bind(account)
+            .bind(format!("s{i}.test"))
+            .bind(100 - i)
+            .execute(&pool)
+            .await
+            .expect("insert site");
+        }
+    }
+
+    codoseo_store::pool::migrate(&pool)
+        .await
+        .expect("apply 0015");
+
+    let mut plans = Vec::new();
+    for id in &ids {
+        let plan: String = sqlx::query_scalar("SELECT plan::text FROM accounts WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("read plan");
+        plans.push(plan);
+    }
+    assert_eq!(plans, ["free", "lite", "pro", "self_hosted"]);
+
+    let monitored = |account: uuid::Uuid| {
+        sqlx::query_scalar::<_, String>(
+            "SELECT domain FROM sites WHERE account_id = $1 AND monitoring_active \
+             ORDER BY created_at",
+        )
+        .bind(account)
+        .fetch_all(&pool)
+    };
+    assert_eq!(
+        monitored(agency).await.expect("sites"),
+        (0..10).map(|i| format!("s{i}.test")).collect::<Vec<_>>(),
+        "the 10 oldest stay monitored"
+    );
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM sites WHERE account_id = $1")
+        .bind(agency)
+        .fetch_one(&pool)
+        .await
+        .expect("count sites");
+    assert_eq!(total, 12, "nothing is deleted");
+    assert_eq!(
+        monitored(old_pro).await.expect("sites").len(),
+        5,
+        "Lite keeps the old Pro's 5 sites"
+    );
+    pool.close().await;
 
     admin
         .execute(format!(r#"DROP DATABASE "{name}" WITH (FORCE)"#).as_str())

@@ -1003,6 +1003,9 @@ body.solo { overflow: auto; }
   .billing-off { grid-column: span 2; }
 }
 .plan-card.is-current { border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
+.plan-price { display: flex; align-items: baseline; gap: 6px; }
+.plan-price b { font-size: 26px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
+.plan-price span { font-size: 13px; color: var(--ink-3); }
 .plan-features { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .plan-features li { display: flex; align-items: flex-start; gap: 8px; }
 .plan-features .icon { flex: none; margin-top: 3px; color: var(--ok); }

@@ -540,8 +540,8 @@ mod tests {
         let cfg = DodoConfig {
             api_key: "dodo_key_SUPERSECRET".to_owned(),
             webhook_secret: "whsec_WEBHOOKSECRET".to_owned(),
+            product_lite: "pdt_lite".to_owned(),
             product_pro: "pdt_pro".to_owned(),
-            product_agency: "pdt_agency".to_owned(),
             api_url: Url::parse("https://test.dodopayments.com").unwrap(),
         };
         let shown = format!("{cfg:?}");

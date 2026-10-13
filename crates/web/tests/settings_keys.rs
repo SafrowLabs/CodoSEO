@@ -336,8 +336,8 @@ async fn the_usage_line_follows_the_plan() {
     let app = cloud().await;
     for (plan, line) in [
         (Plan::Free, "37 of 100 API calls used today"),
-        (Plan::Pro, "37 of 2,000 API calls used today"),
-        (Plan::Agency, "37 of 10,000 API calls used today"),
+        (Plan::Lite, "37 of 1,000 API calls used today"),
+        (Plan::Pro, "37 of 5,000 API calls used today"),
     ] {
         let (account, cookie) = app
             .login_with_plan(&format!("{plan:?}@example.com"), Some(plan))

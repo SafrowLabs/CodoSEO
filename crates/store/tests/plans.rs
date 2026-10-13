@@ -56,7 +56,7 @@ async fn plan_of(db: &TestDb, id: Uuid) -> (String, Option<OffsetDateTime>) {
 #[tokio::test]
 async fn an_expired_plan_drops_to_free_and_keeps_only_the_oldest_site_monitored() {
     let db = TestDb::new().await;
-    let pro = account(&db, "pro@example.test", "pro", Some(-1)).await;
+    let pro = account(&db, "lite@example.test", "lite", Some(-1)).await;
     let oldest = site(&db, pro, "a.test", 30, "daily").await;
     let middle = site(&db, pro, "b.test", 20, "daily").await;
     let newest = site(&db, pro, "c.test", 10, "weekly").await;
@@ -88,10 +88,10 @@ async fn an_expired_plan_drops_to_free_and_keeps_only_the_oldest_site_monitored(
 #[tokio::test]
 async fn only_expired_paid_plans_are_downgraded() {
     let db = TestDb::new().await;
-    let running = account(&db, "running@example.test", "agency", Some(5)).await;
+    let running = account(&db, "running@example.test", "pro", Some(5)).await;
     let selfhost = account(&db, "self@example.test", "self_hosted", None).await;
     let free = account(&db, "free@example.test", "free", None).await;
-    let gone = account(&db, "gone@example.test", "agency", Some(-2)).await;
+    let gone = account(&db, "gone@example.test", "pro", Some(-2)).await;
     let s1 = site(&db, running, "r.test", 3, "daily").await;
     let s2 = site(&db, running, "r2.test", 2, "daily").await;
 
@@ -100,7 +100,7 @@ async fn only_expired_paid_plans_are_downgraded() {
         .unwrap();
     assert_eq!(moved, 1);
     assert_eq!(plan_of(&db, gone).await.0, "free");
-    assert_eq!(plan_of(&db, running).await.0, "agency");
+    assert_eq!(plan_of(&db, running).await.0, "pro");
     assert_eq!(plan_of(&db, selfhost).await.0, "self_hosted");
     assert_eq!(plan_of(&db, free).await.0, "free");
     assert!(site_state(&db, s1).await.0 && site_state(&db, s2).await.0);
@@ -140,7 +140,7 @@ async fn limits_keep_the_oldest_active_sites_and_leave_inactive_ones_alone() {
 #[tokio::test]
 async fn limits_do_nothing_within_the_plan() {
     let db = TestDb::new().await;
-    let id = account(&db, "pro@example.test", "pro", Some(10)).await;
+    let id = account(&db, "lite@example.test", "lite", Some(10)).await;
     let a = site(&db, id, "a.test", 3, "daily").await;
     let b = site(&db, id, "b.test", 2, "daily").await;
     let mut tx = db.pool.begin().await.unwrap();

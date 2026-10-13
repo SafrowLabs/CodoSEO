@@ -385,6 +385,27 @@ docker compose up -d
 
 Then open <http://localhost:8080>. The first account to sign in becomes the owner. Sign-in uses magic links; without an email server (`SMTP_URL`) the link is printed in the container log (`docker compose logs codoseo`).
 
+### Hosted plans
+
+Self-hosting has no plan caps (the limits are settings you can raise). The hosted version at [codoseo.com](https://codoseo.com) has three plans:
+
+| | Free | Lite | Pro |
+|---|---|---|---|
+| Price | $0 | $9 a month | $19 a month |
+| Monitored sites | 1 | 5 | 10 |
+| Pages per crawl | 500 | 5,000 | 10,000 |
+| Crawl time limit | 10 minutes | 1 hour | 2 hours |
+| Scheduled crawls | weekly | daily | daily |
+| Manual crawls | 1 a week | 1 a day | unlimited, 1 running per site |
+| Alerts | email | email, Slack, Discord, webhook | email, Slack, Discord, webhook |
+| History | 30 days | 1 year | 1 year |
+| API and MCP calls a day | 100 | 1,000 | 5,000 |
+| AI incident rechecks a day | 3 | 20 | 60 |
+
+Need more than Pro? Write to [contact@codoseo.com](mailto:contact@codoseo.com).
+
+### Running without Docker
+
 Without Docker, run everything in one process against any Postgres:
 
 ```sh

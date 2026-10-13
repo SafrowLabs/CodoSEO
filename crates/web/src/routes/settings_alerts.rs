@@ -49,8 +49,8 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/alerts/rules", post(set_rule))
 }
 
-const UPGRADE: &str = "Slack, Discord and webhook alerts are on Pro and Agency. \
-                       Upgrade to Pro to use them.";
+const UPGRADE: &str = "Slack, Discord and webhook alerts are on Lite and Pro. \
+                       Upgrade to Lite to use them.";
 
 fn kind_label(kind: ChannelKind) -> &'static str {
     match kind {

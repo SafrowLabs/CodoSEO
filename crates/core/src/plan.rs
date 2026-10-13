@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+/// The cloud plans (Free, Lite at $9 and Pro at $19 a month) and a self-hosted install. The slugs are the labels of the Postgres `plan` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Plan {
     Free,
+    Lite,
     Pro,
-    Agency,
     SelfHosted,
 }
 
@@ -73,14 +74,14 @@ impl PlanLimits {
                 llms_link_checks: 5,
                 ai_rechecks_per_day: Some(3),
             },
-            Plan::Pro => PlanLimits {
+            Plan::Lite => PlanLimits {
                 max_sites: Some(5),
-                max_pages: Some(10_000),
-                max_duration: Some(Duration::from_secs(2 * HOUR)),
+                max_pages: Some(5_000),
+                max_duration: Some(Duration::from_secs(HOUR)),
                 fastest_schedule: Some(Schedule::Daily),
                 manual_crawls: ManualAllowance::PerDay(1),
                 history_days: Some(365),
-                api_calls_per_day: Some(2_000),
+                api_calls_per_day: Some(1_000),
                 email_alerts_only: false,
                 probe_urls: 3,
                 probe_budget: Duration::from_secs(90),
@@ -88,14 +89,14 @@ impl PlanLimits {
                 llms_link_checks: 20,
                 ai_rechecks_per_day: Some(20),
             },
-            Plan::Agency => PlanLimits {
-                max_sites: Some(25),
-                max_pages: Some(50_000),
-                max_duration: Some(Duration::from_secs(6 * HOUR)),
+            Plan::Pro => PlanLimits {
+                max_sites: Some(10),
+                max_pages: Some(10_000),
+                max_duration: Some(Duration::from_secs(2 * HOUR)),
                 fastest_schedule: Some(Schedule::Daily),
                 manual_crawls: ManualAllowance::Unlimited,
                 history_days: Some(365),
-                api_calls_per_day: Some(10_000),
+                api_calls_per_day: Some(5_000),
                 email_alerts_only: false,
                 probe_urls: 5,
                 probe_budget: Duration::from_secs(120),

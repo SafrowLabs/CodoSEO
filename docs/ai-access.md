@@ -49,8 +49,8 @@ Every probed bot is fetched whatever your intent, so a change of intent can re-e
 |---|---|---|---|
 | No-signup audit | none | 0 | none |
 | Free | 1 (the home page) | at most 30 | 45 s |
-| Pro | 3 | at most 70 | 90 s |
-| Agency | 5 | at most 120 | 120 s |
+| Lite | 3 | at most 70 | 90 s |
+| Pro | 5 | at most 120 | 120 s |
 | Self-hosted | 5 (`CODOSEO_PROBE_URLS`, up to 10) | at most 160 | 180 s |
 
 A page is started only when the requests left and the time left cover all of its requests, counting each request as the gap or the site's average answer time so far, whichever is longer; otherwise the run stops and says why ("time budget used up" or "request cap reached"). Slow answers on the last page can still run over, so a run is stopped outright a minute past its budget: the pages that finished are kept, the bots not yet answered on the page under way are inconclusive ("the time limit came first"), and the run says "time budget used up". Probes never run after a failed crawl, never touch the health score, and never fail a crawl: if anything goes wrong the report simply has no probes.
@@ -158,7 +158,7 @@ The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowe
 - Served as `text/plain` or `text/markdown`.
 - Links resolve: every link that was checked answered 2xx or 3xx.
 
-**Link checks.** Links to pages the crawl already fetched use that status. Other links on your own site get one request each after the crawl, with robots.txt applied and redirects not followed (a redirect counts as resolving), up to a cap that depends on the plan: **Free 5, Pro, Agency and self-hosted 20**. Links to other sites are not checked; the card counts them and the ones past the cap as not checked.
+**Link checks.** Links to pages the crawl already fetched use that status. Other links on your own site get one request each after the crawl, with robots.txt applied and redirects not followed (a redirect counts as resolving), up to a cap that depends on the plan: **Free 5, Lite, Pro and self-hosted 20**. Links to other sites are not checked; the card counts them and the ones past the cap as not checked.
 
 **The incident.** The one finding is `llms_txt_unavailable`, a Warning (grade A), and only after the site had adopted llms.txt, that is, an earlier report served the file and it now answers 5xx or 429 or not at all. A 404 or a soft 404 is a removal, not a failure, and a site that never had one gets nothing. The change kind `ai_llms_txt_unavailable` goes in the Monday digest, not in an instant alert. When the file serves again (or answers 404 because you removed it), the recovery is announced as an `ai_llms_txt_unavailable` change too, with "Resolved" as its new value, not as `ai_issue_resolved`: it follows the same alert rule as the failure, so you are never told at once about something you were only told in a digest.
 
@@ -277,7 +277,7 @@ For a robots.txt finding with several bots, the wait is the longest among their 
 
 **Policy restored ≠ back in AI answers.** A verified recheck says your site now lets the bot in. It does not say the bot has crawled again, that your pages are indexed, or that any answer engine quotes you; those happen on the operators' schedules and CodoSEO does not report outcomes.
 
-**Allowance.** Manual rechecks are limited per account over the trailing 24 hours, across all its sites: Free 3, Pro 20, Agency 60, self-hosted unlimited. There is no midnight reset: a slot frees 24 hours after the recheck that used it. An incident can be rechecked again 10 minutes after the last manual recheck and only one is queued or running per incident. Follow-ups queued by the system do not count, nor do manual rechecks that ended superseded or failed on our side (you got no answer from them), though they still start the 10-minute cooldown. A recheck that failed because the site gave no answer does count: it asked the site.
+**Allowance.** Manual rechecks are limited per account over the trailing 24 hours, across all its sites: Free 3, Lite 20, Pro 60, self-hosted unlimited. There is no midnight reset: a slot frees 24 hours after the recheck that used it. An incident can be rechecked again 10 minutes after the last manual recheck and only one is queued or running per incident. Follow-ups queued by the system do not count, nor do manual rechecks that ended superseded or failed on our side (you got no answer from them), though they still start the 10-minute cooldown. A recheck that failed because the site gave no answer does count: it asked the site.
 
 ## Accept, mark intended and snooze
 

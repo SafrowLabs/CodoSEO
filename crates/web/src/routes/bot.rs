@@ -45,7 +45,7 @@ pub async fn page(State(state): State<AppState>) -> Result<Response, AppError> {
 
 /// The most pages any cloud plan fetches with the AI bots' user agents after a crawl.
 fn cloud_probe_pages() -> u8 {
-    [Plan::Free, Plan::Pro, Plan::Agency]
+    [Plan::Free, Plan::Lite, Plan::Pro]
         .into_iter()
         .map(|p| PlanLimits::for_plan(p).probe_urls)
         .max()
