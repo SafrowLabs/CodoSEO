@@ -8,6 +8,7 @@
     <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>
   </div>
   {% if let Some(note) = allowance %}<p class="page-sub" id="crawl-allowance">{{ note }}</p>{% endif %}
+  {{ live|safe }}
   {{ list|safe }}
 </div>
 {% endblock %}

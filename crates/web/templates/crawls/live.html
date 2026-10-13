@@ -1,0 +1,8 @@
+{% if let Some(line) = line %}
+<section id="crawl-live" class="card card-pad live-card" role="status" hx-get="{{ base }}/crawls/live{% if let Some(p) = panel %}?seen={{ p.newest }}{% endif %}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML" data-quiet>
+  <div class="live-head"><i class="dot {{ state }}"></i><b{% if state == "running" %} class="shimmer"{% endif %}>{{ line }}</b></div>
+  {% if let Some(p) = panel %}{{ p|safe }}{% endif %}
+</section>
+{% else %}
+<div id="crawl-live" hidden hx-get="{{ base }}/crawls/live" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" data-quiet></div>
+{% endif %}

@@ -23,12 +23,14 @@ use crate::crawl_policy::{allowance_phrase, limit_message, manual_priority, plan
 use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{CrawlerView, Screen, Shell, crawler_for};
+use crate::live::LiveCrawl;
 use crate::render::{Hx, ascii_json, html};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/s/{site}/crawls", get(history).post(run))
+        .route("/s/{site}/crawls/live", get(live))
         .route("/s/{site}/status", get(status))
 }
 
@@ -72,7 +74,50 @@ pub struct CrawlsPage {
     pub base: String,
     pub total: String,
     pub allowance: Option<String>,
+    pub live: CrawlLive,
     pub list: CrawlList,
+}
+
+/// The card over the history while a crawl is queued or running: its counters and newest pages,
+/// polled every 2 s. Otherwise an empty slot that fills when a crawl is queued.
+#[derive(Template)]
+#[template(path = "crawls/live.html")]
+pub struct CrawlLive {
+    pub base: String,
+    /// `Crawl #49 running`, or `Crawl #49 queued`; `None` when no crawl is active.
+    pub line: Option<String>,
+    /// `running` or `queued`, for the dot.
+    pub state: &'static str,
+    pub panel: Option<LiveCrawl>,
+}
+
+impl CrawlLive {
+    fn new(
+        base: &str,
+        active: Option<&Crawl>,
+        seen: Option<u32>,
+        now: OffsetDateTime,
+    ) -> CrawlLive {
+        let Some(c) = active else {
+            return CrawlLive {
+                base: base.to_owned(),
+                line: None,
+                state: "idle",
+                panel: None,
+            };
+        };
+        let running = c.status == CrawlStatus::Running;
+        CrawlLive {
+            base: base.to_owned(),
+            line: Some(if running {
+                format!("Crawl #{} running", c.number)
+            } else {
+                format!("Crawl #{} queued · waiting for a crawler", c.number)
+            }),
+            state: if running { "running" } else { "queued" },
+            panel: LiveCrawl::for_crawl(c, seen, now),
+        }
+    }
 }
 
 /// The history card. It refreshes itself when a crawl is queued or finishes, and polls every
@@ -116,6 +161,9 @@ async fn history(
         n => format!("{} crawls", fmt::thousands(n)),
     };
     let allowance = allowance_note(&state, &site, user.account.plan, now).await?;
+    // The history is newest first, and only one crawl is ever active, so it is the first.
+    let active = crawls.first().filter(|c| c.is_active());
+    let live = CrawlLive::new(&base, active, None, now);
     let mut list = CrawlList {
         base: base.clone(),
         domain: site.domain.clone(),
@@ -134,6 +182,7 @@ async fn history(
         base,
         total,
         allowance,
+        live,
         list,
     })?
     .into_response())
@@ -186,6 +235,26 @@ async fn run(
         "crawlQueued": true,
     });
     Ok((StatusCode::NO_CONTENT, [hx_trigger(&trigger)]).into_response())
+}
+
+#[derive(Deserialize)]
+struct LiveQuery {
+    /// The newest page the card shows.
+    seen: Option<u32>,
+}
+
+/// The live card on its own, polled every 2 s while a crawl is active.
+async fn live(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+    Query(q): Query<LiveQuery>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, parse_site_id(&site)?).await?;
+    let active = codoseo_store::crawls::active(&state.pool, site.id).await?;
+    let base = format!("/s/{}", site.id);
+    let card = CrawlLive::new(&base, active.as_ref(), q.seen, OffsetDateTime::now_utc());
+    Ok(html(&card)?.into_response())
 }
 
 #[derive(Deserialize)]

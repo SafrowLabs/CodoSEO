@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use codoseo_core::Url;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
+use codoseo_core::output::LiveProgress;
 use codoseo_core::page::{FetchFailure, Indexability, PageRecord};
-use codoseo_crawler::crawl::{CrawlError, crawl, inspect_page};
+use codoseo_crawler::crawl::{CrawlError, crawl, crawl_watched, inspect_page};
 use codoseo_crawler::preflight::BLOCKED_MSG;
 use codoseo_crawler::{CrawlOutput, StopReason};
 use codoseo_testkit::{Page, SiteBuilder, TestSite, html_page};
@@ -166,6 +167,52 @@ async fn robots_disallowed_paths_become_records_and_are_never_requested() {
     assert_eq!(site.path_hits("/private/x"), 0);
     assert!(try_page(&out, "/a").is_some());
     assert_eq!(out.stop, StopReason::Completed);
+}
+
+#[tokio::test]
+async fn a_watched_crawl_shows_its_newest_pages_as_they_are_recorded() {
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: *\nDisallow: /private")
+        .html("/", "Home", &["/a", "/missing", "/private/x"])
+        .html("/a", "A", &[])
+        .start()
+        .await;
+    let seen: Mutex<Vec<LiveProgress>> = Mutex::new(Vec::new());
+    let out = crawl_watched(cfg(site.url("/")), |p, pages| {
+        assert_eq!(p.pages_done as usize, pages.len());
+        seen.lock().unwrap().push(LiveProgress::new(p, pages));
+    })
+    .await
+    .unwrap();
+    let seen = seen.into_inner().unwrap();
+    // Called after every recorded page, the start page first.
+    assert_eq!(seen.len(), out.pages.len());
+    assert_eq!(seen[0].recent.len(), 1);
+    assert_eq!(seen[0].recent[0].n, 1);
+    assert_eq!(seen[0].recent[0].url, site.url("/").to_string());
+
+    // The last call has every page, newest first, numbered in crawl order; the 404 is an
+    // error, the page robots.txt keeps us out of is not.
+    let last = seen.last().unwrap();
+    assert_eq!(last.progress.pages_done, 4);
+    let order: Vec<u32> = last.recent.iter().map(|r| r.n).collect();
+    assert_eq!(order, [4, 3, 2, 1]);
+    let urls: Vec<&str> = last.recent.iter().map(|r| r.url.as_str()).collect();
+    let in_crawl_order: Vec<String> = out.pages.iter().rev().map(|p| p.url.to_string()).collect();
+    assert_eq!(urls, refs(&in_crawl_order));
+    let missing = last
+        .recent
+        .iter()
+        .find(|r| r.url.ends_with("/missing"))
+        .unwrap();
+    assert_eq!(missing.status, 404);
+    let private = last
+        .recent
+        .iter()
+        .find(|r| r.url.ends_with("/private/x"))
+        .unwrap();
+    assert!(private.robots && private.status == 0);
+    assert_eq!(last.errors, 1);
 }
 
 #[tokio::test]

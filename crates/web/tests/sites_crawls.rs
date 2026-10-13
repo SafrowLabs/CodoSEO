@@ -608,6 +608,74 @@ async fn status_poll_shows_the_active_crawl() {
 }
 
 #[tokio::test]
+async fn the_crawls_screen_shows_the_running_crawl_live() {
+    let app = TestApp::new().await;
+    let (account, cookie) = app.login("ana@example.com").await;
+    let site = app.site(&account, "example.com").await;
+    let live = format!("/s/{}/crawls/live", site.id);
+
+    // No crawl: an empty slot that waits for one to be queued.
+    let res = app
+        .get(&format!("/s/{}/crawls", site.id), Some(&cookie))
+        .await;
+    assert!(
+        res.body.contains(&format!(
+            r#"<div id="crawl-live" hidden hx-get="{live}" hx-trigger="crawlQueued from:body""#
+        )),
+        "{}",
+        res.body
+    );
+
+    // Queued, then running with the worker's counters and newest pages.
+    run_crawl(&app, &site, &cookie).await;
+    let res = app.get_hx(&live, Some(&cookie)).await;
+    assert!(res.body.contains("Crawl #1 queued"), "{}", res.body);
+    assert!(res.body.contains("every 2s"));
+    sqlx::query(
+        "UPDATE crawls SET status = 'running', started_at = now(), worker_id = 'w', progress = $2 \
+         WHERE site_id = $1",
+    )
+    .bind(site.id)
+    .bind(serde_json::json!({
+        "pages_done": 2, "queued": 7, "failures": 1, "depth": 1, "elapsed_ms": 3000, "errors": 1,
+        "recent": [
+            {"n": 2, "url": "https://example.com/slow", "status": 0, "error": "timeout"},
+            {"n": 1, "url": "https://example.com/", "status": 200},
+        ],
+    }))
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let res = app
+        .get(&format!("/s/{}/crawls", site.id), Some(&cookie))
+        .await;
+    assert!(res.body.contains("Crawl #1 running"), "{}", res.body);
+    assert!(res.body.contains(&format!(r#"hx-get="{live}?seen=2""#)));
+    let res = app.get_hx(&format!("{live}?seen=1"), Some(&cookie)).await;
+    assert!(
+        res.body
+            .contains(r#"<span class="code t-err">timeout</span>"#),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains(">/slow<"));
+    assert_eq!(res.body.matches("is-new").count(), 1, "{}", res.body);
+
+    // Over: the card empties and stops polling (the sidebar poll reloads the history).
+    finish_all(&app, &site).await;
+    let res = app.get_hx(&live, Some(&cookie)).await;
+    assert!(res.body.contains("hidden"), "{}", res.body);
+    assert!(!res.body.contains("every 2s"), "{}", res.body);
+
+    // Someone else's site is not found.
+    let (_, other) = app.login("bo@example.com").await;
+    assert_eq!(
+        app.get_hx(&live, Some(&other)).await.status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
 async fn status_poll_announces_a_finished_crawl() {
     let app = TestApp::new().await;
     let (account, cookie) = app.login("ana@example.com").await;

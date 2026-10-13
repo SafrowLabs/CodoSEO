@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::crawl::{RobotsFile, SitemapSummary};
-use crate::page::PageRecord;
+use crate::page::{FetchFailure, Indexability, PageRecord};
 
 /// One internal link between two crawled pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +107,71 @@ pub struct Progress {
     pub elapsed_ms: u64,
 }
 
+/// How many of a running crawl's newest pages [`LiveProgress`] keeps.
+pub const RECENT_PAGES: usize = 20;
+
+/// A running crawl as the worker stores it between heartbeats: its [`Progress`], the error
+/// count and its newest pages, for the live crawl views. Flattened, so a reader that only wants
+/// the plain `Progress` reads the same JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveProgress {
+    #[serde(flatten)]
+    pub progress: Progress,
+    /// Pages that answered 4xx or 5xx, or gave no response at all. Pages robots.txt keeps the
+    /// crawler out of are not errors.
+    #[serde(default)]
+    pub errors: u32,
+    /// The newest pages, newest first, at most [`RECENT_PAGES`].
+    #[serde(default)]
+    pub recent: Vec<RecentPage>,
+}
+
+impl LiveProgress {
+    /// The progress with the error count and newest pages of `pages`, the crawl's records so
+    /// far in the order they were recorded.
+    pub fn new(progress: Progress, pages: &[PageRecord]) -> LiveProgress {
+        let errors = pages.iter().filter(|p| is_error(p)).count();
+        let recent = pages
+            .iter()
+            .enumerate()
+            .rev()
+            .take(RECENT_PAGES)
+            .map(|(i, p)| RecentPage {
+                n: u32::try_from(i + 1).unwrap_or(u32::MAX),
+                url: p.url.to_string(),
+                status: p.status,
+                error: p.error,
+                robots: p.indexability == Indexability::BlockedByRobots,
+            })
+            .collect();
+        LiveProgress {
+            progress,
+            errors: u32::try_from(errors).unwrap_or(u32::MAX),
+            recent,
+        }
+    }
+}
+
+/// A page counted by [`LiveProgress::errors`].
+fn is_error(p: &PageRecord) -> bool {
+    p.status >= 400 || (p.status == 0 && p.indexability != Indexability::BlockedByRobots)
+}
+
+/// One of a running crawl's newest pages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecentPage {
+    /// Its place in the crawl: 1 for the first page recorded.
+    pub n: u32,
+    pub url: String,
+    /// 0 when there was no response, or robots.txt kept the crawler out.
+    pub status: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<FetchFailure>,
+    /// robots.txt keeps the crawler out of it, so it was never fetched.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub robots: bool,
+}
+
 /// A small file fetched from a well-known path, kept as served.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WellKnownFile {
@@ -207,4 +272,46 @@ pub struct CrawlOutput {
     pub duration_ms: u64,
     #[serde(default)]
     pub signals: SiteSignals,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn progress() -> Progress {
+        Progress {
+            pages_done: 3,
+            queued: 9,
+            failures: 1,
+            depth: 2,
+            elapsed_ms: 4200,
+        }
+    }
+
+    #[test]
+    fn live_progress_is_read_as_plain_progress_and_back() {
+        let live = LiveProgress {
+            progress: progress(),
+            errors: 1,
+            recent: vec![RecentPage {
+                n: 3,
+                url: "https://e.com/gone".to_owned(),
+                status: 404,
+                error: None,
+                robots: false,
+            }],
+        };
+        let json = serde_json::to_value(&live).unwrap();
+        assert_eq!(json["pages_done"], 3);
+        assert_eq!(json["recent"][0]["status"], 404);
+        assert!(json["recent"][0].get("robots").is_none());
+        let plain: Progress = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(plain, progress());
+        assert_eq!(serde_json::from_value::<LiveProgress>(json).unwrap(), live);
+
+        // A heartbeat written before the newest pages were kept reads with none.
+        let old = serde_json::to_value(progress()).unwrap();
+        let read: LiveProgress = serde_json::from_value(old).unwrap();
+        assert_eq!((read.errors, read.recent.len()), (0, 0));
+    }
 }

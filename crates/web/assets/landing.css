@@ -18,6 +18,7 @@
 .q-wait b { font-size: 18px; letter-spacing: -0.02em; }
 .q-wait p { margin-top: 4px; }
 .q-count { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.q-main .live-pages { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 4px 14px; }
 .q-score { display: flex; align-items: center; gap: 22px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
 .q-score h2 { font-size: 20px; margin: 0 0 4px; }
 .q-score .ring { width: 92px; height: 92px; flex: none; background: conic-gradient(var(--accent-strong) calc(var(--p) * 1%), var(--line) 0); }

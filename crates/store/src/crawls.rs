@@ -2,7 +2,7 @@
 //! in flight, history, and the manual-crawl count behind the plan allowance; plus the checked
 //! insert behind Run crawl.
 
-use codoseo_core::output::{Progress, StopReason};
+use codoseo_core::output::{LiveProgress, Progress, StopReason};
 use codoseo_core::plan::ManualAllowance;
 use codoseo_core::report::CrawlSummary;
 use serde::Deserialize;
@@ -52,6 +52,14 @@ pub struct StoredSummary {
 
 impl Crawl {
     pub fn progress(&self) -> Option<Progress> {
+        self.progress
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+    }
+
+    /// The progress with the error count and the newest pages, as the worker's heartbeat
+    /// stores them while the crawl runs.
+    pub fn live_progress(&self) -> Option<LiveProgress> {
         self.progress
             .as_ref()
             .and_then(|v| serde_json::from_value(v.clone()).ok())

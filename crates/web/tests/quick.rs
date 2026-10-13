@@ -320,14 +320,27 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
         "the report is not for search engines"
     );
     assert_eq!(res.header("cache-control"), Some("no-store"));
+    // Without JavaScript the page reloads itself while it waits.
+    assert!(
+        res.body
+            .contains(r#"<noscript><meta http-equiv="refresh" content="5"></noscript>"#),
+        "{}",
+        res.body
+    );
 
-    // Running: the live counter.
+    // Running: the live counters and the newest pages.
     sqlx::query(
-        "UPDATE crawls SET status = 'running', started_at = now(), \
-         progress = '{\"pages_done\":37,\"queued\":12,\"failures\":0,\"depth\":2,\"elapsed_ms\":9000}' \
-         WHERE id = $1",
+        "UPDATE crawls SET status = 'running', started_at = now(), progress = $2 WHERE id = $1",
     )
     .bind(crawl)
+    .bind(serde_json::json!({
+        "pages_done": 37, "queued": 12, "failures": 0, "depth": 2, "elapsed_ms": 9000,
+        "errors": 0,
+        "recent": [
+            {"n": 37, "url": "https://example.com/pricing", "status": 200},
+            {"n": 36, "url": "https://example.com/private", "status": 0, "robots": true},
+        ],
+    }))
     .execute(app.pool())
     .await
     .unwrap();
@@ -335,6 +348,21 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
     assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("37"), "{}", res.body);
     assert!(res.body.contains("every 2s"));
+    assert!(
+        res.body
+            .contains("<dt>Queued</dt><dd class=\"num \">12</dd>")
+    );
+    assert!(res.body.contains(">/pricing<"), "{}", res.body);
+    assert!(
+        res.body
+            .contains(r#"<span class="code t-muted">robots</span>"#)
+    );
+    assert!(
+        res.body
+            .contains(&format!(r#"hx-get="{path}/live?seen=37""#)),
+        "{}",
+        res.body
+    );
 
     // Done: the score and the top issues; the polling stops.
     app.finalize_crawl(
@@ -352,6 +380,9 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
         !res.body.contains("every 2s"),
         "a finished audit stops polling"
     );
+    assert!(!res.body.contains("live-crawl"), "{}", res.body);
+    let res = app.get(&path, None).await;
+    assert!(!res.body.contains("http-equiv=\"refresh\""), "{}", res.body);
     assert!(res.body.contains(&format!(r#"action="{path}/unlock""#)));
     assert_eq!(
         count(
