@@ -1,0 +1,81 @@
+# CodoSEO in CI: audit the site on every push to main and on every pull request, fail the pull
+# request on a new SEO or GEO regression, and show the results in code scanning.
+#
+# Copy this file to .github/workflows/codoseo.yml in your repository and set SITE_URL (for a
+# preview per pull request, pass the preview deployment's URL instead). Third-party actions are
+# pinned by commit SHA; the tag each SHA was taken from is in the comment next to it (2026-10-13).
+# Pin SafrowLabs/CodoSEO the same way, at the release you use.
+
+name: CodoSEO
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  # upload-sarif writes code scanning results.
+  security-events: write
+
+env:
+  SITE_URL: https://example.com/
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The audit from the latest run on main is the baseline: a pull request then fails only on
+      # what is new or worse than main. Caches saved on the default branch are visible to pull
+      # requests; the first run has none and judges every result.
+      - name: Restore the baseline from main
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: codoseo-baseline.json
+          key: codoseo-baseline-${{ github.run_id }}
+          restore-keys: codoseo-baseline-
+
+      - name: CodoSEO audit
+        id: codoseo
+        # Pin to a release commit SHA in your workflow, as with the actions above.
+        uses: SafrowLabs/CodoSEO@main
+        with:
+          url: ${{ env.SITE_URL }}
+          # SEO checks at critical, plus the GEO gates: robots.txt failing (5xx/429), an AI search
+          # bot you want newly blocked, nosnippet/noarchive added, raw HTML content missing.
+          fail-on: critical,geo
+          baseline: ${{ github.event_name == 'pull_request' && 'codoseo-baseline.json' || '' }}
+          sarif: codoseo.sarif
+          audit: codoseo-audit.json
+          max-pages: "500"
+
+      # Upload even when the gate failed, so the alerts show on the pull request.
+      - name: Upload SARIF to code scanning
+        if: always() && steps.codoseo.outputs.sarif != ''
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: codoseo.sarif
+          category: codoseo
+
+      - name: Keep the audit as the next baseline
+        if: always() && github.event_name == 'push' && steps.codoseo.outputs.exit-code != '2'
+        run: cp codoseo-audit.json codoseo-baseline.json
+      - name: Save the baseline
+        if: always() && github.event_name == 'push' && steps.codoseo.outputs.exit-code != '2'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: codoseo-baseline.json
+          key: codoseo-baseline-${{ github.run_id }}
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codoseo
+          path: |
+            codoseo.sarif
+            codoseo-audit.json
+          if-no-files-found: ignore

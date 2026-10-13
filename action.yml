@@ -1,0 +1,90 @@
+name: CodoSEO audit
+description: Crawl a site, run the 44 SEO and 7 AI & GEO checks, and fail the job on SEO or GEO regressions. Writes SARIF for code scanning.
+author: SafrowLabs
+branding:
+  icon: search
+  color: green
+
+# A composite action: it installs the released codoseo binary for the runner (checksum verified)
+# and runs `codoseo crawl` with GitHub annotations, a SARIF file and an audit file. See docs/ci.md.
+
+inputs:
+  url:
+    description: The site to audit (its start URL), for example https://example.com/ or a preview deployment URL.
+    required: true
+  fail-on:
+    description: >-
+      What fails the job (comma-separated): critical, warning (SEO checks at that severity or worse); geo (robots.txt
+      failing, AI search bots you want blocked, nosnippet or noarchive, empty app shells); geo:critical, geo:warning,
+      geo:notice; or an AI access finding kind such as bots_blocked:search. Empty to never fail on results.
+    required: false
+    default: critical,geo
+  baseline:
+    description: An audit file from an earlier run (the `audit` output). With it only new or worse results fail the job. A path that does not exist is skipped with a notice.
+    required: false
+    default: ""
+  sarif:
+    description: Where to write the SARIF 2.1.0 file.
+    required: false
+    default: codoseo.sarif
+  audit:
+    description: Where to write the audit (JSON), the baseline for the next run.
+    required: false
+    default: codoseo-audit.json
+  max-pages:
+    description: Most pages to crawl.
+    required: false
+    default: "500"
+  max-time:
+    description: Longest crawl, in seconds.
+    required: false
+    default: "600"
+  rps:
+    description: Requests per second (1 to 50).
+    required: false
+    default: "5"
+  version:
+    description: >-
+      The CodoSEO release to install (0.2.0 or v0.2.0, or latest). Empty: the release this action is used at when
+      that is a version tag, else the latest release.
+    required: false
+    default: ""
+  args:
+    description: Extra `codoseo crawl` flags, separated by spaces (for example --probes).
+    required: false
+    default: ""
+
+outputs:
+  exit-code:
+    description: 0 passed, 1 a fail-on gate failed, 2 the crawl could not run.
+    value: ${{ steps.run.outputs.exit-code }}
+  sarif:
+    description: The SARIF file's path.
+    value: ${{ steps.run.outputs.sarif }}
+  audit:
+    description: The audit file's path.
+    value: ${{ steps.run.outputs.audit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install CodoSEO
+      shell: bash
+      env:
+        CODOSEO_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: bash "$GITHUB_ACTION_PATH/action/install.sh"
+    - name: Audit
+      id: run
+      shell: bash
+      env:
+        CODOSEO_URL: ${{ inputs.url }}
+        CODOSEO_FAIL_ON: ${{ inputs.fail-on }}
+        CODOSEO_BASELINE: ${{ inputs.baseline }}
+        CODOSEO_SARIF: ${{ inputs.sarif }}
+        CODOSEO_AUDIT: ${{ inputs.audit }}
+        CODOSEO_MAX_PAGES: ${{ inputs.max-pages }}
+        CODOSEO_MAX_TIME: ${{ inputs.max-time }}
+        CODOSEO_RPS: ${{ inputs.rps }}
+        CODOSEO_ARGS: ${{ inputs.args }}
+      run: bash "$GITHUB_ACTION_PATH/action/run.sh"
