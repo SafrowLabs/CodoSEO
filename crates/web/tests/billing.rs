@@ -591,7 +591,7 @@ async fn checkout_posts_the_right_body_and_redirects_to_the_checkout_url() {
         serde_json::json!({
             "product_cart": [{"product_id": "pdt_pro", "quantity": 1}],
             "customer": {"email": "ana@example.com"},
-            "return_url": "https://codoseo.com/billing?status=success",
+            "return_url": "https://codoseo.com/billing?checkout=done",
             "metadata": {"account_id": account.id.to_string()},
         })
     );
@@ -747,7 +747,26 @@ async fn a_paid_account_sees_its_renewal_date_and_manage_billing() {
 async fn the_return_url_shows_a_thank_you() {
     let (app, _, _server) = billing_app().await;
     let (_, cookie) = free_account(&app, "ana@example.com").await;
-    let res = app.get("/billing?status=success", Some(&cookie)).await;
+    let res = app.get("/billing?checkout=done", Some(&cookie)).await;
+    assert!(res.body.contains("your plan updates in a few seconds"));
+    // Dodo appends its own parameters to the return URL, `status` among them.
+    let res = app
+        .get(
+            "/billing?checkout=done&subscription_id=sub_1&payment_id=pay_1&status=active\
+             &email=ana%40example.com",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(res.body.contains("your plan updates in a few seconds"));
+    // A checkout started before the return URL changed comes back with two `status` values.
+    let res = app
+        .get(
+            "/billing?status=success&subscription_id=sub_1&status=active",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("your plan updates in a few seconds"));
     let res = app.get("/billing", Some(&cookie)).await;
     assert!(!res.body.contains("your plan updates in a few seconds"));
