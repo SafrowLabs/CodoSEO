@@ -113,6 +113,11 @@ fn crawl(
         health_score: Some(score),
         checks_passed: Some((CHECKS.len() - counts) as i16),
         checks_total: Some(CHECKS.len() as i16),
+        // The demo has no AI access fixture to score.
+        geo_score: None,
+        geo_checks_passed: None,
+        geo_checks_applicable: None,
+        overall_score: None,
         progress: None,
         summary: Some(summary),
         failure_reason: None,

@@ -1274,6 +1274,7 @@ mod tests {
                 ..Default::default()
             },
             counts: counts.into_iter().map(|(s, n)| (s.to_owned(), n)).collect(),
+            geo: None,
         }
     }
 

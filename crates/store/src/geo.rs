@@ -17,11 +17,17 @@
 //! badges) or [`snooze`] it (its change rows are still recorded, already marked alerted, so the
 //! changes page and the digest stay truthful but nothing alerts at once, until the snooze ends on
 //! its own).
+//!
+//! The crawl's GEO and Overall scores ([`codoseo_geo::score`]) are part of its AI access
+//! evaluation: `finalize` writes them with the report ([`score_crawl`]), under the same intent,
+//! and [`reevaluate_quietly`] writes them again for the newest finished crawl, so "Mark intended"
+//! shows in the score at once. A recheck writes no report and leaves the scores alone: they are
+//! the crawl's, and the next crawl scores what the recheck saw.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use codoseo_core::change::{Change, ChangeKind};
-use codoseo_core::check::Severity;
+use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::plan::PlanLimits;
 use codoseo_geo::Intent;
 use codoseo_geo::eligibility::DirectiveSlug;
@@ -33,11 +39,13 @@ use codoseo_geo::incident::{OpenIncident, Transition, before_of, reconcile};
 use codoseo_geo::llms::LlmsTxtReport;
 use codoseo_geo::report::{AccessReport, Declared};
 use codoseo_geo::robots::Pair;
+use codoseo_geo::score::{GeoScore, assess, overall_score};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::crawls::StoredSummary;
 use crate::dbenum::enum_slug;
 use crate::finalize::{enqueue_alert_job, insert_changes};
 use crate::jobs::{JobKind, enqueue_at_in};
@@ -1419,8 +1427,91 @@ pub async fn reevaluate_quietly(
         )
         .await?;
     }
+    rescore_latest(&mut tx, site_id, &intent, &reports).await?;
     tx.commit().await?;
     Ok((opened, resolved))
+}
+
+/// Scores a finished crawl from its access report under the site's intent and its SEO checks'
+/// `counts` over `pages`, and writes the scores beside its `health_score` ([`write_scores`]).
+/// Called by `finalize` after [`apply_geo`], in its transaction: the site row is already locked,
+/// so the intent read here is the one the findings were drawn under.
+pub(crate) async fn score_crawl(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+    crawl_id: Uuid,
+    report: &AccessReport,
+    seo: u8,
+    counts: &[(CheckId, u32)],
+    pages: u32,
+) -> Result<(), sqlx::Error> {
+    let intent = lock_site(tx, site_id).await?;
+    let geo = assess(report, &intent, counts, pages);
+    write_scores(tx, crawl_id, seo, geo.as_ref()).await
+}
+
+/// After an intent change: scores the site's newest finished crawl again under `intent`, from its
+/// stored report (one of `reports`) and summary. Nothing happens when that crawl has no report (a
+/// no-signup audit, or a report trimmed away) or no summary to read: its scores stay as they are.
+/// Older crawls keep the scores of the intent they were finished under.
+async fn rescore_latest(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+    intent: &Intent,
+    reports: &[(Uuid, Option<AccessReport>)],
+) -> Result<(), sqlx::Error> {
+    // Chosen like `crawls::latest_done`.
+    let row: Option<(Uuid, Option<i16>, Option<Value>)> = sqlx::query_as(
+        "SELECT id, health_score, summary FROM crawls WHERE site_id = $1 AND status = 'done' \
+         ORDER BY finished_at DESC, created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(site_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some((crawl_id, Some(seo), Some(summary))) = row else {
+        return Ok(());
+    };
+    let Some((_, Some(report))) = reports.iter().find(|(id, _)| *id == crawl_id) else {
+        return Ok(());
+    };
+    let Ok(summary) = serde_json::from_value::<StoredSummary>(summary) else {
+        return Ok(());
+    };
+    let counts: Vec<(CheckId, u32)> = summary
+        .counts
+        .iter()
+        .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n)))
+        .collect();
+    let geo = assess(report, intent, &counts, summary.report_summary.pages);
+    write_scores(tx, crawl_id, seo.clamp(0, 100) as u8, geo.as_ref()).await
+}
+
+/// Writes the crawl's GEO score, its check counts and the Overall score, and keeps the per-check
+/// breakdown in `summary.geo` (read back as [`StoredSummary::geo`]). `None` (nothing applied)
+/// clears them all.
+async fn write_scores(
+    tx: &mut Transaction<'_, Postgres>,
+    crawl_id: Uuid,
+    seo: u8,
+    geo: Option<&GeoScore>,
+) -> Result<(), sqlx::Error> {
+    let breakdown = geo.map(|g| serde_json::to_value(g).expect("a score always serializes"));
+    sqlx::query(
+        "UPDATE crawls SET geo_score = $2, overall_score = $3, geo_checks_passed = $4, \
+         geo_checks_applicable = $5, \
+         summary = CASE WHEN $6::jsonb IS NULL THEN summary - 'geo' \
+                        ELSE jsonb_set(coalesce(summary, '{}'::jsonb), '{geo}', $6::jsonb) END \
+         WHERE id = $1",
+    )
+    .bind(crawl_id)
+    .bind(geo.map(|g| i16::from(g.score)))
+    .bind(geo.map(|g| i16::from(overall_score(seo, g.score))))
+    .bind(geo.map(|g| g.checks_passed as i16))
+    .bind(geo.map(|g| g.checks_applicable as i16))
+    .bind(breakdown)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// A crawl that failed for good (its site gave no pages) but did read a failing robots.txt:

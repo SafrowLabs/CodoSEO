@@ -1,7 +1,7 @@
 //! Writing a finished crawl in one transaction: pages and inlinks via `COPY` (batched, so
 //! memory stays flat on a large crawl), one `site_files` row, `changes`, the crawl's own
 //! `done`/summary update, the 2-crawl retention cleanup, the AI access report and its incidents
-//! (see [`crate::geo`]), the alert planning job and the public crawl totals ([`crate::stats`]). A
+//! (see [`crate::geo`]) with the GEO and Overall scores, the alert planning job and the public crawl totals ([`crate::stats`]). A
 //! failure partway rolls the whole transaction back, so a crawl never ends up half-written.
 
 use std::collections::HashSet;
@@ -73,6 +73,19 @@ pub async fn finalize(
         // Someone else now owns this crawl_id (requeued and reclaimed while we were still
         // running). Roll back rather than leave orphaned pages/inlinks/changes for their crawl.
         return Err(sqlx::Error::RowNotFound);
+    }
+    // The GEO and Overall scores, once the AI access evaluation above is complete.
+    if let Some(input) = geo {
+        geo::score_crawl(
+            &mut tx,
+            site_id,
+            crawl_id,
+            &input.report,
+            report.health_score,
+            &report.counts,
+            report.summary.pages,
+        )
+        .await?;
     }
 
     // Keep only the latest 2 `done` crawls' per-URL data (spec section 6).
