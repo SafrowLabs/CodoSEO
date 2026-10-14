@@ -54,6 +54,10 @@ pub fn app(state: AppState) -> Router {
         .fallback(error::not_found)
         .layer(middleware::from_fn_with_state(
             state.clone(),
+            layout::remember_site,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
             auth::origin::check_origin,
         ))
         .layer(middleware::from_fn(error::error_pages))

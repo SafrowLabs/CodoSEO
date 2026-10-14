@@ -14,7 +14,7 @@
 <script src="{{ crate::assets::url("htmx.min.js") }}" defer></script>
 <script src="{{ crate::assets::url("app.js") }}" defer></script>
 </head>
-<body hx-boost="true" data-site="{% if let Some(site) = shell.site %}{{ site.base }}{% endif %}">
+<body hx-boost="true" data-site="{% if let Some(site) = shell.current %}{{ site.base }}{% endif %}">
 {% include "partials/icons.html" %}
 <div class="progress" aria-hidden="true"></div>
 <div class="shell">
@@ -28,7 +28,7 @@
       <span class="here">{{ shell.screen.title() }}</span>
     </div>
     <button class="search-trigger" data-action="palette" aria-label="Search">
-      <svg class="icon"><use href="#i-search"/></svg><span>{% if shell.site.is_some() %}Search URLs{% else %}Jump to…{% endif %}</span><kbd>⌘K</kbd>
+      <svg class="icon"><use href="#i-search"/></svg><span>{% if shell.current.is_some() %}Search URLs{% else %}Jump to…{% endif %}</span><kbd>⌘K</kbd>
     </button>
     <div id="header-actions" style="display:flex;align-items:center;gap:12px">
       {% if let Some(site) = shell.site %}
@@ -43,7 +43,7 @@
   <aside class="sidebar" id="sidebar">
     <details class="switcher" id="switcher">
       <summary class="site-pill" aria-label="Switch site">
-        {% if let Some(site) = shell.site %}
+        {% if let Some(site) = shell.current %}
           <span class="avatar">{{ site.initial }}</span>
           <span class="meta"><span class="name" style="display:block">{{ site.domain }}</span><span class="sub">{{ site.urls_label }}</span></span>
         {% else %}
@@ -107,7 +107,7 @@
 
 <dialog id="palette" class="palette" aria-label="Command palette">
   <div class="palette-box">
-    <div class="palette-input"><svg class="icon"><use href="#i-search"/></svg><input id="palette-input" type="text" placeholder="{% if shell.site.is_some() %}Search URLs and titles, or type a command…{% else %}Type a command…{% endif %}" autocomplete="off" spellcheck="false" aria-label="Search"><kbd>esc</kbd></div>
+    <div class="palette-input"><svg class="icon"><use href="#i-search"/></svg><input id="palette-input" type="text" placeholder="{% if shell.current.is_some() %}Search URLs and titles, or type a command…{% else %}Type a command…{% endif %}" autocomplete="off" spellcheck="false" aria-label="Search"><kbd>esc</kbd></div>
     <div id="palette-list" class="palette-list" role="listbox"></div>
     <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></div>
   </div>
@@ -119,10 +119,10 @@
     <div class="keys">
       <div>Command palette<span><kbd>⌘</kbd><kbd>K</kbd></span></div>
       <div>Show shortcuts<span><kbd>?</kbd></span></div>
-      <div>URL explorer<span><kbd>G</kbd><kbd>E</kbd></span></div>
       <div>Site audit<span><kbd>G</kbd><kbd>A</kbd></span></div>
-      <div>Changes<span><kbd>G</kbd><kbd>C</kbd></span></div>
+      <div>URL explorer<span><kbd>G</kbd><kbd>E</kbd></span></div>
       <div>AI access<span><kbd>G</kbd><kbd>I</kbd></span></div>
+      <div>Changes<span><kbd>G</kbd><kbd>C</kbd></span></div>
       <div>Crawl history<span><kbd>G</kbd><kbd>H</kbd></span></div>
       <div>Account<span><kbd>G</kbd><kbd>S</kbd></span></div>
       <div>Filter URLs<span><kbd>/</kbd></span></div>

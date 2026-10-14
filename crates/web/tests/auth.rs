@@ -188,6 +188,7 @@ async fn another_accounts_site_is_not_found() {
     let as_user = |account| CurrentUser {
         account,
         session_id: Uuid::nil(),
+        last_site: None,
     };
     let found = codoseo_web::auth::load_site(&app.state, &as_user(ana.clone()), site.id).await;
     assert_eq!(found.unwrap().id, site.id);
