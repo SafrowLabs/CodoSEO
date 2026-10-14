@@ -4,6 +4,10 @@
 //! Every screen template extends `base.html` and has a `shell: Shell` field, built once per
 //! request by [`Shell::load`].
 
+use axum::extract::{Request, State};
+use axum::http::{Method, header};
+use axum::middleware::Next;
+use axum::response::Response;
 use codoseo_checks::def;
 use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::plan::{Plan, PlanLimits};
@@ -11,7 +15,7 @@ use codoseo_store::crawls::{Crawl, CrawlStatus};
 use codoseo_store::sites::Site;
 use uuid::Uuid;
 
-use crate::auth::CurrentUser;
+use crate::auth::{CurrentUser, session};
 use crate::config::Mode;
 use crate::error::AppError;
 use crate::fmt;
@@ -65,6 +69,7 @@ pub struct SiteLink {
     pub active: bool,
 }
 
+#[derive(Clone)]
 pub struct SiteView {
     pub id: Uuid,
     pub domain: String,
@@ -117,7 +122,11 @@ pub struct Shell {
     pub screen: Screen,
     pub user: UserView,
     pub sites: Vec<SiteLink>,
+    /// The site in view, if the screen has one: the breadcrumb and Run crawl.
     pub site: Option<SiteView>,
+    /// The sidebar's site: the one in view, or else the user's current site. `None` only
+    /// when the user has no site yet.
+    pub current: Option<SiteView>,
     pub nav: Vec<NavGroup>,
     pub crawler: Option<CrawlerView>,
     pub version: &'static str,
@@ -148,23 +157,32 @@ impl Shell {
             .max_sites
             .is_none_or(|max| (sites.len() as u32) < max);
 
-        let mut site_view = None;
+        // The sidebar is the same on every page: a screen without a site in view (settings,
+        // billing, the site list) still shows the user's current site, the one they last
+        // looked at or else the first, which is where `/` goes.
+        let current = site.or_else(|| {
+            user.last_site
+                .and_then(|id| sites.iter().find(|s| s.id == id))
+                .or(sites.first())
+        });
+
+        let mut current_view = None;
         let mut nav = Vec::new();
         let mut crawler = None;
-        if let Some(site) = site {
-            let latest = codoseo_store::crawls::latest_done(pool, site.id).await?;
-            let active = codoseo_store::crawls::active(pool, site.id).await?;
+        if let Some(cur) = current {
+            let latest = codoseo_store::crawls::latest_done(pool, cur.id).await?;
+            let active = codoseo_store::crawls::active(pool, cur.id).await?;
             let changes = match &latest {
                 Some(c) => change_counts(state, c.id).await?,
                 None => (0, false),
             };
-            let ai_issues = codoseo_store::geo::open_counts(pool, site.id).await?;
+            let ai_issues = codoseo_store::geo::open_counts(pool, cur.id).await?;
             let summary = latest.as_ref().and_then(Crawl::summary);
-            let base = format!("/s/{}", site.id);
-            site_view = Some(SiteView {
-                id: site.id,
-                domain: site.domain.clone(),
-                initial: initial(&site.domain),
+            let base = format!("/s/{}", cur.id);
+            current_view = Some(SiteView {
+                id: cur.id,
+                domain: cur.domain.clone(),
+                initial: initial(&cur.domain),
                 base: base.clone(),
                 urls_label: match &summary {
                     Some(s) => {
@@ -178,33 +196,33 @@ impl Shell {
                     format!("crawl #{} · {when}", c.number)
                 }),
             });
-            nav = nav_groups(
+            nav.push(site_group(
                 &base,
                 screen,
                 latest.as_ref(),
                 summary.as_ref(),
                 changes,
                 ai_issues,
-            );
+            ));
             crawler = Some(crawler_view(
                 &base,
                 latest.as_ref(),
                 active.as_ref(),
                 user.account.plan,
             ));
-        } else {
-            nav.push(NavGroup {
-                title: "WORKSPACE",
-                items: vec![workspace_item(
-                    "Sites",
+        }
+
+        let mut workspace = vec![
+            NavItem {
+                count: fmt::thousands(sites.len() as i64),
+                ..workspace_item(
+                    "All sites",
                     "/sites",
                     screen == Screen::Sites,
                     "",
                     "i-globe",
-                )],
-            });
-        }
-        let mut account_items = vec![
+                )
+            },
             workspace_item(
                 "Alerts",
                 "/settings/alerts",
@@ -219,10 +237,6 @@ impl Shell {
                 "",
                 "i-key",
             ),
-            NavItem {
-                soon: true,
-                ..workspace_item("Schedule", "#", false, "", "i-calendar")
-            },
         ];
         // Billing exists on the cloud only; a free account is nudged toward the upgrade.
         if state.config.mode == Mode::Cloud {
@@ -236,9 +250,9 @@ impl Shell {
             if user.account.plan == Plan::Free {
                 billing.count = "upgrade".to_owned();
             }
-            account_items.push(billing);
+            workspace.push(billing);
         }
-        account_items.push(workspace_item(
+        workspace.push(workspace_item(
             "Settings",
             "/account",
             screen == Screen::Account,
@@ -246,12 +260,8 @@ impl Shell {
             "i-settings",
         ));
         nav.push(NavGroup {
-            title: if site.is_some() {
-                "WORKSPACE"
-            } else {
-                "ACCOUNT"
-            },
-            items: account_items,
+            title: "WORKSPACE",
+            items: workspace,
         });
 
         let sites = sites
@@ -260,7 +270,7 @@ impl Shell {
                 domain: s.domain.clone(),
                 initial: initial(&s.domain),
                 href: format!("/s/{}/audit", s.id),
-                active: site.is_some_and(|cur| cur.id == s.id),
+                active: current.is_some_and(|cur| cur.id == s.id),
             })
             .collect();
 
@@ -268,7 +278,8 @@ impl Shell {
             screen,
             user: user_view(user),
             sites,
-            site: site_view,
+            site: site.and(current_view.clone()),
+            current: current_view,
             nav,
             crawler,
             version: env!("CARGO_PKG_VERSION"),
@@ -276,6 +287,42 @@ impl Shell {
             legal: state.config.mode == Mode::Cloud,
         })
     }
+}
+
+/// Remembers the site last in view, so screens without one keep it in the sidebar.
+pub const SITE_COOKIE: &str = "codoseo_site";
+const SITE_COOKIE_TTL_SECS: i64 = 365 * 24 * 60 * 60;
+
+/// Middleware: a successful `GET /s/{site}/…` sets [`SITE_COOKIE`] when it changes. Only the
+/// account's own sites answer 2xx there, so the cookie never names someone else's site.
+pub async fn remember_site(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let seen = (req.method() == Method::GET)
+        .then(|| site_in_path(req.uri().path()))
+        .flatten()
+        .filter(|id| {
+            session::cookie(req.headers(), SITE_COOKIE).as_deref() != Some(&id.to_string())
+        });
+    let mut res = next.run(req).await;
+    if let Some(id) = seen
+        && res.status().is_success()
+    {
+        res.headers_mut().append(
+            header::SET_COOKIE,
+            session::set_cookie(
+                SITE_COOKIE,
+                &id.to_string(),
+                SITE_COOKIE_TTL_SECS,
+                state.config.secure_cookies(),
+            ),
+        );
+    }
+    res
+}
+
+/// The site id in a `/s/{site}/…` path.
+fn site_in_path(path: &str) -> Option<Uuid> {
+    let rest = path.strip_prefix("/s/")?;
+    rest.split('/').next()?.parse().ok()
 }
 
 /// The sidebar crawler card for one site, on its own (the `/s/{site}/status` poll).
@@ -358,30 +405,16 @@ fn user_view(user: &CurrentUser) -> UserView {
     }
 }
 
-/// Affected-page counts by check slug, from the stored summary.
-fn check_count(summary: &codoseo_store::crawls::StoredSummary, id: CheckId) -> u32 {
-    summary
-        .counts
-        .iter()
-        .find(|(slug, _)| slug == id.slug())
-        .map_or(0, |(_, n)| *n)
-}
-
-fn nav_groups(
+/// THIS SITE: the current site's screens, Site audit first. The old REPORTS links live on as
+/// URL explorer filters.
+fn site_group(
     base: &str,
     screen: Screen,
     latest: Option<&Crawl>,
     summary: Option<&codoseo_store::crawls::StoredSummary>,
     (changes, critical_change): (i64, bool),
     (ai_open, ai_critical): (i64, i64),
-) -> Vec<NavGroup> {
-    let n = |v: u32| {
-        if summary.is_some() {
-            fmt::thousands(v)
-        } else {
-            String::new()
-        }
-    };
+) -> NavGroup {
     let critical_checks = summary.map_or(0, |s| {
         s.counts
             .iter()
@@ -389,25 +422,7 @@ fn nav_groups(
             .filter(|id| def(*id).severity == Severity::Critical)
             .count() as u32
     });
-    let (pages, status, indexable) = summary.map_or((0, Default::default(), 0), |s| {
-        (
-            s.report_summary.pages,
-            s.report_summary.status,
-            s.report_summary.indexable,
-        )
-    });
-    let title_issues = summary.map_or(0, |s| {
-        [
-            CheckId::TitleMissing,
-            CheckId::TitleTooLong,
-            CheckId::TitleTooShort,
-            CheckId::TitleDuplicate,
-        ]
-        .iter()
-        .map(|&c| check_count(s, c))
-        .sum()
-    });
-    let alt = summary.map_or(0, |s| check_count(s, CheckId::ImagesMissingAlt));
+    let pages = summary.map(|s| fmt::thousands(s.report_summary.pages));
 
     let item = |label, href: String, count: String, alert, active, keys, icon| NavItem {
         label,
@@ -419,121 +434,68 @@ fn nav_groups(
         soon: false,
         icon,
     };
-    let explorer = |f: &str| format!("{base}/explorer?filter={f}");
-    vec![
-        NavGroup {
-            title: "PROJECT",
-            items: vec![
-                item(
-                    "URL explorer",
-                    format!("{base}/explorer"),
-                    n(pages),
-                    false,
-                    screen == Screen::Explorer,
-                    "G E",
-                    "i-explorer",
-                ),
-                item(
-                    "Site audit",
-                    format!("{base}/audit"),
-                    if critical_checks > 0 {
-                        n(critical_checks)
-                    } else {
-                        String::new()
-                    },
-                    critical_checks > 0,
-                    screen == Screen::Audit,
-                    "G A",
-                    "i-audit",
-                ),
-                item(
-                    "Changes",
-                    format!("{base}/changes"),
-                    if changes > 0 {
-                        fmt::thousands(changes)
-                    } else {
-                        String::new()
-                    },
-                    critical_change,
-                    screen == Screen::Changes,
-                    "G C",
-                    "i-changes",
-                ),
-                item(
-                    "AI access",
-                    format!("{base}/ai-access"),
-                    if ai_open > 0 {
-                        fmt::thousands(ai_open)
-                    } else {
-                        String::new()
-                    },
-                    ai_critical > 0,
-                    screen == Screen::AiAccess,
-                    "G I",
-                    "i-ai",
-                ),
-                item(
-                    "Crawls",
-                    format!("{base}/crawls"),
-                    latest.map(|c| fmt::thousands(c.number)).unwrap_or_default(),
-                    false,
-                    screen == Screen::Crawls,
-                    "G H",
-                    "i-crawls",
-                ),
-            ],
-        },
-        NavGroup {
-            title: "REPORTS",
-            items: vec![
-                item(
-                    "Response codes",
-                    explorer("s4"),
-                    n(status.client_error + status.server_error),
-                    false,
-                    false,
-                    "",
-                    "i-codes",
-                ),
-                item(
-                    "Redirects",
-                    explorer("s3"),
-                    n(status.redirect),
-                    false,
-                    false,
-                    "",
-                    "i-redirect",
-                ),
-                item(
-                    "Indexability",
-                    explorer("nx"),
-                    n(pages.saturating_sub(indexable)),
-                    false,
-                    false,
-                    "",
-                    "i-index",
-                ),
-                item(
-                    "Page titles",
-                    explorer("check:title_too_long"),
-                    n(title_issues),
-                    false,
-                    false,
-                    "",
-                    "i-title",
-                ),
-                item(
-                    "Image alt text",
-                    explorer("check:images_missing_alt"),
-                    n(alt),
-                    false,
-                    false,
-                    "",
-                    "i-image",
-                ),
-            ],
-        },
-    ]
+    NavGroup {
+        title: "THIS SITE",
+        items: vec![
+            item(
+                "Site audit",
+                format!("{base}/audit"),
+                if critical_checks > 0 {
+                    fmt::thousands(critical_checks)
+                } else {
+                    String::new()
+                },
+                critical_checks > 0,
+                screen == Screen::Audit,
+                "G A",
+                "i-audit",
+            ),
+            item(
+                "URL explorer",
+                format!("{base}/explorer"),
+                pages.unwrap_or_default(),
+                false,
+                screen == Screen::Explorer,
+                "G E",
+                "i-explorer",
+            ),
+            item(
+                "AI access",
+                format!("{base}/ai-access"),
+                if ai_open > 0 {
+                    fmt::thousands(ai_open)
+                } else {
+                    String::new()
+                },
+                ai_critical > 0,
+                screen == Screen::AiAccess,
+                "G I",
+                "i-ai",
+            ),
+            item(
+                "Changes",
+                format!("{base}/changes"),
+                if changes > 0 {
+                    fmt::thousands(changes)
+                } else {
+                    String::new()
+                },
+                critical_change,
+                screen == Screen::Changes,
+                "G C",
+                "i-changes",
+            ),
+            item(
+                "Crawls",
+                format!("{base}/crawls"),
+                latest.map(|c| fmt::thousands(c.number)).unwrap_or_default(),
+                false,
+                screen == Screen::Crawls,
+                "G H",
+                "i-crawls",
+            ),
+        ],
+    }
 }
 
 fn crawler_view(

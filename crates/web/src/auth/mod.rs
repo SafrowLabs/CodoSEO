@@ -40,6 +40,10 @@ pub fn router() -> Router<AppState> {
 pub struct CurrentUser {
     pub account: Account,
     pub session_id: Uuid,
+    /// The site this browser last had in view (the [`crate::layout::SITE_COOKIE`]), for the
+    /// sidebar on screens without one. Unchecked: the shell only uses it if it is one of the
+    /// account's sites.
+    pub last_site: Option<Uuid>,
 }
 
 impl CurrentUser {
@@ -91,6 +95,8 @@ impl FromRequestParts<AppState> for CurrentUser {
             Ok(Some((session_id, account))) => Ok(CurrentUser {
                 account,
                 session_id,
+                last_site: session::cookie(&parts.headers, crate::layout::SITE_COOKIE)
+                    .and_then(|v| v.parse().ok()),
             }),
             Ok(None) => Err(login()),
             Err(e) => Err(AuthRejection::Error(e.into())),
