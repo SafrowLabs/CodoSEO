@@ -6,15 +6,7 @@ use codoseo_geo::ledger::{Lag, OPERATOR_LAGS, finding_sources, for_kind, lag, le
 use codoseo_geo::registry;
 use codoseo_geo::robots::GroupMatch;
 
-const ALL_KINDS: [FindingKind; 7] = [
-    FindingKind::RobotsUnavailable,
-    FindingKind::BotsBlocked,
-    FindingKind::BotsNotBlocked,
-    FindingKind::AnswersRestricted,
-    FindingKind::FetchBlocked,
-    FindingKind::ContentMissing,
-    FindingKind::LlmsTxtUnavailable,
-];
+const ALL_KINDS: [FindingKind; 9] = FindingKind::ALL;
 
 /// The checks that never open an incident but still show a grade.
 const CHECKS: [&str; 7] = [
@@ -55,6 +47,8 @@ fn todays_grades_are_unchanged() {
         (FetchBlocked, Grade::B),
         (ContentMissing, Grade::AMinus),
         (LlmsTxtUnavailable, Grade::A),
+        (ContentSignalsMissing, Grade::A),
+        (MarkdownUnavailable, Grade::A),
     ] {
         assert_eq!(for_kind(kind).grade, grade, "{kind:?}");
     }
@@ -247,6 +241,8 @@ fn kinds_without_a_documented_lag_use_codoseos_own_debounce() {
         FindingKind::FetchBlocked,
         FindingKind::ContentMissing,
         FindingKind::LlmsTxtUnavailable,
+        FindingKind::ContentSignalsMissing,
+        FindingKind::MarkdownUnavailable,
     ] {
         assert_eq!(
             lag(kind, &bots(&["DuckAssistBot"])),

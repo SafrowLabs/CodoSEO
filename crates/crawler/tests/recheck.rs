@@ -14,6 +14,7 @@ fn cfg(site: Url, pages: Vec<Url>, llms: bool) -> RecheckFetch {
         site,
         pages,
         llms,
+        markdown: false,
         address_policy: AddressPolicy::AllowPrivate,
         politeness: Politeness {
             requests_per_sec: 1000.0,
@@ -117,4 +118,34 @@ async fn nothing_starts_after_the_deadline() {
     assert!(!got.pages[0].is_html_ok(), "cut short");
     assert_eq!(got.not_reached, vec![site.url("/b")]);
     assert_eq!(site.path_hits("/b"), 0);
+}
+
+#[tokio::test]
+async fn asks_for_the_home_page_as_markdown_when_told_to() {
+    let site = SiteBuilder::new()
+        .page(
+            "/",
+            Page::by_accept(
+                vec![(
+                    "text/markdown",
+                    Page::html("# Home\n").header("content-type", "text/markdown"),
+                )],
+                Page::html("<title>Home</title>"),
+            ),
+        )
+        .start()
+        .await;
+    let got = recheck_fetch(RecheckFetch {
+        markdown: true,
+        ..cfg(site.url("/"), Vec::new(), false)
+    })
+    .await
+    .unwrap();
+    let probe = got.markdown.expect("asked").expect("made");
+    assert_eq!(probe.negotiated.status, 200);
+    assert_eq!(
+        codoseo_geo::markdown::assess(&probe).state,
+        codoseo_geo::markdown::MarkdownState::Negotiated
+    );
+    assert_eq!(site.path_hits("/"), 1);
 }

@@ -10,6 +10,7 @@ pub mod incident;
 pub mod intent;
 pub mod ledger;
 pub mod llms;
+pub mod markdown;
 pub mod probe;
 pub mod recheck;
 pub mod registry;
@@ -17,6 +18,7 @@ pub mod remedy;
 pub mod report;
 pub mod robots;
 pub mod score;
+pub mod signals;
 
 pub use intent::{Intent, Stance};
 pub use registry::{Bot, Honours, Purpose, Registry, registry, registry_json};

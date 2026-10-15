@@ -18,9 +18,11 @@ fn report_for(out: &CrawlOutput) -> AccessReport {
 
 /// [`codoseo_geo::findings::findings`], checking every finding against the evidence ledger: its
 /// grade is its kind's, and its sources are the ones the ledger draws from its evidence (a broken
-/// robots.txt also cites the wanted bots' pages, which its evidence doesn't carry).
+/// robots.txt also cites the wanted bots' pages, which its evidence doesn't carry). The advisory
+/// findings (Content Signals, Markdown), which most fixtures here raise, are checked the same way
+/// and then left out: tests/signals.rs is about them.
 fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
-    let found = codoseo_geo::findings::findings(report, intent);
+    let mut found = codoseo_geo::findings::findings(report, intent);
     for f in &found {
         assert_eq!(f.grade, for_kind(f.kind).grade, "{f:?}");
         let ledger = finding_sources(f.kind, &f.evidence);
@@ -30,6 +32,7 @@ fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
             assert_eq!(f.sources, ledger, "{f:?}");
         }
     }
+    found.retain(|f| !f.kind.is_advisory());
     found
 }
 
@@ -496,7 +499,8 @@ fn evaluated_kinds_follow_what_the_report_can_see() {
             FindingKind::BotsBlocked,
             FindingKind::BotsNotBlocked,
             FindingKind::AnswersRestricted,
-            FindingKind::ContentMissing
+            FindingKind::ContentMissing,
+            FindingKind::ContentSignalsMissing
         ]
     );
     let down = report_for(&with_robots(site(3, |p| p), 503, ""));
@@ -520,7 +524,8 @@ fn evaluated_kinds_follow_what_the_report_can_see() {
         [
             FindingKind::RobotsUnavailable,
             FindingKind::BotsBlocked,
-            FindingKind::BotsNotBlocked
+            FindingKind::BotsNotBlocked,
+            FindingKind::ContentSignalsMissing
         ]
     );
 }

@@ -100,6 +100,7 @@ struct CrawlExtras<'a> {
     robots: Option<RobotsFile>,
     probes: Option<&'a dyn Fn(&AccessReport) -> ProbeReport>,
     llms: Option<(LlmsTxtFetch, bool)>,
+    markdown: Option<codoseo_core::output::MarkdownProbe>,
 }
 
 pub struct TestApp {
@@ -394,6 +395,40 @@ impl TestApp {
         crawl_id
     }
 
+    /// Like [`finished_crawl_with_robots`](Self::finished_crawl_with_robots), with the home page
+    /// asked for as Markdown (`Accept: text/markdown`) and what came back.
+    pub async fn finished_crawl_with_markdown(
+        &self,
+        site: &Site,
+        pages: Vec<PageRecord>,
+        robots: (u16, &str),
+        markdown: codoseo_core::output::MarkdownProbe,
+    ) -> Uuid {
+        let crawl_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id, started_at, heartbeat_at) \
+             VALUES ($1, $2, 'manual', 2, 'running', 'test-worker', now() - interval '95 seconds', now()) \
+             RETURNING id",
+        )
+        .bind(site.id)
+        .bind(&site.domain)
+        .fetch_one(self.pool())
+        .await
+        .expect("insert crawl");
+        let robots = RobotsFile {
+            status: robots.0,
+            body: robots.1.to_owned(),
+            hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
+        };
+        let extras = CrawlExtras {
+            robots: Some(robots),
+            markdown: Some(markdown),
+            ..CrawlExtras::default()
+        };
+        self.finalize_with(crawl_id, pages, Vec::new(), StopReason::Completed, extras)
+            .await;
+        crawl_id
+    }
+
     /// Like [`finished_crawl_with_robots`](Self::finished_crawl_with_robots), with synthetic
     /// fetch probes: `probes` gets the report the crawl built and returns what the probes found,
     /// stored in `report.probes` before `finalize` as the worker does.
@@ -457,6 +492,7 @@ impl TestApp {
             robots,
             probes,
             llms,
+            markdown,
         } = extras;
         let (site_id, start_url): (Uuid, String) = sqlx::query_as(
             "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
@@ -496,6 +532,7 @@ impl TestApp {
             duration_ms: 95_000,
             signals: SiteSignals {
                 llms_txt: llms.as_ref().map(|(f, _)| f.clone()),
+                markdown,
                 ..SiteSignals::default()
             },
         };

@@ -54,15 +54,7 @@ use crate::jobs::{JobKind, enqueue_at_in};
 /// newest two can't stand in for (see [`reports_to_keep`]).
 const KEEP_REPORTS: usize = 2;
 /// Every kind of finding, for the kinds a run opens quietly.
-const ALL_KINDS: [FindingKind; 7] = [
-    FindingKind::RobotsUnavailable,
-    FindingKind::BotsBlocked,
-    FindingKind::BotsNotBlocked,
-    FindingKind::AnswersRestricted,
-    FindingKind::FetchBlocked,
-    FindingKind::ContentMissing,
-    FindingKind::LlmsTxtUnavailable,
-];
+const ALL_KINDS: [FindingKind; 9] = FindingKind::ALL;
 /// Longest `before_value`/`after_value` a change row gets, in characters.
 const MAX_CHANGE_TEXT: usize = 300;
 /// Most per-bot overrides an intent may hold.
@@ -589,14 +581,23 @@ pub async fn incident(
 
 /// How many incidents are open on the site, and how many of those are critical (the sidebar).
 /// Accepted incidents and those snoozed until later are left out: the owner already decided
-/// about them, so they don't ask for attention.
+/// about them, so they don't ask for attention. So are the advisory kinds (Content Signals,
+/// Markdown): nice-to-haves most sites lack, listed on the AI access screen and in the fix list but
+/// not worth a badge.
 pub async fn open_counts(pool: &PgPool, site_id: Uuid) -> Result<(i64, i64), sqlx::Error> {
+    let advisory: Vec<&str> = FindingKind::ALL
+        .into_iter()
+        .filter(|k| k.is_advisory())
+        .map(FindingKind::slug)
+        .collect();
     sqlx::query_as(
         "SELECT count(*), count(*) FILTER (WHERE severity = 'critical') \
          FROM ai_incidents WHERE site_id = $1 AND resolved_at IS NULL \
-           AND accepted_at IS NULL AND (snoozed_until IS NULL OR snoozed_until <= now())",
+           AND accepted_at IS NULL AND (snoozed_until IS NULL OR snoozed_until <= now()) \
+           AND NOT (kind = ANY($2))",
     )
     .bind(site_id)
+    .bind(&advisory)
     .fetch_one(pool)
     .await
 }
@@ -1623,9 +1624,10 @@ pub(crate) async fn apply_geo(
         &transitions,
         &open,
         Mode {
+            // Advisory kinds always open quietly: they never alert.
             quiet: ALL_KINDS
                 .into_iter()
-                .filter(|k| !judged_before.contains(k))
+                .filter(|k| k.is_advisory() || !judged_before.contains(k))
                 .collect(),
             changes: true,
             resolution: "fixed",
@@ -1906,8 +1908,11 @@ async fn write_transitions(
                 )
                 .execute(&mut **tx)
                 .await?;
-                if mode.changes && !quiet {
-                    written.push(None, finding_change(finding));
+                if mode.changes
+                    && !quiet
+                    && let Some(change) = finding_change(finding)
+                {
+                    written.push(None, change);
                 }
             }
             Transition::Updated {
@@ -1922,13 +1927,13 @@ async fn write_transitions(
                 // An accepted incident announces nothing, unless it got worse: the owner
                 // accepted what it was, not this, so it is accepted no longer. One that got
                 // worse during a snooze that is over now is announced by this crawl, once.
-                let unaccept = mode.changes && *escalated && row.is_some_and(|r| r.accepted);
-                let due = mode.changes && row.is_some_and(|r| r.escalation_due);
+                // Advisory kinds are never announced, so they stay quiet.
+                let changes = mode.changes && !finding.kind.is_advisory();
+                let unaccept = changes && *escalated && row.is_some_and(|r| r.accepted);
+                let due = changes && row.is_some_and(|r| r.escalation_due);
                 let announce = unaccept
                     || due
-                    || (mode.changes
-                        && (*escalated || *widened)
-                        && !row.is_some_and(|r| r.accepted));
+                    || (changes && (*escalated || *widened) && !row.is_some_and(|r| r.accepted));
                 let snoozed = row.is_some_and(|r| r.snoozed);
                 let mut evidence =
                     serde_json::to_value(&finding.evidence).expect("evidence always serializes");
@@ -1964,11 +1969,11 @@ async fn write_transitions(
                 .bind(*escalated)
                 .execute(&mut **tx)
                 .await?;
-                if announce {
+                if announce && let Some(change) = finding_change(finding) {
                     match row {
-                        _ if snoozed => written.muted.push(finding_change(finding)),
-                        Some(_) if unaccept => written.changes.push(finding_change(finding)),
-                        _ => written.push(row, finding_change(finding)),
+                        _ if snoozed => written.muted.push(change),
+                        Some(_) if unaccept => written.changes.push(change),
+                        _ => written.push(row, change),
                     }
                 }
             }
@@ -2047,8 +2052,9 @@ fn resolved_kind(kind: FindingKind) -> ChangeKind {
 }
 
 /// The change row for an incident that opened, got worse or widened. `before` is what was
-/// expected, `after` the finding's title; the summary and evidence live on the incident.
-fn finding_change(finding: &Finding) -> Change {
+/// expected, `after` the finding's title; the summary and evidence live on the incident. `None`
+/// for the advisory kinds, which are never announced.
+fn finding_change(finding: &Finding) -> Option<Change> {
     let (kind, before) = match finding.kind {
         FindingKind::RobotsUnavailable | FindingKind::BotsBlocked => {
             (ChangeKind::AiBotBlocked, "allowed")
@@ -2058,14 +2064,15 @@ fn finding_change(finding: &Finding) -> Change {
         FindingKind::FetchBlocked => (ChangeKind::AiFetchBlocked, "reachable"),
         FindingKind::ContentMissing => (ChangeKind::AiContentMissing, "content in the HTML"),
         FindingKind::LlmsTxtUnavailable => (ChangeKind::AiLlmsTxtUnavailable, "llms.txt served"),
+        FindingKind::ContentSignalsMissing | FindingKind::MarkdownUnavailable => return None,
     };
-    Change {
+    Some(Change {
         kind,
         severity: finding.severity,
         url: None,
         before: before.to_owned(),
         after: truncate(&finding.title),
-    }
+    })
 }
 
 /// `Some` when the declared AI preferences differ between two reports that both knew them

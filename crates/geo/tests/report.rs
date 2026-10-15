@@ -475,9 +475,10 @@ fn the_audit_section_is_the_report_and_its_findings_under_the_default_intent() {
     assert_eq!(report, report_for(&out));
     let found: Vec<Finding> = serde_json::from_value(section["findings"].clone()).unwrap();
     assert_eq!(found, findings(&report, &Intent::default()));
+    // The robots.txt declares no Content Signals: the advisory finding comes along.
     assert_eq!(
         found.iter().map(|f| f.kind).collect::<Vec<_>>(),
-        [FindingKind::BotsBlocked]
+        [FindingKind::BotsBlocked, FindingKind::ContentSignalsMissing]
     );
 }
 
@@ -502,11 +503,18 @@ fn the_audit_section_carries_one_remedy_per_finding_for_a_local_run() {
     assert!(!r["sources"].as_array().unwrap().is_empty());
     // A local run has no earlier report to compare with.
     assert!(r.get("before").is_none());
+    assert_eq!(remedies[1]["kind"], "content_signals_missing");
+    assert!(
+        remedies[1]["fix"]
+            .as_str()
+            .unwrap()
+            .contains("Content-Signal: search=yes")
+    );
     // A clean site has none.
     let clean = assess_with_defaults(&with_robots(
         site(3, |p| p),
         200,
-        "User-agent: *\nAllow: /\n",
+        "User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n",
     ));
     assert_eq!(clean["remedies"], serde_json::json!([]));
 }

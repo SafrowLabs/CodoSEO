@@ -247,8 +247,8 @@ pub fn geo_check_label(c: GeoCheck) -> &'static str {
         GeoCheck::DescriptionMissing => "Every page has a description",
         GeoCheck::Sitemap => "Sitemap is there and answers",
         GeoCheck::LlmsTxt => "llms.txt",
-        GeoCheck::ContentSignals => "Content signals",
-        GeoCheck::MarkdownNegotiation => "Markdown for agents",
+        GeoCheck::ContentSignals => "robots.txt declares Content Signals",
+        GeoCheck::MarkdownNegotiation => "Markdown for AI agents",
     }
 }
 
@@ -262,6 +262,8 @@ pub fn geo_check_of(kind: FindingKind) -> GeoCheck {
         FindingKind::FetchBlocked => GeoCheck::FetchBlocked,
         FindingKind::ContentMissing => GeoCheck::ContentMissing,
         FindingKind::LlmsTxtUnavailable => GeoCheck::LlmsTxt,
+        FindingKind::ContentSignalsMissing => GeoCheck::ContentSignals,
+        FindingKind::MarkdownUnavailable => GeoCheck::MarkdownNegotiation,
     }
 }
 
@@ -369,7 +371,15 @@ pub fn fix_list(input: FixInput<'_>) -> FixList {
                 .map(|u| (path_of(&u), u))
                 .collect();
             let total = (ev.urls.total as usize).max(urls.len());
-            let fresh = has_previous && i.opened_crawl_id == Some(input.crawl_id);
+            // An advisory check the previous crawl could not judge (it predates the check) is
+            // newly checked, not newly broken.
+            let judged_before = !i.kind.is_advisory()
+                || input
+                    .previous
+                    .and_then(|p| p.geo.as_ref())
+                    .and_then(|g| g.checks.iter().find(|c| c.check == check))
+                    .is_some_and(|c| c.status != Status::Skipped);
+            let fresh = has_previous && judged_before && i.opened_crawl_id == Some(input.crawl_id);
             rows.push(FixRow {
                 id: format!("fx-ai-{}", i.id),
                 severity: i.severity,

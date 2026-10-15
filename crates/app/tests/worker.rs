@@ -557,6 +557,18 @@ async fn run_crawl(db: &TestDb, site_id: uuid::Uuid, trigger: CrawlTrigger) -> u
     run_crawl_with(db, site_id, trigger, &fast_probes()).await
 }
 
+/// The open incidents, without the advisory ones (Content Signals, Markdown) the test sites raise.
+async fn open_incidents(
+    pool: &sqlx::PgPool,
+    site_id: uuid::Uuid,
+) -> Result<Vec<codoseo_store::geo::Incident>, sqlx::Error> {
+    Ok(codoseo_store::geo::open_incidents(pool, site_id)
+        .await?
+        .into_iter()
+        .filter(|i| !i.kind.is_advisory())
+        .collect())
+}
+
 async fn ai_changes(db: &TestDb, crawl: uuid::Uuid) -> Vec<(String, String)> {
     sqlx::query_as(
         "SELECT kind::text, severity::text FROM changes \
@@ -589,9 +601,13 @@ async fn ai_access_incidents_open_and_resolve_across_real_crawls() {
     knobs.lock().unwrap().robots_body =
         "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n".to_owned();
     let first = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
-    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
+    // Leaving out the advisory ones (Content Signals, Markdown) the test site raises.
+    let open: Vec<_> = open_incidents(&db.pool, site_id)
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|i| !i.kind.is_advisory())
+        .collect();
     assert_eq!(open.len(), 1);
     assert!(open[0].quiet);
     assert!(ai_changes(&db, first).await.is_empty());
@@ -601,10 +617,11 @@ async fn ai_access_incidents_open_and_resolve_across_real_crawls() {
     knobs.lock().unwrap().robots_body = "User-agent: *\nAllow: /\n".to_owned();
     let second = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
     assert!(
-        codoseo_store::geo::open_incidents(&db.pool, site_id)
+        open_incidents(&db.pool, site_id)
             .await
             .unwrap()
-            .is_empty()
+            .iter()
+            .all(|i| i.kind.is_advisory())
     );
     assert!(
         ai_changes(&db, second).await.is_empty(),
@@ -615,9 +632,7 @@ async fn ai_access_incidents_open_and_resolve_across_real_crawls() {
     knobs.lock().unwrap().robots_body =
         "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n".to_owned();
     let third = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
-    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
-        .await
-        .unwrap();
+    let open = open_incidents(&db.pool, site_id).await.unwrap();
     assert_eq!(open.len(), 1);
     assert!(!open[0].quiet);
     assert_eq!(
@@ -629,12 +644,7 @@ async fn ai_access_incidents_open_and_resolve_across_real_crawls() {
     // The rule is removed again: resolved with an `ai_issue_resolved` change.
     knobs.lock().unwrap().robots_body = "User-agent: *\nAllow: /\n".to_owned();
     let fourth = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
-    assert!(
-        codoseo_store::geo::open_incidents(&db.pool, site_id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site_id).await.unwrap().is_empty());
     assert_eq!(
         ai_changes(&db, fourth).await,
         vec![("ai_issue_resolved".to_owned(), "notice".to_owned())]
@@ -644,9 +654,7 @@ async fn ai_access_incidents_open_and_resolve_across_real_crawls() {
     // (d) A site-wide nosnippet is one incident.
     knobs.lock().unwrap().meta_robots = Some("nosnippet".to_owned());
     let fifth = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
-    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
-        .await
-        .unwrap();
+    let open = open_incidents(&db.pool, site_id).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(open[0].subject, "nosnippet");
     assert_eq!(
@@ -706,12 +714,7 @@ async fn a_failing_robots_txt_opens_an_incident_through_the_failed_crawl_path() 
             .is_some_and(|r| r.contains("robots.txt returned HTTP 503")),
         "{reason:?}"
     );
-    assert!(
-        codoseo_store::geo::open_incidents(&db.pool, site_id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site_id).await.unwrap().is_empty());
     assert!(ai_changes(&db, crawl).await.is_empty());
     assert_eq!(alert_planning_jobs(&db, crawl).await, 0);
     assert_eq!(ai_report_count(&db, site_id).await, 1);
@@ -725,9 +728,7 @@ async fn a_failing_robots_txt_opens_an_incident_through_the_failed_crawl_path() 
         .await
         .unwrap();
     assert_eq!(status, "failed");
-    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
-        .await
-        .unwrap();
+    let open = open_incidents(&db.pool, site_id).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(
         open[0].kind,
@@ -801,11 +802,14 @@ async fn a_robots_txt_blip_the_retry_does_not_see_says_nothing() {
         .unwrap();
     assert_eq!(status, "done");
     assert!(ai_changes(&db, crawl).await.is_empty());
-    let incidents: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_incidents WHERE site_id = $1")
-        .bind(site_id)
-        .fetch_one(&db.pool)
-        .await
-        .unwrap();
+    let incidents: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ai_incidents WHERE site_id = $1 \
+         AND kind NOT IN ('content_signals_missing', 'markdown_unavailable')",
+    )
+    .bind(site_id)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
     assert_eq!(incidents, 0, "never opened, so never resolved either");
 }
 
@@ -1046,9 +1050,7 @@ async fn probes_open_a_quiet_incident_first_and_a_new_blocked_bot_writes_one_cha
         "the free plan probes the home page only"
     );
     assert!(ai_requests(&seen) > 0);
-    let open = codoseo_store::geo::open_incidents(&db.pool, site_id)
-        .await
-        .unwrap();
+    let open = open_incidents(&db.pool, site_id).await.unwrap();
     let fetch: Vec<_> = open
         .iter()
         .filter(|i| i.kind == FindingKind::FetchBlocked)

@@ -22,6 +22,7 @@ use crate::declared::{
 };
 use crate::eligibility::{Cause, DirectiveSlug, Effect, EngineId, engines, record_effect};
 use crate::llms::{self, LlmsTxtReport};
+use crate::markdown::{self, MarkdownReport};
 use crate::probe::ProbeReport;
 use crate::registry::{Honours, Purpose, registry};
 use crate::robots::{
@@ -311,6 +312,10 @@ pub struct AccessReport {
     /// address is refused, the time ran out); `None` otherwise and in older reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llms_txt_skipped: Option<LlmsSkip>,
+    /// The home page asked for as Markdown ([`crate::markdown`]); `None` when it was not asked
+    /// (and in older reports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<MarkdownReport>,
 }
 
 impl EngineAccess {
@@ -525,6 +530,7 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
             .as_ref()
             .map(|f| llms::assess(f, false)),
         llms_txt_skipped: out.signals.llms_txt_skipped,
+        markdown: out.signals.markdown.as_ref().map(markdown::assess),
     }
 }
 

@@ -162,6 +162,21 @@ The file is fetched once per crawl, as CodoSEObot, after robots.txt (a disallowe
 
 **The incident.** The one finding is `llms_txt_unavailable`, a Warning (grade A), and only after the site had adopted llms.txt, that is, an earlier report served the file and it now answers 5xx or 429 or not at all. A 404 or a soft 404 is a removal, not a failure, and a site that never had one gets nothing. The change kind `ai_llms_txt_unavailable` goes in the Monday digest, not in an instant alert. When the file serves again (or answers 404 because you removed it), the recovery is announced as an `ai_llms_txt_unavailable` change too, with "Resolved" as its new value, not as `ai_issue_resolved`: it follows the same alert rule as the failure, so you are never told at once about something you were only told in a digest.
 
+## Content Signals and Markdown
+
+Two advisory checks, both **Notices that never alert**: their incidents always open quietly (no change rows, no email, Slack, webhook or digest), they are listed on the AI access screen and in the site audit's fix list but not counted in the sidebar badge, and each counts as one Recommended check in the [GEO score](scores.md). `--fail-on geo` leaves them out; `geo:notice` or their own name gates on them ([ci.md](ci.md)).
+
+**Content Signals** (`content_signals_missing`). The [Content Signals Policy](https://contentsignals.org/) adds a `Content-Signal` line to robots.txt that says how your content may be used: `search` (search results), `ai-input` (as input to AI answers) and `ai-train` (to train AI models), each `yes` or `no`, usually under `User-agent: *`:
+
+```text
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+```
+
+CodoSEO reads the robots.txt the crawl already fetched, so the check costs no request. The field name is read in any case, comments are dropped, and a line counts wherever it sits (in a group, or before any). It passes when at least one line sets one of the three signals to `yes` or `no`. It fails when robots.txt answers (or there is none, a 4xx) and no line does; values it cannot read (`ai-train=maybe`, an unknown signal, a line with no `key=value`) are listed in the evidence. It is skipped when robots.txt cannot be read, which is already the `robots_unavailable` finding. The **Content Signals and Markdown** card on the AI access screen shows the signals that apply to everyone, the lines it could not read and, when `ai-train` says the opposite of your intent for AI training bots (`ai-train=no` while you want them in, or `yes` while you block them), a note that one of the two is out of date. That note never fails anything. Declared, not enforced: nothing makes a bot honour the signals.
+
+**Markdown for AI agents** (`markdown_unavailable`). AI agents read Markdown with far fewer tokens than HTML. CodoSEO asks for the page the start address settles on (the home page) once per crawl with `Accept: text/markdown, text/html;q=0.9`, as CodoSEObot, through the crawl's politeness limiter and timeouts, and only when robots.txt allows it and site signals are on. It passes when the answer is a 2xx with `Content-Type: text/markdown` (any parameters) and a body that is not empty, as [Cloudflare's Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/) serves. Otherwise it looks for a Markdown version the page advertises, a `Link: <...>; rel="alternate"; type="text/markdown"` header or a `<link rel="alternate" type="text/markdown" href="...">` in the HTML, and asks for that one (a second request, only on the same origin and when robots.txt allows it): Markdown there passes too. Anything else fails, and the evidence says what came back (`HTTP 200 text/html`, `HTTP 406 text/html`, `HTTP 200 text/markdown (empty)`). It is skipped when the home page itself did not load, or gave no answer to the Markdown request; a site that is rate limiting the crawl is not waited on for it. At most two requests per crawl. The fix: switch on Markdown for Agents on Cloudflare, or add content negotiation on your server or CDN, or publish `.md` versions of your pages and link them from the page head and from your llms.txt.
+
 ## What is not checked yet
 
 - Whether bots really visit: **log evidence** (which bots crawled you, verified by IP range) arrives later, in C1. Until then the fetch check shows what CodoSEO's own requests get, not what the real bots get.
@@ -173,7 +188,7 @@ Every finding carries a grade and links to its sources. Grades, sources and what
 
 | Grade | Means | Ledger entries |
 |---|---|---|
-| **A** | It rests on something the operator documents: robots.txt rules, page-level controls, the operator's own description of its bot, the specification of a declared preference. Declared preferences are graded on how they are read, and stay *declared, not enforced*. | `robots_unavailable`, `bots_blocked`, `bots_not_blocked`, `answers_restricted`, `llms_txt_unavailable`, `robots_verdict`, `eligibility`, `declared_preferences`, `llms_format` |
+| **A** | It rests on something the operator documents: robots.txt rules, page-level controls, the operator's own description of its bot, the specification of a declared preference. Declared preferences are graded on how they are read, and stay *declared, not enforced*. | `robots_unavailable`, `bots_blocked`, `bots_not_blocked`, `answers_restricted`, `llms_txt_unavailable`, `content_signals_missing`, `markdown_unavailable`, `robots_verdict`, `eligibility`, `declared_preferences`, `llms_format` |
 | **A-** | Read from your own pages and checked against a published measurement of how the bots fetch, rather than the operator's own documentation: the content in raw HTML verdicts (Vercel and MERJ, 2024: GPTBot, ClaudeBot and PerplexityBot don't execute JavaScript). | `content_missing`, `content_verdict` |
 | **B** | Observed by CodoSEO's synthetic fetch check: a request with the bot's documented user agent, compared with CodoSEObot's baseline for the same page at the same moment and, the first time, confirmed by a second fetch. | `fetch_blocked`, `synthetic_probe` |
 | **C** | Inferred heuristic: a threshold CodoSEO sets where the source names none, such as reading llms.txt's "small enough to fit in context" as 100 KiB. | `llms_size_and_type` |
@@ -181,7 +196,7 @@ Every finding carries a grade and links to its sources. Grades, sources and what
 
 Which grade shows where:
 
-- **A** is on robots.txt and page-control incidents and on the matching rows of the AI access screen (the per-bot verdicts, the AI answers table, the declared preferences), on the llms.txt format checks and on the `llms_txt_unavailable` incident.
+- **A** is on robots.txt and page-control incidents and on the matching rows of the AI access screen (the per-bot verdicts, the AI answers table, the declared preferences), on the llms.txt format checks, on the `llms_txt_unavailable` incident and on the advisory `content_signals_missing` and `markdown_unavailable` incidents.
 - **A-** is on the Content in raw HTML card and the `content_missing` incident.
 - **B** is on the Fetch check card and the `fetch_blocked` incident, and every `fetch_blocked` fix says so.
 - **C** is on the llms.txt size and MIME type checks, where the threshold is CodoSEO's own.
@@ -222,6 +237,8 @@ The web app turns findings into incidents that open when a crawl first sees a pr
 | `ai_issue_resolved` | An AI access incident is gone (except `llms_txt_unavailable`, whose recovery is an `ai_llms_txt_unavailable` change) |
 | `ai_preferences_changed` | Your declared Content-Signal, Content-Usage or TDM preferences changed |
 
+The advisory `content_signals_missing` and `markdown_unavailable` incidents write none of these: they open quietly every time, and resolve quietly. See [Content Signals and Markdown](#content-signals-and-markdown).
+
 They are in the alert settings grid like any other kind, so email, Slack, Discord and webhook alerts work for them. By default `ai_bot_blocked`, `ai_answers_restricted`, `ai_fetch_blocked`, `ai_content_missing` and `ai_issue_resolved` alert at once; the other three (`ai_block_not_applied`, `ai_preferences_changed`, `ai_llms_txt_unavailable`) wait for the Monday digest. An alert whose changes are all AI access ones links to the AI access screen. A crawl that failed on robots.txt is not a finished crawl, so its incident shows on the AI access screen and in alerts, not on the changes page.
 
 **The first check is quiet.** The incidents opened by the first report that could judge them are your baseline: they are listed but write no changes and send no alerts, so turning the feature on (or a site whose first crawls failed) does not fire a storm. Changing your intent re-evaluates quietly the same way. An open incident that gets worse, or names another bot or engine, writes a change again.
@@ -259,6 +276,8 @@ The same texts are available over the API ([`GET .../fix`](api.md#ai-access-inci
 | `answers_restricted`, `content_missing` | the named pages (at most 20) |
 | `fetch_blocked` | the incident's bots on its probed pages, within your plan's probe pages, time budget and request cap, and only while fetch checks are on for the site and the install |
 | `llms_txt_unavailable` | `/llms.txt`, without link checks |
+| `content_signals_missing` | robots.txt only |
+| `markdown_unavailable` | the home page asked for as Markdown, and the Markdown alternate it advertises |
 
 A recheck takes at most 120 seconds: its fetches stop 10 seconds before that to leave time to record the result, and past 120 seconds it fails (it never stays "running"). A page that was not fetched keeps what the crawl saw, so a recheck of an incident about more than 20 pages can find it still there but never clears pages it did not fetch.
 
@@ -271,7 +290,7 @@ A recheck takes at most 120 seconds: its fetches stop 10 seconds before that to 
 | Google | 24 hours | [Google's robots.txt documentation](https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt): it caches robots.txt for up to 24 hours; also used for a failing robots.txt |
 | any other operator | 24 hours, an estimate | nobody publishes it: evidence grade X |
 
-For a robots.txt finding with several bots, the wait is the longest among their operators (on a tie, the weakest grade). Page, fetch and llms.txt findings are not governed by a robots.txt cache, so the follow-up waits CodoSEO's own debounce of 1 hour (grade X).
+For a robots.txt finding with several bots, the wait is the longest among their operators (on a tie, the weakest grade). Page, fetch, llms.txt, Content Signals and Markdown findings are not governed by a robots.txt cache, so the follow-up waits CodoSEO's own debounce of 1 hour (grade X).
 
 **What a recheck cannot tell.** One that cannot judge (robots.txt failing, a page that did not load, a probe with no verdict) is **inconclusive** and changes nothing. An inconclusive follow-up tries again 6 hours later, at most three in a row since the manual recheck, and then leaves the incident recovered for the next crawl to judge ("Waiting for the next crawl"). A recheck asked for while a crawl of the site is queued or running is refused ("A crawl is running; it will judge this."), and one that a crawl overtakes (queued or running when the recheck is due or when its result comes in) is **superseded**: the crawl judges the incident. A superseded follow-up of a recovered incident is queued again 6 hours later, counted with the inconclusive ones toward the three in a row. One whose robots.txt gets no answer at all (the site is unreachable or too slow) fails, except for a failing robots.txt incident, where no answer means it is still failing. One that cannot run on our side fails too. Either can be asked for again. A recheck never opens an incident, never touches another one and only judges the kind its incident is.
 
@@ -289,14 +308,14 @@ Three ways to say "I know":
   - a page directive such as `nosnippet` joins the directives you use on purpose. The engines' crawlers keep their stance, so robots.txt is still watched for Googlebot, Bingbot and the rest.
 
   It then re-evaluates quietly, the incident resolves as a choice instead of a fix, and the notice says how many issues resolved or opened.
-- **Accept** is for the findings that have no intent to change: `fetch_blocked`, `content_missing` and `llms_txt_unavailable`. The incident stays listed under **Accepted (N)**, muted, and stops counting in the badges and panels and writes no changes or alerts. A crawl that no longer finds it still resolves it. If it gets worse (a higher severity) it is no longer accepted and alerts as usual: you accepted what it was, not that. Spreading to more bots or pages at the same severity stays muted. **Unaccept** brings it back. The bot and directive kinds (`bots_blocked`, `bots_not_blocked`, `answers_restricted`) go through Mark intended instead, and a failing robots.txt (`robots_unavailable`) can only be snoozed: bots that follow Google's rules stay out of the whole site until it answers.
+- **Accept** is for the findings that have no intent to change: `fetch_blocked`, `content_missing`, `llms_txt_unavailable`, `content_signals_missing` and `markdown_unavailable`. The incident stays listed under **Accepted (N)**, muted, and stops counting in the badges and panels and writes no changes or alerts. A crawl that no longer finds it still resolves it. If it gets worse (a higher severity) it is no longer accepted and alerts as usual: you accepted what it was, not that. Spreading to more bots or pages at the same severity stays muted. **Unaccept** brings it back. The bot and directive kinds (`bots_blocked`, `bots_not_blocked`, `answers_restricted`) go through Mark intended instead, and a failing robots.txt (`robots_unavailable`) can only be snoozed: bots that follow Google's rules stay out of the whole site until it answers.
 - **Snooze** works for every kind, for 1, 7 or 30 days (never more than 90). A snoozed incident shows a "Snoozed until ..." chip and does not count in the badges, and nothing alerts at once, but its changes are still written, already marked as alerted, so the changes page and the Monday digest stay truthful. **Unsnooze** ends it early; otherwise it ends on its own. If it got worse during the snooze, the first crawl after the snooze ends that still finds it alerts about it, once.
 
 ## The AI access panel and exports
 
 The site audit opens on an **AI & search · GEO audit** section, above the health score and labelled as access and checks, not traffic, and not part of the score. It shows:
 
-- the **AI & GEO checks** passed out of 7 (one per kind of finding, judged on the latest report; kinds that report couldn't judge are not counted as passed) next to the 44 SEO checks in the page head; the failing-checks KPI counts both, out of 51;
+- the **AI & GEO checks** passed out of 9 (one per kind of finding, judged on the latest report; kinds that report couldn't judge are not counted as passed) next to the 44 SEO checks in the page head; the failing-checks KPI counts both, out of 53;
 - tiles for search bots allowed, training bots blocked against your intent, the synthetic fetch checks, content in raw HTML and llms.txt (informational);
 - one card per operator with its logo, each of its registry bots, its purpose, what robots.txt says (with **Blocked · intended** when your intent asks for it) and what the synthetic fetch saw (**Not probed** where none ran). On a phone each operator is one summary line;
 - **Can AI answers quote you?**: the important pages each answer engine may quote;

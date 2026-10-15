@@ -8,7 +8,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::header::{FROM, HeaderName, HeaderValue, USER_AGENT};
+use axum::http::header::{ACCEPT, FROM, HeaderName, HeaderValue, USER_AGENT};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::Response;
 use codoseo_core::Url;
@@ -34,6 +34,10 @@ enum Kind {
     Drop,
     Sequence(Vec<Page>),
     ByUserAgent {
+        rules: Vec<(String, Page)>,
+        default: Box<Page>,
+    },
+    ByAccept {
         rules: Vec<(String, Page)>,
         default: Box<Page>,
     },
@@ -115,6 +119,24 @@ impl Page {
         }
     }
 
+    /// Answers with the page of the first rule whose substring the request's `Accept` header
+    /// contains (case-sensitive), or with `default`: content negotiation.
+    pub fn by_accept(rules: Vec<(&str, Page)>, default: Page) -> Page {
+        Page {
+            status: 200,
+            body: String::new(),
+            headers: Vec::new(),
+            delay: None,
+            kind: Kind::ByAccept {
+                rules: rules
+                    .into_iter()
+                    .map(|(accept, page)| (accept.to_owned(), page))
+                    .collect(),
+                default: Box::new(default),
+            },
+        }
+    }
+
     /// Closes the connection without sending a response (after `delay`, if set), like
     /// a firewall resetting it. The request is still counted and logged.
     pub fn drop_connection() -> Page {
@@ -136,6 +158,7 @@ impl Page {
         &self,
         key: String,
         user_agent: Option<&str>,
+        accept: Option<&str>,
         sequences: &mut HashMap<String, usize>,
     ) -> Page {
         match &self.kind {
@@ -144,7 +167,7 @@ impl Page {
                 let n = sequences.entry(key.clone()).or_default();
                 let i = (*n).min(pages.len() - 1);
                 *n += 1;
-                pages[i].pick(format!("{key}\0{i}"), user_agent, sequences)
+                pages[i].pick(format!("{key}\0{i}"), user_agent, accept, sequences)
             }
             Kind::ByUserAgent { rules, default } => {
                 let matched = user_agent.and_then(|ua| {
@@ -153,10 +176,27 @@ impl Page {
                         .position(|(needle, _)| ua.contains(needle.as_str()))
                 });
                 match matched {
-                    Some(i) => rules[i]
-                        .1
-                        .pick(format!("{key}\0ua{i}"), user_agent, sequences),
-                    None => default.pick(format!("{key}\0ua-"), user_agent, sequences),
+                    Some(i) => {
+                        rules[i]
+                            .1
+                            .pick(format!("{key}\0ua{i}"), user_agent, accept, sequences)
+                    }
+                    None => default.pick(format!("{key}\0ua-"), user_agent, accept, sequences),
+                }
+            }
+            Kind::ByAccept { rules, default } => {
+                let matched = accept.and_then(|a| {
+                    rules
+                        .iter()
+                        .position(|(needle, _)| a.contains(needle.as_str()))
+                });
+                match matched {
+                    Some(i) => {
+                        rules[i]
+                            .1
+                            .pick(format!("{key}\0ac{i}"), user_agent, accept, sequences)
+                    }
+                    None => default.pick(format!("{key}\0ac-"), user_agent, accept, sequences),
                 }
             }
         }
@@ -359,6 +399,7 @@ impl SiteState {
                 .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
         };
         let user_agent = header(USER_AGENT);
+        let accept = header(ACCEPT);
         self.hits.fetch_add(1, Ordering::SeqCst);
         let mut counters = self.counters();
         *counters.by_path.entry(key.to_owned()).or_default() += 1;
@@ -372,7 +413,12 @@ impl SiteState {
             .into_iter()
             .find(|k| self.pages.contains_key(*k));
         if let Some(k) = registered {
-            return self.pages[k].pick(k.to_owned(), user_agent.as_deref(), &mut counters.sequence);
+            return self.pages[k].pick(
+                k.to_owned(),
+                user_agent.as_deref(),
+                accept.as_deref(),
+                &mut counters.sequence,
+            );
         }
 
         let not_found = || Page::status(404, "<title>not found</title>");
@@ -387,6 +433,7 @@ impl SiteState {
                 Some(page) => page.pick(
                     key.to_owned(),
                     user_agent.as_deref(),
+                    accept.as_deref(),
                     &mut counters.sequence,
                 ),
                 None => not_found(),

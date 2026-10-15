@@ -858,7 +858,12 @@ async fn mark_intended_on_a_partly_blocked_bot_sets_no_preference() {
         .await;
     app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI_AND_DOCS), Vec::new())
         .await;
-    let open = geo::open_incidents(app.pool(), site.id).await.unwrap();
+    let open: Vec<_> = geo::open_incidents(app.pool(), site.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|i| !i.kind.is_advisory())
+        .collect();
     assert_eq!(open.len(), 1, "one issue for the search bots");
     let body = app
         .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
@@ -888,7 +893,8 @@ async fn mark_intended_on_a_partly_blocked_bot_sets_no_preference() {
         geo::open_incidents(app.pool(), site.id)
             .await
             .unwrap()
-            .is_empty()
+            .iter()
+            .all(|i| i.kind.is_advisory())
     );
 }
 
@@ -2765,4 +2771,132 @@ async fn operator_logos_sit_beside_their_bots() {
         .body;
     assert!(intent.contains(&tile("sm", openai)), "{intent}");
     assert!(intent.contains(r#"<b>CC</b>"#), "{intent}");
+}
+
+// ---- Content Signals and Markdown: advisory checks ---------------------------------------------
+
+/// robots.txt with a Content-Signal line whose only value can't be read.
+const BAD_SIGNALS: &str = "User-agent: *\nContent-Signal: ai-train=maybe\nAllow: /\n";
+
+fn markdown_probe(
+    status: u16,
+    content_type: &str,
+    body_bytes: u64,
+) -> codoseo_core::output::MarkdownProbe {
+    codoseo_core::output::MarkdownProbe {
+        negotiated: codoseo_core::output::MarkdownFetch {
+            url: format!("https://{DOMAIN}/"),
+            status,
+            error: None,
+            content_type: Some(content_type.to_owned()),
+            body_bytes,
+        },
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn content_signals_and_markdown_are_advisory_issues_with_fixes() {
+    use codoseo_geo::findings::FindingKind;
+
+    let (app, site, cookie) = setup().await;
+    // Both pass on the first crawl.
+    app.finished_crawl_with_markdown(
+        &site,
+        pages(),
+        (200, OPEN),
+        markdown_probe(200, "text/markdown", 120),
+    )
+    .await;
+    assert!(
+        geo::open_incidents(app.pool(), site.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // Then robots.txt loses its valid signal and the home page answers HTML only.
+    app.finished_crawl_with_markdown(
+        &site,
+        pages(),
+        (200, BAD_SIGNALS),
+        markdown_probe(200, "text/html; charset=utf-8", 5000),
+    )
+    .await;
+    let open = geo::open_incidents(app.pool(), site.id).await.unwrap();
+    let of = |k: FindingKind| open.iter().find(|i| i.kind == k).expect("open").clone();
+    let (signals, markdown) = (
+        of(FindingKind::ContentSignalsMissing),
+        of(FindingKind::MarkdownUnavailable),
+    );
+    // Advisory: Notices, opened quietly although an earlier crawl judged them, never alerted.
+    for i in [&signals, &markdown] {
+        assert_eq!(i.severity, Severity::Notice);
+        assert!(i.quiet, "{:?}", i.kind);
+    }
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM changes WHERE kind::text LIKE 'ai_%' \
+             AND kind::text <> 'ai_preferences_changed'"
+        )
+        .await,
+        0
+    );
+
+    // The AI access screen: the card, the unreadable value and what the Markdown request got.
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(body.contains("Content Signals and Markdown"), "{body}");
+    assert!(
+        body.contains("ai-train=maybe (the value must be yes or no)"),
+        "{body}"
+    );
+    assert!(
+        body.contains("HTTP 200 text&#x2f;html") || body.contains("HTTP 200 text/html"),
+        "{body}"
+    );
+    assert!(body.contains("Advisory"), "{body}");
+
+    // The fix list: both Notices, new this crawl, with their fix and prompt.
+    let audit = audit_body(&app, &site, &cookie).await;
+    for i in [&signals, &markdown] {
+        let row = fix_row(&audit, i.id).expect("in the fix list");
+        assert!(row.contains(r#"data-sev="notice""#), "{row}");
+        assert!(row.contains("New this crawl"), "{row}");
+        assert!(row.contains(" GEO</span>"), "{row}");
+    }
+    assert!(
+        audit.contains("Content-Signal: search=yes, ai-input=yes, ai-train=no"),
+        "{audit}"
+    );
+    assert!(audit.contains("Markdown for Agents"), "the prompt: {audit}");
+
+    // Fixed: both resolve, quietly, and the footer says so.
+    app.finished_crawl_with_markdown(
+        &site,
+        pages(),
+        (200, OPEN),
+        markdown_probe(200, "text/markdown", 120),
+    )
+    .await;
+    assert!(
+        geo::open_incidents(app.pool(), site.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let audit = audit_body(&app, &site, &cookie).await;
+    assert!(audit.contains("fixed since last crawl"), "{audit}");
+    assert!(
+        audit.contains("robots.txt declares Content Signals"),
+        "{audit}"
+    );
+    assert!(audit.contains("Markdown for AI agents"), "{audit}");
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM changes WHERE kind::text = 'ai_issue_resolved'"
+        )
+        .await,
+        0
+    );
 }

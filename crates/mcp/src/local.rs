@@ -608,7 +608,8 @@ mod tests {
     /// Polls `get_audit` until the fixture crawl (a handful of localhost pages) finishes.
     async fn audit_fast(backend: &LocalBackend, url: Url) -> AuditId {
         let handle = backend.audit(url, 50).await.unwrap();
-        for _ in 0..200 {
+        // Up to 5 seconds: a crawl is polite even to localhost.
+        for _ in 0..500 {
             let state = backend.get_audit(&handle.id).await.unwrap();
             match state.status {
                 AuditStatus::Done => return handle.id,
@@ -673,10 +674,19 @@ mod tests {
             .iter()
             .filter_map(|f| f["kind"].as_str())
             .collect();
-        assert_eq!(kinds, ["bots_blocked"], "{section}");
+        // With the advisory ones the fixture raises: no Content-Signal, no Markdown version.
+        assert_eq!(
+            kinds,
+            [
+                "bots_blocked",
+                "content_signals_missing",
+                "markdown_unavailable"
+            ],
+            "{section}"
+        );
         // The cached audit has the fix for each finding, as `codoseo crawl` writes it.
         let remedies = section["remedies"].as_array().expect("remedies");
-        assert_eq!(remedies.len(), 1);
+        assert_eq!(remedies.len(), 3);
         assert_eq!(remedies[0]["kind"], "bots_blocked");
         assert!(
             remedies[0]["fix"]
@@ -716,7 +726,20 @@ mod tests {
                     .health_score,
             );
             let section = backend.cache.load(&id).unwrap().ai_access.unwrap();
-            finding_counts.push(section["findings"].as_array().unwrap().len());
+            // Leaving out the advisory findings both sites raise (Content Signals, Markdown).
+            finding_counts.push(
+                section["findings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|f| {
+                        !matches!(
+                            f["kind"].as_str(),
+                            Some("content_signals_missing" | "markdown_unavailable")
+                        )
+                    })
+                    .count(),
+            );
         }
         assert_eq!(
             finding_counts,

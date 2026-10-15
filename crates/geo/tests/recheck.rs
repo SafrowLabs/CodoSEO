@@ -105,6 +105,7 @@ fn a_robots_finding_rechecks_robots_txt_and_nothing_else() {
             pages: Vec::new(),
             probe: None,
             llms: false,
+            markdown: false,
             kinds: vec![FindingKind::BotsBlocked],
         }
     );

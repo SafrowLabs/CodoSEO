@@ -3,21 +3,22 @@
 //!
 //! A recheck never crawls. It re-reads only what the incident is about (robots.txt for the bot
 //! findings, the named pages for the page findings, the named bots on the named pages for a
-//! fetch block, `/llms.txt`) and lays that over the newest stored report, so the findings drawn
-//! from the result are the crawl's everywhere else. It speaks only for the kinds its
+//! fetch block, `/llms.txt`, the home page as Markdown) and lays that over the newest stored
+//! report, so the findings drawn from the result are the crawl's everywhere else. It speaks only for the kinds its
 //! observations were conclusive for: a probe that got no verdict, a page that did not load or a
 //! robots.txt that could not be read judge nothing, and the incident stays as it is.
 
 use std::collections::BTreeSet;
 
 use codoseo_core::crawl::RobotsFile;
-use codoseo_core::output::LlmsTxtFetch;
+use codoseo_core::output::{LlmsTxtFetch, MarkdownProbe};
 use codoseo_core::page::PageRecord;
 
 use crate::content::{ContentReport, raw_content};
 use crate::eligibility::{Cause, Effect, engines, record_effect};
 use crate::findings::{Evidence, FindingKind, evaluated_kinds};
 use crate::llms;
+use crate::markdown::{self, MarkdownState};
 use crate::probe::ProbeReport;
 use crate::registry::registry;
 use crate::report::{
@@ -49,6 +50,8 @@ pub struct RecheckPlan {
     pub probe: Option<ProbeScope>,
     /// Fetch `/llms.txt`.
     pub llms: bool,
+    /// Ask for the home page as Markdown.
+    pub markdown: bool,
     /// The kinds the recheck may judge: the incident's own.
     pub kinds: Vec<FindingKind>,
 }
@@ -68,6 +71,7 @@ pub fn plan(
         pages: Vec::new(),
         probe: None,
         llms: false,
+        markdown: false,
         kinds: vec![kind],
     };
     let position = |u: &str| {
@@ -78,9 +82,13 @@ pub fn plan(
             .unwrap_or(usize::MAX)
     };
     match kind {
-        FindingKind::RobotsUnavailable | FindingKind::BotsBlocked | FindingKind::BotsNotBlocked => {
+        FindingKind::RobotsUnavailable
+        | FindingKind::BotsBlocked
+        | FindingKind::BotsNotBlocked
+        | FindingKind::ContentSignalsMissing => {
             plan.robots = true;
         }
+        FindingKind::MarkdownUnavailable => plan.markdown = true,
         FindingKind::AnswersRestricted => {
             // The pages the stored report shows the directive on, for the incident's engines;
             // the evidence's sample when the report no longer has them.
@@ -146,6 +154,8 @@ pub struct Observations {
     pub probes: Option<ProbeReport>,
     /// `/llms.txt` as fetched (an error inside is an answer: the file is unavailable).
     pub llms: Option<LlmsTxtFetch>,
+    /// The home page asked for as Markdown.
+    pub markdown: Option<MarkdownProbe>,
 }
 
 /// The stored report with what the recheck saw laid over it, and the kinds of `plan` the
@@ -160,6 +170,8 @@ pub struct Observations {
 /// - probes: the re-probed bots' results replace theirs on the re-probed pages, other bots' stay.
 ///   Conclusive when every planned bot got a verdict on every page it was sent to.
 /// - llms.txt: replaced. Conclusive when fetched.
+/// - Markdown: replaced. Conclusive when the home page answered.
+/// - robots.txt also brings its Content-Signal lines, for the Content Signals check.
 pub fn overlay(
     stored: &AccessReport,
     obs: &Observations,
@@ -183,6 +195,10 @@ pub fn overlay(
             status: Some(file.status),
             availability: avail,
         };
+        // The Content-Signal lines come with the file; a failing one keeps what the crawl read.
+        if let Some(robots) = &parsed {
+            now.declared.content_signals = robots.content_signals().to_vec();
+        }
         let paths: Vec<String> = now
             .important
             .iter()
@@ -293,6 +309,16 @@ pub fn overlay(
         llms_seen = true;
     }
 
+    // Markdown
+    let mut markdown_seen = false;
+    if plan.markdown
+        && let Some(probe) = &obs.markdown
+    {
+        let report = markdown::assess(probe);
+        markdown_seen = report.state != MarkdownState::Unreachable;
+        now.markdown = Some(report);
+    }
+
     let evaluated = evaluated_kinds(&now);
     let kinds = plan
         .kinds
@@ -302,7 +328,9 @@ pub fn overlay(
             let seen = match k {
                 FindingKind::RobotsUnavailable
                 | FindingKind::BotsBlocked
-                | FindingKind::BotsNotBlocked => robots_seen,
+                | FindingKind::BotsNotBlocked
+                | FindingKind::ContentSignalsMissing => robots_seen,
+                FindingKind::MarkdownUnavailable => markdown_seen,
                 FindingKind::AnswersRestricted | FindingKind::ContentMissing => pages_ok,
                 FindingKind::FetchBlocked => probes_ok,
                 FindingKind::LlmsTxtUnavailable => llms_seen,

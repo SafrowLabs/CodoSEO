@@ -231,6 +231,11 @@ pub struct AiAccessInfo {
     /// `deadline`. Absent when it was fetched, or the report has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llms_txt_skipped: Option<codoseo_core::output::LlmsSkip>,
+    /// The home page asked for with `Accept: text/markdown`: `state` (negotiated, alternate,
+    /// not_served or unreachable), what came back and the Markdown alternate it advertises.
+    /// Advisory. Absent when the report has none (an older report, or it was not asked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<codoseo_geo::markdown::MarkdownReport>,
 }
 
 /// What the important HTML pages hold in their HTML as served, before any JavaScript runs. AI
@@ -362,8 +367,10 @@ pub struct AiIncidentInfo {
     /// One of `bots_blocked`, `bots_not_blocked`, `robots_unavailable`, `answers_restricted`,
     /// `fetch_blocked` (the synthetic fetch check: a firewall or CDN blocks or challenges bots
     /// the owner wants; evidence grade B), `content_missing` (important pages are empty app
-    /// shells in their HTML as served; evidence grade A-) or `llms_txt_unavailable` (an llms.txt
-    /// the site served before now fails; informational).
+    /// shells in their HTML as served; evidence grade A-), `llms_txt_unavailable` (an llms.txt
+    /// the site served before now fails; informational), `content_signals_missing` (robots.txt
+    /// declares no Content-Signal; advisory, never alerted) or `markdown_unavailable` (the home
+    /// page has no Markdown version for AI agents; advisory, never alerted).
     pub kind: String,
     /// The purpose or directive the incident is about, or for `fetch_blocked` the cause
     /// (`challenge_cloudflare`, `blocked_403`, ...); empty for the robots.txt one.

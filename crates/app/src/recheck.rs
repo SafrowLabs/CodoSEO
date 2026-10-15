@@ -258,6 +258,7 @@ async fn execute(
         site: site.clone(),
         pages,
         llms: plan.llms,
+        markdown: plan.markdown,
         address_policy: settings.policy,
         politeness: settings.politeness.clone(),
         request_timeout: settings.request_timeout,
@@ -319,11 +320,20 @@ async fn execute(
         }
         None => None,
     };
+    let markdown = match &fetched.markdown {
+        Some(Some(p)) => Some(p.clone()),
+        Some(None) => {
+            notes.push("the home page could not be asked for as Markdown".to_owned());
+            None
+        }
+        None => None,
+    };
     let obs = Observations {
         robots: Some(fetched.robots.clone()),
         pages: fetched.pages.clone(),
         probes,
         llms,
+        markdown,
     };
     let (report, kinds) = overlay(&stored, &obs, &plan);
     let observed = observations(&plan, &fetched, &obs, &report, &evidence, &kinds, &notes);
@@ -521,6 +531,14 @@ fn observations(
     }
     if let Some(f) = &obs.llms {
         out.insert("llms".into(), llms_seen(f));
+    }
+    if let Some(m) = &report.markdown
+        && obs.markdown.is_some()
+    {
+        out.insert(
+            "markdown".into(),
+            json!({ "state": m.state, "answered": clip(&m.describe()) }),
+        );
     }
     out.insert("requests".into(), json!(fetched.requests));
     out.insert(

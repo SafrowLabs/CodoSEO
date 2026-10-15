@@ -36,8 +36,10 @@ The GEO score has two tiers.
 | Descriptions | every page has a meta description |
 | Sitemap | there is a sitemap and its URLs answer 200 |
 | llms.txt | the site serves an `/llms.txt` |
+| Content Signals | robots.txt has a `Content-Signal` line that sets `search`, `ai-input` or `ai-train` to yes or no ([details](ai-access.md#content-signals-and-markdown)) |
+| Markdown for AI agents | the home page answers `Accept: text/markdown` with Markdown, or advertises a Markdown version that does |
 
-Two more Recommended checks are coming: a `Content-Signal` line in robots.txt, and pages answering `Accept: text/markdown` with Markdown. Until CodoSEO checks them they are skipped.
+Content Signals is skipped when robots.txt can't be read; Markdown when the home page did not load, or on crawls from before the check (as on crawls without site signals).
 
 **Your choices don't cost points.** The checks are judged against your [intent](ai-access.md#intent). A bot you chose to block, or marked as intended, is not a failure.
 
@@ -48,19 +50,19 @@ Two more Recommended checks are coming: a `Content-Signal` line in robots.txt, a
 | Tier | Checks and weights | Total |
 |---|---|---|
 | Essential | robots.txt 15, search bots 15, answers 15, other bots 5, fetch 5, text 5 | 60 |
-| Recommended | structured data 5, titles 5, descriptions 5, sitemap 5, llms.txt 1 | 21 |
+| Recommended | structured data 5, titles 5, descriptions 5, sitemap 5, llms.txt 1, Content Signals 1, Markdown 1 | 23 |
 
-So with every check applicable, a robots.txt that can't be read costs 70 × 15/60 = 17.5 points, and a missing llms.txt costs 30 × 1/21 ≈ 1.4.
+So with every check applicable, a robots.txt that can't be read costs 70 × 15/60 = 17.5 points, and a missing llms.txt, Content-Signal line or Markdown version costs 30 × 1/23 ≈ 1.3 each. llms.txt, Content Signals and Markdown are nice to have, so they weigh as a Notice; the Content Signals and Markdown findings are Notices that never alert.
 
 A failing check loses `cap × (0.25 + 0.75 × share)` of its weight, at most all of it. The cap is the severity it actually failed with, so a block that only matters a little (a Notice) costs much less than a Critical one. The share is the part of the important pages the problem affects (of all crawled pages for the SEO checks). It is 1 for robots.txt and for blocked fetches, which affect the whole site. The score is 100 minus everything lost, rounded.
 
-**Check counts.** "3 of 11 checks pass" counts the checks that were not skipped.
+**Check counts.** "3 of 13 checks pass" counts the checks that were not skipped.
 
 **What fixing a check gives back.** Each check's line in the breakdown says how many GEO points fixing it alone would give back. That is what it costs now. Overall gains 0.4 times that.
 
 ## Overall
 
-`round(0.6 × SEO + 0.4 × GEO)`. Its check count adds the SEO checks and the applicable GEO checks ("39 of 55"). The four SEO checks the Recommended tier reads count in both.
+`round(0.6 × SEO + 0.4 × GEO)`. Its check count adds the SEO checks and the applicable GEO checks ("39 of 57"). The four SEO checks the Recommended tier reads count in both.
 
 ## When the scores are computed
 

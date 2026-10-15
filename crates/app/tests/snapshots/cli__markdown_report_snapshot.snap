@@ -32,7 +32,10 @@ expression: out
 
 ## AI access
 
-No AI access issues
+- **Notice:** No robots.txt, so no Content Signals
+  - Fix: Publish a robots.txt at http://[host]/robots.txt: the site has none. With no rules yet, it can hold just `User-agent: *` and the Content-Signal line.
+- **Notice:** No Markdown version for AI agents
+  - Fix: Asked for Markdown, http://[host]/ answered HTTP 200 text/html. Make it answer `Accept: text/markdown` with a Markdown version of the page (`Content-Type: text/markdown`).
 
 ## Summary
 

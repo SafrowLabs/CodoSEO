@@ -106,13 +106,16 @@ pub fn reconcile(
 /// Whether the owner may accept an incident of `kind` as it is (muted, still listed). The bot and
 /// directive kinds are made a choice through the owner's intent ("Mark intended"), which changes
 /// what the findings are; accepting is for the kinds that have no intent to change: what the
-/// site's CDN serves bots, app-shell pages and llms.txt. A failing robots.txt is never fine (it
-/// stops every bot that follows Google's rules), so it can only be snoozed.
+/// site's CDN serves bots, app-shell pages, llms.txt, Content Signals and Markdown. A failing
+/// robots.txt is never fine (it stops every bot that follows Google's rules), so it can only be
+/// snoozed.
 pub fn acceptable(kind: FindingKind) -> bool {
     match kind {
         FindingKind::FetchBlocked
         | FindingKind::ContentMissing
-        | FindingKind::LlmsTxtUnavailable => true,
+        | FindingKind::LlmsTxtUnavailable
+        | FindingKind::ContentSignalsMissing
+        | FindingKind::MarkdownUnavailable => true,
         FindingKind::RobotsUnavailable
         | FindingKind::BotsBlocked
         | FindingKind::BotsNotBlocked
@@ -140,6 +143,12 @@ pub struct Before {
     /// `LlmsTxtUnavailable`: what /llms.txt answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llms: Option<LlmsBefore>,
+    /// `MarkdownUnavailable`: what the Markdown request got, in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<String>,
+    /// `ContentSignalsMissing`: the signals robots.txt declared (`search=yes, ai-train=no`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signals: Option<String>,
     /// `ContentMissing`: each named page's verdict and word count.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content: Vec<ContentBefore>,
@@ -358,6 +367,12 @@ pub fn before_of(
                     });
                 }
             }
+        }
+        FindingKind::ContentSignalsMissing => {
+            before.signals = crate::signals::summarize(&prev.declared.content_signals).line_text();
+        }
+        FindingKind::MarkdownUnavailable => {
+            before.markdown = Some(prev.markdown.as_ref()?.describe());
         }
         FindingKind::LlmsTxtUnavailable => {
             let llms = prev.llms_txt.as_ref()?;

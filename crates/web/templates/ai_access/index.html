@@ -178,6 +178,19 @@
     {% endif %}
   </section>
 
+  <section class="card aia-section aia-ready" aria-labelledby="aia-ready">
+    <div class="card-head">
+      <h2 class="card-title" id="aia-ready">Content Signals and Markdown</h2>
+      <span class="chip">Advisory · Notice</span>
+      <span class="card-aside"><a href="{{ v.ready.signals_spec }}" target="_blank" rel="noopener noreferrer">contentsignals.org</a> · <a href="{{ v.ready.markdown_doc }}" target="_blank" rel="noopener noreferrer">Markdown for Agents</a></span>
+    </div>
+    <div class="rows aia-llms-checks">
+      {% for r in v.ready.rows %}
+      <div class="aia-llms-check">{% match r.ok %}{% when Some(true) %}<span class="c-ok"><span aria-hidden="true">✓</span><span class="sr-only">Passes:</span></span>{% when Some(false) %}<span class="c-warn"><span aria-hidden="true">✗</span><span class="sr-only">Does not pass:</span></span>{% when None %}<span class="t-muted"><span aria-hidden="true">–</span><span class="sr-only">Not checked:</span></span>{% endmatch %}<b>{{ r.label }}</b><span class="aia-ev-detail">{% for s in r.detail %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}{% for n in r.notes %}<br>{{ n }}{% endfor %}</span></div>
+      {% endfor %}
+    </div>
+  </section>
+
   <section class="card aia-section aia-botcard" aria-labelledby="aia-bots">
     <div class="card-head aia-bots-head">
       <h2 class="card-title" id="aia-bots">AI bots</h2>
