@@ -28,11 +28,10 @@ async fn the_demo_is_public_read_only_and_labelled_as_sample_data() {
     // The audit screen and its AI & GEO part, from the fixture.
     for part in [
         "Site audit",
-        "AI &amp; search · GEO audit",
-        "Top fixes",
-        "Health score over time",
-        "Can AI answers quote you?",
         "PerplexityBot is blocked by robots.txt",
+        "Fix these, in order",
+        "Score trend",
+        "AI bots",
         "AI access issues and their fixes",
         "User-agent: PerplexityBot",
     ] {
@@ -48,7 +47,10 @@ async fn the_demo_is_public_read_only_and_labelled_as_sample_data() {
     ] {
         assert!(!body.contains(action), "{action:?} on the demo");
     }
-    assert!(body.contains("href=\"#fix-1\""));
+    // No GEO score in the fixture: those cards read "—", and nothing to mark intended.
+    assert!(body.contains("<b>—</b>"));
+    assert!(!body.contains("Mark intended"));
+    assert!(body.contains("id=\"fix-1\""));
     // A marketing page: indexable.
     assert!(!body.contains("noindex"));
     assert_eq!(rows(&app).await, before);

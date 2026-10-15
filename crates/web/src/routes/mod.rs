@@ -7,6 +7,8 @@ pub mod ai_bots;
 pub mod api;
 pub mod audit;
 pub mod audit_ai;
+pub mod audit_fix;
+pub mod audit_trend;
 pub mod billing;
 pub mod bot;
 pub mod changes;

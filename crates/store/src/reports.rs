@@ -143,6 +143,29 @@ pub async fn change_kind_counts(
     })
 }
 
+/// [`change_kind_counts`] for several crawls in one query, keyed by crawl. A crawl with no
+/// changes is missing from the map. The site audit's trend pins read it.
+pub async fn change_kind_counts_by_crawl(
+    pool: &PgPool,
+    crawl_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, ChangeCounts>, sqlx::Error> {
+    let rows: Vec<(Uuid, String, String, i64)> = sqlx::query_as(
+        "SELECT crawl_id, kind::text, severity::text, count(*) FROM changes \
+         WHERE crawl_id = ANY($1) GROUP BY crawl_id, kind, severity \
+         ORDER BY crawl_id, kind, severity",
+    )
+    .bind(crawl_ids)
+    .fetch_all(pool)
+    .await?;
+    let mut out: std::collections::HashMap<Uuid, ChangeCounts> = Default::default();
+    for (crawl, kind, severity, n) in rows {
+        if let (Some(kind), Some(severity)) = (from_slug(&kind), from_slug(&severity)) {
+            out.entry(crawl).or_default().rows.push((kind, severity, n));
+        }
+    }
+    Ok(out)
+}
+
 /// Health scores of the site's last `limit` finished crawls, oldest first.
 pub async fn health_history(
     pool: &PgPool,

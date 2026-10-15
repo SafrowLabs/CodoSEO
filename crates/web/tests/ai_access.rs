@@ -2321,48 +2321,72 @@ async fn a_fetch_blocked_card_names_the_probe_identity() {
     assert!(c.contains(">Accept<"), "{c}");
 }
 
-// ---- the overview's panel and the exports (B3.14) ---------------------------------------------
+// ---- the site audit's fix list and the exports (B3.14) ----------------------------------------
 
-/// The text of the panel on the site's audit page.
-async fn panel(app: &TestApp, site: &Site, cookie: &str) -> Option<String> {
-    let body = app
-        .get(&format!("/s/{}/audit", site.id), Some(cookie))
+async fn audit_body(app: &TestApp, site: &Site, cookie: &str) -> String {
+    app.get(&format!("/s/{}/audit", site.id), Some(cookie))
         .await
-        .body;
-    let start = body.find(r#"id="ai-access-panel""#)?;
-    Some(body[start..start + body[start..].find("View AI access").unwrap()].to_owned())
+        .body
+}
+
+/// The fix list's row of incident `id`, if it is listed.
+fn fix_row(body: &str, id: i64) -> Option<String> {
+    let at = body.find(&format!(r#"id="fx-ai-{id}""#))?;
+    let end = body[at..].find("Copy fix prompt").unwrap();
+    Some(body[at..at + end].to_owned())
+}
+
+/// A score card's markup, by its key.
+fn score_card(body: &str, key: &str) -> String {
+    let at = body
+        .find(&format!("sc sc-{key} "))
+        .unwrap_or_else(|| panic!("the {key} card"));
+    let rest = &body[at + 1..];
+    let end = ["card sc sc-", "id=\"help-overall\""]
+        .iter()
+        .filter_map(|m| rest.find(m))
+        .min()
+        .unwrap();
+    rest[..end].to_owned()
 }
 
 #[tokio::test]
-async fn the_overview_has_an_ai_access_panel_beside_the_health_score_and_not_in_it() {
-    let (app, site, cookie, _) = blocked_incident().await;
-    let body = app
-        .get(&format!("/s/{}/audit", site.id), Some(&cookie))
-        .await
-        .body;
-    let panel = panel(&app, &site, &cookie).await.expect("a panel");
-    assert!(panel.contains("Not part of the health score"), "{panel}");
-    assert!(panel.contains("1 critical"), "{panel}");
-    assert!(panel.contains("Weakest evidence: A"), "{panel}");
+async fn an_ai_issue_is_ranked_in_the_fix_list_with_its_geo_points() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let body = audit_body(&app, &site, &cookie).await;
+    let row = fix_row(&body, id).expect("the AI issue in the fix list");
+    assert!(row.contains(r#"data-kind="ai""#), "{row}");
+    assert!(row.contains(r#"data-sev="critical""#), "{row}");
+    // Not there on the crawl before: new this crawl. It costs GEO points.
+    assert!(row.contains("New this crawl"), "{row}");
+    assert!(row.contains(" GEO</span>"), "{row}");
+    // Mark intended returns to the audit; the fix and its prompt sit behind the "?".
     assert!(
-        body.contains(&format!(r#"href="/s/{}/ai-access""#, site.id)),
-        "{body}"
+        row.contains(&format!(
+            r#"action="/s/{}/ai-access/incidents/{id}/intended?back=audit""#,
+            site.id
+        )),
+        "{row}"
     );
-    // The health score KPI is the crawl's own score and says nothing about AI access.
-    let score: i16 = sqlx::query_scalar(
-        "SELECT health_score FROM crawls WHERE site_id = $1 ORDER BY finished_at DESC LIMIT 1",
+    assert!(row.contains(r#"popovertarget="fx-ai-"#), "{row}");
+    assert!(
+        body.contains("User-agent: OAI-SearchBot"),
+        "the fix: {body}"
+    );
+    // The cards read the crawl's own scores.
+    let (seo, geo, overall): (i16, i16, i16) = sqlx::query_as(
+        "SELECT health_score, geo_score, overall_score FROM crawls WHERE site_id = $1 \
+         ORDER BY finished_at DESC LIMIT 1",
     )
     .bind(site.id)
     .fetch_one(app.pool())
     .await
     .unwrap();
-    let kpi_start = body.find("Health score").expect("the health score KPI");
-    let kpi = &body[kpi_start..kpi_start + body[kpi_start..].find("kpi-delta").unwrap()];
-    assert!(kpi.contains(&format!(r#"data-count="{score}""#)), "{kpi}");
-    assert!(!kpi.contains("AI access"), "{kpi}");
-    // The AI & GEO section comes first on the page, above the score's KPIs.
-    assert!(body.find(r#"id="ai-access-panel""#).unwrap() < body.find("Health score").unwrap());
-    // The score is what it is without the incident: both crawls hold the same pages.
+    assert!(score_card(&body, "seo").contains(&format!(r#"data-count="{seo}""#)));
+    assert!(score_card(&body, "geo").contains(&format!(r#"data-count="{geo}""#)));
+    assert!(score_card(&body, "overall").contains(&format!(r#"data-count="{overall}""#)));
+    assert!(geo < 100, "the blocked search bot costs GEO points");
+    // The SEO score is what it is without the incident: both crawls hold the same pages.
     let scores: Vec<i16> = sqlx::query_scalar(
         "SELECT health_score FROM crawls WHERE site_id = $1 ORDER BY created_at",
     )
@@ -2372,67 +2396,49 @@ async fn the_overview_has_an_ai_access_panel_beside_the_health_score_and_not_in_
     .unwrap();
     assert_eq!(scores.len(), 2);
     assert_eq!(scores[0], scores[1]);
+    // The trend has two crawls to draw, the GEO line among them.
+    assert!(body.contains("tr-line tr-geo"), "{body}");
 }
 
 #[tokio::test]
-async fn the_panel_splits_open_accepted_and_snoozed_and_counts_fixes_being_verified() {
+async fn accepted_and_snoozed_issues_leave_the_fix_list() {
     let (app, site, cookie, id) = llms_incident().await;
-    let p = panel(&app, &site, &cookie).await.unwrap();
-    assert!(p.contains("1 warning"), "{p}");
-    assert!(p.contains("Weakest evidence"), "{p}");
+    let body = audit_body(&app, &site, &cookie).await;
+    let row = fix_row(&body, id).expect("listed");
+    assert!(row.contains(r#"data-sev="warning""#), "{row}");
+    // An llms.txt that is unavailable is this incident, not a second "missing" row.
+    assert!(!body.contains(r#"id="fx-ai-llms""#), "{body}");
 
     let res = app
         .post_hx(&action(&site, id, "accept"), "", Some(&cookie))
         .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    let p = panel(&app, &site, &cookie).await.unwrap();
-    // Open is empty now and Accepted has the notice.
-    let row = |p: &str, label: &str| {
-        let at = p
-            .find(&format!(r#"<span class="k">{label}</span>"#))
-            .unwrap();
-        p[at..at + p[at..].find("</div>").unwrap()].to_owned()
-    };
-    assert!(!row(&p, "Open").contains("warning"), "{p}");
-    assert!(row(&p, "Accepted").contains("1 warning"), "{p}");
-    assert!(!p.contains("Weakest evidence"), "{p}");
+    assert!(fix_row(&audit_body(&app, &site, &cookie).await, id).is_none());
 
     app.post_hx(&action(&site, id, "unaccept"), "", Some(&cookie))
         .await;
     app.post_hx(&action(&site, id, "snooze"), "days=7", Some(&cookie))
         .await;
-    let p = panel(&app, &site, &cookie).await.unwrap();
-    assert!(row(&p, "Snoozed").contains("1 warning"), "{p}");
-    assert!(!row(&p, "Open").contains("warning"), "{p}");
+    assert!(fix_row(&audit_body(&app, &site, &cookie).await, id).is_none());
 
     app.post_hx(&action(&site, id, "unsnooze"), "", Some(&cookie))
         .await;
-    sqlx::query("UPDATE ai_incidents SET recovered_at = now() WHERE id = $1")
-        .bind(id)
-        .execute(app.pool())
-        .await
-        .unwrap();
-    sqlx::query(
-        "INSERT INTO ai_rechecks (site_id, incident_id, origin, due_at) \
-         VALUES ($1, $2, 'followup', now() + interval '24 hours')",
-    )
-    .bind(site.id)
-    .bind(id)
-    .execute(app.pool())
-    .await
-    .unwrap();
-    let p = panel(&app, &site, &cookie).await.unwrap();
-    assert!(p.contains("1 fix being verified"), "{p}");
+    assert!(fix_row(&audit_body(&app, &site, &cookie).await, id).is_some());
 }
 
 #[tokio::test]
-async fn a_clear_site_says_so_and_a_site_without_a_report_has_no_panel() {
+async fn a_missing_llms_txt_is_a_notice_in_the_fix_list() {
     let (app, site, cookie) = setup().await;
-    assert!(panel(&app, &site, &cookie).await.is_none());
-    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+    app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(404, ""), false)
         .await;
-    let p = panel(&app, &site, &cookie).await.unwrap();
-    assert!(p.contains("Nothing open, accepted or snoozed"), "{p}");
+    let body = audit_body(&app, &site, &cookie).await;
+    let at = body.find(r#"id="fx-ai-llms""#).expect("the llms.txt row");
+    let row = &body[at..at + body[at..].find("Copy fix prompt").unwrap()];
+    assert!(row.contains(r#"data-sev="notice""#), "{row}");
+    assert!(row.contains("llms.txt is missing"), "{row}");
+    assert!(row.contains(" GEO</span>"), "{row}");
+    // The first crawl: nothing is new yet.
+    assert!(!body.contains("New this crawl"), "{body}");
 }
 
 fn csv_rows(body: &str) -> Vec<Vec<String>> {
@@ -2602,99 +2608,108 @@ async fn the_incident_exports_are_the_signed_in_owners_only() {
     assert!(body.contains(&format!("/s/{}/ai-access/incidents.json", site.id)));
 }
 
-// ---- the site audit's AI & GEO section ------------------------------------------------------
+// ---- the site audit's AI bots table -----------------------------------------------------------
 
-async fn audit_body(app: &TestApp, site: &Site, cookie: &str) -> String {
-    app.get(&format!("/s/{}/audit", site.id), Some(cookie))
-        .await
-        .body
-}
-
-/// The audit's row for one bot, up to its closing `</li>`.
-fn audit_bot_row(body: &str, token: &str) -> String {
+/// The AI bots table's row of one product, up to its closing `</tr>`.
+fn product_row(body: &str, name: &str) -> String {
     let at = body
-        .find(&format!(">{token}</span>"))
-        .expect("the bot's row");
-    body[at..at + body[at..].find("</li>").unwrap()].to_owned()
+        .find(&format!("<b>{name}</b>"))
+        .unwrap_or_else(|| panic!("the {name} row"));
+    body[at..at + body[at..].find("</tr>").unwrap()].to_owned()
 }
 
 #[tokio::test]
-async fn the_audit_opens_on_the_geo_section_with_operators_fetch_results_and_incidents() {
+async fn the_ai_bots_table_lists_every_product_and_the_fetch_problems() {
     let (app, site, cookie) = setup().await;
     app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
         .await;
     let body = audit_body(&app, &site, &cookie).await;
     let start = body
-        .find(r#"aria-labelledby="au-geo-h""#)
-        .expect("the GEO section");
-    let end = body.find("Headline metrics").expect("the KPIs");
-    assert!(start < end, "GEO first");
-    let geo = &body[start..end];
-    for needle in [
-        "Access &amp; checks · not traffic",
-        "Not part of the health score",
-        // One card per operator, with its logo on a tile, or a monogram.
-        "/assets/logo-openai.",
-        "/assets/logo-mistral.",
-        ">CC</b>",
-        "Common Crawl",
-        // OpenAI's search bot is challenged by the WAF; ChatGPT-User gets the same page.
-        "Challenged · Cloudflare",
-        "Same page",
-        "Needs a look",
-        // Control tokens and training bots are never probed.
-        "Training control",
-        "Not probed",
-        // The KPIs, with the grades the ledger gives.
-        "Search bots allowed",
-        "2 treated worse",
-        "synthetic · grade B",
-        "Content in HTML",
-        "informational · not scored",
-        // Eligibility per engine, the incidents panel and the C1 placeholder.
-        "Can AI answers quote you?",
-        "Bing / Copilot",
-        r#"id="ai-access-panel""#,
-        "Real bot activity",
-        "Coming with log ingestion (C1)",
-    ] {
-        assert!(geo.contains(needle), "missing {needle:?} in {geo}");
+        .find(r#"aria-labelledby="bt-h""#)
+        .expect("the AI bots card");
+    let table = &body[start..];
+    for e in codoseo_geo::eligibility::engines() {
+        assert!(
+            table.contains(&format!(">{}</td>", e.crawler)),
+            "{}: {table}",
+            e.crawler
+        );
     }
-    // Every registry bot has a row.
-    for b in &registry().bots {
-        assert!(geo.contains(&format!(">{}</span>", b.token)), "{}", b.token);
-    }
-    assert!(audit_bot_row(geo, "OAI-SearchBot").contains("Challenged · Cloudflare"));
-    // The open incident links to its card, where Fix and Recheck are.
-    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    assert!(table.contains("Training crawlers"), "{table}");
+    // OpenAI's search bot is challenged by the WAF: ChatGPT reaches the pages only partly,
+    // and the reason opens on tap or focus.
+    let chatgpt = product_row(table, "ChatGPT");
+    assert!(chatgpt.contains("Partly"), "{chatgpt}");
+    assert!(chatgpt.contains("Cloudflare challenge on"), "{chatgpt}");
     assert!(
-        geo.contains(&format!(r#"href="/s/{}/ai-access#issue-{id}""#, site.id)),
-        "{geo}"
+        chatgpt.contains(r#"popovertarget="bt-chatgpt""#),
+        "{chatgpt}"
     );
-    // The header counts the AI & GEO checks apart from the SEO ones; failing checks count both.
-    assert!(body.contains("/ 7 AI &#38; GEO checks passed"), "{body}");
-    assert!(body.contains("<span>of 51</span>"), "{body}");
-    assert!(body.contains(" SEO · 1 AI &#38; GEO"), "{body}");
+    assert!(chatgpt.contains("treated worse"), "{chatgpt}");
+    let claude = product_row(table, "Claude");
+    assert!(claude.contains("Allowed"), "{claude}");
+    assert!(claude.contains("All 3 key pages"), "{claude}");
+    // Logos beside the names, and the head counts who can reach the pages.
+    assert!(table.contains("/assets/logo-openai."), "{table}");
+    assert!(table.contains("can reach your pages"), "{table}");
+    assert!(
+        table.contains(&format!(r#"href="/s/{}/ai-access""#, site.id)),
+        "{table}"
+    );
+    // The open fetch incident is in the fix list.
+    let id = geo::open_incidents(app.pool(), site.id).await.unwrap()[0].id;
+    assert!(fix_row(&body, id).is_some(), "{body}");
+    // The AI products card agrees with the table.
+    let card = score_card(&body, "ai");
+    assert!(card.contains("partly"), "{card}");
 }
 
 #[tokio::test]
-async fn a_blocked_search_bot_reads_blocked_in_the_audit_and_an_intended_block_says_so() {
+async fn a_blocked_search_bot_reads_blocked_and_mark_intended_returns_to_the_audit() {
     let (app, site, cookie, id) = blocked_incident().await;
     let body = audit_body(&app, &site, &cookie).await;
-    let row = audit_bot_row(&body, "OAI-SearchBot");
-    assert!(row.contains(r#"<span class="badge t-err""#), "{row}");
-    assert!(row.contains(">Blocked</span>"), "{row}");
-    assert!(body.contains("Needs a look"), "{body}");
+    let row = product_row(&body, "ChatGPT");
+    assert!(row.contains(r#"<span class="badge t-err">"#), "{row}");
+    assert!(row.contains("Blocked on all 3 key pages"), "{row}");
 
-    // Marked intended: the same block is now the owner's choice.
+    // Marked intended from the fix list: the audit comes back, the issue leaves the list and
+    // the block is the owner's choice, named in the footer.
     let res = app
-        .post_hx(&action(&site, id, "intended"), "", Some(&cookie))
+        .post_hx(
+            &format!("{}?back=audit", action(&site, id, "intended")),
+            "",
+            Some(&cookie),
+        )
         .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    let body = audit_body(&app, &site, &cookie).await;
-    let row = audit_bot_row(&body, "OAI-SearchBot");
-    assert!(row.contains("Blocked · intended"), "{row}");
-    assert!(row.contains("t-intent"), "{row}");
+    assert_eq!(
+        res.header("hx-replace-url"),
+        Some(format!("/s/{}/audit", site.id).as_str())
+    );
+    assert!(res.body.contains("Fix these, in order"), "{}", res.body);
+    assert!(fix_row(&res.body, id).is_none(), "{}", res.body);
+    let row = product_row(&res.body, "ChatGPT");
+    assert!(row.contains("Blocked by you"), "{row}");
+    assert!(
+        res.body
+            .contains("marked intended, not counted:</span> <b>OAI-SearchBot</b>"),
+        "{}",
+        res.body
+    );
+    // A plain form post is redirected there.
+    let (app, site, cookie, id) = blocked_incident().await;
+    let res = app
+        .post(
+            &format!("{}?back=audit", action(&site, id, "intended")),
+            "",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        res.location(),
+        Some(format!("/s/{}/audit", site.id).as_str())
+    );
 }
 
 #[tokio::test]

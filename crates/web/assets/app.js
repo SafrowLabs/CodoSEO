@@ -413,6 +413,105 @@
     $$("details[open].switcher, details[open].user, details[open][data-menu]").forEach((d) => { if (!d.contains(e.target)) d.removeAttribute("open"); });
   });
 
+  // ── Site audit: the fix list's filters and page chips ─
+  // [data-fx-filter] shows the rows of one severity or kind; empty groups hide with them.
+  // [data-fx-toggle] shows or hides the URL chips it controls.
+  document.addEventListener("click", (e) => {
+    const f = e.target.closest("[data-fx-filter]");
+    if (f) {
+      const list = f.closest(".fx");
+      const want = f.dataset.fxFilter;
+      $$("[data-fx-filter]", list).forEach((b) => b.setAttribute("aria-pressed", String(b === f)));
+      let shown = 0;
+      $$(".fx-group", list).forEach((g) => {
+        let here = 0;
+        $$(".fx-row", g).forEach((r) => {
+          const hit = want === "all" || r.dataset.sev === want || r.dataset.kind === want;
+          r.hidden = !hit;
+          if (hit) here++;
+        });
+        g.hidden = here === 0;
+        const n = $("[data-fx-count]", g);
+        if (n) n.textContent = here;
+        shown += here;
+      });
+      const none = $(".fx-none", list);
+      if (none) none.hidden = shown > 0;
+      return;
+    }
+    const t = e.target.closest("[data-fx-toggle]");
+    if (t) {
+      const box = document.getElementById(t.getAttribute("aria-controls"));
+      const open = t.getAttribute("aria-expanded") !== "true";
+      t.setAttribute("aria-expanded", String(open));
+      if (box) box.hidden = !open;
+    }
+  });
+
+  // ── Popovers: placed by the button that opened them ──
+  // The [popover] top layer never clips, but opens centred: put it under (or above) its
+  // button, inside the viewport. A phone shows it as a sheet at the bottom (CSS). A
+  // [data-hover-pop] button also opens its popover on mouse hover and keyboard focus.
+  let invoker = null;
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("[popovertarget]");
+    if (b) invoker = b;
+  }, true);
+  function place(pop, by) {
+    if (!by || window.innerWidth <= 560) { pop.style.inset = pop.style.margin = ""; return; }
+    const r = by.getBoundingClientRect();
+    const w = pop.offsetWidth, h = pop.offsetHeight, pad = 8;
+    const left = Math.min(Math.max(pad, r.left + r.width / 2 - w / 2), window.innerWidth - w - pad);
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - pad) top = Math.max(pad, r.top - h - 6);
+    pop.style.margin = "0";
+    pop.style.inset = `${top}px auto auto ${left}px`;
+  }
+  document.addEventListener("toggle", (e) => {
+    const pop = e.target;
+    if (!(pop instanceof HTMLElement) || !pop.matches("[popover].pop") || e.newState !== "open") return;
+    const by = invoker && invoker.getAttribute("popovertarget") === pop.id
+      ? invoker : document.querySelector(`[popovertarget="${pop.id}"]`);
+    place(pop, by);
+  }, true);
+  const hoverPop = (b) => b && document.getElementById(b.getAttribute("popovertarget"));
+  let hoverTimer = 0;
+  function showFor(b) {
+    const pop = hoverPop(b);
+    if (!pop || !pop.showPopover || pop.matches(":popover-open")) return;
+    clearTimeout(hoverTimer);
+    invoker = b;
+    try { pop.showPopover(); } catch {}
+  }
+  function hideLater(b) {
+    const pop = hoverPop(b);
+    if (!pop || !pop.hidePopover) return;
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      if (!pop.matches(":hover") && !b.matches(":hover") && document.activeElement !== b) {
+        try { pop.hidePopover(); } catch {}
+      }
+    }, 180);
+  }
+  document.addEventListener("pointerover", (e) => {
+    if (e.pointerType !== "mouse") return;
+    const b = e.target.closest && e.target.closest("[data-hover-pop]");
+    if (b) showFor(b);
+  });
+  document.addEventListener("pointerout", (e) => {
+    if (e.pointerType !== "mouse") return;
+    const b = e.target.closest && e.target.closest("[data-hover-pop]");
+    if (b && !b.contains(e.relatedTarget)) hideLater(b);
+  });
+  document.addEventListener("focusin", (e) => {
+    const b = e.target.closest && e.target.closest("[data-hover-pop]");
+    if (b && b.matches(":focus-visible")) showFor(b);
+  });
+  document.addEventListener("focusout", (e) => {
+    const b = e.target.closest && e.target.closest("[data-hover-pop]");
+    if (b) hideLater(b);
+  });
+
   // ── Filter a table as you type ──────────────────────
   // <input data-filter="#table" data-filter-empty="#msg" data-filter-count="#count"> hides the
   // rows (tr[data-search], lower-cased text) that don't contain the query, and any <tbody>
