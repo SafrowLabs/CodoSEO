@@ -111,6 +111,7 @@ pub(crate) async fn preflight(
         tdmrep: None,
         llms_txt: None,
         llms_txt_skipped: None,
+        markdown: None,
     };
     let stop = match &result {
         Err(e) => Some(StopReason::Unreachable(e.to_string())),

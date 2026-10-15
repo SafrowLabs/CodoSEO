@@ -415,6 +415,7 @@ mod tests {
             content: None,
             llms_txt: None,
             llms_txt_skipped: None,
+            markdown: None,
         }
     }
 

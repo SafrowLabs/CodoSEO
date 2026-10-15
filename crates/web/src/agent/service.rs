@@ -660,6 +660,7 @@ impl<'a> AgentService<'a> {
                 content: None,
                 llms_txt: None,
                 llms_txt_skipped: None,
+                markdown: None,
             });
         };
         let intent = geo::get_intent(pool, site.id).await?;
@@ -685,6 +686,7 @@ impl<'a> AgentService<'a> {
             content: ai_content(&report),
             llms_txt: report.llms_txt.as_ref().map(ai_llms_txt),
             llms_txt_skipped: report.llms_txt_skipped,
+            markdown: report.markdown.clone(),
             declared: report.declared,
         })
     }

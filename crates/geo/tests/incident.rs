@@ -295,7 +295,8 @@ mod before {
     fn a_widened_block_remembers_the_rule_that_decided_each_page_before() {
         let prev = report_for(&with_robots(pages(), 200, PRIVATE));
         let now = report_for(&with_robots(pages(), 200, EVERYTHING));
-        let f = findings(&now, &Intent::default());
+        let mut f = findings(&now, &Intent::default());
+        f.retain(|f| !f.kind.is_advisory());
         assert_eq!(f.len(), 1);
         let before = before_of(f[0].kind, &f[0].subject, &f[0].evidence, &prev).expect("before");
         assert_eq!(before.bots.len(), 1);

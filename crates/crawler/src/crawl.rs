@@ -22,6 +22,7 @@ use url::Url;
 use crate::fetch::{FetchError, FetchResult, Fetcher, FetcherConfig};
 use crate::frontier::{Frontier, Queued};
 use crate::llms::{LinkCheck, check_links, fetch_llms_txt};
+use crate::markdown::fetch_markdown;
 use crate::politeness::{Limiter, retry_after_of};
 use crate::preflight::{BLOCKED_MSG, LOGIN_MSG, Preflight, fetch_tdmrep, origin_of, preflight};
 use crate::record::{self, Built};
@@ -107,6 +108,15 @@ pub async fn crawl_shared(
         match fetch_llms_txt(&fetcher, &limiter, &origin, &rules, deadline).await {
             Ok(f) => signals.llms_txt = Some(f),
             Err(skip) => signals.llms_txt_skipped = Some(skip),
+        }
+        // The page the start address settled on, and only when it answered: a site that failed
+        // it gets no more requests.
+        let home = start
+            .as_ref()
+            .and_then(|(_, r)| r.as_ref().ok())
+            .map(|r| r.final_url.clone());
+        if let Some(home) = home {
+            signals.markdown = fetch_markdown(&fetcher, &limiter, &home, &rules, deadline).await;
         }
     }
 

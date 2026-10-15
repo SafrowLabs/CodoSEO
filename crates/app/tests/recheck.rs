@@ -502,11 +502,13 @@ async fn a_fixed_robots_txt_recovers_then_the_follow_up_resolves_it() {
         vec!["ai_bot_blocked", "ai_issue_resolved"]
     );
     assert_eq!(alert_jobs(&w, last_seen).await, alerts_before + 1);
+    // Only the advisory ones (Content Signals, Markdown) the fixture's robots.txt raises are left.
     assert!(
         geo::open_incidents(w.pool(), w.site_id)
             .await
             .unwrap()
-            .is_empty()
+            .iter()
+            .all(|i| i.kind.is_advisory())
     );
 }
 

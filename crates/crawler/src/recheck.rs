@@ -1,5 +1,5 @@
-//! The fetches of one AI access recheck: robots.txt, a few named pages and `/llms.txt`, as
-//! CodoSEObot and as politely as a crawl. What to fetch and what it means live in
+//! The fetches of one AI access recheck: robots.txt, a few named pages, `/llms.txt` and the home
+//! page as Markdown, as CodoSEObot and as politely as a crawl. What to fetch and what it means live in
 //! [`codoseo_geo::recheck`]; the synthetic probes run on their own ([`crate::probe`]).
 //!
 //! robots.txt is always read first, whatever the recheck is about: it gives the crawl delay and
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use codoseo_core::crawl::{AddressPolicy, Politeness, RobotsFile, USER_AGENT};
-use codoseo_core::output::{LlmsSkip, LlmsTxtFetch};
+use codoseo_core::output::{LlmsSkip, LlmsTxtFetch, MarkdownProbe};
 use codoseo_core::page::PageRecord;
 use tokio::sync::Semaphore;
 use tokio::time::{Instant, timeout_at};
@@ -19,6 +19,7 @@ use url::Url;
 use crate::crawl::inspected;
 use crate::fetch::{FetchError, Fetcher, FetcherConfig};
 use crate::llms::fetch_llms_txt;
+use crate::markdown::fetch_markdown;
 use crate::politeness::{Limiter, retry_after_of};
 use crate::robots::fetch_robots;
 
@@ -31,6 +32,8 @@ pub struct RecheckFetch {
     pub pages: Vec<Url>,
     /// Fetch `/llms.txt` (no link checks).
     pub llms: bool,
+    /// Ask for `site` as Markdown, and for the Markdown alternate it advertises.
+    pub markdown: bool,
     pub address_policy: AddressPolicy,
     pub politeness: Politeness,
     /// Per-request time limit.
@@ -51,6 +54,9 @@ pub struct RecheckFetched {
     pub not_reached: Vec<Url>,
     /// `/llms.txt`, when asked for: the fetch, or why it was not made.
     pub llms: Option<Result<LlmsTxtFetch, LlmsSkip>>,
+    /// The Markdown requests, when asked for; `None` inside when none was made (robots.txt
+    /// disallows the page, the address is refused, the time ran out).
+    pub markdown: Option<Option<MarkdownProbe>>,
     /// Requests sent, every redirect hop counted.
     pub requests: u32,
 }
@@ -105,6 +111,7 @@ pub async fn recheck_fetch(cfg: RecheckFetch) -> Result<RecheckFetched, RecheckF
         robots_skipped: Vec::new(),
         not_reached: Vec::new(),
         llms: None,
+        markdown: None,
         requests: 0,
     };
     for url in &cfg.pages {
@@ -131,6 +138,10 @@ pub async fn recheck_fetch(cfg: RecheckFetch) -> Result<RecheckFetched, RecheckF
     }
     if cfg.llms {
         out.llms = Some(fetch_llms_txt(&fetcher, &limiter, &origin, &rules, cfg.deadline).await);
+    }
+    if cfg.markdown {
+        out.markdown =
+            Some(fetch_markdown(&fetcher, &limiter, &cfg.site, &rules, cfg.deadline).await);
     }
     out.requests = fetcher.requests();
     Ok(out)

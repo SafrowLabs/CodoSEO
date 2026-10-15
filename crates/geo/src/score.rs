@@ -9,11 +9,13 @@
 //!   pages have their text in the HTML before JavaScript runs. These are the AI access findings
 //!   ([`crate::findings`]), one check per [`FindingKind`].
 //! - **Recommended, 30 points**: is the site easy for AI to understand. Structured data parses,
-//!   pages have titles and descriptions, a sitemap is there, and so is an llms.txt. The first
-//!   four reuse the SEO checks' counts; llms.txt is read from the access report.
+//!   pages have titles and descriptions, a sitemap is there, and so is an llms.txt, robots.txt
+//!   declares Content Signals and the home page has a Markdown version. The first four reuse the
+//!   SEO checks' counts; llms.txt is read from the access report, the last two from their
+//!   (advisory) findings.
 //!
 //! A check that does not apply to the crawl (the report could not judge it, there were no
-//! pages, the probes did not run, or CodoSEO does not check it yet) is *skipped*: left out of
+//! pages, the probes did not run, or the crawl predates the check) is *skipped*: left out of
 //! both what the site scored and what it could have scored, never failed. A block the owner
 //! chose in their [`Intent`] opens no finding, so it costs nothing.
 //!
@@ -92,9 +94,10 @@ pub enum GeoCheck {
     /// The site serves an llms.txt (the report's `llms_txt`; an adopted file that stopped
     /// answering is [`FindingKind::LlmsTxtUnavailable`]).
     LlmsTxt,
-    /// A `Content-Signal` line in robots.txt. Not checked yet, so always skipped.
+    /// A `Content-Signal` line in robots.txt ([`FindingKind::ContentSignalsMissing`]).
     ContentSignals,
-    /// Pages answer `Accept: text/markdown` with Markdown. Not checked yet, so always skipped.
+    /// The home page answers `Accept: text/markdown` with Markdown, or advertises a Markdown
+    /// alternate that does ([`FindingKind::MarkdownUnavailable`]).
     MarkdownNegotiation,
 }
 
@@ -180,7 +183,8 @@ impl GeoCheck {
         cap(self.nominal())
     }
 
-    /// The finding kind the check reads, for the Essential tier.
+    /// The finding kind the check reads: the Essential tier's, and the two advisory Recommended
+    /// checks'.
     fn finding_kind(self) -> Option<FindingKind> {
         Some(match self {
             GeoCheck::RobotsUnavailable => FindingKind::RobotsUnavailable,
@@ -189,6 +193,8 @@ impl GeoCheck {
             GeoCheck::AnswersRestricted => FindingKind::AnswersRestricted,
             GeoCheck::FetchBlocked => FindingKind::FetchBlocked,
             GeoCheck::ContentMissing => FindingKind::ContentMissing,
+            GeoCheck::ContentSignals => FindingKind::ContentSignalsMissing,
+            GeoCheck::MarkdownNegotiation => FindingKind::MarkdownUnavailable,
             _ => return None,
         })
     }
@@ -355,7 +361,7 @@ pub fn outcomes(
         .iter()
         .any(|f| f.kind == FindingKind::RobotsUnavailable);
     let important = report.important.len();
-    let essential = GeoCheck::ALL.into_iter().filter_map(|c| {
+    let by_finding = GeoCheck::ALL.into_iter().filter_map(|c| {
         let kind = c.finding_kind()?;
         let rests_on_verdicts = matches!(
             kind,
@@ -363,6 +369,7 @@ pub fn outcomes(
                 | FindingKind::BotsNotBlocked
                 | FindingKind::FetchBlocked
                 | FindingKind::ContentMissing
+                | FindingKind::ContentSignalsMissing
         );
         if !evaluated.contains(&kind) || (robots_failed && rests_on_verdicts) {
             return Some((c, Outcome::Skipped));
@@ -401,7 +408,7 @@ pub fn outcomes(
         },
     };
 
-    essential
+    by_finding
         .chain([
             (GeoCheck::JsonldInvalid, seo(&[CheckId::JsonldInvalid])),
             (GeoCheck::TitleMissing, seo(&[CheckId::TitleMissing])),
@@ -414,9 +421,6 @@ pub fn outcomes(
                 seo(&[CheckId::SitemapMissing, CheckId::SitemapNon200]),
             ),
             (GeoCheck::LlmsTxt, llms),
-            // Extension points: until CodoSEO checks them they are not checked, so skipped.
-            (GeoCheck::ContentSignals, Outcome::Skipped),
-            (GeoCheck::MarkdownNegotiation, Outcome::Skipped),
         ])
         .collect()
 }
@@ -460,7 +464,10 @@ fn merge(a: Outcome, b: Outcome) -> Outcome {
 fn finding_share(f: &Finding, important: usize) -> f64 {
     let total = f.evidence.urls.total as usize;
     match f.kind {
-        FindingKind::RobotsUnavailable | FindingKind::FetchBlocked => 1.0,
+        FindingKind::RobotsUnavailable
+        | FindingKind::FetchBlocked
+        | FindingKind::ContentSignalsMissing
+        | FindingKind::MarkdownUnavailable => 1.0,
         _ if total == 0 || important == 0 => 1.0,
         _ => (total as f64 / important as f64).min(1.0),
     }
@@ -492,13 +499,9 @@ mod tests {
 
     type Outcomes = Vec<(GeoCheck, Outcome)>;
 
-    /// Every check that is checked today, all passing.
+    /// Every check, all passing.
     fn all_pass() -> Vec<(GeoCheck, Outcome)> {
-        GeoCheck::ALL
-            .into_iter()
-            .filter(|c| !matches!(c, ContentSignals | MarkdownNegotiation))
-            .map(|c| (c, Pass))
-            .collect()
+        GeoCheck::ALL.into_iter().map(|c| (c, Pass)).collect()
     }
 
     fn with(changes: &[(GeoCheck, Outcome)]) -> Vec<(GeoCheck, Outcome)> {
@@ -524,14 +527,14 @@ mod tests {
                 .map(|(c, _)| c.weight())
                 .sum()
         };
-        // 15 + 15 + 5 + 15 + 5 + 5 and 5 + 5 + 5 + 5 + 1.
+        // 15 + 15 + 5 + 15 + 5 + 5 and 5 + 5 + 5 + 5 + 1 + 1 + 1.
         assert_eq!(tier(Tier::Essential), 60.0);
-        assert_eq!(tier(Tier::Recommended), 21.0);
+        assert_eq!(tier(Tier::Recommended), 23.0);
     }
 
     #[test]
     fn scores() {
-        // Essential: 70 points over weight 60. Recommended: 30 over 21.
+        // Essential: 70 points over weight 60. Recommended: 30 over 23.
         let cases: &[(&str, Outcomes, u8)] = &[
             ("all pass", all_pass(), 100),
             (
@@ -550,14 +553,28 @@ mod tests {
                 100,
             ),
             (
-                "titles missing everywhere: 30 x 5/21",
+                "titles missing everywhere: 30 x 5/23",
                 with(&[(TitleMissing, fail(Warning, 1.0))]),
                 93,
             ),
             (
-                "no llms.txt: 30 x 1/21",
+                "no llms.txt: 30 x 1/23",
                 with(&[(LlmsTxt, fail(Notice, 1.0))]),
                 99,
+            ),
+            (
+                "no Content-Signal: 30 x 1/23",
+                with(&[(ContentSignals, fail(Notice, 1.0))]),
+                99,
+            ),
+            (
+                "no Markdown, no Content-Signal, no llms.txt: 30 x 3/23",
+                with(&[
+                    (ContentSignals, fail(Notice, 1.0)),
+                    (MarkdownNegotiation, fail(Notice, 1.0)),
+                    (LlmsTxt, fail(Notice, 1.0)),
+                ]),
+                96,
             ),
             (
                 "a severity above the nominal weight is capped at the weight",
@@ -598,7 +615,7 @@ mod tests {
         assert_eq!(score(&failing(Tier::Essential)), 30);
         assert_eq!(score(&failing(Tier::Recommended)), 70);
         // The tiers split by points, the checks inside them by severity: an Essential robots.txt
-        // failure (Critical) costs 17.5, a Recommended Warning everywhere 30 x 5/21 = 7.1, an
+        // failure (Critical) costs 17.5, a Recommended Warning everywhere 30 x 5/23 = 6.5, an
         // Essential Warning everywhere 70 x 5/60 = 5.8.
         assert_eq!(
             score(&with(&[(RobotsUnavailable, fail(Critical, 1.0))])),
@@ -636,22 +653,14 @@ mod tests {
         ]);
         let s = geo_score(&outcomes).unwrap();
         assert_eq!(s.score, 79);
-        assert_eq!((s.checks_passed, s.checks_applicable), (8, 9));
+        assert_eq!((s.checks_passed, s.checks_applicable), (10, 11));
         let skipped: Vec<GeoCheck> = s
             .checks
             .iter()
             .filter(|c| c.status == Status::Skipped)
             .map(|c| c.check)
             .collect();
-        assert_eq!(
-            skipped,
-            [
-                FetchBlocked,
-                ContentMissing,
-                ContentSignals,
-                MarkdownNegotiation
-            ]
-        );
+        assert_eq!(skipped, [FetchBlocked, ContentMissing]);
         // A skipped check never costs anything, whatever else is listed for it later.
         assert_eq!(score(&with(&[(LlmsTxt, Skipped)])), 100);
     }
@@ -673,14 +682,14 @@ mod tests {
             (Sitemap, fail(Notice, 1.0)),
         ]))
         .unwrap();
-        assert_eq!((s.checks_passed, s.checks_applicable), (9, 11));
+        assert_eq!((s.checks_passed, s.checks_applicable), (11, 13));
         let line = |c: GeoCheck| s.checks.iter().find(|l| l.check == c).unwrap();
         let bots = line(BotsBlocked);
         assert_eq!((bots.tier, bots.status), (Tier::Essential, Status::Fail));
         assert_eq!(bots.severity, Some(Critical));
         assert!((bots.points_regained - 17.5).abs() < 1e-9);
         let sitemap = line(Sitemap);
-        assert!((sitemap.points_lost - 30.0 / 21.0).abs() < 1e-9);
+        assert!((sitemap.points_lost - 30.0 / 23.0).abs() < 1e-9);
         assert_eq!(line(TitleMissing).points_lost, 0.0);
         // Fixing both gives back exactly what they cost.
         let lost: f64 = s.checks.iter().map(|c| c.points_regained).sum();
@@ -702,6 +711,6 @@ mod tests {
             assert_eq!(overall_score(seo, geo), want, "{seo} / {geo}");
         }
         let geo = geo_score(&all_pass()).unwrap();
-        assert_eq!(overall_checks(40, 44, &geo), (51, 55));
+        assert_eq!(overall_checks(40, 44, &geo), (53, 57));
     }
 }

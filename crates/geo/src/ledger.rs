@@ -16,8 +16,10 @@ use crate::content::NON_RENDERING_SOURCE;
 use crate::eligibility::engines;
 use crate::findings::{Evidence, FindingKind, Grade, ROBOTS_DOC};
 use crate::llms::{LIGHTHOUSE_DOC, LIGHTHOUSE_SOURCE, SPEC_URL as LLMS_SPEC_URL};
+use crate::markdown::MARKDOWN_FOR_AGENTS_DOC;
 use crate::probe::Vendor;
 use crate::registry::registry;
+use crate::signals::CONTENT_SIGNALS_URL;
 
 /// The robots.txt standard.
 pub const RFC_9309: &str = "https://www.rfc-editor.org/rfc/rfc9309";
@@ -83,7 +85,7 @@ pub struct LedgerEntry {
 /// The grade-A wording for findings that rest on the operators' own documentation.
 const OPERATOR_DOCUMENTED: &str = "Evidence grade A: documented by the operator";
 
-static LEDGER: [LedgerEntry; 14] = [
+static LEDGER: [LedgerEntry; 16] = [
     // ---- findings ----
     LedgerEntry {
         key: "robots_unavailable",
@@ -140,6 +142,22 @@ static LEDGER: [LedgerEntry; 14] = [
         sources: &[LLMS_SPEC_URL, LIGHTHOUSE_DOC],
         limits: "Informational: no operator documents depending on llms.txt to crawl, so it never affects the score.",
         explain: "Evidence grade A: what your /llms.txt answered, judged by Lighthouse's documented llms.txt check. llms.txt is informational and never affects your score.",
+    },
+    LedgerEntry {
+        key: "content_signals_missing",
+        grade: Grade::A,
+        rests_on: "The site's robots.txt read as the Content Signals Policy defines its `Content-Signal` line: search, ai-input and ai-train, each yes or no.",
+        sources: &[CONTENT_SIGNALS_URL, CONTENT_SIGNAL_DOC],
+        limits: "Declared, not enforced: nothing makes a bot honour the signals. Advisory: it never alerts.",
+        explain: "Evidence grade A: your robots.txt, read as the Content Signals Policy defines it. Declared, not enforced.",
+    },
+    LedgerEntry {
+        key: "markdown_unavailable",
+        grade: Grade::A,
+        rests_on: "What the home page answered to `Accept: text/markdown`, and the Markdown alternate it advertises, as Cloudflare documents Markdown for Agents.",
+        sources: &[MARKDOWN_FOR_AGENTS_DOC],
+        limits: "Only the home page is asked. No operator documents preferring Markdown when crawling; it saves agents tokens. Advisory: it never alerts.",
+        explain: "Evidence grade A: what your home page answered when asked for Markdown. Advisory: no operator documents depending on it.",
     },
     // ---- checks that open no incident ----
     LedgerEntry {
@@ -367,6 +385,8 @@ pub fn lag(kind: FindingKind, ev: &Evidence) -> Lag {
         FindingKind::AnswersRestricted
         | FindingKind::FetchBlocked
         | FindingKind::ContentMissing
-        | FindingKind::LlmsTxtUnavailable => DEBOUNCE,
+        | FindingKind::LlmsTxtUnavailable
+        | FindingKind::ContentSignalsMissing
+        | FindingKind::MarkdownUnavailable => DEBOUNCE,
     }
 }

@@ -246,6 +246,52 @@ pub struct SiteSignals {
     /// fetched, site signals were off, the crawl stopped before it (and in older crawls).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llms_txt_skipped: Option<LlmsSkip>,
+    /// The home page asked for with `Accept: text/markdown`; `None` when it was not asked (signals
+    /// off, robots.txt disallows the home page, the crawl stopped early, and in older crawls).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<MarkdownProbe>,
+}
+
+/// One answer of a Markdown request.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkdownFetch {
+    /// The URL asked for.
+    pub url: String,
+    /// The final status after redirects; 0 when no response arrived (see `error`).
+    pub status: u16,
+    /// Why no response arrived; `None` whenever there is a status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    /// Bytes of body read that are not whitespace (up to the cap): 0 is an empty body.
+    #[serde(default)]
+    pub body_bytes: u64,
+}
+
+/// Where a page advertised its Markdown version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlternateSource {
+    /// `<link rel="alternate" type="text/markdown" href="…">` in the HTML.
+    LinkTag,
+    /// A `Link: <…>; rel="alternate"; type="text/markdown"` response header.
+    LinkHeader,
+}
+
+/// The home page asked for as Markdown: the content-negotiated answer and, when that was not
+/// Markdown, the Markdown alternate the page advertised and what it answered.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkdownProbe {
+    /// The home page with `Accept: text/markdown, text/html;q=0.9`.
+    pub negotiated: MarkdownFetch,
+    /// The advertised alternate's URL and where it was advertised.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternate: Option<(String, AlternateSource)>,
+    /// What the alternate answered; `None` when it was not requested (none advertised, the
+    /// negotiated answer was Markdown already, it is on another origin or robots.txt disallows it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternate_fetch: Option<MarkdownFetch>,
 }
 
 /// Why a crawl did not fetch `/llms.txt`.

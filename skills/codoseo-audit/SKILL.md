@@ -7,7 +7,7 @@ compatibility: Needs the CodoSEO MCP server (local `codoseo mcp`, or https://cod
 
 # CodoSEO audit
 
-CodoSEO crawls a site and runs 44 SEO checks (they make the 0-100 health score) and 7 AI & GEO checks (who among the AI bots may read the site, and whether pages can be quoted in AI answers; never part of the score). This skill is how to run it, read it and turn it into fixes.
+CodoSEO crawls a site and runs 44 SEO checks (they make the 0-100 health score) and 9 AI & GEO checks (who among the AI bots may read the site, whether pages can be quoted in AI answers, and whether robots.txt declares Content Signals and the home page has a Markdown version; never part of the health score). This skill is how to run it, read it and turn it into fixes.
 
 ## Pick the tool you have
 
@@ -38,6 +38,8 @@ Report in this order, and say how many pages each one touches:
    - `fetch_blocked`: a firewall or CDN blocks, challenges or diverts a bot that robots.txt lets in. Synthetic check (grade B): say so.
    - `content_missing`: important pages are an empty app shell in the HTML as served; AI crawlers that do not run JavaScript see nothing.
    - `llms_txt_unavailable`: an llms.txt the site used to serve stopped answering. Informational.
+   - `content_signals_missing`: robots.txt declares no Content Signals (`Content-Signal: search=yes, ai-input=yes, ai-train=no` under `User-agent: *`, see contentsignals.org). Advisory Notice.
+   - `markdown_unavailable`: the home page answers `Accept: text/markdown` with HTML and advertises no Markdown alternate. Advisory Notice: Cloudflare's Markdown for Agents or `.md` versions of pages fix it.
 3. **Evidence grades**: A is documented by the bot's operator, A- is read from the site's own HTML against a published measurement, B is CodoSEO's synthetic check, C is a CodoSEO heuristic, X is unverified. Never present a B, C or X finding as certain.
 
 Default intent: AI search and user-triggered bots are wanted; training, agent and ads bots are the owner's choice and are never reported either way. Do not tell the user to block or unblock training bots unless they say what they want.

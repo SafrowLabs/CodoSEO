@@ -25,25 +25,33 @@ fn status(s: &GeoScore, check: GeoCheck) -> Status {
     s.checks.iter().find(|c| c.check == check).unwrap().status
 }
 
-const BLOCK_OAI_SEARCH: &str =
-    "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n";
+const BLOCK_OAI_SEARCH: &str = "User-agent: *\nContent-Signal: search=yes, ai-input=yes\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n";
+/// Allows everything and declares Content Signals.
+const CLEAN: &str =
+    "User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n";
 
 #[test]
 fn a_clean_site_scores_100_and_skips_what_did_not_run() {
-    let report = report_for(&site(5, |p| p));
+    let report = report_for(&with_robots(site(5, |p| p), 200, CLEAN));
     let s = assess(&report, &Intent::default(), &[], 5).unwrap();
     assert_eq!(s.score, 100);
     assert_eq!(s.checks_passed, s.checks_applicable);
-    // No probes ran and llms.txt was not fetched; the two future checks are not checked yet.
+    // No probes ran, and neither llms.txt nor the home page as Markdown was asked for.
     for check in [
         GeoCheck::FetchBlocked,
         GeoCheck::LlmsTxt,
-        GeoCheck::ContentSignals,
         GeoCheck::MarkdownNegotiation,
     ] {
         assert_eq!(status(&s, check), Status::Skipped, "{check:?}");
     }
     assert_eq!(status(&s, GeoCheck::BotsBlocked), Status::Pass);
+    assert_eq!(status(&s, GeoCheck::ContentSignals), Status::Pass);
+
+    // Without a Content-Signal line, that check fails: a Notice's whole weight.
+    let bare = report_for(&site(5, |p| p));
+    let s = assess(&bare, &Intent::default(), &[], 5).unwrap();
+    assert_eq!(status(&s, GeoCheck::ContentSignals), Status::Fail);
+    assert_eq!(s.score, 99);
 }
 
 #[test]

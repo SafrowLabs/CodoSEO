@@ -1,6 +1,6 @@
 //! SARIF 2.1.0, for GitHub code scanning and any other SARIF reader.
 //!
-//! One run, one rule per check: the 44 SEO checks (`seo/<slug>`) and the 7 AI & GEO checks
+//! One run, one rule per check: the 44 SEO checks (`seo/<slug>`) and the 9 AI & GEO checks
 //! (`geo/<kind>`), always all of them so rule indexes never move. A failing page check gives one
 //! result per page (at most [`MAX_PER_RULE`]), a site-wide check one result at the start URL and
 //! an AI access finding one result at the page it names first. Locations are the page URLs
@@ -32,15 +32,7 @@ pub const SARIF_SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 pub const MAX_PER_RULE: usize = 100;
 const REPO: &str = "https://github.com/SafrowLabs/CodoSEO";
 
-const KINDS: [FindingKind; 7] = [
-    FindingKind::RobotsUnavailable,
-    FindingKind::BotsBlocked,
-    FindingKind::BotsNotBlocked,
-    FindingKind::AnswersRestricted,
-    FindingKind::FetchBlocked,
-    FindingKind::ContentMissing,
-    FindingKind::LlmsTxtUnavailable,
-];
+const KINDS: [FindingKind; 9] = FindingKind::ALL;
 
 fn level(s: Severity) -> &'static str {
     match s {
@@ -133,6 +125,8 @@ fn geo_title(kind: FindingKind) -> &'static str {
             "Important pages are an empty app shell in the HTML as served"
         }
         FindingKind::LlmsTxtUnavailable => "An adopted llms.txt stopped serving",
+        FindingKind::ContentSignalsMissing => "robots.txt declares no Content Signals",
+        FindingKind::MarkdownUnavailable => "The home page has no Markdown version for AI agents",
     }
 }
 
@@ -219,6 +213,7 @@ fn finding_uri(f: &Finding, origin: &str) -> String {
             format!("{base}/robots.txt")
         }
         FindingKind::LlmsTxtUnavailable => format!("{base}/llms.txt"),
+        FindingKind::ContentSignalsMissing => format!("{base}/robots.txt"),
         _ => f
             .evidence
             .urls

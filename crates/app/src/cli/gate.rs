@@ -65,15 +65,7 @@ impl fmt::Display for Gate {
     }
 }
 
-const KINDS: [FindingKind; 7] = [
-    FindingKind::RobotsUnavailable,
-    FindingKind::BotsBlocked,
-    FindingKind::BotsNotBlocked,
-    FindingKind::AnswersRestricted,
-    FindingKind::FetchBlocked,
-    FindingKind::ContentMissing,
-    FindingKind::LlmsTxtUnavailable,
-];
+const KINDS: [FindingKind; 9] = FindingKind::ALL;
 
 fn purposes() -> Vec<String> {
     [
@@ -149,7 +141,9 @@ pub fn parse_gate(raw: &str) -> Result<Gate, String> {
         FindingKind::FetchBlocked => None,
         FindingKind::RobotsUnavailable
         | FindingKind::ContentMissing
-        | FindingKind::LlmsTxtUnavailable => {
+        | FindingKind::LlmsTxtUnavailable
+        | FindingKind::ContentSignalsMissing
+        | FindingKind::MarkdownUnavailable => {
             return Err(format!("`{raw}`: {} has no subject", kind.slug()));
         }
     };
@@ -191,9 +185,13 @@ impl Gate {
                 FindingKind::AnswersRestricted => {
                     GEO_DEFAULT_DIRECTIVES.contains(&f.subject.as_str())
                 }
+                // The advisory kinds are nice-to-haves: only `geo:notice` or their own name
+                // gates on them.
                 FindingKind::BotsNotBlocked
                 | FindingKind::FetchBlocked
-                | FindingKind::LlmsTxtUnavailable => false,
+                | FindingKind::LlmsTxtUnavailable
+                | FindingKind::ContentSignalsMissing
+                | FindingKind::MarkdownUnavailable => false,
             },
             Gate::Geo { kind, subject } => {
                 f.kind == *kind && subject.as_ref().is_none_or(|s| *s == f.subject)

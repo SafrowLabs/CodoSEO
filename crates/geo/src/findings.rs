@@ -8,6 +8,8 @@
 //! crawlers which don't run JavaScript get.
 //! A seventh, grade A, is informational: an llms.txt the site served before has stopped answering.
 //! It is never Critical, and llms.txt never counts toward the health score.
+//! Two more, grade A and advisory (Notice, never alerted): robots.txt declares no Content Signals,
+//! and the home page has no Markdown version for AI agents.
 //! Severity follows the owner's [`Intent`]: a blocked training bot is not a problem unless the
 //! owner said they want it to crawl.
 
@@ -23,10 +25,12 @@ use crate::eligibility::{Cause, CauseSource, DirectiveSlug, Effect, EngineId, en
 use crate::intent::{Intent, Stance};
 use crate::ledger::{finding_sources, for_kind};
 use crate::llms::LlmsState;
+use crate::markdown::{MarkdownReport, MarkdownState};
 use crate::probe::{ProbeFetch, ProbeReport, Vendor, Verdict};
 use crate::registry::{Bot, Honours, Purpose, registry};
 use crate::report::{AccessReport, Reason, path_and_query, slug_str};
 use crate::robots::{GroupMatch, MatchedRule, RobotsAvailability};
+use crate::signals::{SUGGESTED_LINE, summarize};
 
 /// How many URLs the evidence lists as a sample.
 const SAMPLE_URLS: usize = 10;
@@ -48,6 +52,10 @@ pub enum FindingKind {
     ContentMissing,
     /// An llms.txt the site had adopted answers 5xx or 429, or not at all.
     LlmsTxtUnavailable,
+    /// robots.txt declares no Content Signals (`Content-Signal: search=yes, ...`). Advisory.
+    ContentSignalsMissing,
+    /// The home page has no Markdown version for AI agents (`Accept: text/markdown`). Advisory.
+    MarkdownUnavailable,
 }
 
 impl FindingKind {
@@ -60,21 +68,36 @@ impl FindingKind {
             FindingKind::FetchBlocked => "fetch_blocked",
             FindingKind::ContentMissing => "content_missing",
             FindingKind::LlmsTxtUnavailable => "llms_txt_unavailable",
+            FindingKind::ContentSignalsMissing => "content_signals_missing",
+            FindingKind::MarkdownUnavailable => "markdown_unavailable",
         }
     }
 
     pub fn from_slug(slug: &str) -> Option<FindingKind> {
-        [
-            FindingKind::RobotsUnavailable,
-            FindingKind::BotsBlocked,
-            FindingKind::BotsNotBlocked,
-            FindingKind::AnswersRestricted,
-            FindingKind::FetchBlocked,
-            FindingKind::ContentMissing,
-            FindingKind::LlmsTxtUnavailable,
-        ]
-        .into_iter()
-        .find(|k| k.slug() == slug)
+        FindingKind::ALL.into_iter().find(|k| k.slug() == slug)
+    }
+
+    /// Every kind, in order.
+    pub const ALL: [FindingKind; 9] = [
+        FindingKind::RobotsUnavailable,
+        FindingKind::BotsBlocked,
+        FindingKind::BotsNotBlocked,
+        FindingKind::AnswersRestricted,
+        FindingKind::FetchBlocked,
+        FindingKind::ContentMissing,
+        FindingKind::LlmsTxtUnavailable,
+        FindingKind::ContentSignalsMissing,
+        FindingKind::MarkdownUnavailable,
+    ];
+
+    /// Nice-to-haves most sites don't have yet (Content Signals, Markdown for agents): Notice
+    /// only, and their incidents always open quietly, so they are listed and scored but never
+    /// alert, by email, digest or webhook.
+    pub fn is_advisory(self) -> bool {
+        matches!(
+            self,
+            FindingKind::ContentSignalsMissing | FindingKind::MarkdownUnavailable
+        )
     }
 }
 
@@ -221,6 +244,15 @@ pub struct Evidence {
     /// The llms.txt status, for `LlmsTxtUnavailable`; `None` when no response arrived.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llms_status: Option<u16>,
+    /// `Content-Signal` lines in robots.txt, for `ContentSignalsMissing` (0: none at all).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_lines: Option<u32>,
+    /// Pairs of those lines that are not a valid signal, for `ContentSignalsMissing`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub malformed: Vec<String>,
+    /// What the Markdown requests got, for `MarkdownUnavailable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<MarkdownReport>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -284,6 +316,20 @@ pub fn evaluated_kinds(report: &AccessReport) -> Vec<FindingKind> {
     if report.llms_txt.is_some() {
         kinds.push(FindingKind::LlmsTxtUnavailable);
     }
+    // Content-Signal lines live in robots.txt: a missing file (4xx) has none, a failing one is
+    // already `RobotsUnavailable`.
+    if report.has_verdicts() {
+        kinds.push(FindingKind::ContentSignalsMissing);
+    }
+    // Only when the home page itself loaded: an unreachable site is not a missing Markdown version.
+    if report.declared.home_read
+        && report
+            .markdown
+            .as_ref()
+            .is_some_and(|m| m.state != MarkdownState::Unreachable)
+    {
+        kinds.push(FindingKind::MarkdownUnavailable);
+    }
     kinds
 }
 
@@ -298,9 +344,11 @@ pub fn findings(report: &AccessReport, intent: &Intent) -> Vec<Finding> {
         out.extend(bots_not_blocked(report, intent));
         out.extend(fetch_blocked(report, intent));
         out.extend(content_missing(report, intent));
+        out.extend(content_signals_missing(report));
     }
     out.extend(answers_restricted(report, intent));
     out.extend(llms_txt_unavailable(report));
+    out.extend(markdown_unavailable(report));
     out.sort_by(|a, b| (a.kind, &a.subject).cmp(&(b.kind, &b.subject)));
     out
 }
@@ -1563,6 +1611,91 @@ fn llms_txt_unavailable(report: &AccessReport) -> Option<Finding> {
             "Make /llms.txt answer 200 again, or 404 if you removed it on purpose. Your site served it before, and it {what}, so AI agents that look for it get nothing; Lighthouse counts this as a failed llms.txt check. llms.txt is informational: it does not affect your health score or how search engines crawl the site."
         ),
         sources: finding_sources(FindingKind::LlmsTxtUnavailable, &evidence),
+        evidence,
+    })
+}
+
+// ---- Content Signals -------------------------------------------------------------------------
+
+/// The `ContentSignalsMissing` finding: robots.txt was read (or there is none) and no
+/// `Content-Signal` line declares a valid signal. Advisory: a Notice, whatever the intent.
+fn content_signals_missing(report: &AccessReport) -> Option<Finding> {
+    if !report.has_verdicts() {
+        return None;
+    }
+    let summary = summarize(&report.declared.content_signals);
+    if summary.declared() {
+        return None;
+    }
+    let missing_file = report.robots.availability == RobotsAvailability::Missing;
+    let (title, what) = if summary.lines > 0 {
+        (
+            "robots.txt Content-Signal lines declare no valid signal".to_owned(),
+            format!(
+                "robots.txt has {} Content-Signal line{}, but none sets search, ai-input or ai-train to yes or no",
+                summary.lines,
+                if summary.lines == 1 { "" } else { "s" }
+            ),
+        )
+    } else if missing_file {
+        (
+            "No robots.txt, so no Content Signals".to_owned(),
+            "The site has no robots.txt, so it declares no Content Signals".to_owned(),
+        )
+    } else {
+        (
+            "robots.txt declares no Content Signals".to_owned(),
+            "robots.txt has no Content-Signal line".to_owned(),
+        )
+    };
+    let evidence = Evidence {
+        robots_status: report.robots.status,
+        signal_lines: Some(summary.lines),
+        malformed: summary.malformed,
+        ..Evidence::default()
+    };
+    Some(Finding {
+        kind: FindingKind::ContentSignalsMissing,
+        subject: String::new(),
+        severity: Severity::Notice,
+        grade: for_kind(FindingKind::ContentSignalsMissing).grade,
+        title,
+        summary: format!(
+            "{what}. Add `{SUGGESTED_LINE}` (your own choices) under `User-agent: *` to say how your content may be used: in search results, as input to AI answers, or to train AI models. Declared, not enforced, and optional."
+        ),
+        sources: finding_sources(FindingKind::ContentSignalsMissing, &evidence),
+        evidence,
+    })
+}
+
+// ---- Markdown for agents ---------------------------------------------------------------------
+
+/// The `MarkdownUnavailable` finding: the home page loaded, but asked for with
+/// `Accept: text/markdown` it answered with something else, and advertised no Markdown alternate
+/// that answers with Markdown. Advisory: a Notice.
+fn markdown_unavailable(report: &AccessReport) -> Option<Finding> {
+    if !report.declared.home_read {
+        return None;
+    }
+    let md = report.markdown.as_ref()?;
+    if md.state != MarkdownState::NotServed {
+        return None;
+    }
+    let evidence = Evidence {
+        markdown: Some(md.clone()),
+        ..Evidence::default()
+    };
+    Some(Finding {
+        kind: FindingKind::MarkdownUnavailable,
+        subject: String::new(),
+        severity: Severity::Notice,
+        grade: for_kind(FindingKind::MarkdownUnavailable).grade,
+        title: "No Markdown version for AI agents".to_owned(),
+        summary: format!(
+            "Asked for Markdown (Accept: text/markdown), the home page answered {}. AI agents read Markdown with far fewer tokens than HTML: serve it by content negotiation (Cloudflare's Markdown for Agents does this), or publish .md versions of your pages and link them. Optional.",
+            md.describe()
+        ),
+        sources: finding_sources(FindingKind::MarkdownUnavailable, &evidence),
         evidence,
     })
 }

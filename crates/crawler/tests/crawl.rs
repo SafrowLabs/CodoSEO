@@ -330,7 +330,8 @@ async fn redirect_stubs_do_not_spend_the_page_budget() {
     let site = b.start().await;
     let out = crawl(cfg_pages(site.url("/"), 20), |_| {}).await.unwrap();
 
-    let fetches = site.path_hits("/") + links.iter().map(|l| site.path_hits(l)).sum::<usize>();
+    // The home page's Markdown request (Accept: text/markdown) is not a page fetch.
+    let fetches = site.path_hits("/") - 1 + links.iter().map(|l| site.path_hits(l)).sum::<usize>();
     assert_eq!(fetches, 20);
     assert_eq!(out.stop, StopReason::PageLimit);
     let redirects: Vec<&PageRecord> = out.pages.iter().filter(|p| p.status == 301).collect();

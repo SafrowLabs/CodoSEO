@@ -156,8 +156,8 @@ fn a_geo_regression_against_the_baseline_fails_the_build_with_a_sarif_result() {
     let run = &doc["runs"][0];
     assert_eq!(run["originalUriBaseIds"]["SITE"]["uri"], after.as_str());
     let rules = run["tool"]["driver"]["rules"].as_array().expect("rules");
-    // 44 SEO checks and 7 AI & GEO checks, one rule each.
-    assert_eq!(rules.len(), 51);
+    // 44 SEO checks and 9 AI & GEO checks, one rule each.
+    assert_eq!(rules.len(), 53);
     let rule = &rules[r["ruleIndex"].as_u64().expect("an index") as usize];
     assert_eq!(rule["id"], "geo/bots_blocked");
     assert_eq!(rule["properties"]["evidenceGrade"], "A");

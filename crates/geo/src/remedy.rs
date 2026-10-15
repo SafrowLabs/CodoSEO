@@ -21,10 +21,12 @@ use crate::eligibility::{CauseSource, DirectiveSlug, Effect};
 use crate::findings::{Evidence, Finding, FindingKind, Grade, ROBOTS_DOC};
 use crate::incident::{Before, BotBefore};
 use crate::ledger::{Lag, VENDOR_DOCS, finding_sources, for_kind};
+use crate::markdown::MARKDOWN_FOR_AGENTS_DOC;
 use crate::probe::{Vendor, Verdict};
 use crate::registry::{Honours, registry};
 use crate::report::{AccessReport, path_and_query, slug_from_str};
 use crate::robots::{GroupMatch, MatchedRule, RobotsAvailability};
+use crate::signals::{CONTENT_SIGNALS_URL, SUGGESTED_LINE};
 
 /// The line before the site data in an [`agent_prompt`].
 pub const UNTRUSTED_BEGIN: &str = "----- BEGIN UNTRUSTED SITE DATA -----";
@@ -232,6 +234,8 @@ pub fn remedy(kind: FindingKind, subject: &str, ev: &Evidence, ctx: &RemedyConte
         FindingKind::FetchBlocked => fetch_blocked(subject, ev, ctx),
         FindingKind::ContentMissing => content_missing(ev, ctx),
         FindingKind::LlmsTxtUnavailable => Some(llms_txt_unavailable(ev, ctx)),
+        FindingKind::ContentSignalsMissing => Some(content_signals_missing(ev, ctx)),
+        FindingKind::MarkdownUnavailable => Some(markdown_unavailable(ev, ctx)),
     }
     .unwrap_or_else(|| generic(ctx));
     Remedy {
@@ -946,6 +950,86 @@ fn llms_txt_unavailable(ev: &Evidence, ctx: &RemedyContext) -> Body {
     }
 }
 
+// ---- Content Signals -------------------------------------------------------------------------
+
+fn content_signals_missing(ev: &Evidence, ctx: &RemedyContext) -> Body {
+    let robots = format!("{}/robots.txt", site_of(ctx.origin));
+    let mut steps = Vec::new();
+    if ev.robots_status.is_some_and(|s| (400..500).contains(&s)) {
+        steps.push(format!(
+            "Publish a robots.txt at {robots}: the site has none. With no rules yet, it can hold just `User-agent: *` and the Content-Signal line."
+        ));
+    }
+    steps.push(format!(
+        "In {robots}, add a Content-Signal line under `User-agent: *`, with your own choices: search (appear in search results), ai-input (be used as input to AI answers), ai-train (be used to train AI models), each yes or no."
+    ));
+    if !ev.malformed.is_empty() {
+        let shown: Vec<String> = ev
+            .malformed
+            .iter()
+            .take(MAX_PARTS)
+            .map(|m| clean(m, MAX_FIELD))
+            .collect();
+        steps.push(format!(
+            "Fix or remove the lines CodoSEO could not read: {}.",
+            shown.join("; ")
+        ));
+    }
+    steps.push(format!(
+        "The policy and its wording are at {CONTENT_SIGNALS_URL}. Leave every Allow and Disallow line as it is: the signals say how content may be used, robots.txt rules still decide who may crawl."
+    ));
+    Body {
+        title: "Declare Content Signals in robots.txt".to_owned(),
+        why: "Content Signals tell AI companies how your content may be used (search, AI answers, training), next to the robots.txt rules that say who may crawl. Optional and declared, not enforced.".to_owned(),
+        steps,
+        snippet: Some(Snippet {
+            label: format!("Add to {robots}, under User-agent: *"),
+            text: format!("User-agent: *\n{SUGGESTED_LINE}"),
+        }),
+        verify: vec![format!(
+            "`curl -s {}` shows the Content-Signal line under `User-agent: *`.",
+            sh(&robots)
+        )],
+    }
+}
+
+// ---- Markdown for agents ----------------------------------------------------------------------
+
+fn markdown_unavailable(ev: &Evidence, ctx: &RemedyContext) -> Body {
+    let site = site_of(ctx.origin);
+    let home = format!("{site}/");
+    let got = ev.markdown.as_ref().map(|m| clean(&m.describe(), MAX_TEXT));
+    let mut steps = Vec::new();
+    if let Some(got) = &got {
+        steps.push(format!(
+            "Asked for Markdown, {home} answered {got}. Make it answer `Accept: text/markdown` with a Markdown version of the page (`Content-Type: text/markdown`)."
+        ));
+    } else {
+        steps.push(format!(
+            "Make {home} answer `Accept: text/markdown` with a Markdown version of the page (`Content-Type: text/markdown`)."
+        ));
+    }
+    steps.push(format!(
+        "On Cloudflare, switch on Markdown for Agents for the zone ({MARKDOWN_FOR_AGENTS_DOC}): it converts your HTML to Markdown for requests that ask for it. Elsewhere, add content negotiation on the server or CDN, or publish a .md version of each page (such as /index.md) and link it from the page's head with `<link rel=\"alternate\" type=\"text/markdown\" href=\"/index.md\">`."
+    ));
+    steps.push(format!(
+        "List the Markdown pages in {site}/llms.txt so agents find them. Keep the HTML as it is: browsers and search engines still get it."
+    ));
+    Body {
+        title: "Serve a Markdown version of your pages to AI agents".to_owned(),
+        why: "AI agents read Markdown with far fewer tokens than HTML and get the text without the page chrome. Optional: no crawler depends on it.".to_owned(),
+        steps,
+        snippet: Some(Snippet {
+            label: "Add to the home page's <head> when you publish a .md version".to_owned(),
+            text: "<link rel=\"alternate\" type=\"text/markdown\" href=\"/index.md\">".to_owned(),
+        }),
+        verify: vec![format!(
+            "`curl -sI -H 'Accept: text/markdown' {}` answers 200 with `content-type: text/markdown`.",
+            sh(&home)
+        )],
+    }
+}
+
 // ---- before and now ---------------------------------------------------------------------------
 
 /// Entries a before or now line names before "and N more".
@@ -1091,6 +1175,14 @@ pub fn before_text(kind: FindingKind, before: &Before) -> Option<String> {
             0 => "llms.txt gave no answer".to_owned(),
             s => format!("llms.txt answered HTTP {s}"),
         },
+        FindingKind::ContentSignalsMissing => format!(
+            "robots.txt declared Content-Signal: {}",
+            clean(before.signals.as_deref()?, MAX_TEXT)
+        ),
+        FindingKind::MarkdownUnavailable => format!(
+            "asked for Markdown, the home page answered {}",
+            clean(before.markdown.as_deref()?, MAX_TEXT)
+        ),
     };
     (!line.is_empty()).then_some(line)
 }
@@ -1173,6 +1265,24 @@ pub fn now_text(kind: FindingKind, ev: &Evidence) -> String {
         FindingKind::LlmsTxtUnavailable => match ev.llms_status {
             Some(s) => format!("llms.txt answers HTTP {s}"),
             None => "llms.txt gives no answer".to_owned(),
+        },
+        FindingKind::ContentSignalsMissing => match (ev.signal_lines, ev.malformed.first()) {
+            (Some(n), Some(m)) if n > 0 => format!(
+                "robots.txt has {n} Content-Signal line{} and no valid signal ({})",
+                if n == 1 { "" } else { "s" },
+                clean(m, MAX_FIELD)
+            ),
+            (Some(n), None) if n > 0 => {
+                "robots.txt has Content-Signal lines but no valid signal".to_owned()
+            }
+            _ => "robots.txt has no Content-Signal line".to_owned(),
+        },
+        FindingKind::MarkdownUnavailable => match &ev.markdown {
+            Some(m) => format!(
+                "asked for Markdown, the home page answers {}",
+                clean(&m.describe(), MAX_TEXT)
+            ),
+            None => "the home page has no Markdown version".to_owned(),
         },
     }
 }
@@ -1350,7 +1460,7 @@ pub fn agent_prompt(r: &Remedy, f: &IncidentFacts) -> String {
         "Constraints:\n\
          - Do not guess where files are. Search the repository for where robots.txt, response headers, firewall or CDN rules, or page rendering are defined, and ask me if you can't find it.\n\
          - Change only what is listed above, and nothing else.\n\
-         - Never add a blanket rule: no `Allow: /` for every bot, no edit to the `User-agent: *` group, and never switch off a firewall, WAF or challenge for all traffic.\n\
+         - Never add a blanket rule: no `Allow: /` for every bot, no new Allow or Disallow line in the `User-agent: *` group, and never switch off a firewall, WAF or challenge for all traffic.\n\
          - When you are done, report what you changed: each file, the lines before and after, and how you checked it.\n\n",
     );
     out.push_str(&note(r));

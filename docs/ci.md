@@ -30,7 +30,7 @@ Comma-separated, or repeat the flag. Any gate that fails makes the exit code `1`
 | `warning` | An SEO check of severity warning or critical fails. |
 | `geo` | The GEO gates for CI, listed below. |
 | `geo:critical`, `geo:warning`, `geo:notice` | An AI access finding at that severity or worse. |
-| `<kind>` | An AI access finding of that kind: `robots_unavailable`, `bots_blocked`, `bots_not_blocked`, `answers_restricted`, `fetch_blocked`, `content_missing`, `llms_txt_unavailable`. |
+| `<kind>` | An AI access finding of that kind: `robots_unavailable`, `bots_blocked`, `bots_not_blocked`, `answers_restricted`, `fetch_blocked`, `content_missing`, `llms_txt_unavailable`, `content_signals_missing`, `markdown_unavailable`. |
 | `<kind>:<subject>` | One subject of a kind. `bots_blocked` and `bots_not_blocked` take a purpose (`search`, `user_fetch`, `agent`, `training`, `ads`); `answers_restricted` a directive (`noindex`, `nosnippet`, `max_snippet`, `noarchive`, `nocache`, `data_nosnippet`); `fetch_blocked` a cause (`challenge_cloudflare`, `blocked_403`, ...). |
 
 `geo` covers the four regressions that take a site out of AI answers:
@@ -42,7 +42,7 @@ Comma-separated, or repeat the flag. Any gate that fails makes the exit code `1`
 | `nosnippet` or `noarchive` added to important pages | `answers_restricted:nosnippet`, `answers_restricted:noarchive` |
 | Raw HTML content missing: important pages are an empty app shell before JavaScript runs | `content_missing` |
 
-The AI access checks are judged under the default intent: AI search and user-triggered bots are wanted, training, agent and ads bots are your call (never reported either way). They never touch the health score; a gate only decides the exit code. `notice` is not an SEO gate: there are too many notices to fail a build on. The `fetch_blocked` finding needs `--probes` (a synthetic fetch of up to 5 pages as each AI bot), which is off by default.
+The AI access checks are judged under the default intent: AI search and user-triggered bots are wanted, training, agent and ads bots are your call (never reported either way). They never touch the health score; a gate only decides the exit code. `notice` is not an SEO gate: there are too many notices to fail a build on. The two advisory kinds, `content_signals_missing` (robots.txt declares no Content-Signal) and `markdown_unavailable` (the home page has no Markdown version for AI agents), are Notices: `geo` leaves them out, and only `geo:notice` or their own name gates on them. The `fetch_blocked` finding needs `--probes` (a synthetic fetch of up to 5 pages as each AI bot), which is off by default.
 
 ```sh
 codoseo crawl https://example.com --fail-on critical,geo
@@ -89,7 +89,7 @@ codoseo crawl https://example.com --format github --fail-on critical,geo \
 
 `--format sarif` (or `--save codoseo.sarif`) writes [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html). A test validates the output against the [published schema](https://json.schemastore.org/sarif-2.1.0.json) on every build.
 
-- **One run**, tool `CodoSEO`, with **one rule per check**: `seo/<slug>` for the 44 SEO checks and `geo/<kind>` for the 7 AI & GEO checks, always all 51 so rule indexes never move. Each rule has a short and full description, help text (Markdown too), a `helpUri`, its default level and `properties` (`category` and `severity` for SEO; `evidenceGrade` and `sources` for AI access).
+- **One run**, tool `CodoSEO`, with **one rule per check**: `seo/<slug>` for the 44 SEO checks and `geo/<kind>` for the 9 AI & GEO checks, always all 53 so rule indexes never move. Each rule has a short and full description, help text (Markdown too), a `helpUri`, its default level and `properties` (`category` and `severity` for SEO; `evidenceGrade` and `sources` for AI access).
 - **Results**: one per page for a failing page check (at most 100 per rule; the run's `properties.omitted` counts the rest), one for a failing site-wide check, one per AI access finding. Each AI access result carries its `evidenceGrade`, `subject`, `sources`, `affectedUrls` and the `gate` value that selects it in `properties`, and its fix in the message.
 - **Level** comes from the severity: critical `error`, warning `warning`, notice `note`.
 - **Locations** are the page URLs. A site has no source files, and GitHub rejects absolute `https:` URIs next to its file source root, so each `artifactLocation.uri` is the page's path relative to the `SITE` base (`uriBaseId: "SITE"`), and `originalUriBaseIds.SITE` is the site's origin: `about/team` under `https://example.com/` is `https://example.com/about/team`. The home page is `./`; robots.txt findings point at `robots.txt`, llms.txt findings at `llms.txt`.

@@ -30,6 +30,16 @@ use uuid::Uuid;
 
 const WORKER: &str = "test-worker";
 
+/// The open incidents, without the advisory ones (Content Signals, Markdown) that most robots.txt
+/// fixtures here raise; `advisory_incidents_open_and_resolve_quietly` is about those.
+async fn open_incidents(pool: &PgPool, site: Uuid) -> Result<Vec<geo::Incident>, sqlx::Error> {
+    Ok(geo::open_incidents(pool, site)
+        .await?
+        .into_iter()
+        .filter(|i| !i.kind.is_advisory())
+        .collect())
+}
+
 async fn make_site(pool: &PgPool, domain: &str) -> Uuid {
     sqlx::query_scalar("INSERT INTO sites (domain, start_url) VALUES ($1, $2) RETURNING id")
         .bind(domain)
@@ -180,7 +190,7 @@ async fn the_first_report_is_a_quiet_baseline() {
     let site = make_site(&db.pool, "example.com").await;
     let crawl = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
 
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(open[0].kind, FindingKind::BotsBlocked);
     assert_eq!(open[0].severity, Severity::Critical);
@@ -196,16 +206,11 @@ async fn blocking_a_search_bot_opens_an_incident_and_removing_the_rule_resolves_
     let db = TestDb::new().await;
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
 
     // (a) the rule appears: one critical incident, one change, one alert job.
     let second = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(
         (open[0].kind, open[0].subject.as_str(), open[0].severity),
@@ -231,18 +236,13 @@ async fn blocking_a_search_bot_opens_an_incident_and_removing_the_rule_resolves_
 
     // Still blocked: the incident is updated, not opened again, and nothing new is recorded.
     let third = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+    assert_eq!(open_incidents(&db.pool, site).await.unwrap().len(), 1);
     assert!(change_kinds(&db.pool, third).await.is_empty());
     assert_eq!(alert_jobs(&db.pool, third).await, 0);
 
     // (b) the rule is removed: resolved by a crawl, with a notice change.
     let fourth = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
     let resolved = geo::recent_resolved(&db.pool, site, 10).await.unwrap();
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].resolution.as_deref(), Some("fixed"));
@@ -277,7 +277,7 @@ async fn an_incident_opened_by_a_later_crawl_keeps_what_the_earlier_report_held(
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     let before: Before =
         serde_json::from_value(open[0].before.clone().expect("before stored")).unwrap();
@@ -296,7 +296,7 @@ async fn an_incident_opened_by_a_later_crawl_keeps_what_the_earlier_report_held(
 
     // The next crawl updates the incident and leaves `before` as it was.
     full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    let again = geo::open_incidents(&db.pool, site).await.unwrap();
+    let again = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(again[0].before, open[0].before);
 }
 
@@ -305,7 +305,7 @@ async fn a_baseline_incident_has_nothing_before_it() {
     let db = TestDb::new().await;
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open[0].before, None);
 }
 
@@ -316,7 +316,7 @@ async fn a_site_wide_nosnippet_is_exactly_one_incident() {
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     let second = full_crawl(&db.pool, site, 200, ALLOW_ALL, Some("nosnippet")).await;
 
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(
         (open[0].kind, open[0].subject.as_str()),
@@ -341,7 +341,7 @@ async fn a_failing_robots_txt_on_a_finished_crawl_opens_robots_unavailable() {
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     // A robots.txt that fails judges only RobotsUnavailable and leaves the rest alone.
     let second = full_crawl(&db.pool, site, 503, "", None).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(open[0].kind, FindingKind::RobotsUnavailable);
     assert_eq!(
@@ -377,7 +377,7 @@ async fn the_failed_crawl_path_records_the_incident_once_across_a_retry() {
     );
     assert_eq!(alert_jobs(&db.pool, crawl).await, 1);
     // The incident from the earlier crawl (bots_blocked) was not judged, so it stays open.
-    let kinds: Vec<_> = geo::open_incidents(&db.pool, site)
+    let kinds: Vec<_> = open_incidents(&db.pool, site)
         .await
         .unwrap()
         .into_iter()
@@ -406,7 +406,7 @@ async fn an_intent_change_resolves_and_opens_quietly_without_changes() {
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     let second = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+    assert_eq!(open_incidents(&db.pool, site).await.unwrap().len(), 1);
 
     let intent = Intent {
         bots: [("OAI-SearchBot".to_owned(), Stance::Any)].into(),
@@ -416,12 +416,7 @@ async fn an_intent_change_resolves_and_opens_quietly_without_changes() {
     assert_eq!(geo::get_intent(&db.pool, site).await.unwrap(), intent);
     let (opened, resolved) = geo::reevaluate_quietly(&db.pool, site).await.unwrap();
     assert_eq!((opened, resolved), (0, 1));
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
     let r = geo::recent_resolved(&db.pool, site, 5).await.unwrap();
     assert_eq!(r[0].resolution.as_deref(), Some("intent"));
     assert_eq!(
@@ -444,7 +439,7 @@ async fn an_intent_change_resolves_and_opens_quietly_without_changes() {
     geo::set_intent(&db.pool, site, &intent).await.unwrap();
     let (opened, resolved) = geo::reevaluate_quietly(&db.pool, site).await.unwrap();
     assert_eq!((opened, resolved), (1, 0));
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open[0].kind, FindingKind::BotsNotBlocked);
     assert!(open[0].quiet);
     let total: i64 = sqlx::query_scalar("SELECT count(*) FROM changes WHERE site_id = $1")
@@ -547,7 +542,7 @@ async fn reevaluating_after_a_failed_crawl_judges_each_kind_by_the_newest_report
     geo::set_intent(&db.pool, site, &intent).await.unwrap();
     let (opened, resolved) = geo::reevaluate_quietly(&db.pool, site).await.unwrap();
     assert_eq!((opened, resolved), (0, 1));
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(open[0].kind, FindingKind::RobotsUnavailable);
     let r = geo::recent_resolved(&db.pool, site, 5).await.unwrap();
@@ -569,8 +564,8 @@ async fn another_sites_incidents_are_untouched() {
     // Site A fixes its robots.txt and changes its intent; B keeps its incident.
     full_crawl(&db.pool, a, 200, ALLOW_ALL, None).await;
     geo::reevaluate_quietly(&db.pool, a).await.unwrap();
-    assert!(geo::open_incidents(&db.pool, a).await.unwrap().is_empty());
-    let open_b = geo::open_incidents(&db.pool, b).await.unwrap();
+    assert!(open_incidents(&db.pool, a).await.unwrap().is_empty());
+    let open_b = open_incidents(&db.pool, b).await.unwrap();
     assert_eq!(open_b.len(), 1);
     assert!(open_b[0].resolved_at.is_none());
     assert_eq!(geo::open_counts(&db.pool, b).await.unwrap(), (1, 1));
@@ -810,12 +805,7 @@ async fn a_stale_workers_finalize_leaves_no_geo_rows() {
     assert!(result.is_err());
 
     assert_eq!(report_count(&db.pool, site).await, 1);
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
     assert!(change_kinds(&db.pool, crawl).await.is_empty());
     assert_eq!(alert_jobs(&db.pool, crawl).await, 0);
 }
@@ -884,12 +874,7 @@ async fn an_intent_saved_while_a_crawl_runs_is_the_one_its_findings_follow() {
     .expect("finalize");
 
     // The crawl follows the intent stored when it finished: nothing reopens, nobody is told.
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
     assert!(change_kinds(&db.pool, crawl).await.is_empty());
     assert_eq!(alert_jobs(&db.pool, crawl).await, 0);
 }
@@ -905,7 +890,7 @@ async fn a_kind_first_judged_after_failed_crawls_opens_quietly() {
 
     // The first good crawl is the baseline for the bots and the answers: no storm.
     let good = full_crawl(&db.pool, site, 200, BLOCK_OAI, Some("nosnippet")).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 2);
     assert!(open.iter().all(|i| i.quiet), "{open:?}");
     assert!(change_kinds(&db.pool, good).await.is_empty());
@@ -1015,7 +1000,7 @@ async fn a_widening_incident_is_announced_and_its_resolution_too() {
     // PerplexityBot is blocked too: same incident, same severity, but news.
     let both = format!("{BLOCK_OAI}\nUser-agent: PerplexityBot\nDisallow: /\n");
     let widened = full_crawl(&db.pool, site, 200, &both, None).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     let (kind, after): (String, String) =
         sqlx::query_as("SELECT kind::text, after_value FROM changes WHERE crawl_id = $1")
@@ -1045,7 +1030,7 @@ async fn a_quiet_incident_that_escalates_is_loud_from_then_on() {
     let site = make_site(&db.pool, "example.com").await;
     let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
     full_crawl(&db.pool, site, 200, below_home, None).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open[0].severity, Severity::Warning);
     assert!(open[0].quiet);
 
@@ -1068,7 +1053,7 @@ async fn an_accepted_directive_resolves_its_incident_and_noindex_cannot_be_accep
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     full_crawl(&db.pool, site, 200, ALLOW_ALL, Some("nosnippet")).await;
-    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+    assert_eq!(open_incidents(&db.pool, site).await.unwrap().len(), 1);
 
     let accept = Intent {
         accepted_directives: [DirectiveSlug::Nosnippet].into(),
@@ -1083,12 +1068,7 @@ async fn an_accepted_directive_resolves_its_incident_and_noindex_cannot_be_accep
     // The next crawl that still finds it opens nothing.
     let again = full_crawl(&db.pool, site, 200, ALLOW_ALL, Some("nosnippet")).await;
     assert!(change_kinds(&db.pool, again).await.is_empty());
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
 
     let noindex = Intent {
         accepted_directives: [DirectiveSlug::Noindex].into(),
@@ -1107,7 +1087,7 @@ async fn a_site_wide_noarchive_is_one_incident_naming_bing() {
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     let second = full_crawl(&db.pool, site, 200, ALLOW_ALL, Some("noarchive")).await;
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(
         (open[0].kind, open[0].subject.as_str()),
@@ -1153,12 +1133,7 @@ async fn a_stale_worker_cannot_record_a_failed_crawl() {
         assert_eq!(alert_jobs(&db.pool, id).await, 0);
     }
     assert_eq!(report_count(&db.pool, site).await, 1);
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
 }
 
 // ---- Synthetic fetch probes (GB.8) -------------------------------------------------------------
@@ -1230,7 +1205,7 @@ async fn probed_crawl(pool: &PgPool, site: Uuid, verdicts: &[(&str, Verdict)]) -
 
 /// The site's open `fetch_blocked` incidents.
 async fn fetch_blocked_open(pool: &PgPool, site: Uuid) -> Vec<geo::Incident> {
-    geo::open_incidents(pool, site)
+    open_incidents(pool, site)
         .await
         .unwrap()
         .into_iter()
@@ -1541,7 +1516,7 @@ fn llms_down() -> LlmsTxtFetch {
 }
 
 async fn open_of(pool: &PgPool, site: Uuid, kind: FindingKind) -> Vec<geo::Incident> {
-    geo::open_incidents(pool, site)
+    open_incidents(pool, site)
         .await
         .unwrap()
         .into_iter()
@@ -1682,7 +1657,7 @@ async fn site_with_incident(pool: &PgPool) -> (Uuid, i64) {
     let site = make_site(pool, "example.com").await;
     full_crawl(pool, site, 200, ALLOW_ALL, None).await;
     full_crawl(pool, site, 200, BLOCK_OAI_TXT, None).await;
-    let open = geo::open_incidents(pool, site).await.unwrap();
+    let open = open_incidents(pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     (site, open[0].id)
 }
@@ -1732,7 +1707,7 @@ async fn the_repair_fields_of_an_incident_round_trip() {
     assert!(i.verified_at.is_some());
     assert_eq!(i.resolved_by.as_deref(), Some("recheck"));
     // The listings read the same columns.
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open[0].resolved_by.as_deref(), Some("recheck"));
 
     // Deleting the account clears the reference but keeps the incident.
@@ -1879,10 +1854,7 @@ async fn recheck_values_are_checked_and_go_with_their_incident_and_site() {
         let site = make_site(&db.pool, "other.example").await;
         full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
         full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
-        (
-            site,
-            geo::open_incidents(&db.pool, site).await.unwrap()[0].id,
-        )
+        (site, open_incidents(&db.pool, site).await.unwrap()[0].id)
     };
     insert_recheck(&db.pool, site2, incident2).await.unwrap();
     sqlx::query("DELETE FROM sites WHERE id = $1")
@@ -1952,7 +1924,7 @@ async fn an_accepted_incident_stays_listed_but_is_not_counted_and_writes_no_chan
             .accepted_at,
         accepted_at
     );
-    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+    assert_eq!(open_incidents(&db.pool, site).await.unwrap().len(), 1);
     assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
 
     // Widened: same incident, no change row, no alert job, still quiet.
@@ -2108,7 +2080,7 @@ async fn a_snoozed_incident_still_writes_its_changes_but_alerts_nobody() {
     let site = make_site(&db.pool, "example.com").await;
     let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
     full_crawl(&db.pool, site, 200, below_home, None).await;
-    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let id = open_incidents(&db.pool, site).await.unwrap()[0].id;
     let until = OffsetDateTime::now_utc() + TimeDuration::days(7);
     geo::snooze(&db.pool, site, id, until).await.unwrap();
     assert_eq!(geo::open_counts(&db.pool, site).await.unwrap(), (0, 0));
@@ -2147,7 +2119,7 @@ async fn an_expired_snooze_alerts_again() {
     let site = make_site(&db.pool, "example.com").await;
     let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
     full_crawl(&db.pool, site, 200, below_home, None).await;
-    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let id = open_incidents(&db.pool, site).await.unwrap()[0].id;
     geo::snooze(
         &db.pool,
         site,
@@ -2204,7 +2176,7 @@ async fn resolved_by_says_whether_a_crawl_or_the_intent_resolved_it() {
     assert_eq!(i.resolved_by.as_deref(), Some("crawl"));
 
     full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
-    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let id = open_incidents(&db.pool, site).await.unwrap()[0].id;
     let intent = Intent {
         bots: [("OAI-SearchBot".to_owned(), Stance::Any)].into(),
         ..Intent::default()
@@ -2403,12 +2375,7 @@ async fn a_repair_is_resolved_in_two_steps_by_rechecks() {
         (f.status, f.outcome),
         (RecheckStatus::Done, Some(RecheckOutcome::Clean))
     );
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -2547,7 +2514,7 @@ async fn a_recheck_never_opens_an_incident() {
     .await
     .unwrap();
     assert_eq!(outcome, Some(RecheckOutcome::StillFailing));
-    let open = geo::open_incidents(&db.pool, site).await.unwrap();
+    let open = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(open[0].id, id);
 }
@@ -2557,7 +2524,7 @@ async fn a_quiet_incidents_verified_resolution_writes_no_change() {
     let db = TestDb::new().await;
     let site = make_site(&db.pool, "example.com").await;
     full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
-    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let id = open_incidents(&db.pool, site).await.unwrap()[0].id;
     assert!(quiet_of(&db.pool, site, "bots_blocked").await);
     let owner = make_account(&db.pool, "o@example.com").await;
     let followup = recover(&db.pool, site, id, owner).await;
@@ -2827,7 +2794,7 @@ async fn the_daily_cap_counts_every_site_of_the_account() {
     let b = make_site(&db.pool, "other.example").await;
     full_crawl(&db.pool, b, 200, ALLOW_ALL, None).await;
     full_crawl(&db.pool, b, 200, BLOCK_OAI_TXT, None).await;
-    let ib = geo::open_incidents(&db.pool, b).await.unwrap()[0].id;
+    let ib = open_incidents(&db.pool, b).await.unwrap()[0].id;
     sqlx::query("UPDATE sites SET account_id = $1")
         .bind(owner)
         .execute(&db.pool)
@@ -3057,7 +3024,7 @@ async fn a_recheck_that_sees_it_worse_leaves_the_escalation_to_the_next_crawl() 
     let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     full_crawl(&db.pool, site, 200, below_home, None).await;
-    let before = geo::open_incidents(&db.pool, site).await.unwrap();
+    let before = open_incidents(&db.pool, site).await.unwrap();
     assert_eq!(before.len(), 1);
     let id = before[0].id;
 
@@ -3089,12 +3056,7 @@ async fn an_intent_change_does_not_reopen_what_a_recheck_verified_fixed() {
     geo::apply_recheck(&db.pool, followup, &report, &kinds, None)
         .await
         .unwrap();
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
 
     // An unrelated intent change: the newest report still holds the block the rechecks saw
     // fixed, but it is older than that verdict.
@@ -3107,16 +3069,11 @@ async fn an_intent_change_does_not_reopen_what_a_recheck_verified_fixed() {
         geo::reevaluate_quietly(&db.pool, site).await.unwrap(),
         (0, 0)
     );
-    assert!(
-        geo::open_incidents(&db.pool, site)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(open_incidents(&db.pool, site).await.unwrap().is_empty());
 
     // A crawl that sees it again does reopen it.
     full_crawl(&db.pool, site, 200, BLOCK_OAI_TXT, None).await;
-    assert_eq!(geo::open_incidents(&db.pool, site).await.unwrap().len(), 1);
+    assert_eq!(open_incidents(&db.pool, site).await.unwrap().len(), 1);
 }
 
 /// A report like [`probed_crawl`]'s, without a crawl: what a fetch recheck that probed these
@@ -3399,7 +3356,7 @@ async fn a_snoozed_incident_that_got_worse_alerts_once_when_the_snooze_ends() {
     let below_home = "User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /a\n";
     full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
     full_crawl(&db.pool, site, 200, below_home, None).await;
-    let id = geo::open_incidents(&db.pool, site).await.unwrap()[0].id;
+    let id = open_incidents(&db.pool, site).await.unwrap()[0].id;
     geo::snooze(
         &db.pool,
         site,
@@ -3545,6 +3502,12 @@ async fn a_robots_txt_that_still_does_not_answer_is_still_failing() {
 }
 
 /// The crawl's stored `(geo_score, overall_score, geo_checks_passed, geo_checks_applicable)`.
+/// [`ALLOW_ALL`] and [`BLOCK_OAI`] with a Content-Signal line: no advisory finding, so a score
+/// moves only with the bot findings. The pages of these crawls are not counted (the check report
+/// is empty), so the Recommended tier would be the Content Signals check alone.
+const SIGNALS_ALLOW: &str = "User-agent: *\nAllow: /\nContent-Signal: search=yes\n";
+const SIGNALS_BLOCK_OAI: &str = "User-agent: *\nAllow: /\nContent-Signal: search=yes\n\nUser-agent: OAI-SearchBot\nDisallow: /\n";
+
 async fn scores(
     pool: &PgPool,
     crawl: Uuid,
@@ -3563,7 +3526,7 @@ async fn scores(
 async fn finalize_scores_geo_and_overall_and_reads_them_back() {
     let db = TestDb::new().await;
     let site = make_site(&db.pool, "example.com").await;
-    let clean = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let clean = full_crawl(&db.pool, site, 200, SIGNALS_ALLOW, None).await;
     let (geo_score, overall, passed, applicable) = scores(&db.pool, clean).await;
     assert_eq!(geo_score, Some(100));
     // round(0.6 x 90 + 0.4 x 100).
@@ -3571,7 +3534,7 @@ async fn finalize_scores_geo_and_overall_and_reads_them_back() {
     assert_eq!(passed, applicable);
     assert!(applicable.unwrap() > 0);
 
-    let blocked = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let blocked = full_crawl(&db.pool, site, 200, SIGNALS_BLOCK_OAI, None).await;
     let (geo_score, overall, passed, applicable) = scores(&db.pool, blocked).await;
     assert!(geo_score.unwrap() < 100);
     assert_eq!(
@@ -3636,8 +3599,8 @@ async fn finalize_scores_geo_and_overall_and_reads_them_back() {
 async fn marking_a_block_intended_rescores_the_newest_crawl_only() {
     let db = TestDb::new().await;
     let site = make_site(&db.pool, "example.com").await;
-    let first = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
-    let second = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let first = full_crawl(&db.pool, site, 200, SIGNALS_BLOCK_OAI, None).await;
+    let second = full_crawl(&db.pool, site, 200, SIGNALS_BLOCK_OAI, None).await;
     let before = scores(&db.pool, second).await;
     assert!(before.0.unwrap() < 100);
 
@@ -3655,4 +3618,50 @@ async fn marking_a_block_intended_rescores_the_newest_crawl_only() {
     assert_eq!(latest.summary().unwrap().geo.unwrap().score, 100);
     // The older crawl keeps the score of the intent it was finished under.
     assert_eq!(scores(&db.pool, first).await, before);
+}
+
+// ---- advisory kinds --------------------------------------------------------------------------
+
+#[tokio::test]
+async fn advisory_incidents_open_and_resolve_quietly() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let signals = "User-agent: *\nContent-Signal: search=yes, ai-train=no\nAllow: /\n";
+    // A baseline that declares Content Signals, then a crawl whose robots.txt does not.
+    full_crawl(&db.pool, site, 200, signals, None).await;
+    let second = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let open: Vec<geo::Incident> = geo::open_incidents(&db.pool, site)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == FindingKind::ContentSignalsMissing)
+        .collect();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].severity, Severity::Notice);
+    // Judged by the crawl before, and still quiet: advisory kinds never alert.
+    assert!(open[0].quiet);
+    let changes = change_kinds(&db.pool, second).await;
+    assert!(
+        changes.iter().all(|(k, _)| k == "ai_preferences_changed"),
+        "{changes:?}"
+    );
+    // What robots.txt declared before is kept for the fix.
+    let before: codoseo_geo::incident::Before =
+        serde_json::from_value(open[0].before.clone().unwrap()).unwrap();
+    assert_eq!(before.signals.as_deref(), Some("search=yes, ai-train=no"));
+
+    // Fixed: resolved, quietly.
+    let third = full_crawl(&db.pool, site, 200, signals, None).await;
+    assert!(
+        geo::open_incidents(&db.pool, site)
+            .await
+            .unwrap()
+            .iter()
+            .all(|i| i.kind != FindingKind::ContentSignalsMissing)
+    );
+    let changes = change_kinds(&db.pool, third).await;
+    assert!(
+        changes.iter().all(|(k, _)| k == "ai_preferences_changed"),
+        "{changes:?}"
+    );
 }

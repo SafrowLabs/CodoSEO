@@ -300,6 +300,8 @@ pub struct Overview {
     pub content: ContentCard,
     /// `/llms.txt`, informational.
     pub llms: LlmsCard,
+    /// Content Signals in robots.txt and Markdown for agents: advisory checks.
+    pub ready: ReadyCard,
     /// Shown instead of the bots table when robots.txt gave no verdicts.
     pub robots_callout: Option<Callout>,
     /// `robots.txt · HTTP 200`
@@ -739,6 +741,7 @@ async fn render_page(
         ),
         content: content_card(site, &base, report),
         llms: llms_card(report.llms_txt.as_ref(), report.llms_txt_skipped),
+        ready: ready_card(report, &intent),
         robots_callout: robots_callout(report),
         robots_aside: robots_aside(report),
         bot_attention: bot_groups
@@ -1720,6 +1723,10 @@ fn incident_view(
         })
         .collect();
     let quiet = i.quiet.then(|| match report_at {
+        _ if i.kind.is_advisory() => (
+            "Advisory",
+            "A nice-to-have: listed and scored, never alerted",
+        ),
         // The same transaction: Postgres' now() is the same instant for both rows. Quiet then
         // means no earlier crawl could check this kind of issue (the first one, or the first
         // to read what earlier failed crawls couldn't).
@@ -2425,6 +2432,113 @@ fn content_card(site: &Site, base: &str, report: &AccessReport) -> ContentCard {
             .collect(),
         source: NON_RENDERING_SOURCE,
         grade,
+    }
+}
+
+/// The "Content Signals and Markdown" section: two advisory checks, each a row.
+pub struct ReadyCard {
+    pub rows: Vec<ReadyRow>,
+    pub signals_spec: &'static str,
+    pub markdown_doc: &'static str,
+}
+
+pub struct ReadyRow {
+    pub label: &'static str,
+    /// `None`: not checked in this report.
+    pub ok: Option<bool>,
+    pub detail: Vec<Seg>,
+    /// Malformed values, a consistency hint.
+    pub notes: Vec<String>,
+}
+
+pub(crate) fn ready_card(report: &AccessReport, intent: &Intent) -> ReadyCard {
+    use codoseo_core::output::AlternateSource;
+    use codoseo_geo::markdown::MarkdownState;
+    use codoseo_geo::signals::{SUGGESTED_LINE, summarize, training_hint};
+
+    let mut rows = Vec::new();
+    let signals = if report.has_verdicts() {
+        let summary = summarize(&report.declared.content_signals);
+        let mut notes = summary.malformed.clone();
+        notes.extend(training_hint(&summary, intent));
+        match summary.line_text() {
+            Some(line) => ReadyRow {
+                label: "Content Signals",
+                ok: Some(true),
+                detail: summary_segments(&format!("robots.txt declares `{line}`.")),
+                notes,
+            },
+            None => ReadyRow {
+                label: "Content Signals",
+                ok: Some(false),
+                detail: summary_segments(&format!(
+                    "robots.txt declares none. Add `{SUGGESTED_LINE}` (your own choices) under `User-agent: *`."
+                )),
+                notes,
+            },
+        }
+    } else {
+        ReadyRow {
+            label: "Content Signals",
+            ok: None,
+            detail: summary_segments("Not checked: robots.txt could not be read."),
+            notes: Vec::new(),
+        }
+    };
+    rows.push(signals);
+    let markdown = match &report.markdown {
+        None => ReadyRow {
+            label: "Markdown for agents",
+            ok: None,
+            detail: summary_segments(
+                "Not checked in this report: reports from before this check, and crawls that skip site signals, leave it out.",
+            ),
+            notes: Vec::new(),
+        },
+        Some(m) if m.state == MarkdownState::Unreachable || !report.declared.home_read => {
+            ReadyRow {
+                label: "Markdown for agents",
+                ok: None,
+                detail: summary_segments(
+                    "Not checked: the home page did not load, so there was nothing to ask for as Markdown.",
+                ),
+                notes: Vec::new(),
+            }
+        }
+        Some(m) => ReadyRow {
+            label: "Markdown for agents",
+            ok: Some(m.served()),
+            detail: summary_segments(&match m.state {
+                MarkdownState::Negotiated => format!(
+                    "The home page answers `Accept: text/markdown` with Markdown ({}).",
+                    codoseo_geo::markdown::describe_fetch(&m.negotiated)
+                ),
+                MarkdownState::Alternate => {
+                    let (url, source) = m
+                        .alternate
+                        .clone()
+                        .unwrap_or((String::new(), AlternateSource::LinkTag));
+                    format!(
+                        "The home page advertises a Markdown version at `{url}` ({}), and it answers with Markdown.",
+                        match source {
+                            AlternateSource::LinkTag => "a link in its HTML",
+                            AlternateSource::LinkHeader => "a Link header",
+                        }
+                    )
+                }
+                _ => format!(
+                    "Asked for Markdown (`Accept: text/markdown`), the home page answered {}.",
+                    m.describe()
+                ),
+            }),
+            notes: Vec::new(),
+        },
+    };
+    rows.push(markdown);
+    ReadyCard {
+        rows,
+        signals_spec: codoseo_geo::signals::CONTENT_SIGNALS_URL,
+        markdown_doc: codoseo_geo::markdown::MARKDOWN_FOR_AGENTS_DOC,
     }
 }
 
