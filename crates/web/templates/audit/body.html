@@ -1,15 +1,15 @@
 {%- import "partials/mascot.html" as m -%}
+{%- import "partials/operator_logo.html" as op -%}
 <div id="audit-body" class="page au"{% if reloads_on_queue() %} hx-get="{{ base }}/audit" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
 {% if let Some(d) = done %}
   <div class="page-head au-head">
     <div class="au-title">
+      <span class="au-domain">{{ domain }}</span>
       <div class="au-title-row">
         <h1>Site audit</h1>
-        <span class="badge au-chip {{ d.seo_chip.class }}" title="{{ d.seo_chip.tip }}">{{ d.seo_chip.text }}</span>
-        {% if let Some(g) = d.geo_chip %}<span class="badge au-chip {{ g.class }}" title="{{ g.tip }}">{{ g.text }}</span>{% endif %}
         {% if let Some(stop) = d.stop_chip %}<span class="chip">{{ stop }}</span>{% endif %}
       </div>
-      <div class="au-meta mono" title="Finished {{ d.finished }}">{{ d.meta }}</div>
+      <div class="au-meta" title="Finished {{ d.finished }}">{{ d.meta }}</div>
     </div>
     <span class="grow"></span>
     {% if !demo %}
@@ -20,209 +20,217 @@
     {% endif %}
   </div>
   {% if let Some(live) = live %}{{ live|safe }}{% endif %}
-
-  <section class="card au-geo" aria-labelledby="au-geo-h">
-    <div class="au-geo-head">
-      <div class="au-geo-title">
-        <div class="au-title-row">
-          <h2 id="au-geo-h">AI &amp; search · GEO audit</h2>
-          <span class="au-tag is-sunk">Access &amp; checks · not traffic</span>
-          <span class="au-tag">Not part of the health score</span>
-        </div>
-        <p class="muted">What each operator's bots may fetch (robots.txt), what our synthetic fetch saw, and which answers can quote you.</p>
-      </div>
-      {% if demo %}<a class="btn au-open" href="#ai-fixes">See the fixes<svg class="icon"><use href="#i-arrow"/></svg></a>{% else %}<a class="btn au-open" href="{{ base }}/ai-access">Open AI access<svg class="icon"><use href="#i-arrow"/></svg></a>{% endif %}
-    </div>
-    {% if let Some(g) = d.geo.section %}
-    <div class="au-aikpis">
-      {% for k in g.kpis %}
-      <div class="au-aikpi"><span class="au-label">{{ k.label }}</span><b{% if !k.class.is_empty() %} class="{{ k.class }}"{% endif %}>{{ k.value }}</b><span class="au-note">{{ k.note }}</span></div>
-      {% endfor %}
-    </div>
-    {% if let Some(note) = g.robots_note %}<p class="au-callout">{{ note }}</p>{% endif %}
-    <div class="au-ops">
-      {% for o in g.operators %}
-      <article class="au-op" style="--i:{{ loop.index0 }}" aria-label="{{ o.name }}: {{ o.status }}">
-        <div class="au-op-head">
-          <span class="au-logo" aria-hidden="true">{% if let Some(src) = o.logo %}<img src="{{ src }}" alt="" width="22" height="22" loading="lazy">{% else %}<b>{{ o.monogram }}</b>{% endif %}</span>
-          <span class="au-op-name"><b>{{ o.name }}</b><span class="mono">{{ o.count }}</span></span>
-          <span class="badge {{ o.status_class }}">{{ o.status }}</span>
-        </div>
-        <p class="au-op-summary mono">{{ o.summary }}</p>
-        <ul class="au-bots">
-          {% for b in o.bots %}
-          <li><span class="au-bot"><span class="mono">{{ b.token }}</span><span>{{ b.purpose }}</span></span><span class="au-bot-state"><span class="badge {{ b.robots_class }}" title="robots.txt{% if !b.robots_tip.is_empty() %}: {{ b.robots_tip }}{% endif %}">{{ b.robots }}</span><span class="badge {{ b.fetch_class }}" title="Synthetic fetch: {{ b.fetch_tip }}">{{ b.fetch }}</span></span></li>
-          {% endfor %}
-        </ul>
-      </article>
-      {% endfor %}
-    </div>
-    <div class="au-geo-foot">
-      <div class="au-box">
-        <div class="au-box-head"><h3>Can AI answers quote you?</h3><span class="mono faint">{{ g.engines_aside }}</span></div>
-        <div class="au-engines">
-          {% for e in g.engines %}
-          <div class="au-engine" title="{{ e.full }}"><span>{{ e.name }}</span><span class="au-track"><span class="{{ e.class }}" style="width:{{ e.width }}%"></span></span><span class="mono muted">{{ e.label }}</span></div>
-          {% endfor %}
-        </div>
-      </div>
-      {% if let Some(ai) = d.geo.panel %}
-      <div class="au-box" id="ai-access-panel">
-        <div class="au-box-head"><h3>Open AI issues</h3><span class="mono faint">Not part of the health score</span></div>
-        {% if ai.clear %}
-        <p class="au-clear"><span class="badge t-ok"><svg class="icon" style="width:13px;height:13px"><use href="#i-check"/></svg>No issues</span>Nothing open, accepted or snoozed.</p>
-        {% else %}
-        <div class="legend legend-rows">
-          {% for r in ai.rows %}
-          <div><span class="k">{{ r.label }}</span><span class="mono num">{{ r.total }}</span>{% for c in r.chips %}<span class="badge {{ c.0 }}">{{ c.1 }}</span>{% endfor %}</div>
-          {% endfor %}
-        </div>
-        {% if !ai.links.is_empty() %}
-        <ul class="au-incidents">
-          {% for i in ai.links %}<li><a href="{{ i.href }}"><span class="badge sev-{{ i.severity }}">{{ i.severity_label }}</span><span class="trunc">{{ i.title }}</span><span class="au-go">Fix<svg class="icon"><use href="#i-arrow"/></svg></span></a></li>{% endfor %}
-        </ul>
-        {% if let Some(more) = ai.more %}<p class="muted au-small">{{ more }}</p>{% endif %}
-        {% endif %}
-        {% endif %}
-        {% if ai.weakest.is_some() || ai.verifying.is_some() %}
-        <p class="muted au-small">{% if let Some(w) = ai.weakest %}{{ w }}{% endif %}{% if ai.weakest.is_some() && ai.verifying.is_some() %} · {% endif %}{% if let Some(v) = ai.verifying %}{{ v }}{% endif %}</p>
-        {% endif %}
-        {% if demo %}<p class="au-small"><a class="au-link" href="#ai-fixes">See each fix</a> below.</p>{% else %}<p class="au-small"><a class="au-link" href="{{ base }}/ai-access">View AI access</a> to fix, recheck, accept or snooze.</p>{% endif %}
-      </div>
-      {% endif %}
-      <div class="au-box au-soon">
-        <span class="au-label">Coming with log ingestion (C1)</span>
-        <h3>Real bot activity</h3>
-        <p class="muted">Last fetch, hits and errors per bot from your own access logs, verified against each operator's IP list, with spoofed claimants split out. Until then this section shows declared access and synthetic checks only.</p>
-        <div class="au-soon-bars" aria-hidden="true"><span style="height:30%"></span><span style="height:55%"></span><span style="height:40%"></span><span style="height:75%"></span><span style="height:60%"></span><span style="height:90%"></span><span style="height:50%"></span></div>
-      </div>
-    </div>
-    {% else %}
-    <p class="au-callout">{{ d.geo.empty }}</p>
+  {% if let Some(f) = d.failed %}
+  <div class="au-failed" role="alert">
+    <i class="sdot is-err" aria-hidden="true"></i>
+    <span class="au-failed-text"><b>Crawl #{{ f.number }} failed{% if !f.ago.is_empty() %} {{ f.ago }}{% endif %}.</b> {{ f.reason }} Showing results from crawl #{{ d.number }} below.</span>
+    {% if !demo %}
+    <a class="au-link" href="{{ base }}/crawls">Crawl log</a>
+    <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Retry crawl</button>
     {% endif %}
+  </div>
+  {% endif %}
+
+  <section class="sc-row" aria-labelledby="sc-h">
+    <h2 id="sc-h" class="sr-only">Scores</h2>
+    {% for c in d.cards %}
+    {% if let Some(href) = c.href %}<a class="card sc sc-{{ c.key }} {{ c.tone }}" href="{{ href }}">{% else %}<div class="card sc sc-{{ c.key }} {{ c.tone }}">{% endif %}
+      <span class="sc-label">{% if let Some(t) = c.tag %}<span class="atag {{ t.0 }}">{{ t.1 }}</span>{% endif %}<span>{{ c.label }}</span>{% if c.help %}<button type="button" class="q" popovertarget="help-{{ c.key }}" aria-label="How the {% if c.key == "overall" %}overall{% else %}GEO{% endif %} score works">?</button>{% endif %}</span>
+      <span class="sc-val">{% if c.count.is_empty() %}<b>{{ c.value }}</b>{% else %}<b data-count="{{ c.count }}">{{ c.value }}</b>{% endif %}{% if !c.unit.is_empty() %}<small>{{ c.unit }}</small>{% endif %}</span>
+      <span class="sc-line">{% for p in c.change %}<span class="{{ p.class }}">{{ p.text }}</span>{% endfor %}</span>
+      <span class="sc-line">{% if !c.dots.is_empty() %}<span class="sc-dots" aria-hidden="true">{% for dot in c.dots %}<i class="sdot is-{{ dot }}"></i>{% endfor %}</span>{% endif %}{% for p in c.detail %}<span class="{{ p.class }}">{{ p.text }}</span>{% endfor %}</span>
+    {% if c.href.is_some() %}</a>{% else %}</div>{% endif %}
+    {% endfor %}
+    <div id="help-overall" popover class="pop">
+      <p>One number for search and AI: <b>60% SEO score + 40% GEO score</b>.</p>
+      <p>Its check count adds the SEO checks and the GEO checks that apply to this site.</p>
+    </div>
+    <div id="help-geo" popover class="pop">
+      <p>How well AI tools can find, read and quote your site.</p>
+      <p><b>70 pts</b> Essential: AI products can reach your pages and read the text.</p>
+      <p><b>30 pts</b> Recommended: extras such as structured data, descriptions and llms.txt.</p>
+      <p>Bots you chose to block don’t count. Checks that don’t apply are skipped.</p>
+    </div>
   </section>
 
-  <div class="kpis au-kpis" aria-label="Headline metrics">
-    {% for k in d.kpis %}
-    <div class="kpi">
-      <div class="kpi-label"><span class="swatch {{ k.swatch }}"></span>{{ k.label }}</div>
-      <div class="kpi-value">{% for p in k.parts %}<b{% if !p.count.is_empty() %} data-count="{{ p.count }}"{% endif %}>{{ p.text }}</b>{% if !p.unit.is_empty() %}<span>{{ p.unit }}</span>{% endif %}{% endfor %}</div>
-      <div class="kpi-delta{% if !k.tone.is_empty() %} {{ k.tone }}{% endif %}">{{ k.delta }}</div>
-    </div>
-    {% endfor %}
-  </div>
-
-  <div class="au-two">
-    <section class="card au-card" aria-labelledby="au-trend-h">
-      <div class="au-card-head"><h2 id="au-trend-h">Health score over time</h2><span class="mono muted">{{ d.trend.aside }}</span></div>
-      {% if let Some(e) = d.trend.empty %}
-      <p class="au-empty">{{ e }}</p>
-      {% else %}
-      <div class="au-trend">
-        <svg role="img" aria-label="{{ d.trend.label }}" viewBox="0 0 640 180" preserveAspectRatio="none">
-          {% for gl in d.trend.grid %}<line x1="0" x2="640" y1="{{ "{:.1}"|format(gl.0) }}" y2="{{ "{:.1}"|format(gl.0) }}" class="au-gridline" vector-effect="non-scaling-stroke"/>{% endfor %}
-          <path d="{{ d.trend.area }}" class="au-area"/>
-          <polyline points="{{ d.trend.points }}" class="au-line" vector-effect="non-scaling-stroke"/>
-        </svg>
-        {% for gl in d.trend.grid %}<span class="au-ylabel mono" style="top:{{ "{:.1}"|format(gl.2) }}%" aria-hidden="true">{{ gl.1 }}</span>{% endfor %}
-        <span class="au-dot" style="left:{{ "{:.1}"|format(d.trend.last.0) }}%;top:{{ "{:.1}"|format(d.trend.last.1) }}%" title="Latest crawl: {{ d.trend.last.2 }}"></span>
-      </div>
-      <div class="au-xaxis mono" aria-hidden="true">{% for a in d.trend.axis %}<span style="left:{{ "{:.1}"|format(a.1) }}%">{{ a.0 }}</span>{% endfor %}</div>
-      {% if let Some(n) = d.trend.note %}<p class="muted au-small">▲ {{ n }}</p>{% endif %}
-      {% endif %}
-    </section>
-
-    <section class="card au-card" aria-labelledby="au-fixes-h">
-      <div class="au-card-head"><h2 id="au-fixes-h">Top fixes</h2><span class="mono muted">ranked by score points regained</span></div>
-      {% if d.fixes.is_empty() %}
-      <p class="au-clear"><span class="badge t-ok"><svg class="icon" style="width:13px;height:13px"><use href="#i-check"/></svg>All clear</span>Every check passed on this crawl. Nice work.</p>
-      {% else %}
-      <div class="au-fixes">
-        {% for f in d.fixes %}{% include "audit/_fix.html" %}{% endfor %}
-      </div>
-      {% if !d.more_fixes.is_empty() %}
-      <details class="au-more">
-        <summary>Show all {{ d.fixes.len() + d.more_fixes.len() }} failing checks</summary>
-        <div class="au-fixes">
-          {% for f in d.more_fixes %}{% include "audit/_fix.html" %}{% endfor %}
+  <div class="au-main">
+    <section id="fix" class="card fx" aria-labelledby="fx-h">
+      <div class="fx-top">
+        <div class="fx-title-block">
+          <h2 id="fx-h">Fix these, in order</h2>
+          <p class="muted">SEO and AI issues in one list, ranked by the points you get back. Blocks you marked as intended are left out.</p>
         </div>
-      </details>
-      {% endif %}
-      {% endif %}
-    </section>
-  </div>
-
-  <div class="au-two">
-    <section class="card au-card" aria-labelledby="au-sev-h">
-      <div class="au-card-head"><h2 id="au-sev-h">Issues by severity</h2><span class="au-legend"><span><i class="bg-err"></i>Critical</span><span><i class="bg-warn"></i>Warning</span><span><i class="bg-ghost"></i>Notice</span></span></div>
-      <div class="au-sev" role="img" aria-label="Failing pages by severity, {{ d.severity_aside }}">
-        {% for b in d.severity %}
-        <div class="au-sev-col" title="{{ b.tip }}">
-          <span class="mono muted">{{ b.total }}</span>
-          <div class="au-sev-stack"><span class="bg-err" style="height:{{ b.critical }}%"></span><span class="bg-warn" style="height:{{ b.warning }}%"></span><span class="bg-ghost" style="height:{{ b.notice }}%"></span></div>
-          <span class="mono faint">{{ b.label }}</span>
+        {% if !d.fixes.is_clear() %}
+        <div class="fx-tools">
+          <div class="fx-filters" role="group" aria-label="Show">
+            <button type="button" class="btn btn-sm" data-fx-filter="all" aria-pressed="true">All <span class="n">{{ d.fixes.total }}</span></button>
+            <button type="button" class="btn btn-sm" data-fx-filter="critical" aria-pressed="false">Critical <span class="n">{{ d.fixes.critical }}</span></button>
+            <button type="button" class="btn btn-sm" data-fx-filter="seo" aria-pressed="false">SEO <span class="n">{{ d.fixes.seo }}</span></button>
+            <button type="button" class="btn btn-sm" data-fx-filter="ai" aria-pressed="false">AI <span class="n">{{ d.fixes.ai }}</span></button>
+          </div>
+          <button type="button" class="btn btn-sm" data-copy="{{ d.fixes.all_prompts }}"><svg class="icon"><use href="#i-copy"/></svg>Copy all fix prompts</button>
+        </div>
+        {% endif %}
+      </div>
+      <div class="fx-scroll" tabindex="0" role="region" aria-label="Issues to fix">
+        {% if d.fixes.is_clear() %}
+        <div class="fx-clear">
+          <span class="fx-check" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
+          <b>Nothing to fix · {{ d.fixes.checks_passed }} of {{ d.fixes.checks_total }}</b>
+          <span class="muted">All {{ d.fixes.checks_total }} checks pass on crawl #{{ d.number }}. You’ll hear if the next crawl finds something.</span>
+        </div>
+        {% endif %}
+        {% for g in d.fixes.groups %}
+        <div class="fx-group" data-sev="{{ g.slug() }}">
+          <div class="fx-gh is-{{ g.slug() }}"><i class="sdot is-{{ g.slug() }}" aria-hidden="true"></i><b>{{ g.label() }} · <span data-fx-count>{{ g.rows.len() }}</span></b><span class="fx-hint">{{ g.hint }}</span></div>
+          {% for r in g.rows %}
+          <div class="fx-row" id="{{ r.id }}" data-sev="{{ r.severity_slug() }}" data-kind="{{ r.kind }}">
+            <span class="fx-sev is-{{ r.severity_slug() }}"><i class="sdot is-{{ r.severity_slug() }}" aria-hidden="true"></i>{{ r.severity_label() }}</span>
+            <div class="fx-body">
+              <div class="fx-head"><span class="atag t-{{ r.kind }}">{{ r.kind_label() }}</span>{% if r.fresh %}<span class="atag t-fresh">New this crawl</span>{% endif %}<span class="fx-name">{{ r.title }}</span></div>
+              <p class="fx-ev">{% for s in r.evidence %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</p>
+              {% if !r.urls.is_empty() %}
+              <div class="fx-urls" id="{{ r.id }}-urls" hidden>
+                {% for u in r.urls %}<span class="fx-url mono" title="{{ u.1 }}">{{ u.0 }}</span>{% endfor %}
+                {% if let Some(h) = r.all_href %}<a class="au-link fx-all" href="{{ h }}">All {{ r.pages }} in the URL explorer</a>{% endif %}
+              </div>
+              {% endif %}
+            </div>
+            <div class="fx-side">
+              {% if let Some(gain) = r.gain %}<span class="fx-gain mono" title="{{ r.gain_tip }}">{{ gain }}</span>{% endif %}
+              <div class="fx-actions">
+                {% if let Some(i) = r.intend %}<form method="post" action="{{ i.0 }}" hx-confirm="{{ i.1 }}"><button class="btn btn-sm" type="submit">Mark intended</button></form>{% endif %}
+                <button type="button" class="q q-lg" popovertarget="{{ r.id }}-fix" aria-label="How to fix: {{ r.title }}">?</button>
+                {% if r.urls.is_empty() %}<span class="fx-pages">{{ r.pages }}</span>{% else %}<button type="button" class="btn btn-sm fx-toggle" aria-expanded="false" aria-controls="{{ r.id }}-urls" data-fx-toggle>{{ r.pages }}<svg class="icon"><use href="#i-chev"/></svg></button>{% endif %}
+              </div>
+            </div>
+            <div id="{{ r.id }}-fix" popover class="pop pop-fix">
+              <span class="pop-h">How to fix</span>
+              <pre class="mono">{{ r.fix }}</pre>
+              <button type="button" class="btn btn-sm" data-copy="{{ r.prompt }}"><svg class="icon"><use href="#i-copy"/></svg>Copy fix prompt</button>
+            </div>
+          </div>
+          {% endfor %}
         </div>
         {% endfor %}
+        <p class="fx-none muted" hidden>Nothing in this filter.</p>
       </div>
-      <p class="muted au-small">Failing pages per crawl, {{ d.severity_aside }}. A site-wide check counts once.</p>
+      <div class="fx-foot">
+        {% if !d.fixes.intended.is_empty() %}
+        <span class="fx-foot-line"><i class="sdot is-na" aria-hidden="true"></i><span>{{ d.fixes.intended.len() }} {% if d.fixes.intended.len() == 1 %}block{% else %}blocks{% endif %} marked intended, not counted:</span> <b>{{ d.fixes.intended|join(", ") }}</b>{% if !demo %} · <a class="au-link" href="{{ base }}/ai-access/intent">review</a>{% endif %}</span>
+        {% endif %}
+        {% if !d.fixes.fixed.is_empty() %}
+        <span class="fx-foot-line"><b class="c-ok">✓ {{ d.fixes.fixed.len() }} fixed since last crawl:</b> <span>{{ d.fixes.fixed|join(" · ") }}</span></span>
+        {% endif %}
+        <span class="fx-foot-line fx-passing">{% for p in d.fixes.passing %}<span class="c-ok">✓ {{ p }}</span>{% endfor %}<span>{{ d.fixes.checks_passed }} passing checks</span></span>
+      </div>
     </section>
 
-    <section class="card au-card" aria-labelledby="au-cat-h">
-      <div class="au-card-head"><h2 id="au-cat-h">Issues by category</h2><span class="mono muted">failing pages, this crawl</span></div>
-      {% if d.categories.is_empty() %}
-      <p class="au-empty">No failing checks in any category.</p>
-      {% else %}
-      <div class="au-cats">
-        {% for c in d.categories %}<div class="au-cat"><span>{{ c.label }}</span><span class="au-track"><span style="width:{{ c.width }}%"></span></span><span class="mono muted">{{ c.count }}</span></div>{% endfor %}
-      </div>
-      {% endif %}
-    </section>
+    <div class="au-side">
+      <section id="trend" class="card tr" aria-labelledby="tr-h">
+        <div class="au-card-head"><h2 id="tr-h">Score trend</h2><span class="muted au-small">{{ d.trend.aside }}</span></div>
+        {% if let Some(w) = d.trend.waiting %}
+        <div class="tr-wait">
+          <b>The trend appears after your second crawl</b>
+          <span class="muted">{{ w }}</span>
+        </div>
+        {% else %}
+        <p class="tr-text">{{ d.trend.sentence }}</p>
+        <div class="tr-chart">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="{{ d.trend.label }}">
+            {% for gl in d.trend.grid %}<line x1="1" x2="80" y1="{{ "{:.2}"|format(gl.0) }}" y2="{{ "{:.2}"|format(gl.0) }}" class="tr-grid" vector-effect="non-scaling-stroke"/>{% endfor %}
+            {% for p in d.trend.pins %}<line x1="{{ "{:.2}"|format(p.x) }}" x2="{{ "{:.2}"|format(p.x) }}" y1="4" y2="92" class="tr-pinline is-{{ p.tone }}" vector-effect="non-scaling-stroke"/>{% endfor %}
+            {% for l in d.trend.lines.iter().rev() %}<polyline points="{{ l.points }}" class="tr-line tr-{{ l.key }}" vector-effect="non-scaling-stroke"/>{% endfor %}
+          </svg>
+          {% for gl in d.trend.grid %}<span class="tr-y mono" style="top:{{ "{:.2}"|format(gl.0) }}%" aria-hidden="true">{{ gl.1 }}</span>{% endfor %}
+          {% for l in d.trend.lines %}{% if let Some(e) = l.end %}<i class="tr-end tr-{{ l.key }}" style="left:{{ "{:.2}"|format(e.0) }}%;top:{{ "{:.2}"|format(e.1) }}%" aria-hidden="true"></i><span class="tr-label tr-{{ l.key }}" style="top:{{ "{:.2}"|format(e.2) }}%" aria-hidden="true">{{ e.3 }}</span>{% endif %}{% endfor %}
+          {% for p in d.trend.pins %}
+          <button type="button" class="tr-pin is-{{ p.tone }}" style="left:{{ "{:.2}"|format(p.left) }}%" popovertarget="pin-{{ p.n }}" data-hover-pop aria-label="Change {{ p.n }}: {{ p.what }}">{{ p.n }}</button>
+          <div id="pin-{{ p.n }}" popover class="pop">
+            <span class="pop-h">{{ p.when }}</span>
+            <b class="pop-title">{{ p.what }}</b>
+            <span class="muted">{{ p.effect }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="tr-axis mono" aria-hidden="true">{% for a in d.trend.axis %}<span class="is-{{ a.2 }}" style="left:{{ "{:.2}"|format(a.0) }}%">{{ a.1 }}</span>{% endfor %}</div>
+        <div class="tr-legend" aria-hidden="true"><span><i class="tr-key tr-overall"></i>Overall</span><span><i class="tr-key tr-seo"></i>SEO</span><span><i class="tr-key tr-geo"></i>GEO</span></div>
+        {% endif %}
+      </section>
+
+      <section class="card bt" aria-labelledby="bt-h">
+        <div class="au-card-head">
+          <h2 id="bt-h">AI bots</h2>
+          {% if let Some(b) = d.bots %}
+          <span class="au-small muted">{% if b.unknown %}robots.txt unreadable{% else %}<b class="ink">{{ b.reach }} of {{ b.of }}</b> can reach your pages{% endif %}{% if !demo %} · <a class="au-link" href="{{ base }}/ai-access">see AI access →</a>{% endif %}</span>
+          {% endif %}
+        </div>
+        {% if let Some(b) = d.bots %}
+        <div class="bt-scroll">
+          <table class="bt-table">
+            <thead><tr><th scope="col">AI product</th><th scope="col">Bot</th><th scope="col">Status</th><th scope="col">Pages</th></tr></thead>
+            <tbody>
+              {% for r in b.rows %}
+              <tr>
+                <td><span class="bt-name">{% call op::tile(r.operator, "sm") %}{% endcall %}<b>{{ r.name }}</b></span></td>
+                <td class="mono bt-bot">{{ r.bots }}</td>
+                <td><span class="badge {{ r.status.class() }}"><i class="sdot is-{{ r.status.dot() }}" aria-hidden="true"></i>{{ r.status.label() }}</span></td>
+                <td><button type="button" class="bt-pages is-{{ r.status.dot() }}" popovertarget="bt-{{ r.key }}" data-hover-pop>{{ r.pages }}</button><div id="bt-{{ r.key }}" popover class="pop"><b class="pop-title">{{ r.name }}</b><span>{{ r.why }}</span></div></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="au-empty">Each crawl checks robots.txt for every known AI bot and which AI products can use your pages. The table appears with the next crawl.</p>
+        {% endif %}
+      </section>
+    </div>
   </div>
 
-  <div class="au-three">
-    <section class="card au-card" aria-labelledby="au-chg-h">
-      <div class="au-card-head"><h2 id="au-chg-h">Changed since last crawl</h2>{% if !demo %}<a class="au-link" href="{{ d.changes.href }}">All changes</a>{% endif %}</div>
-      {% if let Some(e) = d.changes.empty %}
-      <p class="au-empty">{{ e }}</p>
-      {% else %}
-      <ul class="au-changes">
-        {% for c in d.changes.rows %}<li><i class="{{ c.dot }}" aria-hidden="true"></i><span>{{ c.label }}</span><span class="mono muted">{{ c.count }}</span></li>{% endfor %}
-      </ul>
-      {% endif %}
-    </section>
-    <section class="card au-card">
-      <div class="au-card-head"><h2>Response codes</h2><span class="mono muted">{{ d.pages_label }}</span></div>
+  <div class="au-below">
+    <section class="card au-card" aria-labelledby="rc-h">
+      <div class="au-card-head"><h2 id="rc-h">Response codes</h2><span class="muted au-small">{{ d.pages_label }}</span></div>
       <div class="stackbar">{% for s in d.codes %}{% if s.n > 0 %}<span class="{{ s.class }}" style="flex:{{ s.n }}"></span>{% endif %}{% endfor %}</div>
-      <div class="legend">{% for s in d.codes %}<div><span class="swatch {{ s.class }}"></span><span class="k">{{ s.label }}</span><span class="mono num">{{ s.count }}</span></div>{% endfor %}</div>
-      <div class="au-card-head au-sub"><h2>Response time</h2><span class="mono muted">{{ d.times_aside }}</span></div>
+      <ul class="au-list">
+        {% for s in d.codes %}<li>{% if let Some(h) = s.href %}<a href="{{ h }}">{% else %}<span>{% endif %}<i class="swatch {{ s.class }}"></i><span class="k">{{ s.label }}</span><span class="mono num">{{ s.count }}</span>{% if s.href.is_some() %}</a>{% else %}</span>{% endif %}</li>{% endfor %}
+      </ul>
+    </section>
+    <section class="card au-card" aria-labelledby="rt-h">
+      <div class="au-card-head"><h2 id="rt-h">Response time</h2><span class="muted au-small">{{ d.times_aside }}</span></div>
       <div class="hbars">{% for h in d.times %}<div class="hbar"><span class="muted">{{ h.label }}</span><span class="track"><span class="{{ h.class }}" style="width:{{ h.width }}%"></span></span><span class="r mono num">{{ h.value }}</span></div>{% endfor %}</div>
     </section>
-    <section class="card au-card">
-      <div class="au-card-head"><h2>Crawl depth</h2><span class="mono muted">clicks from homepage</span></div>
+    <section class="card au-card" aria-labelledby="cd-h">
+      <div class="au-card-head"><h2 id="cd-h">Crawl depth</h2><span class="muted au-small">clicks from homepage</span></div>
       <div class="vbars">{% for b in d.depth %}<div data-tip="{{ b.value }} · {{ b.tip }}"><div class="v">{{ b.value }}</div><div class="b {{ b.class }}" style="height:{{ b.height }}%"></div></div>{% endfor %}</div>
       <div class="vbars-axis">{% for b in d.depth %}<span>{{ b.label }}</span>{% endfor %}</div>
     </section>
+    <section class="card au-card" aria-labelledby="ia-h">
+      <div class="au-card-head"><h2 id="ia-h">Issues by area</h2><span class="muted au-small">failing pages per area</span></div>
+      {% if d.areas.is_empty() %}
+      <p class="au-empty">No failing checks in any area.</p>
+      {% else %}
+      <div class="au-cats">
+        {% for c in d.areas %}<div class="au-cat"><span>{{ c.label }}</span><span class="au-track"><span class="{% if c.ai %}bg-ai{% else %}bg-ink2{% endif %}" style="width:{{ c.width }}%"></span></span><span class="mono muted">{{ c.count }}</span></div>{% endfor %}
+      </div>
+      {% endif %}
+    </section>
   </div>
 {% else if let Some(live) = live %}
-  <div class="page-head"><h1>Site audit</h1><span class="chip">first crawl</span></div>
-  <div class="kpis" aria-hidden="true">
-    {% for label in kpi_labels() %}
-    <div class="kpi"><div class="kpi-label">{{ label }}</div><div class="skel" style="height:32px;width:62%"></div><div class="skel skel-line" style="width:42%;margin:2px 0 0"></div></div>
-    {% endfor %}
+  <div class="page-head au-head">
+    <div class="au-title">
+      <span class="au-domain">{{ domain }}</span>
+      <div class="au-title-row"><h1>Site audit</h1><span class="chip">first crawl</span></div>
+    </div>
   </div>
-  <div class="card card-pad" style="margin-top:16px">{{ live|safe }}</div>
-  <div class="cols" aria-hidden="true">
-    <div class="card card-pad">
-      <div class="skel skel-line" style="width:24%;margin-top:0"></div>
-      <div class="skel skel-line" style="width:92%;margin-top:22px"></div>
-      <div class="skel skel-line" style="width:84%"></div>
-      <div class="skel skel-line" style="width:88%"></div>
-      <div class="skel skel-line" style="width:70%"></div>
-    </div>
-    <div class="stack">
-      <div class="card card-pad"><div class="skel skel-line" style="width:40%;margin-top:0"></div><div class="skel" style="height:10px;margin-top:18px"></div></div>
-      <div class="card card-pad"><div class="skel skel-line" style="width:36%;margin-top:0"></div><div class="skel" style="height:96px;margin-top:18px"></div></div>
-    </div>
+  <section class="card card-pad au-live" aria-label="First crawl in progress">
+    <div class="au-card-head"><h2>First crawl in progress</h2><span class="muted au-small">Scores and fixes appear when it finishes, usually in a few minutes.</span></div>
+    {{ live|safe }}
+  </section>
+  <div class="sc-row" aria-hidden="true">
+    {% for label in kpi_labels() %}
+    <div class="card sc"><span class="sc-label">{{ label }}</span><div class="skel" style="height:30px;width:52%"></div><div class="skel skel-line" style="width:70%;margin:2px 0 0"></div></div>
+    {% endfor %}
   </div>
 {% else if let Some(reason) = failure %}
   <div class="page-head"><h1>Site audit</h1></div>
@@ -240,7 +248,7 @@
     <div class="empty">
       {% call m::eyes("idle", "mascot-empty") %}{% endcall %}
       <h2>No crawls yet</h2>
-      <p>Run a crawl of {{ domain }} to get a health score and every issue, with the exact URLs behind it.</p>
+      <p>Run a crawl of {{ domain }} to get your SEO, GEO and overall scores and every issue, with the exact URLs behind it.</p>
       <button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>
     </div>
   </div>

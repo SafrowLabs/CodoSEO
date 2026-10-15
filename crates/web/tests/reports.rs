@@ -141,32 +141,35 @@ async fn audit_renders_score_kpis_and_issues() {
     assert_eq!(res.status, StatusCode::OK);
     let body = &res.body;
     assert!(body.contains("<h1>Site audit</h1>"), "{body}");
+    // Seven score cards: the SEO score with its checks, indexable share and average response
+    // as count-ups; no GEO score without an AI access report, so Overall and GEO read "—".
+    assert!(body.contains(&format!(r#"data-count="{score}""#)), "{body}");
     assert!(
-        body.contains(&format!("{passed} / {total} SEO checks passed")),
+        body.contains(&format!("{passed} of {total} checks pass")),
         "{body}"
     );
-    // Health score, URLs crawled, indexable share and average response, as count-ups.
-    assert!(body.contains(&format!(r#"data-count="{score}""#)), "{body}");
-    assert!(body.contains(r#"data-count="4""#), "{body}");
     assert!(body.contains(r#"data-count="75.0""#), "{body}");
-    assert!(body.contains("3 of 4"), "{body}");
+    assert!(body.contains("3 of 4 URLs"), "{body}");
     assert!(body.contains(r#"data-count="120""#), "{body}");
-    assert!(body.contains("— first crawl"), "{body}");
-    // The crawl's number, duration and rate, and the next scheduled crawl, under the title.
+    assert!(body.contains("First crawl"), "{body}");
+    assert_eq!(
+        body.matches("<b>—</b>").count(),
+        3,
+        "Overall, GEO, AI products: {body}"
+    );
+    assert!(body.contains("Needs a GEO score"), "{body}");
+    assert!(body.contains("No AI check yet"), "{body}");
+    // The crawl's number, size, duration and rate, and the next scheduled crawl.
     assert!(body.contains("Crawl #1 · finished"), "{body}");
+    assert!(body.contains("4 URLs"), "{body}");
     assert!(body.contains("URL/s"), "{body}");
-    // Failing checks: the SEO ones only, until there is an AI access report.
+    // Open issues: every failing SEO check, a link down to the fix list.
     let failing = total - passed;
     assert!(
-        body.contains(&format!(
-            r#"data-count="{failing}">{failing}</b><span>of {total}</span>"#
-        )),
+        body.contains(&format!(r#"data-count="{failing}">{failing}</b>"#)),
         "{body}"
     );
-    assert!(
-        body.contains(&format!("{failing} SEO · AI &#38; GEO not checked yet")),
-        "{body}"
-    );
+    assert!(body.contains("See the fix list ↓"), "{body}");
     // Both actions sit in the page head.
     assert!(
         body.contains(&format!(
@@ -191,8 +194,24 @@ async fn audit_renders_score_kpis_and_issues() {
     assert!(body.contains("Response codes"), "{body}");
     assert!(body.contains("stackbar"), "{body}");
     assert!(body.contains("clicks from homepage"), "{body}");
-    assert!(body.contains("&#60; 200 ms"), "{body}");
-    assert!(body.contains("500–1000"), "{body}");
+    assert!(body.contains("Under 200 ms"), "{body}");
+    assert!(body.contains("500 ms–1 s"), "{body}");
+    assert!(body.contains("Issues by area"), "{body}");
+    // Each row has its fix behind a "?" and a coding-agent prompt to copy.
+    assert!(
+        body.contains(r#"popovertarget="fx-seo-http_4xx-fix""#),
+        "{body}"
+    );
+    assert!(body.contains("Copy all fix prompts"), "{body}");
+    // The 404's example URL is a chip behind "1 page".
+    assert!(
+        body.contains(r#"aria-controls="fx-seo-http_4xx-urls""#),
+        "{body}"
+    );
+    assert!(
+        body.contains(r#"title="https://example.com/gone">/gone</span>"#),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -363,7 +382,7 @@ async fn audit_shows_first_crawl_progress() {
     let res = app
         .get_hx(&format!("/s/{}/audit", site.id), Some(&cookie))
         .await;
-    assert!(res.body.contains("Health score"), "{}", res.body);
+    assert!(res.body.contains("Fix these, in order"), "{}", res.body);
     assert!(!res.body.contains("live-crawl"), "{}", res.body);
 }
 
@@ -474,7 +493,7 @@ async fn audit_shows_a_banner_while_a_newer_crawl_runs() {
 }
 
 #[tokio::test]
-async fn audit_health_delta_against_previous_crawl() {
+async fn audit_compares_with_the_previous_crawl() {
     let (app, _, cookie, site) = setup().await;
     let first = app
         .finished_crawl(&site, vec![page(DOMAIN, "/"), page(DOMAIN, "/a")], vec![])
@@ -483,29 +502,13 @@ async fn audit_health_delta_against_previous_crawl() {
         .finished_crawl(
             &site,
             fixture_pages(),
-            vec![
-                change(
-                    ChangeKind::NewUrl,
-                    Severity::Notice,
-                    Some("/gone"),
-                    "",
-                    "404",
-                ),
-                change(
-                    ChangeKind::NewUrl,
-                    Severity::Notice,
-                    Some("/untitled"),
-                    "",
-                    "200",
-                ),
-                change(
-                    ChangeKind::RemovedUrl,
-                    Severity::Notice,
-                    Some("/a"),
-                    "200",
-                    "",
-                ),
-            ],
+            vec![change(
+                ChangeKind::NewUrl,
+                Severity::Notice,
+                Some("/gone"),
+                "",
+                "404",
+            )],
         )
         .await;
     let (a, ..) = crawl_row(&app, first).await;
@@ -514,13 +517,49 @@ async fn audit_health_delta_against_previous_crawl() {
         .get(&format!("/s/{}/audit", site.id), Some(&cookie))
         .await
         .body;
-    assert!(body.contains("+2 new · −1 removed"), "{body}");
     let expected = match b.cmp(&a) {
-        std::cmp::Ordering::Less => format!("↓ {} vs crawl #1", a - b),
-        std::cmp::Ordering::Greater => format!("↑ {} vs crawl #1", b - a),
-        std::cmp::Ordering::Equal => "no change vs crawl #1".to_owned(),
+        std::cmp::Ordering::Less => format!(r#"<span class="down">▼ {}</span>"#, a - b),
+        std::cmp::Ordering::Greater => format!(r#"<span class="up">▲ {}</span>"#, b - a),
+        std::cmp::Ordering::Equal => "No change".to_owned(),
     };
     assert!(body.contains(&expected), "{expected}\n{body}");
+    // Indexable pages: 2 then 3.
+    assert!(
+        body.contains(r#"<span class="up">▲ 1 page</span>"#),
+        "{body}"
+    );
+    // The 404 and the missing title were not there on the first crawl: new this crawl.
+    let row = |id: &str| {
+        let at = body.find(&format!(r#"id="{id}""#)).unwrap();
+        body[at..at + body[at..].find("Copy fix prompt").unwrap()].to_owned()
+    };
+    assert!(row("fx-seo-http_4xx").contains("New this crawl"));
+    assert!(row("fx-seo-title_missing").contains("New this crawl"));
+    // Both crawls lack a sitemap: not new.
+    assert!(!row("fx-seo-sitemap_missing").contains("New this crawl"));
+}
+
+#[tokio::test]
+async fn fixed_checks_are_counted_in_the_footer() {
+    let (app, _, cookie, site) = setup().await;
+    app.finished_crawl(&site, fixture_pages(), vec![]).await;
+    app.finished_crawl(&site, vec![page(DOMAIN, "/"), page(DOMAIN, "/a")], vec![])
+        .await;
+    let body = app
+        .get(&format!("/s/{}/audit", site.id), Some(&cookie))
+        .await
+        .body;
+    let at = body
+        .find(" fixed since last crawl:")
+        .expect("the fixed line");
+    let line = &body[at..at + body[at..].find("</span></span>").unwrap()];
+    assert!(line.contains("Page returns a 4xx error"), "{line}");
+    assert!(line.contains("Title is missing"), "{line}");
+    assert!(
+        !line.contains("Site has no sitemap"),
+        "still failing: {line}"
+    );
+    assert!(!body.contains("New this crawl"), "{body}");
 }
 
 #[tokio::test]
@@ -531,46 +570,41 @@ async fn one_crawl_without_an_ai_report_shows_honest_empty_states() {
         .get(&format!("/s/{}/audit", site.id), Some(&cookie))
         .await
         .body;
-    // The GEO section is there, first, and says when its report comes; no AI chip yet.
-    let geo = body
-        .find("AI &amp; search · GEO audit")
-        .expect("the GEO section");
-    assert!(geo < body.find("Health score").unwrap(), "GEO first");
+    // No AI access report yet: the GEO parts say when they come, nothing breaks.
+    assert!(body.contains("Comes with the next AI check"), "{body}");
     assert!(
-        body.contains("The first report appears with the next crawl"),
+        body.contains("The table appears with the next crawl"),
         "{body}"
     );
-    assert!(!body.contains("AI &#38; GEO checks passed"), "{body}");
-    assert!(!body.contains(r#"id="ai-access-panel""#), "{body}");
-    assert!(body.contains("no report yet"), "{body}");
-    // One crawl: no trend line yet, one severity bar, nothing to compare.
+    assert!(!body.contains(r#"data-kind="ai""#), "{body}");
+    // One crawl: the trend waits for the next, and nothing is new or fixed yet.
     assert!(
-        body.contains("Crawl #1 scored") && body.contains("The trend starts with the next crawl"),
+        body.contains("The trend appears after your second crawl"),
         "{body}"
     );
+    assert!(body.contains("No crawl is scheduled"), "{body}");
     assert!(!body.contains("<polyline"), "{body}");
-    assert!(
-        body.contains("Failing pages per crawl, this crawl"),
-        "{body}"
-    );
-    assert!(
-        body.contains("The first crawl: nothing to compare with yet."),
-        "{body}"
-    );
-    // The site is scheduled weekly but the scheduler has not picked a slot yet.
+    assert!(!body.contains("New this crawl"), "{body}");
+    assert!(!body.contains("fixed since last crawl"), "{body}");
     assert!(body.contains("no crawl scheduled"), "{body}");
-    // Top fixes: the 404 first, linked to its URLs, the sitemap as a site-wide fix.
-    let fixes = body.find("Top fixes").unwrap();
+    // The fix list: the critical 404 first, the sitemap as a site-wide notice.
+    let fixes = body.find("Fix these, in order").unwrap();
     let first = body[fixes..].find("Page returns a 4xx error").unwrap();
     let title = body[fixes..].find("Title is missing").unwrap();
-    assert!(first < title, "the 404 gives back more points");
-    assert!(body.contains(" pts</span>"), "{body}");
-    assert!(body.contains("Issues by category"), "{body}");
-    assert!(!body.contains("Real bot activity"), "only with a report");
+    assert!(first < title, "critical before warning");
+    assert!(body.contains(" SEO</span>"), "{body}");
+    assert!(body.contains("Issues by area"), "{body}");
+    // Passing facts and the count of passing checks close the list.
+    assert!(body.contains("✓ 0 server errors"), "{body}");
+    assert!(
+        !body.contains("✓ 0 broken links"),
+        "/ links to /gone: {body}"
+    );
+    assert!(body.contains(" passing checks"), "{body}");
 }
 
 #[tokio::test]
-async fn many_crawls_draw_the_trend_and_the_severity_history() {
+async fn many_crawls_draw_the_trend_with_a_pin_for_a_serious_change() {
     let (app, _, cookie, site) = setup().await;
     for _ in 0..3 {
         app.finished_crawl(&site, vec![page(DOMAIN, "/"), page(DOMAIN, "/a")], vec![])
@@ -611,23 +645,50 @@ async fn many_crawls_draw_the_trend_and_the_severity_history() {
         .await
         .body;
     assert!(body.contains("next crawl Mar 4 2031, 06:00 UTC"), "{body}");
-    assert!(body.contains("<polyline"), "{body}");
-    assert!(body.contains("last 4 crawls ·"), "{body}");
-    for n in 1..=4 {
-        assert!(body.contains(&format!(">#{n}</span>")), "#{n}\n{body}");
-    }
+    assert!(body.contains("tr-line tr-seo"), "{body}");
+    // Crawls without a GEO score draw no GEO or Overall line.
+    assert!(!body.contains("tr-line tr-geo"), "{body}");
+    assert!(body.contains("Last 4 crawls"), "{body}");
+    assert!(body.contains("The SEO score"), "{body}");
+    // The noindex change pins crawl #4, with what changed and what it did.
+    assert!(body.contains(r#"popovertarget="pin-1""#), "{body}");
+    let at = body.find(r#"id="pin-1""#).unwrap();
+    let pin = &body[at..at + body[at..].find("</div>").unwrap()];
+    assert!(pin.contains("crawl #4"), "{pin}");
+    assert!(pin.contains("Became noindex"), "{pin}");
+    assert!(pin.contains("SEO "), "{pin}");
+    assert!(body.contains("Today"), "{body}");
+}
+
+#[tokio::test]
+async fn a_failed_crawl_after_a_finished_one_shows_a_banner_over_its_results() {
+    let (app, _, cookie, site) = setup().await;
+    app.finished_crawl(&site, fixture_pages(), vec![]).await;
+    sqlx::query(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, finished_at, failure_reason) \
+         VALUES ($1, $2, 'manual', 2, 'failed', now(), 'The server answered 503 for every page.')",
+    )
+    .bind(site.id)
+    .bind(DOMAIN)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let body = app
+        .get(&format!("/s/{}/audit", site.id), Some(&cookie))
+        .await
+        .body;
+    let at = body
+        .find(r#"class="au-failed" role="alert""#)
+        .expect("the banner");
+    let banner = &body[at..at + body[at..].find("</div>").unwrap()];
+    assert!(banner.contains("Crawl #2 failed"), "{banner}");
+    assert!(banner.contains("503 for every page"), "{banner}");
     assert!(
-        body.contains("last 4 crawls. A site-wide check counts once."),
-        "{body}"
+        banner.contains("Showing results from crawl #1 below."),
+        "{banner}"
     );
-    // The changes card lists the worst first and links to the changes screen.
-    let card = body.find("Changed since last crawl").unwrap();
-    let noindex = body[card..].find("Became noindex").unwrap();
-    let new = body[card..].find("New URL").unwrap();
-    assert!(noindex < new);
-    assert!(body[card..].contains(&format!(r#"href="/s/{}/changes""#, site.id)));
-    // Indexable share against the crawl before: 2 of 2 then 3 of 4.
-    assert!(body.contains("↓ 25.0 pts vs crawl #3"), "{body}");
+    assert!(banner.contains("Retry crawl"), "{banner}");
+    assert!(body.contains("Page returns a 4xx error"), "{body}");
 }
 
 // ── Changes ──────────────────────────────────────────────

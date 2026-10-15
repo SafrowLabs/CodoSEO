@@ -34,8 +34,7 @@ use uuid::Uuid;
 use crate::config::{Mode, UmamiConfig};
 use crate::error::AppError;
 use crate::render::html;
-use crate::routes::audit::{AuditBody, DoneInput, done_view, geo_view};
-use crate::routes::audit_ai::ProbeSetting;
+use crate::routes::audit::{AiData, AuditBody, DoneInput, done_view};
 use crate::state::AppState;
 
 /// The sample site's domain: a reserved example domain, so it is never a real site.
@@ -189,48 +188,43 @@ pub fn demo(now: OffsetDateTime) -> Result<DemoPage, AppError> {
             resolved_by: None,
         })
         .collect();
-    let geo = geo_view(
-        "/demo",
-        &report,
-        &intent,
-        &open,
-        &HashMap::new(),
-        // The synthetic fetch check runs on monitored crawls; the fixture has none.
-        ProbeSetting {
-            site_on: false,
-            installed: true,
+    // The changes of the fixture's crawl: they pin its point on the trend.
+    let changes = HashMap::from([(
+        latest.id,
+        ChangeCounts {
+            rows: vec![
+                (ChangeKind::AiBotBlocked, Severity::Critical, 1),
+                (ChangeKind::StatusChanged, Severity::Warning, 1),
+                (ChangeKind::NewUrl, Severity::Notice, 2),
+                (ChangeKind::TitleChanged, Severity::Notice, 1),
+            ],
         },
-        now,
-    );
-    let changes = ChangeCounts {
-        rows: vec![
-            (ChangeKind::AiBotBlocked, Severity::Critical, 1),
-            (ChangeKind::StatusChanged, Severity::Warning, 1),
-            (ChangeKind::NewUrl, Severity::Notice, 2),
-            (ChangeKind::TitleChanged, Severity::Notice, 1),
-        ],
-    };
+    )]);
     let times = ResponseBuckets {
         fast: i64::from(pages).saturating_sub(3),
         ok: 2,
         slow: 1,
         very_slow: 0,
     };
-    let mut done = done_view(DoneInput {
+    let done = done_view(DoneInput {
         base: "/demo".to_owned(),
+        demo: true,
         crawl: &latest,
         recent: &recent,
         changes: &changes,
         times: &times,
         next: Some(now + Duration::days(6) + Duration::hours(21)),
-        geo,
+        failed: None,
+        // The fixture keeps counts, not pages.
+        examples: &HashMap::new(),
+        ai: Some(AiData {
+            origin: DEMO_ORIGIN.to_owned(),
+            report: report.clone(),
+            intent: intent.clone(),
+            open,
+        }),
+        now,
     });
-    // The incident links go to the fixes on this page, not to a site's AI access screen.
-    if let Some(panel) = done.geo.panel.as_mut() {
-        for (link, incident) in panel.links.iter_mut().zip(&open) {
-            link.href = format!("#fix-{}", incident.id);
-        }
-    }
     let remedies = finding_remedies(DEMO_ORIGIN, &report, &found);
     let fixes = found
         .into_iter()
@@ -266,9 +260,22 @@ mod tests {
     fn the_fixture_gives_a_full_audit_with_ai_findings_and_their_fixes() {
         let page = demo(OffsetDateTime::now_utc()).expect("the fixture loads");
         let done = page.body.done.as_ref().expect("a finished audit");
-        assert!(!done.fixes.is_empty());
-        assert!(done.trend.empty.is_none());
-        assert!(done.geo.section.is_some());
+        assert!(!done.fixes.is_clear());
+        assert!(done.trend.waiting.is_none());
+        // The demo has no GEO score: those cards read "—", and the AI rows carry no points.
+        let card = |k: &str| done.cards.iter().find(|c| c.key == k).unwrap();
+        assert_eq!(card("geo").value, "—");
+        assert_eq!(card("overall").value, "—");
+        let ai: Vec<_> = done
+            .fixes
+            .groups
+            .iter()
+            .flat_map(|g| &g.rows)
+            .filter(|r| r.kind == "ai")
+            .collect();
+        assert!(!ai.is_empty());
+        assert!(ai.iter().all(|r| r.gain.is_none() && r.intend.is_none()));
+        assert!(done.bots.is_some());
         assert!(!page.fixes.is_empty());
         assert!(page.fixes.iter().all(|f| !f.remedy.fix.is_empty()));
         // A sample on a reserved domain, never a crawled address.

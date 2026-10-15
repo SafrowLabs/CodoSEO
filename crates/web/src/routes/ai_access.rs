@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use askama::Template;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderName, HeaderValue};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -226,7 +226,7 @@ fn rule_line(rule: &MatchedRule, group: GroupMatch, token: &str) -> String {
 }
 
 /// The URL's path and query, as the screens print a page of the site.
-fn path_of(url: &str) -> String {
+pub(crate) fn path_of(url: &str) -> String {
     match Url::parse(url) {
         Ok(u) => match u.query() {
             Some(q) => format!("{}?{q}", u.path()),
@@ -1300,7 +1300,7 @@ fn probe_detail(subject: &str, p: &ProbeEvidence) -> String {
     }
 }
 
-fn summary_segments(s: &str) -> Vec<Seg> {
+pub(crate) fn summary_segments(s: &str) -> Vec<Seg> {
     s.split('`')
         .enumerate()
         .filter(|(_, t)| !t.is_empty())
@@ -1354,7 +1354,7 @@ fn bot_detail(kind: FindingKind, b: &BotEvidence) -> String {
 
 /// The owner's intent change that turns a finding into a choice ("Mark intended").
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum IntendedChange {
+pub(crate) enum IntendedChange {
     /// Bots and the stance each gets.
     Bots(Vec<(String, Stance)>),
     /// A page directive the owner sets on purpose: it opens no answers issue any more, and the
@@ -1362,7 +1362,11 @@ enum IntendedChange {
     Directive(DirectiveSlug),
 }
 
-fn intended_change(kind: FindingKind, subject: &str, ev: &Evidence) -> Option<IntendedChange> {
+pub(crate) fn intended_change(
+    kind: FindingKind,
+    subject: &str,
+    ev: &Evidence,
+) -> Option<IntendedChange> {
     match kind {
         // A bot kept off the home page is blocked as wanted. One blocked only on some pages
         // still gets in, so Block would open "can still crawl" at once: it gets No preference.
@@ -1393,7 +1397,7 @@ fn intended_change(kind: FindingKind, subject: &str, ev: &Evidence) -> Option<In
     }
 }
 
-fn intend_confirm(kind: FindingKind, change: &IntendedChange) -> String {
+pub(crate) fn intend_confirm(kind: FindingKind, change: &IntendedChange) -> String {
     let bots = match change {
         IntendedChange::Directive(d) => {
             return format!(
@@ -2891,13 +2895,20 @@ async fn reset_intent(
     .await
 }
 
+/// Where an action returns to: `?back=audit` from the site audit's fix list.
+#[derive(serde::Deserialize)]
+struct Back {
+    back: Option<String>,
+}
+
 /// "Mark intended": the intent change that makes an open incident a choice, then the quiet
-/// re-evaluation that resolves it.
+/// re-evaluation that resolves it. From the site audit (`?back=audit`) it returns there.
 async fn mark_intended(
     State(state): State<AppState>,
     user: CurrentUser,
     hx: Hx,
     Path((site, id)): Path<(String, i64)>,
+    Query(back): Query<Back>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
     let incident = geo::incident(&state.pool, site.id, id)
@@ -2919,6 +2930,22 @@ async fn mark_intended(
     })?;
     let current = geo::get_intent(&state.pool, site.id).await?;
     let outcome = apply_intent(&state, &site, &with_change(current, &change)).await?;
+    if back.back.as_deref() == Some("audit") {
+        let to = format!("/s/{}/audit", site.id);
+        if !hx.request {
+            return Ok(Redirect::to(&to).into_response());
+        }
+        let page = crate::routes::audit::render_page(&state, &user, &site).await?;
+        let url = HeaderValue::from_str(&to).map_err(AppError::internal)?;
+        return Ok((
+            [
+                toast(ToastKind::Ok, &format!("Marked as intended · {outcome}")),
+                (HeaderName::from_static("hx-replace-url"), url),
+            ],
+            page,
+        )
+            .into_response());
+    }
     respond(
         &state,
         &user,

@@ -329,7 +329,7 @@ The action installs the release binary (checksum verified), annotates the run an
 
 ### Health score
 
-The score is 0–100 and reads only the 44 SEO checks. Each check carries a weight proportional to its severity (critical > warning > notice) and the fraction of affected pages. A site where every page fails every check scores 0; a site with no failures scores 100. The site audit's **Top fixes** ranks failing checks by the points fixing each one alone would give back, from the same formula (`codoseo_checks::points_regained`).
+The score is 0–100 and reads only the 44 SEO checks. Each check carries a weight proportional to its severity (critical > warning > notice) and the fraction of affected pages. A site where every page fails every check scores 0; a site with no failures scores 100. The site audit's **Fix these, in order** list ranks failing checks by the points fixing each one alone would give back, from the same formula (`codoseo_checks::points_regained`), side by side with the AI access issues and the GEO points they cost ([docs/scores.md](docs/scores.md)).
 
 ---
 
@@ -392,9 +392,9 @@ This repository is also a Claude Code plugin marketplace: `/plugin marketplace a
 
 ## Web app and self-hosting
 
-The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview; inlinks; reconstructed headers), a site audit (AI & GEO section first, then the health score and its trend, the fixes that would raise it most, issues by severity and category), and a changes view that compares each crawl with the one before. It can crawl on a schedule and alert you by email, Slack, Discord or webhook. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
+The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview; inlinks; reconstructed headers), a site audit (Overall, SEO and GEO scores, one ranked fix list across SEO and AI with a fix prompt for each issue, the score trend, which AI products can reach your pages, then response codes, response time, crawl depth and issues by area), and a changes view that compares each crawl with the one before. It can crawl on a schedule and alert you by email, Slack, Discord or webhook. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
 
-![The site audit: the AI & search · GEO section, the headline KPIs, the health score trend and the top fixes](docs/images/site-audit/site-audit-light.png)
+![The site audit: the score cards, the ranked fix list, the score trend and the AI bots table](docs/images/site-audit/site-audit-light.png)
 
 More: [dark theme](docs/images/site-audit/site-audit-dark.png), [on a phone](docs/images/site-audit/site-audit-mobile.png), [after the first crawl](docs/images/site-audit/site-audit-first-light.png). Or open the [live demo](https://codoseo.com/demo): the site audit of a sample site with the fix for each AI access issue, read-only and without sign-up (cloud only; its data is a fixture compiled into the app, so it never crawls).
 

@@ -1,40 +1,46 @@
-//! `/s/{site}/audit`: the site audit, the landing screen for a site. From the top: the AI & GEO
-//! section (access and checks, never part of the score), the headline KPIs, the health score
-//! over the last crawls with the fixes that would raise it most, issues by severity over time
-//! and by category, then what changed, response codes, response time and crawl depth. All of
-//! it comes from the latest finished crawl, the stored summaries of the ones before it and the
-//! latest AI access report; nothing here reads per-page rows except the response-time buckets.
+//! `/s/{site}/audit`: the site audit, the landing screen for a site. From the top: seven score
+//! cards (Overall, SEO, GEO, indexable share, AI products, response time, open issues), then
+//! side by side the ranked fix list ([`audit_fix`]) and a column with the score trend
+//! ([`audit_trend`]) and the AI bots table ([`audit_ai`]), then response codes, response time,
+//! crawl depth and issues by area. All of it comes from the latest finished crawl, the stored
+//! summaries and change counts of the ones before it, and the latest AI access report with the
+//! open incidents; per page it reads only the response-time buckets and a few example URLs.
+//!
 //! Before the first crawl finishes it shows that crawl's live progress instead, refreshed from
-//! `/s/{site}/audit/live`.
+//! `/s/{site}/audit/live`. When the newest crawl failed after an earlier one finished, a banner
+//! says so above the earlier results.
+
+use std::collections::HashMap;
 
 use askama::Template;
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
-use codoseo_checks::{CHECKS, Category, Scope, def, points_regained};
-use codoseo_core::change::ChangeKind;
+use codoseo_checks::{CHECKS, Category, Scope, def};
 use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::output::StopReason;
 use codoseo_core::report::CrawlSummary;
+use codoseo_geo::Intent;
+use codoseo_geo::report::AccessReport;
 use codoseo_store::crawls::{self, Crawl, CrawlStatus, StoredSummary};
-use codoseo_store::geo;
+use codoseo_store::explorer;
+use codoseo_store::geo::{self, Incident};
 use codoseo_store::reports::{self, ChangeCounts, ResponseBuckets};
 use codoseo_store::sites::{self, Site};
 use serde::Deserialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::ai_incident;
 use crate::auth::{CurrentUser, load_site};
 use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{Screen, Shell};
 use crate::live::LiveCrawl;
 use crate::render::{Hx, html};
-use crate::routes::audit_ai::{
-    self, GEO_CHECKS, GeoChecks, GeoSection, IncidentLink, ProbeSetting,
-};
+use crate::routes::audit_ai::{BotsTable, bots_table};
+use crate::routes::audit_fix::{AiFixInput, FixInput, FixList, fix_list, known_counts};
+use crate::routes::audit_trend::{Trend, TrendPoint, trend};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -48,14 +54,10 @@ pub fn site_id(raw: &str) -> Result<Uuid, AppError> {
     Uuid::parse_str(raw).map_err(|_| AppError::NotFound)
 }
 
-/// Finished crawls the health score trend covers.
-const TREND_CRAWLS: i64 = 14;
-/// Finished crawls the issues-by-severity chart covers.
-const SEVERITY_CRAWLS: usize = 8;
-/// Fixes listed before "Show all".
-const FIXES_SHOWN: usize = 5;
-/// Change kinds listed under "Changed since last crawl".
-const CHANGES_SHOWN: usize = 6;
+/// Finished crawls the score trend covers.
+pub const TREND_CRAWLS: i64 = 14;
+/// Example URLs loaded per failing SEO check.
+const EXAMPLE_URLS: i64 = 5;
 
 #[derive(Template)]
 #[template(path = "audit/index.html")]
@@ -87,183 +89,105 @@ impl AuditBody {
         self.done.is_none() && self.live.is_none()
     }
 
-    /// The KPI labels, for the skeleton strip while the first crawl runs.
-    pub fn kpi_labels(&self) -> [&'static str; 6] {
-        KPI_LABELS
+    /// The score card labels, for the skeleton strip while the first crawl runs.
+    pub fn kpi_labels(&self) -> [&'static str; 7] {
+        CARD_LABELS
     }
 }
 
-const KPI_LABELS: [&str; 6] = [
-    "Health score",
-    "URLs crawled",
+const CARD_LABELS: [&str; 7] = [
+    "Overall score",
+    "SEO score",
+    "GEO score",
     "Indexable",
+    "AI products",
     "Avg response",
-    "Failing checks",
-    "AI access",
+    "Open issues",
 ];
 
 pub struct DoneAudit {
-    /// `38 / 44 SEO checks passed`
-    pub seo_chip: Chip,
-    /// `4 / 7 AI & GEO checks passed`; none before the site's first AI access report.
-    pub geo_chip: Option<Chip>,
     /// `page limit reached`, when the crawl stopped early.
     pub stop_chip: Option<&'static str>,
     /// `Crawl #14 · finished 2h ago · 4m 12s · 3.1 URL/s · next crawl Oct 20, 06:00 UTC`
     pub meta: String,
     /// When the crawl finished, in full.
     pub finished: String,
-    pub geo: GeoBlock,
-    pub kpis: Vec<Kpi>,
+    pub number: i64,
+    /// A newer crawl failed: the banner over these results.
+    pub failed: Option<FailedBanner>,
+    pub cards: Vec<ScoreCard>,
+    pub fixes: FixList,
     pub trend: Trend,
-    /// The fixes worth most, then the rest behind "Show all".
-    pub fixes: Vec<FixRow>,
-    pub more_fixes: Vec<FixRow>,
-    pub severity: Vec<SeverityBar>,
-    /// `last 8 crawls`
-    pub severity_aside: String,
-    pub categories: Vec<CategoryBar>,
-    pub changes: ChangesCard,
+    /// None before the site's first AI access report.
+    pub bots: Option<BotsTable>,
     pub codes: Vec<Segment>,
     /// `1,284 URLs`
     pub pages_label: String,
     pub depth: Vec<Bar>,
     pub times: Vec<HBar>,
-    /// `avg 182 ms`
+    /// `Average 182 ms`
     pub times_aside: String,
+    pub areas: Vec<CategoryBar>,
 }
 
-pub struct Chip {
+pub struct FailedBanner {
+    pub number: i64,
+    pub ago: String,
+    pub reason: String,
+}
+
+/// One phrase of a card's line: it never breaks inside.
+pub struct Part {
     pub text: String,
-    /// Badge tone class.
+    /// Tone class, or empty.
     pub class: &'static str,
-    pub tip: String,
 }
 
-/// The AI & GEO section: the report's view, or why there is none yet, and the incidents.
-pub struct GeoBlock {
-    pub section: Option<GeoSection>,
-    /// Shown instead of the section before the first report.
-    pub empty: &'static str,
-    /// The incidents panel; none before the first report.
-    pub panel: Option<AiPanel>,
+fn part(text: impl Into<String>, class: &'static str) -> Part {
+    Part {
+        text: text.into(),
+        class,
+    }
 }
 
-/// The incidents panel in the AI & GEO section.
-pub struct AiPanel {
-    /// Nothing open, accepted or snoozed.
-    pub clear: bool,
-    /// Open, accepted and snoozed, each with its counts by severity.
-    pub rows: Vec<AiPanelRow>,
-    /// `Weakest evidence: B`, over the open incidents.
-    pub weakest: Option<String>,
-    /// `2 fixes being verified`
-    pub verifying: Option<String>,
-    /// The first open incidents by name, each linked to its card (Fix, Recheck).
-    pub links: Vec<IncidentLink>,
-    /// `and 2 more`
-    pub more: Option<String>,
-}
-
-pub struct AiPanelRow {
+pub struct ScoreCard {
+    /// `overall`, `seo`, `geo`, `indexable`, `ai`, `response`, `issues`.
+    pub key: &'static str,
     pub label: &'static str,
-    pub total: u32,
-    /// `(badge class, text)`, most severe first, only the severities that have any.
-    pub chips: Vec<(&'static str, String)>,
-}
-
-pub struct Kpi {
-    pub label: &'static str,
-    /// Swatch background class.
-    pub swatch: &'static str,
-    pub parts: Vec<KpiPart>,
-    pub delta: String,
-    /// `up`, `down` or empty.
-    pub tone: &'static str,
-}
-
-/// One number of a KPI value plus its unit.
-pub struct KpiPart {
-    /// The raw number for the count-up (`1284`, `90.2`); empty for a value that isn't one.
+    /// A tag before the label: `(class, text)`.
+    pub tag: Option<(&'static str, &'static str)>,
+    pub value: String,
+    /// The number for the count-up; empty for "—".
     pub count: String,
-    /// The same number, formatted (`1,284`).
-    pub text: String,
     pub unit: String,
-}
-
-/// The health score over the last crawls, as an inline SVG drawn in a 640×180 box.
-pub struct Trend {
-    /// Fewer than two scored crawls: the chart waits, and says why.
-    pub empty: Option<String>,
-    /// `polyline` points.
-    pub points: String,
-    /// The filled area under the line.
-    pub area: String,
-    /// What the chart shows, for screen readers.
-    pub label: String,
-    /// `last 14 crawls · 71 → 87`
-    pub aside: String,
-    /// Horizontal grid lines: `(y in the box, value, top in %)`.
-    pub grid: Vec<(f64, i64, f64)>,
-    /// Crawl labels under the chart: `(#n, left in %)`.
-    pub axis: Vec<(String, f64)>,
-    /// The latest point, `(left %, top %, score)`, marked with a dot.
-    pub last: (f64, f64, i16),
-    /// `Best gain: crawl #12 (+3)`
-    pub note: Option<String>,
-}
-
-/// One failing check with what fixing it gives back.
-pub struct FixRow {
-    pub severity: &'static str,
-    pub severity_label: &'static str,
-    pub title: &'static str,
-    /// Explorer link; `None` for site-wide checks.
+    /// The change since the previous crawl.
+    pub change: Vec<Part>,
+    /// One more line of detail.
+    pub detail: Vec<Part>,
+    /// Status dots, on the AI products card.
+    pub dots: Vec<&'static str>,
     pub href: Option<String>,
-    /// `14 pages`, or `site-wide`.
-    pub pages: String,
-    pub category: &'static str,
-    /// `+6.2`
-    pub gain: String,
-}
-
-/// One crawl's failing pages by severity, stacked.
-pub struct SeverityBar {
-    pub label: String,
-    /// Segment heights in % of the tallest bar.
-    pub critical: u32,
-    pub warning: u32,
-    pub notice: u32,
-    pub total: String,
-    pub tip: String,
+    /// `is-strong`, `is-err`, `is-ok` or empty.
+    pub tone: &'static str,
+    /// Has a "?" explaining it.
+    pub help: bool,
 }
 
 pub struct CategoryBar {
     pub label: &'static str,
+    pub n: u32,
     pub count: String,
     pub width: u32,
+    pub ai: bool,
 }
 
-pub struct ChangesCard {
-    pub href: String,
-    pub rows: Vec<ChangeLine>,
-    /// Shown instead of the rows.
-    pub empty: Option<String>,
-}
-
-pub struct ChangeLine {
-    pub label: &'static str,
-    pub count: String,
-    /// Dot colour class.
-    pub dot: &'static str,
-}
-
-/// A response-code class: one stackbar segment and one legend entry.
+/// A response-code class: one stackbar segment and one row.
 pub struct Segment {
     pub label: &'static str,
     pub class: &'static str,
     pub n: u32,
     pub count: String,
+    pub href: Option<String>,
 }
 
 /// One vertical bar.
@@ -329,7 +253,7 @@ impl AuditLive {
             // The counters and pages are in the panel below the line.
             (false, true) => (
                 format!("Crawling {}", site.domain),
-                "Your audit appears here the moment the crawl finishes.".to_owned(),
+                "Scores and fixes appear here the moment the crawl finishes.".to_owned(),
             ),
             (false, false) => (
                 format!("Starting a crawl of {}", site.domain),
@@ -358,13 +282,24 @@ async fn page(
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    let probes_installed = state.config.probe_urls_for(user.account.plan) > 0;
-    let body = load_body(&state, &site, probes_installed).await?;
+    let body = load_body(&state, &site).await?;
     if hx.partial() {
         return Ok(html(&body)?.into_response());
     }
     let shell = Shell::load(&state, &user, Some(&site), Screen::Audit).await?;
     Ok(html(&AuditPage { shell, body })?.into_response())
+}
+
+/// The whole audit page, for an action that returns to it (AI access's "Mark intended" from
+/// the fix list).
+pub(crate) async fn render_page(
+    state: &AppState,
+    user: &CurrentUser,
+    site: &Site,
+) -> Result<Html<String>, AppError> {
+    let body = load_body(state, site).await?;
+    let shell = Shell::load(state, user, Some(site), Screen::Audit).await?;
+    html(&AuditPage { shell, body })
 }
 
 #[derive(Deserialize)]
@@ -387,14 +322,11 @@ async fn live(
     Ok(html(&AuditLive::new(&site, banner, active.as_ref(), q.seen))?.into_response())
 }
 
-async fn load_body(
-    state: &AppState,
-    site: &Site,
-    probes_installed: bool,
-) -> Result<AuditBody, AppError> {
+async fn load_body(state: &AppState, site: &Site) -> Result<AuditBody, AppError> {
     let pool = &state.pool;
     let latest = crawls::latest_done(pool, site.id).await?;
     let active = crawls::active(pool, site.id).await?;
+    let newest = crawls::history(pool, site.id, 1).await?.into_iter().next();
     let mut body = AuditBody {
         base: format!("/s/{}", site.id),
         domain: site.domain.clone(),
@@ -405,124 +337,79 @@ async fn load_body(
     };
     match latest {
         Some(crawl) => {
-            body.done = Some(done_audit(state, site, &crawl, probes_installed).await?);
+            // The newest crawl failed after this one finished.
+            let failed =
+                newest.filter(|c| c.status == CrawlStatus::Failed && c.number > crawl.number);
+            body.done = Some(done_audit(state, site, &crawl, failed.as_ref()).await?);
             body.live = Some(AuditLive::new(site, true, active.as_ref(), None));
         }
         None if active.is_some() => {
             body.live = Some(AuditLive::new(site, false, active.as_ref(), None));
         }
         None => {
-            let last = crawls::history(pool, site.id, 1).await?;
-            body.failure = last
-                .into_iter()
-                .find(|c| c.status == CrawlStatus::Failed)
-                .map(|c| {
-                    c.failure_reason
-                        .unwrap_or_else(|| "The crawl stopped unexpectedly.".to_owned())
-                });
+            body.failure = newest
+                .filter(|c| c.status == CrawlStatus::Failed)
+                .map(|c| failure_reason(&c));
         }
     }
     Ok(body)
 }
 
-/// What the AI & GEO parts of the screen read, loaded once.
-pub(crate) struct GeoData {
-    checks: Option<GeoChecks>,
-    block: GeoBlock,
-    /// Open incidents asking for attention, and how many fixes are being verified.
-    open: Option<(u32, u32, u32)>,
+fn failure_reason(c: &Crawl) -> String {
+    c.failure_reason
+        .clone()
+        .unwrap_or_else(|| "The crawl stopped unexpectedly.".to_owned())
 }
 
-const GEO_EMPTY: &str = "Each crawl checks robots.txt for every known AI bot, what your pages hold in their HTML and which answer engines may quote them. The first report appears with the next crawl.";
-
-async fn geo_data(
-    pool: &sqlx::PgPool,
-    site: &Site,
-    probes: ProbeSetting,
-) -> Result<GeoData, AppError> {
-    let base = format!("/s/{}", site.id);
-    let Some(latest) = geo::latest_report(pool, site.id).await? else {
-        return Ok(GeoData {
-            checks: None,
-            block: GeoBlock {
-                section: None,
-                empty: GEO_EMPTY,
-                panel: None,
-            },
-            open: None,
-        });
-    };
-    let intent = geo::get_intent(pool, site.id).await?;
-    let open = geo::open_incidents(pool, site.id).await?;
-    let rechecks = geo::latest_rechecks(pool, site.id).await?;
-    Ok(geo_view(
-        &base,
-        &latest.report,
-        &intent,
-        &open,
-        &rechecks,
-        probes,
-        time::OffsetDateTime::now_utc(),
-    ))
-}
-
-/// The AI & GEO parts of the screen from an access report and the site's incidents, without the
-/// database (the public demo draws it from a fixture).
-pub(crate) fn geo_view(
-    base: &str,
-    report: &codoseo_geo::report::AccessReport,
-    intent: &codoseo_geo::Intent,
-    open: &[geo::Incident],
-    rechecks: &std::collections::HashMap<i64, geo::Recheck>,
-    probes: ProbeSetting,
-    now: time::OffsetDateTime,
-) -> GeoData {
-    let counts = ai_incident::panel_counts(open, rechecks, now);
-    let mut panel = ai_panel_view(&counts);
-    panel.links = audit_ai::incident_links(base, open, now);
-    let asking = counts.open.total();
-    panel.more = (asking as usize > panel.links.len())
-        .then(|| format!("and {} more", asking as usize - panel.links.len()));
-    GeoData {
-        checks: Some(GeoChecks::of(report, intent)),
-        block: GeoBlock {
-            section: Some(audit_ai::section(report, intent, probes)),
-            empty: "",
-            panel: Some(panel),
-        },
-        open: Some((asking, counts.open.critical, counts.verifying)),
-    }
+/// The AI side of the audit: the latest access report, the owner's intent and the open
+/// incidents. None before the site's first report.
+pub(crate) struct AiData {
+    /// The site's start URL, which the remedies are written for.
+    pub origin: String,
+    pub report: AccessReport,
+    pub intent: Intent,
+    pub open: Vec<Incident>,
 }
 
 async fn done_audit(
     state: &AppState,
     site: &Site,
     crawl: &Crawl,
-    probes_installed: bool,
+    failed: Option<&Crawl>,
 ) -> Result<DoneAudit, AppError> {
     let pool = &state.pool;
     // Oldest first, ending with `crawl` (both are the latest finished crawl, chosen alike).
     let recent = crawls::recent_done(pool, site.id, TREND_CRAWLS).await?;
-    let changes = reports::change_kind_counts(pool, crawl.id).await?;
     let times = reports::response_time_buckets(pool, crawl.id).await?;
     let next = sites::next_crawl_at(pool, site.id).await?;
-    let geo = geo_data(
-        pool,
-        site,
-        ProbeSetting {
-            site_on: site.ai_probes,
-            installed: probes_installed,
-        },
-    )
-    .await?;
+    let ids: Vec<Uuid> = recent.iter().map(|c| c.id).collect();
+    let changes = reports::change_kind_counts_by_crawl(pool, &ids).await?;
+    let failing: Vec<CheckId> = crawl
+        .summary()
+        .map(|s| known_counts(&s).into_iter().map(|c| c.0).collect())
+        .unwrap_or_default();
+    let examples = explorer::example_urls(pool, crawl.id, &failing, EXAMPLE_URLS).await?;
+    let ai = match geo::latest_report(pool, site.id).await? {
+        Some(latest) => Some(AiData {
+            origin: site.start_url.clone(),
+            report: latest.report,
+            intent: geo::get_intent(pool, site.id).await?,
+            open: geo::open_incidents(pool, site.id).await?,
+        }),
+        None => None,
+    };
     Ok(done_view(DoneInput {
         base: format!("/s/{}", site.id),
+        demo: false,
         crawl,
         recent: &recent,
         changes: &changes,
         times: &times,
         next,
-        geo,
+        failed,
+        examples: &examples,
+        ai,
+        now: OffsetDateTime::now_utc(),
     }))
 }
 
@@ -531,26 +418,37 @@ async fn done_audit(
 pub(crate) struct DoneInput<'a> {
     /// `/s/{site}`, which the screen's links hang off.
     pub base: String,
+    pub demo: bool,
     /// The latest finished crawl.
     pub crawl: &'a Crawl,
     /// Up to [`TREND_CRAWLS`] finished crawls, oldest first, ending with `crawl`.
     pub recent: &'a [Crawl],
-    pub changes: &'a ChangeCounts,
+    /// Change counts of the `recent` crawls, by crawl.
+    pub changes: &'a HashMap<Uuid, ChangeCounts>,
     pub times: &'a ResponseBuckets,
     /// The next scheduled crawl.
-    pub next: Option<time::OffsetDateTime>,
-    pub geo: GeoData,
+    pub next: Option<OffsetDateTime>,
+    /// A newer crawl that failed.
+    pub failed: Option<&'a Crawl>,
+    /// Example URLs per failing SEO check.
+    pub examples: &'a HashMap<CheckId, Vec<String>>,
+    pub ai: Option<AiData>,
+    pub now: OffsetDateTime,
 }
 
 pub(crate) fn done_view(input: DoneInput<'_>) -> DoneAudit {
     let DoneInput {
         base,
+        demo,
         crawl,
         recent,
         changes,
         times,
         next,
-        geo,
+        failed,
+        examples,
+        ai,
+        now,
     } = input;
     let stored = crawl.summary();
     let summary = stored
@@ -561,111 +459,109 @@ pub(crate) fn done_view(input: DoneInput<'_>) -> DoneAudit {
         .iter()
         .rev()
         .find(|c| c.id != crawl.id && c.finished_at <= crawl.finished_at);
+    let prev_stored = previous.and_then(Crawl::summary);
 
-    let total = i64::from(crawl.checks_total.unwrap_or(0));
-    let passed = i64::from(crawl.checks_passed.unwrap_or(0));
-    let critical_failing = stored.as_ref().is_some_and(|s| {
-        s.counts.iter().any(|(slug, _)| {
-            CheckId::from_slug(slug).is_some_and(|id| def(id).severity == Severity::Critical)
-        })
-    });
-    let seo_chip = Chip {
-        text: format!("{passed} / {total} SEO checks passed"),
-        class: if passed == total {
-            "t-ok"
-        } else if critical_failing {
-            "t-err"
-        } else {
-            "t-warn"
-        },
-        tip: "The checks behind the health score".to_owned(),
-    };
-    let geo_chip = geo.checks.map(|g| Chip {
-        text: format!("{} / {GEO_CHECKS} AI & GEO checks passed", g.passed),
-        class: if g.failing > 0 {
-            "t-warn"
-        } else if g.not_checked > 0 {
-            "t-muted"
-        } else {
-            "t-ok"
-        },
-        tip: match g.not_checked {
-            0 => "AI access checks: not part of the health score".to_owned(),
-            n => format!(
-                "AI access checks, not part of the health score. {n} couldn't be checked on this crawl"
-            ),
-        },
-    });
     let stop_chip = stored.as_ref().and_then(|s| match s.stop_reason {
         StopReason::PageLimit => Some("page limit reached"),
         StopReason::TimeLimit => Some("time limit reached"),
         _ => None,
     });
-
     let mut meta = vec![format!("Crawl #{}", crawl.number)];
     if let Some(at) = crawl.finished_at {
-        meta.push(format!("finished {}", fmt::ago(at)));
+        meta.push(format!("finished {}", fmt::ago_from(at, now)));
     }
+    meta.push(format!("{} URLs", fmt::thousands(summary.pages)));
     if let Some(d) = crawl.duration() {
         meta.push(fmt::duration(d));
         meta.push(rate(summary.pages, d));
     }
     meta.push(match next {
-        Some(at) => format!("next crawl {}", fmt::until(at)),
+        Some(at) => format!("next crawl {}", fmt::until_from(at, now)),
         None => "no crawl scheduled".to_owned(),
     });
 
-    let seo_failing = (total - passed).max(0);
-    let mut fixes = stored
-        .as_ref()
-        .map(|s| fix_rows(&base, s))
-        .unwrap_or_default();
-    let more_fixes = fixes.split_off(fixes.len().min(FIXES_SHOWN));
-    let summaries: Vec<(i64, StoredSummary)> = recent
+    let seo_total = u32::try_from(crawl.checks_total.unwrap_or(0)).unwrap_or(0);
+    let seo_passed = u32::try_from(crawl.checks_passed.unwrap_or(0)).unwrap_or(0);
+    let bots = ai.as_ref().map(|a| bots_table(&a.report, &a.intent));
+    let fixes = fix_list(FixInput {
+        base: &base,
+        demo,
+        crawl_id: crawl.id,
+        current: stored.as_ref(),
+        previous: prev_stored.as_ref(),
+        seo_passed,
+        seo_total,
+        examples,
+        ai: ai.as_ref().map(|a| AiFixInput {
+            origin: &a.origin,
+            report: &a.report,
+            intent: &a.intent,
+            open: &a.open,
+            now,
+        }),
+    });
+
+    let points: Vec<TrendPoint> = recent
         .iter()
-        .filter_map(|c| Some((c.number, c.summary()?)))
+        .filter_map(|c| {
+            Some(TrendPoint {
+                number: c.number,
+                at: c.finished_at?,
+                seo: c.health_score,
+                geo: c.geo_score,
+                overall: c.overall_score,
+                changes: changes.get(&c.id).cloned().unwrap_or_default(),
+            })
+        })
         .collect();
-    let history: Vec<(i64, &StoredSummary)> = summaries.iter().map(|(n, s)| (*n, s)).collect();
-    let window = &history[history.len().saturating_sub(SEVERITY_CRAWLS)..];
+
+    let mut areas = stored.as_ref().map(category_bars).unwrap_or_default();
+    // The open AI issues are an area of their own.
+    if fixes.ai > 0 {
+        areas.push(CategoryBar {
+            label: "AI access",
+            n: fixes.ai as u32,
+            count: fmt::thousands(fixes.ai as u32),
+            width: 0,
+            ai: true,
+        });
+        scale_bars(&mut areas);
+    }
+
+    let cards = cards(CardInput {
+        base: &base,
+        demo,
+        crawl,
+        previous,
+        summary: &summary,
+        prev_summary: prev_stored.as_ref().map(|s| &s.report_summary),
+        times,
+        bots: bots.as_ref(),
+        fixes: &fixes,
+    });
 
     DoneAudit {
-        seo_chip,
-        geo_chip,
         stop_chip,
         meta: meta.join(" · "),
         finished: crawl.finished_at.map(fmt::datetime).unwrap_or_default(),
-        kpis: kpis(KpiInput {
-            crawl,
-            summary: &summary,
-            previous,
-            new_urls: changes.kind(ChangeKind::NewUrl),
-            removed_urls: changes.kind(ChangeKind::RemovedUrl),
-            seo_failing,
-            seo_total: total,
-            geo_failing: geo.checks.map(|g| g.failing),
-            open: geo.open,
+        number: crawl.number,
+        failed: failed.map(|f| FailedBanner {
+            number: f.number,
+            ago: f
+                .finished_at
+                .map_or_else(String::new, |at| fmt::ago_from(at, now)),
+            reason: failure_reason(f),
         }),
-        trend: trend(
-            &recent
-                .iter()
-                .filter_map(|c| Some((c.number, c.health_score?)))
-                .collect::<Vec<_>>(),
-        ),
+        cards,
         fixes,
-        more_fixes,
-        severity: severity_bars(window),
-        severity_aside: match window.len() {
-            1 => "this crawl".to_owned(),
-            n => format!("last {n} crawls"),
-        },
-        categories: stored.as_ref().map(category_bars).unwrap_or_default(),
-        changes: changes_card(&base, changes, previous.map(|p| p.number)),
-        geo: geo.block,
-        codes: segments(&summary),
+        trend: trend(&points, next, now),
+        bots,
+        codes: segments(&base, demo, &summary),
         pages_label: format!("{} URLs", fmt::thousands(summary.pages)),
         depth: depth_bars(&summary),
         times: time_bars(times),
-        times_aside: format!("avg {} ms", fmt::thousands(summary.avg_response_ms)),
+        times_aside: format!("Average {} ms", fmt::thousands(summary.avg_response_ms)),
+        areas,
     }
 }
 
@@ -679,325 +575,301 @@ fn rate(pages: u32, d: time::Duration) -> String {
     }
 }
 
-fn ai_panel_view(c: &ai_incident::PanelCounts) -> AiPanel {
-    let row = |label, n: ai_incident::BySeverity| AiPanelRow {
-        label,
-        total: n.total(),
-        chips: [
-            ("sev-critical", n.critical, "critical"),
-            ("sev-warning", n.warning, "warning"),
-            ("sev-notice", n.notice, "notice"),
-        ]
-        .into_iter()
-        .filter(|(_, count, _)| *count > 0)
-        .map(|(class, count, name)| (class, format!("{count} {name}")))
-        .collect(),
-    };
-    let rows = vec![
-        row("Open", c.open),
-        row("Accepted", c.accepted),
-        row("Snoozed", c.snoozed),
-    ];
-    AiPanel {
-        clear: rows.iter().all(|r| r.total == 0),
-        rows,
-        weakest: c
-            .weakest_grade
-            .map(|g| format!("Weakest evidence: {}", g.label())),
-        verifying: match c.verifying {
-            0 => None,
-            1 => Some("1 fix being verified".to_owned()),
-            n => Some(format!("{n} fixes being verified")),
-        },
-        links: Vec::new(),
-        more: None,
-    }
-}
-
-fn part(count: impl ToString, text: String, unit: &str) -> KpiPart {
-    KpiPart {
-        count: count.to_string(),
-        text,
-        unit: unit.to_owned(),
-    }
-}
-
-struct KpiInput<'a> {
+struct CardInput<'a> {
+    base: &'a str,
+    demo: bool,
     crawl: &'a Crawl,
-    summary: &'a CrawlSummary,
     previous: Option<&'a Crawl>,
-    new_urls: i64,
-    removed_urls: i64,
-    seo_failing: i64,
-    seo_total: i64,
-    /// AI & GEO checks failing; none before the first report.
-    geo_failing: Option<usize>,
-    /// `(asking for attention, of them critical, fixes being verified)`.
-    open: Option<(u32, u32, u32)>,
+    summary: &'a CrawlSummary,
+    prev_summary: Option<&'a CrawlSummary>,
+    times: &'a ResponseBuckets,
+    bots: Option<&'a BotsTable>,
+    fixes: &'a FixList,
 }
 
-fn kpis(k: KpiInput) -> Vec<Kpi> {
-    let KpiInput {
-        crawl,
-        summary: s,
-        previous,
-        ..
-    } = k;
-    let score = crawl.health_score.unwrap_or(0);
-    let prev_score = previous.and_then(|p| Some((p.number, p.health_score?)));
-    let (health_delta, health_tone) = match prev_score {
-        None => ("— first crawl".to_owned(), ""),
-        Some((n, prev)) if score < prev => (format!("↓ {} vs crawl #{n}", prev - score), "down"),
-        Some((n, prev)) if score > prev => (format!("↑ {} vs crawl #{n}", score - prev), "up"),
-        Some((n, _)) => (format!("no change vs crawl #{n}"), ""),
+/// The change line of a score: against the previous crawl's, when both have one.
+fn score_change(
+    cur: Option<i16>,
+    previous: Option<&Crawl>,
+    of: fn(&Crawl) -> Option<i16>,
+) -> Vec<Part> {
+    let Some(prev) = previous else {
+        return vec![part("First crawl", "")];
     };
-    let health_swatch = match score {
-        80.. => "bg-ok",
-        50..80 => "bg-warn",
-        _ => "bg-err",
-    };
+    match (cur, of(prev)) {
+        (None, _) => vec![part("Not scored yet", "")],
+        (Some(_), None) => vec![part("No earlier score", "")],
+        (Some(c), Some(p)) => change_parts(i64::from(c) - i64::from(p), "", true),
+    }
+}
 
-    let urls_delta = if previous.is_some() {
+/// `▲ 3 since last crawl` (up is good when `up_good`), or `No change`.
+fn change_parts(d: i64, unit: &str, up_good: bool) -> Vec<Part> {
+    let tone = |good: bool| if good { "up" } else { "down" };
+    match d {
+        0 => vec![part("No change", "")],
+        d if d > 0 => vec![
+            part(format!("▲ {}{unit}", fmt::thousands(d)), tone(up_good)),
+            part("since last crawl", ""),
+        ],
+        d => vec![
+            part(format!("▼ {}{unit}", fmt::thousands(-d)), tone(!up_good)),
+            part("since last crawl", ""),
+        ],
+    }
+}
+
+fn number_card(
+    key: &'static str,
+    label: &'static str,
+    value: Option<i16>,
+    unit: &str,
+) -> ScoreCard {
+    ScoreCard {
+        key,
+        label,
+        tag: None,
+        value: value.map_or_else(|| "—".to_owned(), |v| v.to_string()),
+        count: value.map(|v| v.to_string()).unwrap_or_default(),
+        unit: if value.is_some() {
+            unit.to_owned()
+        } else {
+            String::new()
+        },
+        change: Vec::new(),
+        detail: Vec::new(),
+        dots: Vec::new(),
+        href: None,
+        tone: "",
+        help: false,
+    }
+}
+
+fn checks_line(passed: impl Into<i64>, total: impl Into<i64>) -> Vec<Part> {
+    vec![part(
         format!(
-            "+{} new · −{} removed",
-            fmt::thousands(k.new_urls),
-            fmt::thousands(k.removed_urls)
-        )
-    } else {
-        "— first crawl".to_owned()
+            "{} of {} checks pass",
+            fmt::thousands(passed),
+            fmt::thousands(total)
+        ),
+        "",
+    )]
+}
+
+fn cards(k: CardInput<'_>) -> Vec<ScoreCard> {
+    let CardInput {
+        base,
+        demo,
+        crawl,
+        previous,
+        summary: s,
+        prev_summary,
+        times,
+        bots,
+        fixes,
+    } = k;
+    let seo_passed = i64::from(crawl.checks_passed.unwrap_or(0));
+    let seo_total = i64::from(crawl.checks_total.unwrap_or(0));
+    let geo_counts = crawl
+        .geo_checks_passed
+        .zip(crawl.geo_checks_applicable)
+        .map(|(p, a)| (i64::from(p), i64::from(a)));
+
+    let mut overall = number_card("overall", CARD_LABELS[0], crawl.overall_score, "/100");
+    overall.change = score_change(crawl.overall_score, previous, |c| c.overall_score);
+    overall.detail = match (crawl.overall_score, geo_counts) {
+        (Some(_), Some((p, a))) => checks_line(seo_passed + p, seo_total + a),
+        _ => vec![part("Needs a GEO score", "")],
     };
+    overall.tone = "is-strong";
+    overall.help = true;
+
+    let mut seo = number_card("seo", "score", crawl.health_score, "/100");
+    seo.tag = Some(("t-seo", "SEO"));
+    seo.change = score_change(crawl.health_score, previous, |c| c.health_score);
+    seo.detail = checks_line(seo_passed, seo_total);
+    seo.href = Some("#fix".to_owned());
+
+    let mut geo = number_card("geo", "score", crawl.geo_score, "/100");
+    geo.tag = Some(("t-ai", "GEO"));
+    geo.change = score_change(crawl.geo_score, previous, |c| c.geo_score);
+    geo.detail = match geo_counts {
+        Some((p, a)) => checks_line(p, a),
+        None => vec![part("Comes with the next AI check", "")],
+    };
+    geo.help = true;
 
     let pct = fmt::pct1(u64::from(s.indexable), u64::from(s.pages));
-    let share = |sum: &CrawlSummary| f64::from(sum.indexable) * 100.0 / f64::from(sum.pages.max(1));
-    let prev_share = previous.and_then(|p| Some((p.number, share(&p.summary()?.report_summary))));
-    let (index_delta, index_tone) = match prev_share {
-        None => (
+    let mut indexable = ScoreCard {
+        key: "indexable",
+        label: CARD_LABELS[3],
+        tag: None,
+        value: pct.clone(),
+        count: pct,
+        unit: "%".to_owned(),
+        change: match prev_summary {
+            None => vec![part("First crawl", "")],
+            Some(p) => {
+                let d = i64::from(s.indexable) - i64::from(p.indexable);
+                match d {
+                    0 => vec![part("No change", "")],
+                    d if d > 0 => vec![part(
+                        format!(
+                            "▲ {} page{}",
+                            fmt::thousands(d),
+                            if d == 1 { "" } else { "s" }
+                        ),
+                        "up",
+                    )],
+                    d => vec![part(
+                        format!(
+                            "▼ {} page{}",
+                            fmt::thousands(-d),
+                            if d == -1 { "" } else { "s" }
+                        ),
+                        "down",
+                    )],
+                }
+            }
+        },
+        detail: vec![part(
             format!(
-                "{} of {}",
+                "{} of {} URLs",
                 fmt::thousands(s.indexable),
                 fmt::thousands(s.pages)
             ),
             "",
-        ),
-        Some((n, prev)) => {
-            let d = share(s) - prev;
-            if d.abs() < 0.05 {
-                (format!("no change vs crawl #{n}"), "")
-            } else if d > 0.0 {
-                (format!("↑ {d:.1} pts vs crawl #{n}"), "up")
+        )],
+        dots: Vec::new(),
+        href: (!demo).then(|| format!("{base}/explorer?filter=nx")),
+        tone: "",
+        help: false,
+    };
+    if s.pages == 0 {
+        indexable.value = "—".to_owned();
+        indexable.count.clear();
+        indexable.unit.clear();
+    }
+
+    let ai = match bots {
+        Some(b) if !b.unknown => ScoreCard {
+            key: "ai",
+            label: "products",
+            tag: Some(("t-ai", "AI")),
+            value: b.reach.to_string(),
+            count: b.reach.to_string(),
+            unit: format!(" / {}", b.of),
+            change: if b.blocked + b.partly == 0 {
+                vec![part("All can reach you", "c-ok")]
             } else {
-                (format!("↓ {:.1} pts vs crawl #{n}", -d), "down")
+                let mut v = Vec::new();
+                if b.blocked > 0 {
+                    v.push(part(format!("{} blocked", b.blocked), "c-err"));
+                }
+                if b.partly > 0 {
+                    v.push(part(format!("{} partly", b.partly), "c-warn"));
+                }
+                v
+            },
+            detail: if demo {
+                Vec::new()
+            } else {
+                vec![part("AI access →", "c-link")]
+            },
+            dots: b.dots(),
+            href: (!demo).then(|| format!("{base}/ai-access")),
+            tone: "",
+            help: false,
+        },
+        Some(_) => ScoreCard {
+            change: vec![part("robots.txt unreadable", "c-warn")],
+            detail: vec![part("AI access →", "c-link")],
+            href: (!demo).then(|| format!("{base}/ai-access")),
+            tag: Some(("t-ai", "AI")),
+            ..number_card("ai", "products", None, "")
+        },
+        None => ScoreCard {
+            change: vec![part("No AI check yet", "")],
+            detail: vec![part("Comes with the next crawl", "")],
+            tag: Some(("t-ai", "AI")),
+            ..number_card("ai", "products", None, "")
+        },
+    };
+
+    let avg = s.avg_response_ms;
+    let response = ScoreCard {
+        key: "response",
+        label: CARD_LABELS[5],
+        tag: None,
+        value: fmt::thousands(avg),
+        count: avg.to_string(),
+        unit: " ms".to_owned(),
+        // Faster is better: a drop is the good colour.
+        change: match prev_summary {
+            None => vec![part("First crawl", "")],
+            Some(p) => change_parts(i64::from(avg) - i64::from(p.avg_response_ms), " ms", false),
+        },
+        detail: vec![part(
+            match times.very_slow {
+                0 => "None over 1 s".to_owned(),
+                n => format!("{} over 1 s", fmt::pages(n as u32)),
+            },
+            "",
+        )],
+        dots: Vec::new(),
+        href: None,
+        tone: "",
+        help: false,
+    };
+
+    let issues = if fixes.is_clear() {
+        ScoreCard {
+            key: "issues",
+            label: CARD_LABELS[6],
+            tag: None,
+            value: "0".to_owned(),
+            count: "0".to_owned(),
+            unit: String::new(),
+            change: vec![part("Nothing to fix", "c-ok")],
+            detail: checks_line(fixes.checks_passed, fixes.checks_total),
+            dots: Vec::new(),
+            href: None,
+            tone: "is-ok",
+            help: false,
+        }
+    } else {
+        let mut change = Vec::new();
+        for (sev, name, class) in [
+            (Severity::Critical, "critical", "c-err"),
+            (Severity::Warning, "warning", ""),
+            (Severity::Notice, "notice", ""),
+        ] {
+            let n = fixes.count(sev);
+            if n > 0 {
+                change.push(part(format!("{n} {name}"), class));
             }
         }
-    };
-
-    // Faster is better, so a drop in response time is the good (`up`) colour.
-    let prev_avg =
-        previous.and_then(|p| Some((p.number, p.summary()?.report_summary.avg_response_ms)));
-    let avg = s.avg_response_ms;
-    let (avg_delta, avg_tone) = match prev_avg {
-        None => ("— first crawl".to_owned(), ""),
-        Some((n, prev)) if avg < prev => (
-            format!("↓ {} ms vs crawl #{n}", fmt::thousands(prev - avg)),
-            "up",
-        ),
-        Some((n, prev)) if avg > prev => (
-            format!("↑ {} ms vs crawl #{n}", fmt::thousands(avg - prev)),
-            "down",
-        ),
-        Some((n, _)) => (format!("no change vs crawl #{n}"), ""),
-    };
-
-    // SEO and AI & GEO checks together; the score reads only the SEO ones.
-    let (failing, of, failing_delta) = match k.geo_failing {
-        Some(g) => (
-            k.seo_failing + g as i64,
-            k.seo_total + GEO_CHECKS as i64,
-            format!("{} SEO · {g} AI & GEO", k.seo_failing),
-        ),
-        None => (
-            k.seo_failing,
-            k.seo_total,
-            format!("{} SEO · AI & GEO not checked yet", k.seo_failing),
-        ),
-    };
-
-    let ai = match k.open {
-        None => Kpi {
-            label: KPI_LABELS[5],
-            swatch: "bg-ghost",
-            parts: vec![part("", "—".to_owned(), "")],
-            delta: "no report yet".to_owned(),
-            tone: "",
-        },
-        Some((open, critical, verifying)) => Kpi {
-            label: KPI_LABELS[5],
-            swatch: if critical > 0 {
-                "bg-err"
-            } else if open > 0 {
-                "bg-warn"
+        ScoreCard {
+            key: "issues",
+            label: CARD_LABELS[6],
+            tag: None,
+            value: fixes.total.to_string(),
+            count: fixes.total.to_string(),
+            unit: String::new(),
+            change,
+            detail: vec![part("See the fix list ↓", "c-link")],
+            dots: Vec::new(),
+            href: Some("#fix".to_owned()),
+            tone: if fixes.critical > 0 {
+                "is-err"
             } else {
-                "bg-ok"
+                "is-warn"
             },
-            parts: vec![part(open, fmt::thousands(open), "open")],
-            delta: match (open, critical, verifying) {
-                (_, _, v) if v > 0 => format!("{v} being verified"),
-                (0, ..) => "nothing to fix".to_owned(),
-                (_, 0, _) => "none critical".to_owned(),
-                (_, c, _) => format!("{c} critical"),
-            },
-            tone: if critical > 0 { "down" } else { "" },
-        },
-    };
-
-    vec![
-        Kpi {
-            label: KPI_LABELS[0],
-            swatch: health_swatch,
-            parts: vec![part(score, score.to_string(), "/100")],
-            delta: health_delta,
-            tone: health_tone,
-        },
-        Kpi {
-            label: KPI_LABELS[1],
-            swatch: "bg-ink",
-            parts: vec![part(s.pages, fmt::thousands(s.pages), "")],
-            delta: urls_delta,
-            tone: "",
-        },
-        Kpi {
-            label: KPI_LABELS[2],
-            swatch: "bg-ok",
-            parts: vec![part(&pct, pct.clone(), "%")],
-            delta: index_delta,
-            tone: index_tone,
-        },
-        Kpi {
-            label: KPI_LABELS[3],
-            swatch: "bg-blue",
-            parts: vec![part(
-                s.avg_response_ms,
-                fmt::thousands(s.avg_response_ms),
-                "ms",
-            )],
-            delta: avg_delta,
-            tone: avg_tone,
-        },
-        Kpi {
-            label: KPI_LABELS[4],
-            swatch: if failing > 0 { "bg-warn" } else { "bg-ok" },
-            parts: vec![part(failing, fmt::thousands(failing), &format!("of {of}"))],
-            delta: failing_delta,
-            tone: "",
-        },
-        ai,
-    ]
-}
-
-/// The health score trend over `points` (`(crawl number, score)`, oldest first) in a 640×180
-/// box. The vertical range is the scores' own, padded to tens and at least 20 points tall, so a
-/// small move still reads as one.
-fn trend(points: &[(i64, i16)]) -> Trend {
-    const W: f64 = 640.0;
-    const H: f64 = 180.0;
-    let mut t = Trend {
-        empty: None,
-        points: String::new(),
-        area: String::new(),
-        label: String::new(),
-        aside: String::new(),
-        grid: Vec::new(),
-        axis: Vec::new(),
-        last: (100.0, 0.0, 0),
-        note: None,
-    };
-    match points {
-        [] => {
-            t.empty = Some("No scored crawl yet.".to_owned());
-            return t;
+            help: false,
         }
-        [(n, s)] => {
-            t.empty = Some(format!(
-                "Crawl #{n} scored {s}. The trend starts with the next crawl."
-            ));
-            t.aside = "1 crawl".to_owned();
-            return t;
-        }
-        _ => {}
-    }
-    let min = points.iter().map(|p| i64::from(p.1)).min().unwrap_or(0);
-    let max = points.iter().map(|p| i64::from(p.1)).max().unwrap_or(100);
-    let mut lo = ((min - 5).max(0) / 10) * 10;
-    let mut hi = (((max + 5) + 9) / 10 * 10).min(100);
-    if hi - lo < 20 {
-        lo = (hi - 20).max(0);
-        hi = lo + 20;
-    }
-    let span = (hi - lo) as f64;
-    let last_i = points.len() - 1;
-    let x = |i: usize| i as f64 * W / last_i as f64;
-    let y = |s: i16| H - (f64::from(s) - lo as f64) / span * H;
-    let xy: Vec<String> = points
-        .iter()
-        .enumerate()
-        .map(|(i, &(_, s))| format!("{:.1},{:.1}", x(i), y(s)))
-        .collect();
-    t.points = xy.join(" ");
-    t.area = format!("M0,{H} L{} L{W},{H} Z", xy.join(" L"));
-    let (first, last) = (points[0], points[last_i]);
-    t.aside = format!("last {} crawls · {} → {}", points.len(), first.1, last.1);
-    t.label = match last.1.cmp(&first.1) {
-        std::cmp::Ordering::Equal => format!(
-            "Health score stayed at {} over the last {} crawls",
-            last.1,
-            points.len()
-        ),
-        o => format!(
-            "Health score {} from {} to {} over the last {} crawls",
-            if o == std::cmp::Ordering::Greater {
-                "rose"
-            } else {
-                "fell"
-            },
-            first.1,
-            last.1,
-            points.len()
-        ),
     };
-    t.grid = (1..=3)
-        .map(|q| {
-            let v = lo + (hi - lo) * q / 4;
-            let top = 100.0 - (v - lo) as f64 / span * 100.0;
-            (top / 100.0 * H, v, top)
-        })
-        .collect();
-    let ticks = if points.len() <= 5 {
-        (0..points.len()).collect::<Vec<_>>()
-    } else {
-        let mut v: Vec<usize> = (0..5).map(|k| (k * last_i + 2) / 4).collect();
-        v.dedup();
-        v
-    };
-    t.axis = ticks
-        .into_iter()
-        .map(|i| (format!("#{}", points[i].0), x(i) / W * 100.0))
-        .collect();
-    t.last = (100.0, y(last.1) / H * 100.0, last.1);
-    t.note = points
-        .windows(2)
-        .map(|w| (w[1].0, w[1].1 - w[0].1))
-        .filter(|&(_, d)| d > 0)
-        .max_by_key(|&(n, d)| (d, n))
-        .map(|(n, d)| format!("Best gain: crawl #{n} (+{d})"));
-    t
-}
 
-fn severity_view(s: Severity) -> (&'static str, &'static str) {
-    match s {
-        Severity::Critical => ("critical", "Critical"),
-        Severity::Warning => ("warning", "Warning"),
-        Severity::Notice => ("notice", "Notice"),
-    }
+    vec![overall, seo, geo, indexable, ai, response, issues]
 }
 
 fn category_label(c: Category) -> &'static str {
@@ -1014,14 +886,6 @@ fn category_label(c: Category) -> &'static str {
     }
 }
 
-/// The checks of a stored summary this version knows, with their counts.
-fn known_counts(s: &StoredSummary) -> Vec<(CheckId, u32)> {
-    s.counts
-        .iter()
-        .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n)))
-        .collect()
-}
-
 /// What one failing check weighs in the charts: its pages, or 1 for a site-wide fact.
 fn weight(id: CheckId, n: u32) -> u32 {
     if def(id).scope == Scope::SiteWide {
@@ -1029,87 +893,6 @@ fn weight(id: CheckId, n: u32) -> u32 {
     } else {
         n
     }
-}
-
-/// Every failing check, the one whose fix gives back the most points first; ties go to the
-/// more severe, then the more widespread.
-fn fix_rows(base: &str, s: &StoredSummary) -> Vec<FixRow> {
-    let counts = known_counts(s);
-    let mut gains: Vec<(CheckId, u32, f64)> = points_regained(&counts, s.report_summary.pages)
-        .into_iter()
-        .zip(&counts)
-        .map(|((id, g), &(_, n))| (id, n, g))
-        .collect();
-    gains.sort_by(|a, b| {
-        b.2.total_cmp(&a.2)
-            .then(def(a.0).severity.cmp(&def(b.0).severity))
-            .then(b.1.cmp(&a.1))
-            .then(a.0.cmp(&b.0))
-    });
-    gains
-        .into_iter()
-        .map(|(id, n, g)| {
-            let d = def(id);
-            let (severity, severity_label) = severity_view(d.severity);
-            let site_wide = d.scope == Scope::SiteWide;
-            FixRow {
-                severity,
-                severity_label,
-                title: d.title,
-                href: (!site_wide).then(|| format!("{base}/explorer?filter=check:{}", id.slug())),
-                pages: if site_wide {
-                    "site-wide".to_owned()
-                } else {
-                    fmt::pages(n)
-                },
-                category: category_label(d.category),
-                gain: format!("+{g:.1}"),
-            }
-        })
-        .collect()
-}
-
-/// Failing pages per crawl by severity (`(crawl number, summary)`, oldest first).
-fn severity_bars(history: &[(i64, &StoredSummary)]) -> Vec<SeverityBar> {
-    let totals: Vec<(i64, [u32; 3])> = history
-        .iter()
-        .map(|(n, s)| {
-            let mut by = [0u32; 3];
-            for (id, count) in known_counts(s) {
-                by[def(id).severity as usize] += weight(id, count);
-            }
-            (*n, by)
-        })
-        .collect();
-    let max = totals
-        .iter()
-        .map(|(_, b)| b.iter().sum::<u32>())
-        .max()
-        .unwrap_or(0)
-        .max(1);
-    let pct = |v: u32| {
-        if v == 0 {
-            0
-        } else {
-            (u64::from(v) * 100 / u64::from(max)).max(1) as u32
-        }
-    };
-    totals
-        .into_iter()
-        .map(|(n, [c, w, no])| SeverityBar {
-            label: format!("#{n}"),
-            critical: pct(c),
-            warning: pct(w),
-            notice: pct(no),
-            total: fmt::thousands(c + w + no),
-            tip: format!(
-                "Crawl #{n}: {} critical · {} warning · {} notice",
-                fmt::thousands(c),
-                fmt::thousands(w),
-                fmt::thousands(no)
-            ),
-        })
-        .collect()
 }
 
 /// This crawl's failing pages per check category, the largest first.
@@ -1126,74 +909,49 @@ fn category_bars(s: &StoredSummary) -> Vec<CategoryBar> {
         }
     }
     by.retain(|(_, n)| *n > 0);
-    by.sort_by_key(|b| std::cmp::Reverse(b.1));
-    let max = by.first().map_or(1, |b| b.1.max(1));
-    by.into_iter()
+    let mut bars: Vec<CategoryBar> = by
+        .into_iter()
         .map(|(c, n)| CategoryBar {
             label: category_label(c),
+            n,
             count: fmt::thousands(n),
-            width: (u64::from(n) * 100 / u64::from(max)).max(3) as u32,
+            width: 0,
+            ai: false,
         })
-        .collect()
+        .collect();
+    scale_bars(&mut bars);
+    bars
 }
 
-/// The crawl's changes per kind, the most severe first.
-fn changes_card(base: &str, c: &ChangeCounts, previous: Option<i64>) -> ChangesCard {
-    let mut by: Vec<(ChangeKind, Severity, i64)> = Vec::new();
-    for &(kind, sev, n) in &c.rows {
-        match by.iter_mut().find(|(k, ..)| *k == kind) {
-            Some(e) => {
-                e.1 = e.1.min(sev);
-                e.2 += n;
-            }
-            None => by.push((kind, sev, n)),
-        }
-    }
-    by.sort_by(|a, b| a.1.cmp(&b.1).then(b.2.cmp(&a.2)));
-    let empty = match previous {
-        _ if !by.is_empty() => None,
-        None => Some("The first crawl: nothing to compare with yet.".to_owned()),
-        Some(n) => Some(format!("Nothing changed since crawl #{n}.")),
-    };
-    ChangesCard {
-        href: format!("{base}/changes"),
-        rows: by
-            .into_iter()
-            .take(CHANGES_SHOWN)
-            .map(|(kind, sev, n)| ChangeLine {
-                label: kind.label(),
-                count: if kind == ChangeKind::NewUrl {
-                    format!("+{}", fmt::thousands(n))
-                } else {
-                    fmt::thousands(n)
-                },
-                dot: match sev {
-                    Severity::Critical => "bg-err",
-                    Severity::Warning => "bg-warn",
-                    Severity::Notice => "bg-ghost",
-                },
-            })
-            .collect(),
-        empty,
+/// The largest first, each as a share of it.
+fn scale_bars(bars: &mut [CategoryBar]) {
+    bars.sort_by_key(|b| std::cmp::Reverse(b.n));
+    let max = bars.first().map_or(1, |b| b.n.max(1));
+    for b in bars {
+        b.width = (u64::from(b.n) * 100 / u64::from(max)).max(3) as u32;
     }
 }
 
-fn segments(s: &CrawlSummary) -> Vec<Segment> {
+fn segments(base: &str, demo: bool, s: &CrawlSummary) -> Vec<Segment> {
     let st = &s.status;
     [
-        ("2xx", "bg-ok", st.ok),
-        ("3xx", "bg-warn", st.redirect),
-        ("4xx", "bg-err", st.client_error),
-        ("5xx", "bg-5xx", st.server_error),
-        ("No response", "bg-ghost", st.failed),
-        ("Blocked", "bg-ink", st.blocked),
+        ("2xx OK", "bg-ok", st.ok, Some("s2")),
+        ("3xx Redirect", "bg-blue", st.redirect, Some("s3")),
+        ("4xx Not found", "bg-warn", st.client_error, Some("s4")),
+        ("5xx Server error", "bg-err", st.server_error, Some("s5")),
+        ("No response", "bg-ghost", st.failed, Some("s0")),
+        ("Blocked", "bg-ink", st.blocked, None),
     ]
     .into_iter()
-    .map(|(label, class, n)| Segment {
+    .filter(|(label, _, n, _)| *n > 0 || label.starts_with(['2', '3', '4', '5']))
+    .map(|(label, class, n, filter)| Segment {
         label,
         class,
         n,
         count: fmt::thousands(n),
+        href: filter
+            .filter(|_| !demo && n > 0)
+            .map(|f| format!("{base}/explorer?filter={f}")),
     })
     .collect()
 }
@@ -1211,7 +969,7 @@ fn depth_bars(s: &CrawlSummary) -> Vec<Bar> {
             } else {
                 i.to_string()
             };
-            let class = if i >= 5 { "bg-warn" } else { "bg-ok" };
+            let class = if i >= 5 { "bg-warn" } else { "bg-blue" };
             let tip = match i {
                 0 => "the homepage".to_owned(),
                 1 => "1 click from the homepage".to_owned(),
@@ -1245,10 +1003,10 @@ fn depth_bars(s: &CrawlSummary) -> Vec<Bar> {
 fn time_bars(t: &ResponseBuckets) -> Vec<HBar> {
     let total = t.total().max(1);
     [
-        ("< 200 ms", t.fast, "bg-ok"),
-        ("200–500", t.ok, "bg-ok"),
-        ("500–1000", t.slow, "bg-warn"),
-        ("> 1 s", t.very_slow, "bg-err"),
+        ("Under 200 ms", t.fast, "bg-ok"),
+        ("200–500 ms", t.ok, "bg-ok"),
+        ("500 ms–1 s", t.slow, "bg-warn"),
+        ("Over 1 s", t.very_slow, "bg-err"),
     ]
     .into_iter()
     .map(|(label, n, class)| HBar {
@@ -1264,12 +1022,15 @@ fn time_bars(t: &ResponseBuckets) -> Vec<HBar> {
 mod tests {
     use super::*;
     use codoseo_core::report::StatusCounts;
+    use codoseo_store::crawl_queue::CrawlTrigger;
+    use time::Duration;
 
     fn stored(counts: Vec<(&str, u32)>, pages: u32) -> StoredSummary {
         StoredSummary {
             stop_reason: StopReason::Completed,
             report_summary: CrawlSummary {
                 pages,
+                indexable: pages,
                 status: StatusCounts::default(),
                 ..Default::default()
             },
@@ -1278,61 +1039,134 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fixes_rank_by_points_regained() {
-        let s = stored(
-            vec![
-                ("og_missing", 40),
-                ("title_missing", 3),
-                ("http_4xx", 2),
-                ("description_missing", 9),
-                ("sitemap_missing", 1),
-                ("from_a_newer_version", 5),
-            ],
-            100,
-        );
-        let rows = fix_rows("/s/x", &s);
-        assert_eq!(rows.len(), 5, "unknown slugs are skipped");
-        // The critical 4xx costs most even on 2 pages of 100.
-        assert_eq!(
-            rows[0].href.as_deref(),
-            Some("/s/x/explorer?filter=check:http_4xx")
-        );
-        assert_eq!(rows[0].severity, "critical");
-        assert_eq!(rows[0].pages, "2 pages");
-        // Warnings: 9 missing descriptions give back more than 3 missing titles.
-        let at = |slug: &str| {
-            rows.iter()
-                .position(|r| r.href.as_deref().is_some_and(|h| h.ends_with(slug)))
-                .unwrap()
-        };
-        assert!(at("description_missing") < at("title_missing"));
-        // Gains read as points with one decimal, and never go up the list.
-        let gains: Vec<f64> = rows.iter().map(|r| r.gain.parse().unwrap()).collect();
-        assert!(gains.windows(2).all(|w| w[0] >= w[1]), "{gains:?}");
-        assert!(rows.iter().all(|r| r.gain.starts_with('+')));
-        // Site-wide checks have no link and no page count.
-        let site_wide = rows.iter().find(|r| r.href.is_none()).unwrap();
-        assert_eq!(site_wide.pages, "site-wide");
-        assert_eq!(site_wide.category, "Sitemap");
-        assert!(fix_rows("/s/x", &stored(vec![], 10)).is_empty());
+    fn crawl(number: i64, now: OffsetDateTime, s: &StoredSummary, geo: Option<i16>) -> Crawl {
+        let finished = now - Duration::days(14 - number);
+        Crawl {
+            id: Uuid::from_u128(number as u128),
+            site_id: Uuid::nil(),
+            number,
+            status: CrawlStatus::Done,
+            trigger: CrawlTrigger::Schedule,
+            queued_at: finished - Duration::minutes(2),
+            started_at: Some(finished - Duration::minutes(1)),
+            finished_at: Some(finished),
+            health_score: Some(80),
+            checks_passed: Some((CHECKS.len() - s.counts.len()) as i16),
+            checks_total: Some(CHECKS.len() as i16),
+            geo_score: geo,
+            geo_checks_passed: geo.map(|_| 9),
+            geo_checks_applicable: geo.map(|_| 11),
+            overall_score: geo.map(|g| (0.6 * 80.0 + 0.4 * f64::from(g)).round() as i16),
+            progress: None,
+            summary: Some(serde_json::json!({
+                "stop_reason": s.stop_reason,
+                "report_summary": s.report_summary,
+                "counts": s.counts,
+            })),
+            failure_reason: None,
+        }
+    }
+
+    fn view(recent: &[Crawl], failed: Option<&Crawl>) -> DoneAudit {
+        let now = OffsetDateTime::now_utc();
+        done_view(DoneInput {
+            base: "/s/x".to_owned(),
+            demo: false,
+            crawl: recent.last().unwrap(),
+            recent,
+            changes: &HashMap::new(),
+            times: &ResponseBuckets::default(),
+            next: None,
+            failed,
+            examples: &HashMap::new(),
+            ai: None,
+            now,
+        })
+    }
+
+    fn card<'a>(d: &'a DoneAudit, key: &str) -> &'a ScoreCard {
+        d.cards.iter().find(|c| c.key == key).unwrap()
+    }
+
+    fn text(parts: &[Part]) -> String {
+        parts
+            .iter()
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[test]
-    fn severity_bars_stack_each_crawl_against_the_tallest() {
-        let a = stored(vec![("http_4xx", 4), ("title_missing", 4)], 10);
-        let b = stored(vec![("http_4xx", 1), ("sitemap_missing", 1)], 10);
-        let bars = severity_bars(&[(3, &a), (4, &b)]);
-        assert_eq!(bars.len(), 2);
-        assert_eq!(bars[0].label, "#3");
-        assert_eq!((bars[0].critical, bars[0].warning), (50, 50));
-        assert_eq!(bars[0].total, "8");
-        // A site-wide check counts once; the notice is 1 of the tallest bar's 8.
-        assert_eq!(bars[1].notice, 12);
-        assert!(bars[1].tip.contains("1 critical · 0 warning · 1 notice"));
-        assert!(severity_bars(&[]).is_empty());
-        let clean = stored(vec![], 10);
-        assert_eq!(severity_bars(&[(1, &clean)])[0].total, "0");
+    fn seven_cards_and_old_crawls_without_geo_read_as_a_dash() {
+        let now = OffsetDateTime::now_utc();
+        let s = stored(vec![("http_4xx", 2)], 10);
+        let one = [crawl(1, now, &s, None)];
+        let d = view(&one, None);
+        let keys: Vec<&str> = d.cards.iter().map(|c| c.key).collect();
+        assert_eq!(
+            keys,
+            [
+                "overall",
+                "seo",
+                "geo",
+                "indexable",
+                "ai",
+                "response",
+                "issues"
+            ]
+        );
+        assert_eq!(card(&d, "overall").value, "—");
+        assert_eq!(card(&d, "geo").value, "—");
+        assert_eq!(text(&card(&d, "seo").change), "First crawl");
+        assert_eq!(text(&card(&d, "issues").change), "1 critical");
+        assert!(d.trend.waiting.is_some(), "one crawl: no chart");
+        assert!(d.bots.is_none());
+
+        // A second crawl with GEO: the overall card counts both kinds of checks.
+        let two = [crawl(1, now, &s, None), crawl(2, now, &s, Some(70))];
+        let d = view(&two, None);
+        assert_eq!(card(&d, "overall").value, "76");
+        assert_eq!(text(&card(&d, "overall").change), "No earlier score");
+        assert_eq!(
+            text(&card(&d, "overall").detail),
+            format!(
+                "{} of {} checks pass",
+                CHECKS.len() - 1 + 9,
+                CHECKS.len() + 11
+            )
+        );
+        assert_eq!(text(&card(&d, "seo").change), "No change");
+        assert!(d.trend.waiting.is_none());
+    }
+
+    #[test]
+    fn a_clean_crawl_is_all_clear_and_a_failed_newer_crawl_shows_a_banner() {
+        let now = OffsetDateTime::now_utc();
+        let s = stored(vec![], 10);
+        let ok = [crawl(1, now, &s, Some(90))];
+        let mut failed = crawl(2, now, &s, None);
+        failed.status = CrawlStatus::Failed;
+        failed.failure_reason = Some("503 on every page".to_owned());
+        let d = view(&ok, Some(&failed));
+        let issues = card(&d, "issues");
+        assert_eq!(issues.value, "0");
+        assert_eq!(issues.tone, "is-ok");
+        assert!(d.fixes.is_clear());
+        let b = d.failed.unwrap();
+        assert_eq!(b.number, 2);
+        assert_eq!(b.reason, "503 on every page");
+    }
+
+    #[test]
+    fn changes_are_signed_and_coloured_by_what_is_good() {
+        assert_eq!(text(&change_parts(3, "", true)), "▲ 3 since last crawl");
+        assert_eq!(change_parts(3, "", true)[0].class, "up");
+        assert_eq!(change_parts(40, " ms", false)[0].class, "down");
+        assert_eq!(
+            text(&change_parts(-40, " ms", false)),
+            "▼ 40 ms since last crawl"
+        );
+        assert_eq!(text(&change_parts(0, "", true)), "No change");
     }
 
     #[test]
@@ -1352,82 +1186,6 @@ mod tests {
         assert_eq!(bars[1].label, "Response");
         assert_eq!(bars.len(), 2);
         assert!(category_bars(&stored(vec![], 1)).is_empty());
-    }
-
-    #[test]
-    fn the_trend_needs_two_crawls_and_scales_to_its_scores() {
-        assert!(trend(&[]).empty.is_some());
-        let one = trend(&[(1, 80)]);
-        assert!(one.empty.unwrap().contains("Crawl #1 scored 80"));
-
-        let t = trend(&[(1, 71), (2, 74), (3, 73), (4, 87)]);
-        assert!(t.empty.is_none());
-        assert_eq!(t.aside, "last 4 crawls · 71 → 87");
-        assert!(t.label.contains("rose from 71 to 87"), "{}", t.label);
-        assert_eq!(t.points.split(' ').count(), 4);
-        assert!(t.points.starts_with("0.0,"));
-        assert!(t.points.ends_with(&format!("640.0,{:.1}", t.last.1 * 1.8)));
-        assert!(t.area.starts_with("M0,180 L0.0,"));
-        assert_eq!(t.note.as_deref(), Some("Best gain: crawl #4 (+14)"));
-        assert_eq!(t.axis.first().unwrap().0, "#1");
-        assert_eq!(t.axis.last().unwrap().0, "#4");
-        // Every point sits inside the box.
-        for p in t.points.split(' ') {
-            let y: f64 = p.split(',').nth(1).unwrap().parse().unwrap();
-            assert!((0.0..=180.0).contains(&y), "{p}");
-        }
-        assert_eq!(t.grid.len(), 3);
-
-        let flat = trend(&[(5, 100), (6, 100)]);
-        assert!(flat.label.contains("stayed at 100"), "{}", flat.label);
-        assert!(flat.note.is_none());
-
-        let many: Vec<(i64, i16)> = (1..=14).map(|n| (n, 60 + n as i16)).collect();
-        let t = trend(&many);
-        assert_eq!(t.axis.len(), 5);
-        assert_eq!(t.axis[4].0, "#14");
-        assert_eq!(t.axis[4].1, 100.0);
-    }
-
-    #[test]
-    fn changes_list_the_worst_kinds_first() {
-        let c = ChangeCounts {
-            rows: vec![
-                (ChangeKind::NewUrl, Severity::Notice, 12),
-                (ChangeKind::BecameNoindex, Severity::Critical, 2),
-                (ChangeKind::TitleChanged, Severity::Notice, 9),
-                (ChangeKind::StatusChanged, Severity::Warning, 3),
-                (ChangeKind::StatusChanged, Severity::Critical, 1),
-            ],
-        };
-        let card = changes_card("/s/x", &c, Some(13));
-        assert!(card.empty.is_none());
-        let labels: Vec<&str> = card.rows.iter().map(|r| r.label).collect();
-        assert_eq!(
-            labels,
-            [
-                "Status changed",
-                "Became noindex",
-                "New URL",
-                "Title changed"
-            ]
-        );
-        assert_eq!(card.rows[0].count, "4");
-        assert_eq!(card.rows[0].dot, "bg-err");
-        assert_eq!(card.rows[2].count, "+12");
-        assert_eq!(card.href, "/s/x/changes");
-
-        let none = ChangeCounts::default();
-        assert!(
-            changes_card("/s/x", &none, None)
-                .empty
-                .unwrap()
-                .contains("first crawl")
-        );
-        assert_eq!(
-            changes_card("/s/x", &none, Some(3)).empty.as_deref(),
-            Some("Nothing changed since crawl #3.")
-        );
     }
 
     #[test]
@@ -1456,7 +1214,7 @@ mod tests {
         assert_eq!(bars.len(), 12);
         assert_eq!(bars[10].label, "10+");
         assert_eq!(bars[6].class, "bg-warn");
-        assert_eq!(bars[4].class, "bg-ok");
+        assert_eq!(bars[4].class, "bg-blue");
         assert_eq!(bars[11].value, "3");
     }
 
