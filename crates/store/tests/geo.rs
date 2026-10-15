@@ -17,8 +17,10 @@ use codoseo_geo::findings::{FindingKind, evaluated_kinds};
 use codoseo_geo::incident::Before;
 use codoseo_geo::report::{build_report, important_urls};
 use codoseo_geo::robots::GroupMatch;
+use codoseo_geo::score::{GeoCheck, Status, overall_score};
 use codoseo_geo::{Intent, Purpose, Stance};
 use codoseo_store::alert_rules::{self, ALL_KINDS, DEFAULT_INSTANT};
+use codoseo_store::crawls;
 use codoseo_store::finalize::finalize;
 use codoseo_store::geo::{self, GeoInput};
 use sqlx::PgPool;
@@ -3540,4 +3542,117 @@ async fn a_robots_txt_that_still_does_not_answer_is_still_failing() {
             .unwrap(),
         Some(RecheckOutcome::Inconclusive)
     );
+}
+
+/// The crawl's stored `(geo_score, overall_score, geo_checks_passed, geo_checks_applicable)`.
+async fn scores(
+    pool: &PgPool,
+    crawl: Uuid,
+) -> (Option<i16>, Option<i16>, Option<i16>, Option<i16>) {
+    sqlx::query_as(
+        "SELECT geo_score, overall_score, geo_checks_passed, geo_checks_applicable \
+         FROM crawls WHERE id = $1",
+    )
+    .bind(crawl)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn finalize_scores_geo_and_overall_and_reads_them_back() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let clean = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let (geo_score, overall, passed, applicable) = scores(&db.pool, clean).await;
+    assert_eq!(geo_score, Some(100));
+    // round(0.6 x 90 + 0.4 x 100).
+    assert_eq!(overall, Some(94));
+    assert_eq!(passed, applicable);
+    assert!(applicable.unwrap() > 0);
+
+    let blocked = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let (geo_score, overall, passed, applicable) = scores(&db.pool, blocked).await;
+    assert!(geo_score.unwrap() < 100);
+    assert_eq!(
+        overall,
+        Some(i16::from(overall_score(90, geo_score.unwrap() as u8)))
+    );
+    assert_eq!(passed.unwrap() + 1, applicable.unwrap());
+
+    // The store reads: the latest crawl's scores with their breakdown, and the trend.
+    let latest = crawls::latest_done(&db.pool, site).await.unwrap().unwrap();
+    assert_eq!(latest.id, blocked);
+    assert_eq!(
+        (latest.geo_score, latest.overall_score),
+        (geo_score, overall)
+    );
+    assert_eq!(
+        (latest.geo_checks_passed, latest.geo_checks_applicable),
+        (passed, applicable)
+    );
+    let breakdown = latest.summary().unwrap().geo.unwrap();
+    assert_eq!(i16::from(breakdown.score), geo_score.unwrap());
+    let bots = breakdown
+        .checks
+        .iter()
+        .find(|c| c.check == GeoCheck::BotsBlocked)
+        .unwrap();
+    assert_eq!(bots.status, Status::Fail);
+    assert!(bots.points_regained > 0.0);
+    let trend: Vec<(Option<i16>, Option<i16>, Option<i16>)> =
+        crawls::recent_done(&db.pool, site, 14)
+            .await
+            .unwrap()
+            .iter()
+            .map(|c| (c.health_score, c.geo_score, c.overall_score))
+            .collect();
+    assert_eq!(
+        trend,
+        [
+            (Some(90), Some(100), Some(94)),
+            (Some(90), geo_score, overall)
+        ]
+    );
+
+    // A crawl without an AI access evaluation (a no-signup audit) has no GEO or Overall score.
+    let quick = make_crawl(&db.pool, site, "quick", "running").await;
+    finalize(
+        &db.pool,
+        quick,
+        site,
+        WORKER,
+        &crawl_of(200, ALLOW_ALL, None),
+        &check_report(),
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(scores(&db.pool, quick).await, (None, None, None, None));
+}
+
+#[tokio::test]
+async fn marking_a_block_intended_rescores_the_newest_crawl_only() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let first = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let second = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let before = scores(&db.pool, second).await;
+    assert!(before.0.unwrap() < 100);
+
+    let intent = Intent {
+        bots: [("OAI-SearchBot".to_owned(), Stance::Block)].into(),
+        ..Intent::default()
+    };
+    geo::set_intent(&db.pool, site, &intent).await.unwrap();
+    geo::reevaluate_quietly(&db.pool, site).await.unwrap();
+    let (geo_score, overall, passed, applicable) = scores(&db.pool, second).await;
+    assert_eq!(geo_score, Some(100));
+    assert_eq!(overall, Some(94));
+    assert_eq!(passed, applicable);
+    let latest = crawls::latest_done(&db.pool, site).await.unwrap().unwrap();
+    assert_eq!(latest.summary().unwrap().geo.unwrap().score, 100);
+    // The older crawl keeps the score of the intent it was finished under.
+    assert_eq!(scores(&db.pool, first).await, before);
 }

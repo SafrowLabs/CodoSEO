@@ -16,6 +16,7 @@ pub mod registry;
 pub mod remedy;
 pub mod report;
 pub mod robots;
+pub mod score;
 
 pub use intent::{Intent, Stance};
 pub use registry::{Bot, Honours, Purpose, Registry, registry, registry_json};

@@ -1,6 +1,6 @@
 # AI access
 
-AI access monitoring answers one question: can the AI crawlers and answer engines you care about reach your site, and does what they find let your pages appear in their answers? It runs on every crawl, next to the SEO checks, and never touches the health score. There is no composite "GEO score" and no "citation probability": every finding says what was checked, what it rests on and where the operator documents it.
+AI access monitoring answers one question: can the AI crawlers and answer engines you care about reach your site, and does what they find let your pages appear in their answers? It runs on every crawl, next to the SEO checks, and never touches the health score. Each crawl also gets a separate [GEO score](scores.md) built from these findings, but there is no "citation probability": every finding says what was checked, what it rests on and where the operator documents it.
 
 ![The AI access screen](images/ai-access/ai-access-hero.png)
 
@@ -127,7 +127,7 @@ cargo test -p codoseo-crawler --test content_corpus -- --nocapture
 
 ## llms.txt
 
-`/llms.txt` is an optional, proposed file at the root of a site: a Markdown index of what an AI agent should read ([llmstxt.org](https://llmstxt.org/)). CodoSEO reports whether you serve one and how it holds up. It is **informational**: it is never scored, never part of the health score and never Critical, and a site without one has nothing to fix.
+`/llms.txt` is an optional, proposed file at the root of a site: a Markdown index of what an AI agent should read ([llmstxt.org](https://llmstxt.org/)). CodoSEO reports whether you serve one and how it holds up. It is **informational**: it never opens an incident, is never part of the health score and is never Critical. The [GEO score](scores.md) does count it, as its smallest Recommended check: a site without one loses one or two points of 100.
 
 <table>
   <tr>

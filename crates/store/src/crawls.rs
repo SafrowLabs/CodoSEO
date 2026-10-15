@@ -5,6 +5,7 @@
 use codoseo_core::output::{LiveProgress, Progress, StopReason};
 use codoseo_core::plan::ManualAllowance;
 use codoseo_core::report::CrawlSummary;
+use codoseo_geo::score::GeoScore;
 use serde::Deserialize;
 use sqlx::{FromRow, PgPool};
 use time::OffsetDateTime;
@@ -35,6 +36,13 @@ pub struct Crawl {
     pub health_score: Option<i16>,
     pub checks_passed: Option<i16>,
     pub checks_total: Option<i16>,
+    /// The GEO score (`codoseo_geo::score`), its passing and applicable checks and the Overall
+    /// score; `None` for a crawl with no AI access evaluation (a no-signup audit, an unfinished
+    /// crawl) and for crawls finished before the scores were kept.
+    pub geo_score: Option<i16>,
+    pub geo_checks_passed: Option<i16>,
+    pub geo_checks_applicable: Option<i16>,
+    pub overall_score: Option<i16>,
     pub progress: Option<serde_json::Value>,
     pub summary: Option<serde_json::Value>,
     pub failure_reason: Option<String>,
@@ -48,6 +56,9 @@ pub struct StoredSummary {
     /// Failing checks as `(slug, affected pages)`; slugs this version doesn't know are kept
     /// as-is so callers can skip them.
     pub counts: Vec<(String, u32)>,
+    /// The GEO score with its per-check breakdown, beside the crawl's `geo_score` column.
+    #[serde(default)]
+    pub geo: Option<GeoScore>,
 }
 
 impl Crawl {
@@ -84,7 +95,8 @@ impl Crawl {
 const SELECT: &str = "SELECT * FROM ( \
        SELECT id, site_id, row_number() OVER (PARTITION BY site_id ORDER BY created_at, id) AS number, \
               status, trigger, queued_at, started_at, finished_at, health_score, checks_passed, \
-              checks_total, progress, summary, failure_reason, created_at \
+              checks_total, geo_score, geo_checks_passed, geo_checks_applicable, overall_score, \
+              progress, summary, failure_reason, created_at \
        FROM crawls WHERE site_id = $1) c";
 
 /// The most recent finished crawl.
@@ -116,7 +128,8 @@ pub async fn latest_done_for_account(
 }
 
 /// The site's last `limit` finished crawls, oldest first, chosen like [`latest_done`]: the
-/// site audit's trend charts read their score and stored summary, nothing per page.
+/// site audit's trend charts read their scores (SEO, GEO and Overall, the last two `None` on
+/// crawls from before they were kept) and stored summary, nothing per page.
 pub async fn recent_done(
     pool: &PgPool,
     site_id: Uuid,
