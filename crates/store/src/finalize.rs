@@ -182,11 +182,17 @@ async fn record_funnel_event(
 }
 
 fn build_summary(out: &CrawlOutput, report: &CrawlReport) -> serde_json::Value {
-    json!({
+    let mut summary = json!({
         "stop_reason": out.stop,
         "report_summary": report.summary,
         "counts": report.counts,
-    })
+    });
+    // What the site policy leaves out of the score; absent without one, as before policies.
+    if !report.excluded.is_empty() {
+        summary["excluded"] =
+            serde_json::to_value(&report.excluded).expect("counts always serialize");
+    }
+    summary
 }
 
 async fn insert_site_files(

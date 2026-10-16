@@ -102,6 +102,7 @@ mod tests {
                 counts: Vec::new(),
                 inlink_samples: Vec::new(),
                 summary: CrawlSummary::default(),
+                excluded: Default::default(),
             },
             snapshot: Snapshot {
                 origin: Url::parse("https://example.com/").unwrap(),

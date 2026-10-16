@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Args;
-use codoseo_checks::{check_page, def};
+use codoseo_checks::{Thresholds, check_page_with, def, title_for};
 use codoseo_core::check::CheckId;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
 use codoseo_core::page::PageRecord;
@@ -22,9 +22,8 @@ pub struct CheckArgs {
     url: Url,
     #[arg(long, value_enum, default_value_t = PlainFormat::Table)]
     format: PlainFormat,
-    /// A site policy file to check first (default: ./codoseo.toml when there is one). One page
-    /// has no AI access report, so the policy changes nothing here yet; an invalid file is
-    /// still an error
+    /// A site policy file (default: ./codoseo.toml when there is one): its check thresholds
+    /// apply to the page. Its other rules need a crawl; an invalid file is still an error
     #[arg(long, value_name = "FILE", conflicts_with = "no_policy")]
     policy: Option<PathBuf>,
     /// Ignore ./codoseo.toml
@@ -33,7 +32,8 @@ pub struct CheckArgs {
 }
 
 pub async fn run(args: CheckArgs) -> Outcome {
-    super::policy::resolve(args.policy.as_deref(), args.no_policy)?;
+    let thresholds = super::policy::resolve(args.policy.as_deref(), args.no_policy)?
+        .map_or(Thresholds::DEFAULT, |f| f.policy.thresholds());
     let cfg = CrawlConfig {
         start_url: args.url,
         limits: CrawlLimits::default(),
@@ -44,12 +44,12 @@ pub async fn run(args: CheckArgs) -> Outcome {
         extra_seeds: Vec::new(),
     };
     let mut page = inspect_page(&cfg).await?;
-    check_page(&mut page);
+    check_page_with(&mut page, &thresholds);
 
     let mut w = std::io::stdout().lock();
     match args.format {
         PlainFormat::Json => write_json(&mut w, &page)?,
-        PlainFormat::Table => write_table(&mut w, &page).map_err(CliError::from)?,
+        PlainFormat::Table => write_table(&mut w, &page, &thresholds).map_err(CliError::from)?,
     }
     w.flush()?;
 
@@ -65,7 +65,7 @@ fn or_dash(value: Option<&str>) -> String {
     value.map_or_else(|| "-".to_owned(), str::to_owned)
 }
 
-fn write_table(w: &mut impl Write, p: &PageRecord) -> std::io::Result<()> {
+fn write_table(w: &mut impl Write, p: &PageRecord, t: &Thresholds) -> std::io::Result<()> {
     let f = &p.fields;
     let mut pairs = vec![
         ("URL", p.url.to_string()),
@@ -121,7 +121,7 @@ fn write_table(w: &mut impl Write, p: &PageRecord) -> std::io::Result<()> {
     writeln!(w, "\nPage issues ({})", issues.len())?;
     let width = issues
         .iter()
-        .map(|d| d.title.chars().count())
+        .map(|d| title_for(d.id, t).chars().count())
         .max()
         .unwrap_or(0);
     for d in issues {
@@ -129,7 +129,7 @@ fn write_table(w: &mut impl Write, p: &PageRecord) -> std::io::Result<()> {
             w,
             "  {:<8}  {:<width$}  {}",
             severity_label(d.severity),
-            d.title,
+            title_for(d.id, t),
             d.id.slug()
         )?;
     }

@@ -1,7 +1,8 @@
 //! The site audit's "Score trend": the Overall, SEO and GEO scores of the last finished crawls
 //! as one server-drawn SVG, a sentence saying what happened, and numbered pins on the crawls
 //! whose change records hold something serious, with what changed and what it did to the
-//! scores. Crawls without a GEO (or Overall) score are left out of that line; with fewer than
+//! scores. A policy change is always a pin of its own, on the crawl it judged again, so a score
+//! jump can be traced to the edit behind it. Crawls without a GEO (or Overall) score are left out of that line; with fewer than
 //! two crawls there is no chart, only when the next crawl is due.
 
 use codoseo_core::change::ChangeKind;
@@ -33,6 +34,17 @@ pub struct TrendPoint {
     pub geo: Option<i16>,
     pub overall: Option<i16>,
     pub changes: ChangeCounts,
+    /// The policy changes that judged this crawl again, oldest first.
+    pub policy: Vec<PolicyPin>,
+}
+
+/// One policy change on the chart: who made it and what it did to the crawl's scores.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyPin {
+    /// `ann@example.com`, `the API`.
+    pub who: String,
+    pub health: (Option<i16>, Option<i16>),
+    pub geo: (Option<i16>, Option<i16>),
 }
 
 pub struct Line {
@@ -256,6 +268,33 @@ pub fn trend(points: &[TrendPoint], next: Option<OffsetDateTime>, now: OffsetDat
             .then(b.0.cmp(&a.0))
     });
     pins.truncate(PINS);
+    // Policy changes are always shown, neutral: the owner's choice, not an event on the site.
+    for (i, p) in points.iter().enumerate() {
+        if p.policy.is_empty() {
+            continue;
+        }
+        let mut who: Vec<&str> = p.policy.iter().map(|c| c.who.as_str()).collect();
+        who.dedup();
+        let what = match p.policy.len() {
+            1 => format!("Policy changed by {}", who.join(", ")),
+            n => format!("Policy changed {n} times by {}", who.join(", ")),
+        };
+        let first = &p.policy[0];
+        let last = &p.policy[p.policy.len() - 1];
+        let moves: Vec<String> = [
+            delta_text("Health", first.health.0, last.health.1),
+            delta_text("GEO", first.geo.0, last.geo.1),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let effect = if moves.is_empty() {
+            "No score change.".to_owned()
+        } else {
+            format!("{}.", moves.join(" · "))
+        };
+        pins.push((i, Severity::Notice, 0, what, effect, 0));
+    }
     pins.sort_by_key(|p| p.0);
     t.pins = pins
         .into_iter()
@@ -373,7 +412,29 @@ mod tests {
             geo,
             overall: geo.map(|g| (0.6 * f64::from(seo) + 0.4 * f64::from(g)).round() as i16),
             changes,
+            policy: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_policy_change_is_always_a_neutral_pin() {
+        let now = time::macros::datetime!(2026-10-14 10:00 UTC);
+        let mut points: Vec<TrendPoint> = (0..3)
+            .map(|i| pt(i, 75, Some(60), ChangeCounts::default()))
+            .collect();
+        points[2].seo = Some(79);
+        points[2].policy = vec![PolicyPin {
+            who: "ann@example.com".into(),
+            health: (Some(75), Some(79)),
+            geo: (Some(60), Some(60)),
+        }];
+        let t = trend(&points, None, now);
+        assert_eq!(t.pins.len(), 1);
+        let pin = &t.pins[0];
+        assert_eq!(pin.what, "Policy changed by ann@example.com");
+        assert_eq!(pin.effect, "Health 75 → 79.");
+        assert_eq!(pin.tone, "flat");
+        assert!(pin.when.ends_with("crawl #3"), "{}", pin.when);
     }
 
     #[test]

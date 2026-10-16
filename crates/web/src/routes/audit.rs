@@ -40,7 +40,7 @@ use crate::live::LiveCrawl;
 use crate::render::{Hx, html};
 use crate::routes::audit_ai::{BotsTable, bots_table};
 use crate::routes::audit_fix::{AiFixInput, FixInput, FixList, fix_list, known_counts};
-use crate::routes::audit_trend::{Trend, TrendPoint, trend};
+use crate::routes::audit_trend::{PolicyPin, Trend, TrendPoint, trend};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -371,6 +371,25 @@ pub(crate) struct AiData {
     pub open: Vec<Incident>,
 }
 
+/// The policy changes behind the trend's policy pins: the history rows that judged one of
+/// `crawls` again, by crawl, oldest first.
+async fn policy_pins(
+    pool: &sqlx::PgPool,
+    crawls: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<PolicyPin>>, AppError> {
+    let rows = codoseo_store::policy::history_for_crawls(pool, crawls).await?;
+    let mut out: HashMap<Uuid, Vec<PolicyPin>> = HashMap::new();
+    for r in rows {
+        let Some(crawl) = r.crawl_id else { continue };
+        out.entry(crawl).or_default().push(PolicyPin {
+            who: crate::routes::policy::who(&r),
+            health: (r.health_before, r.health_after),
+            geo: (r.geo_before, r.geo_after),
+        });
+    }
+    Ok(out)
+}
+
 async fn done_audit(
     state: &AppState,
     site: &Site,
@@ -384,6 +403,7 @@ async fn done_audit(
     let next = sites::next_crawl_at(pool, site.id).await?;
     let ids: Vec<Uuid> = recent.iter().map(|c| c.id).collect();
     let changes = reports::change_kind_counts_by_crawl(pool, &ids).await?;
+    let policy_pins = policy_pins(pool, &ids).await?;
     let failing: Vec<CheckId> = crawl
         .summary()
         .map(|s| known_counts(&s).into_iter().map(|c| c.0).collect())
@@ -404,6 +424,10 @@ async fn done_audit(
         crawl,
         recent: &recent,
         changes: &changes,
+        policy_pins: &policy_pins,
+        thresholds: codoseo_store::policy::get(pool, site.id)
+            .await?
+            .thresholds(),
         times: &times,
         next,
         failed,
@@ -425,6 +449,10 @@ pub(crate) struct DoneInput<'a> {
     pub recent: &'a [Crawl],
     /// Change counts of the `recent` crawls, by crawl.
     pub changes: &'a HashMap<Uuid, ChangeCounts>,
+    /// The policy changes that judged the `recent` crawls again, by crawl, oldest first.
+    pub policy_pins: &'a HashMap<Uuid, Vec<PolicyPin>>,
+    /// The site policy's thresholds, which the check titles name.
+    pub thresholds: codoseo_checks::Thresholds,
     pub times: &'a ResponseBuckets,
     /// The next scheduled crawl.
     pub next: Option<OffsetDateTime>,
@@ -443,6 +471,8 @@ pub(crate) fn done_view(input: DoneInput<'_>) -> DoneAudit {
         crawl,
         recent,
         changes,
+        policy_pins,
+        thresholds,
         times,
         next,
         failed,
@@ -492,6 +522,7 @@ pub(crate) fn done_view(input: DoneInput<'_>) -> DoneAudit {
         seo_passed,
         seo_total,
         examples,
+        thresholds,
         ai: ai.as_ref().map(|a| AiFixInput {
             origin: &a.origin,
             report: &a.report,
@@ -511,6 +542,7 @@ pub(crate) fn done_view(input: DoneInput<'_>) -> DoneAudit {
                 geo: c.geo_score,
                 overall: c.overall_score,
                 changes: changes.get(&c.id).cloned().unwrap_or_default(),
+                policy: policy_pins.get(&c.id).cloned().unwrap_or_default(),
             })
         })
         .collect();
@@ -1037,6 +1069,7 @@ mod tests {
                 ..Default::default()
             },
             counts: counts.into_iter().map(|(s, n)| (s.to_owned(), n)).collect(),
+            excluded: Default::default(),
             geo: None,
         }
     }
@@ -1077,6 +1110,8 @@ mod tests {
             crawl: recent.last().unwrap(),
             recent,
             changes: &HashMap::new(),
+            policy_pins: &HashMap::new(),
+            thresholds: codoseo_checks::Thresholds::DEFAULT,
             times: &ResponseBuckets::default(),
             next: None,
             failed,

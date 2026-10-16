@@ -2,6 +2,8 @@
 
 use codoseo_core::page::PageRecord;
 
+use crate::Thresholds;
+
 pub fn no_internal_outlinks(p: &PageRecord) -> bool {
     p.is_html_ok() && p.outlinks_internal == 0
 }
@@ -22,6 +24,7 @@ pub fn not_https(p: &PageRecord) -> bool {
     p.url.scheme() == "http" && (200..300).contains(&p.status)
 }
 
-pub fn slow_response(p: &PageRecord) -> bool {
-    p.status != 0 && p.response_ms > 1_000
+/// The time to the response headers, close to the time to first byte.
+pub fn slow_response(p: &PageRecord, t: &Thresholds) -> bool {
+    p.status != 0 && p.response_ms > t.slow_ms
 }

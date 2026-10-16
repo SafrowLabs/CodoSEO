@@ -25,7 +25,7 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
     let title_width = groups
         .iter()
         .flat_map(|(_, g)| g)
-        .map(|f| f.def.title.chars().count())
+        .map(|f| f.title.chars().count())
         .max()
         .unwrap_or(0);
     let slug_width = groups
@@ -40,7 +40,7 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
             writeln!(
                 w,
                 "  {:<title_width$}  {:<slug_width$}  {}",
-                f.def.title,
+                f.title,
                 f.def.id.slug(),
                 count_text(f)
             )?;

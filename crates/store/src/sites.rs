@@ -56,8 +56,8 @@ pub(crate) const COLUMNS: &str = "id, account_id, domain, start_url, schedule, \
      monitoring_active, key_pages, ai_probes, created_at";
 
 /// The starred key pages of a site (URL hashes), for the diff. Empty when the site is gone.
-pub async fn starred_key_pages(
-    pool: &PgPool,
+pub async fn starred_key_pages<'e, E: sqlx::PgExecutor<'e>>(
+    pool: E,
     site_id: Uuid,
 ) -> Result<std::collections::HashSet<u64>, sqlx::Error> {
     let hashes: Option<Vec<i64>> = sqlx::query_scalar("SELECT key_pages FROM sites WHERE id = $1")
@@ -73,7 +73,10 @@ pub async fn starred_key_pages(
 
 /// The starred pages' URLs, as the site's stored crawls know them (newest first; a starred page
 /// no stored crawl has is left out), so a crawl can fetch them even when no link leads there.
-pub async fn starred_urls(pool: &PgPool, site_id: Uuid) -> Result<Vec<url::Url>, sqlx::Error> {
+pub async fn starred_urls<'e, E: sqlx::PgExecutor<'e>>(
+    pool: E,
+    site_id: Uuid,
+) -> Result<Vec<url::Url>, sqlx::Error> {
     let urls: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT ON (p.url_hash) p.url FROM pages p \
          JOIN sites s ON s.id = p.site_id \

@@ -416,7 +416,7 @@ pub async fn latest_report(
     latest_report_in(pool, site_id).await
 }
 
-async fn latest_report_in<'e, E>(
+pub(crate) async fn latest_report_in<'e, E>(
     executor: E,
     site_id: Uuid,
 ) -> Result<Option<LatestReport>, sqlx::Error>

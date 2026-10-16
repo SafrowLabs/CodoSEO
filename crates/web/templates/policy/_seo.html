@@ -61,18 +61,38 @@
       <div class="pol-rules" id="seo-must-rows" aria-live="polite">{% include "policy/_seo_must.html" %}</div>
     </section>
 
-    <section class="card card-pad pol-soon" aria-labelledby="h-seo-next">
-      <h2 class="card-title" id="h-seo-next">Coming next</h2>
-      <ul class="pol-soon-list">
-        <li><b>Check thresholds</b> · title and description length, thin pages, slow pages, redirect hops.</li>
-        <li><b>Exceptions</b> · checks that don't apply to part of the site, left out of the health score.</li>
-      </ul>
-      <p class="pol-desc">A <code>codoseo.toml</code> can already hold both: imports and exports keep them.</p>
+    <section class="card pol-purpose" aria-labelledby="h-thresholds">
+      <div class="aia-purpose-main">
+        <div class="aia-purpose-text">
+          <h2 class="card-title" id="h-thresholds">Check thresholds</h2>
+          <p>Change what counts as too long, too thin or too slow for this site. Defaults follow common search guidance; the number of pages flagged updates as you type.</p>
+        </div>
+      </div>
+      <div class="pol-rules" id="seo-thresholds">
+        {% for t in seo.thresholds %}
+        <div class="pol-rule pol-thr">
+          <span class="pol-rule-what"><b>{{ t.label }}</b><span class="pol-rule-note">{{ t.default }}</span></span>
+          <span class="pol-thr-input">{% if t.options.is_empty() %}{{ t.pre }} <input class="input mono pol-input-sm" type="number" name="{{ t.name }}" value="{{ t.value }}" min="{{ t.min }}" max="{{ t.max }}" step="{{ t.step }}" aria-label="{{ t.label }}, in {{ t.unit }}"> {{ t.unit }}{% else %}<select class="select" name="{{ t.name }}" aria-label="{{ t.label }}">{% for o in t.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>{% endif %}</span>
+          <div class="pol-cmp {{ t.cmp.class }}" id="{{ t.cmp.id }}" aria-live="polite"><b>{{ t.cmp.head }}</b><span>{{ t.cmp.text }}</span></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% for e in seo.threshold_errors %}<p class="pol-field-error" role="alert">{{ e }}</p>{% endfor %}
+    </section>
+
+    <section class="card pol-purpose" aria-labelledby="h-exceptions">
+      <div class="aia-purpose-main">
+        <div class="aia-purpose-text">
+          <h2 class="card-title" id="h-exceptions">Exceptions</h2>
+          <p>Checks that don’t apply to part of the site. Excepted pages keep the issue, marked “Excepted” in the explorer, and leave the health score, the same way intended AI blocks leave the GEO score. <code>*</code> matches anything, <code>/</code> included.</p>
+        </div>
+      </div>
+      {% include "policy/_seo_exceptions.html" %}
     </section>
   </div>
 
   <div class="aia-savebar pol-savebar">
     <button class="btn btn-primary" type="submit"><svg class="icon"><use href="#i-check"/></svg>Save policy</button>
-    <span class="pol-save-note">Gaps become issues on the next crawl and cost health points like any other check. Every change is kept in <a href="{{ base }}/policy/history">History</a>.</span>
+    <span class="pol-save-note">Saving judges the latest crawl again at once: gaps become issues that cost health points like any other check, and thresholds and exceptions apply to it. Older crawls keep what they were judged under, so the next comparison may show changes from the policy alone. Every change is kept in <a href="{{ base }}/policy/history">History</a>.</span>
   </div>
 </form>

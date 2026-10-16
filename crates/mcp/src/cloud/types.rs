@@ -839,4 +839,99 @@ pub struct PolicyInfo {
     /// When the policy last changed; none while it never has.
     #[serde(with = "time::serde::rfc3339::option")]
     pub updated_at: Option<OffsetDateTime>,
+    /// After a save (`set_policy`, `PUT`): what it did. Absent on a read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved: Option<PolicySaveOutcome>,
+}
+
+/// A score before and after a policy change; `None` when there is none (no finished crawl, no
+/// AI access report).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScoreChange {
+    pub before: Option<i16>,
+    pub after: Option<i16>,
+}
+
+/// What saving a policy did: whether it changed anything (a history row), and the latest
+/// crawl's scores before and after, as the policy judged that crawl again at once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicySaveOutcome {
+    /// `saved`, or `unchanged` when the policy was the one the site had.
+    pub outcome: String,
+    /// The history row (`/s/{site}/policy/history`); none when nothing changed.
+    pub history_id: Option<i64>,
+    /// The latest crawl's health score, judged again under the new SEO rules.
+    pub health: ScoreChange,
+    pub geo: ScoreChange,
+    /// AI access incidents the new AI rules opened and resolved, quietly.
+    pub ai_incidents_opened: usize,
+    pub ai_incidents_resolved: usize,
+}
+
+/// What saving a policy would do, without saving it (`preview_policy`,
+/// `POST /api/v1/sites/{site}/policy/preview`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyPreview {
+    pub site_id: Uuid,
+    /// Whether it could be saved as it is; `errors` says why not.
+    pub valid: bool,
+    pub errors: Vec<codoseo_policy::PolicyError>,
+    /// What would change, key by key: `seo.thresholds.title_max: default → 65`.
+    pub summary: String,
+    /// The crawl it is measured on: the latest finished one; none before the first.
+    pub crawl_id: Option<Uuid>,
+    /// Issues (a check on a page) the latest crawl counts now that it would no longer count:
+    /// unflagged by a threshold, excepted, or on a page kept out of search as asked.
+    pub issues_muted: u32,
+    /// Issues it would count that it doesn't now, opened at once on that crawl.
+    pub issues_opened: u32,
+    pub health: ScoreChange,
+    pub geo: ScoreChange,
+    /// The new rules measured on the latest crawl.
+    pub report: codoseo_policy::PolicyReport,
+}
+
+/// One key that differs between the stored policy and another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyKeyChange {
+    /// `seo.thresholds.title_max`
+    pub key: String,
+    /// `None`: absent, the default.
+    pub before: Option<serde_json::Value>,
+    pub after: Option<serde_json::Value>,
+}
+
+/// One rule whose result on the latest crawl differs between the two policies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleChange {
+    pub rule: codoseo_policy::RuleId,
+    pub before: codoseo_policy::Status,
+    pub after: codoseo_policy::Status,
+    pub before_text: String,
+    pub after_text: String,
+}
+
+/// A gap count before and after.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GapChange {
+    pub before: u32,
+    pub after: u32,
+}
+
+/// The stored policy compared with another (`compare_policy`): the keys that differ, and what
+/// the difference does to the latest crawl's rules, gaps and scores.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyComparison {
+    pub site_id: Uuid,
+    pub crawl_id: Option<Uuid>,
+    pub summary: String,
+    pub changes: Vec<PolicyKeyChange>,
+    /// Only the rules whose status or text changes.
+    pub rules: Vec<RuleChange>,
+    pub seo_gaps: GapChange,
+    pub ai_gaps: GapChange,
+    pub issues_muted: u32,
+    pub issues_opened: u32,
+    pub health: ScoreChange,
+    pub geo: ScoreChange,
 }

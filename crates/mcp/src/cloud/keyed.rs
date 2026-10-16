@@ -83,6 +83,27 @@ struct SnoozeArgs {
     days: i64,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct PolicyArgs {
+    /// A site's id, from `list_sites`.
+    site_id: String,
+    /// The whole policy, in the shape `get_policy` returns under `policy` (the keys of a
+    /// codoseo.toml [policy] table): `{"version": 1, "seo": {...}, "ai": {...}}`. A section left
+    /// out is its defaults.
+    policy: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SetPolicyArgs {
+    /// A site's id, from `list_sites`.
+    site_id: String,
+    /// The whole policy, in the shape `get_policy` returns under `policy`. It replaces the
+    /// stored one; a section left out is reset to its defaults.
+    policy: serde_json::Value,
+    /// Why, kept with the change in the site's policy history (at most 200 characters).
+    note: Option<String>,
+}
+
 /// What a snooze can be, as the REST API and the app say it.
 const SNOOZE_CHOICES: &str = "Snooze for 1, 7 or 30 days.";
 
@@ -245,11 +266,12 @@ impl<B: CloudBackend> CloudMcp<B> {
             engines and AI bots, with the same keys as a codoseo.toml [policy] table. `ai` holds \
             the stance per purpose (search, user_fetch, agent, training, ads: allow, block or \
             any), per-bot exceptions by robots.txt token, the page directives accepted on \
-            purpose and whether fetch checks run; `seo` holds SEO rules (kept, evaluated from a \
-            later release). `report` measures the latest crawl against the rules: per rule a \
+            purpose and whether fetch checks run; `seo` holds the SEO rules (preferred address, index \
+            rules, ignored parameters, must-work pages, check thresholds and exceptions). `report` measures the latest crawl against the rules: per rule a \
             status (met, gaps, partly, not_checked, limited_effect) and text, and the `gaps`; \
-            `updated_at` says when the policy last changed. Change it in the app's Site policy \
-            screen or with PUT /api/v1/sites/{site}/policy.",
+            `updated_at` says when the policy last changed. Change it with set_policy (preview_policy \
+            and compare_policy first), in the app's Site policy screen or with \
+            PUT /api/v1/sites/{site}/policy.",
         input_schema = schema::<SiteArgs>(),
         annotations(title = "Site policy", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
     )]
@@ -261,6 +283,69 @@ impl<B: CloudBackend> CloudMcp<B> {
         let who = self.keyed(&parts)?;
         let SiteArgs { site_id } = self.args(who, arguments).await?;
         to_json(&self.backend.policy(who, &site_id).await?)
+    }
+
+    #[tool(
+        description = "What saving a policy would do, without saving it: whether it is valid \
+            (and the errors, with the key each is about), what changes key by key, and on the \
+            latest crawl the issues it would stop counting (unflagged by a threshold, excepted, \
+            or on pages kept out of search as asked) and open, and the health and GEO scores \
+            before and after. `policy` is the whole policy, in the shape get_policy returns. \
+            Use it before set_policy.",
+        input_schema = schema::<PolicyArgs>(),
+        annotations(title = "Preview a policy change", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    async fn preview_policy(
+        &self,
+        arguments: JsonObject,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<String, String> {
+        let who = self.keyed(&parts)?;
+        let PolicyArgs { site_id, policy } = self.args(who, arguments).await?;
+        to_json(&self.backend.preview_policy(who, &site_id, policy).await?)
+    }
+
+    #[tool(
+        description = "Replace a site's policy, like saving the Site policy screen: the latest \
+            crawl is judged again under it at once (its issues, health score and GEO score; \
+            older crawls keep theirs), and the change is kept in the site's policy history as \
+            made over MCP with this key, with `note`. Returns the policy as get_policy does, \
+            with `saved`: whether anything changed and the health and GEO scores before and \
+            after. An invalid policy is refused with the reasons; preview_policy shows them \
+            first.",
+        input_schema = schema::<SetPolicyArgs>(),
+        annotations(title = "Save a policy", read_only_hint = false, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    async fn set_policy(
+        &self,
+        arguments: JsonObject,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<String, String> {
+        let who = self.keyed(&parts)?;
+        let SetPolicyArgs {
+            site_id,
+            policy,
+            note,
+        } = self.args(who, arguments).await?;
+        to_json(&self.backend.set_policy(who, &site_id, policy, note).await?)
+    }
+
+    #[tool(
+        description = "Compare a policy with the site's stored one: the keys that differ (with \
+            their values before and after), the rules whose result on the latest crawl changes \
+            (status and text before and after), the SEO and AI gap counts, the issues muted and \
+            opened and the health and GEO scores before and after. Nothing is saved.",
+        input_schema = schema::<PolicyArgs>(),
+        annotations(title = "Compare a policy", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    async fn compare_policy(
+        &self,
+        arguments: JsonObject,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<String, String> {
+        let who = self.keyed(&parts)?;
+        let PolicyArgs { site_id, policy } = self.args(who, arguments).await?;
+        to_json(&self.backend.compare_policy(who, &site_id, policy).await?)
     }
 
     #[tool(

@@ -111,7 +111,11 @@ pub fn write_crawl(
 /// A failing check with the first pages (in crawl order) that have it.
 pub(super) struct Finding<'a> {
     pub(super) def: &'static CheckDef,
+    /// The check's title under the audit's policy thresholds.
+    pub(super) title: String,
     pub(super) pages: u32,
+    /// Of `pages`, those the policy leaves out of the health score.
+    pub(super) excluded: u32,
     pub(super) examples: Vec<&'a Url>,
 }
 
@@ -123,6 +127,7 @@ impl Finding<'_> {
 
 /// Failing checks grouped by severity, most severe first; empty groups are left out.
 pub(super) fn findings(audit: &Audit) -> Vec<(Severity, Vec<Finding<'_>>)> {
+    let thresholds = crate::cli::policy::audit_thresholds(audit);
     let found = |id: CheckId, pages: u32| {
         let def = def(id);
         let examples = if def.scope == Scope::SiteWide {
@@ -138,7 +143,9 @@ pub(super) fn findings(audit: &Audit) -> Vec<(Severity, Vec<Finding<'_>>)> {
         };
         Finding {
             def,
+            title: codoseo_checks::title_for(id, &thresholds).into_owned(),
             pages,
+            excluded: audit.report.excluded.of(id),
             examples,
         }
     };
@@ -196,10 +203,14 @@ pub(super) fn ai_access_findings(audit: &Audit) -> Option<Vec<AiRow>> {
 }
 
 pub(super) fn count_text(f: &Finding) -> String {
-    match (f.site_wide(), f.pages) {
+    let n = match (f.site_wide(), f.pages) {
         (true, _) => "site-wide".to_owned(),
         (false, 1) => "1 page".to_owned(),
         (false, n) => format!("{n} pages"),
+    };
+    match f.excluded {
+        0 => n,
+        e => format!("{n}, {e} excluded from the health score"),
     }
 }
 
@@ -620,6 +631,7 @@ mod tests {
                 counts: Vec::new(),
                 inlink_samples: Vec::new(),
                 summary: CrawlSummary::default(),
+                excluded: Default::default(),
             },
             snapshot: Snapshot {
                 origin: url,

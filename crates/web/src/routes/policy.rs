@@ -248,6 +248,36 @@ pub struct Rail {
     /// Only on the AI tab.
     pub robots: Option<RobotsView>,
     pub base: String,
+    /// "When you save": what saving the form would do to the latest crawl; `None` before it.
+    pub save: Option<SaveBox>,
+}
+
+/// The rail's "When you save" box.
+pub struct SaveBox {
+    pub muted: u32,
+    pub opened: u32,
+    /// `75 → 79`, or `75` when it stays.
+    pub health: String,
+    /// `60 → 62`, or `—` without an AI access report.
+    pub geo: String,
+}
+
+impl SaveBox {
+    fn from(p: &codoseo_policy::SavePreview) -> SaveBox {
+        let pair = |(a, b): (u8, u8)| {
+            if a == b {
+                a.to_string()
+            } else {
+                format!("{a} → {b}")
+            }
+        };
+        SaveBox {
+            muted: p.muted,
+            opened: p.opened,
+            health: pair(p.health),
+            geo: p.geo.map_or_else(|| "—".to_owned(), pair),
+        }
+    }
 }
 
 #[derive(Template)]
@@ -288,6 +318,8 @@ pub struct PreviewFragment {
     pub seo: Option<SeoView>,
     /// Re-render the index rules (after "Add rule" or "Remove"); the rest goes out of band.
     pub index_table: bool,
+    /// Re-render the exceptions (after "Add exception" or "Remove").
+    pub exceptions_table: bool,
     pub base: String,
     pub seo_gaps: u32,
     pub ai_gaps: u32,
@@ -392,6 +424,34 @@ impl Latest {
 
     fn evaluate(&self, policy: &SitePolicy) -> PolicyReport {
         evaluate(policy, &self.input())
+    }
+
+    /// What the threshold and exception rows count under `policy`.
+    fn seo_counts(&self, policy: &SitePolicy) -> policy_seo::SeoCounts {
+        let Some(c) = &self.crawl else {
+            return policy_seo::SeoCounts::default();
+        };
+        let bits = if policy.seo.exceptions.is_empty() {
+            Vec::new()
+        } else {
+            codoseo_policy::recheck(policy, &self.input())
+        };
+        policy_seo::SeoCounts {
+            flags: codoseo_policy::score::threshold_flags(policy, &c.pages),
+            matches: codoseo_policy::score::exception_matches(&policy.seo, &c.pages, &bits),
+            crawled: true,
+        }
+    }
+
+    /// "When you save", for `new` in place of the saved `current`.
+    fn save_box(&self, current: &SitePolicy, new: &SitePolicy) -> Option<SaveBox> {
+        let c = self.crawl.as_ref()?;
+        Some(SaveBox::from(&codoseo_policy::preview(
+            current,
+            new,
+            &self.input(),
+            &c.counts,
+        )))
     }
 
     /// The crawl compared with: the newest finished one, else the AI access report's.
@@ -612,6 +672,7 @@ fn robots_view(site: &Site, intent: &Intent, latest: &Latest) -> RobotsView {
 
 fn rail(
     site: &Site,
+    current: &SitePolicy,
     policy: &SitePolicy,
     rep: &PolicyReport,
     latest: &Latest,
@@ -649,6 +710,7 @@ fn rail(
             .collect(),
         robots: (tab == PolicyTab::Ai).then(|| robots_view(site, &policy.ai.intent, latest)),
         base: format!("/s/{}", site.id),
+        save: latest.save_box(current, policy),
     }
 }
 
@@ -669,15 +731,17 @@ async fn build(
     policy: &SitePolicy,
     tab: PolicyTab,
 ) -> Result<PolicyPage, AppError> {
-    build_with(state, user, site, policy, tab, &[]).await
+    build_with(state, user, site, policy, policy, tab, &[]).await
 }
 
-/// The page for `policy` (the saved one, or the form's when it could not be saved, with
-/// `errors`).
+/// The page for `policy` (the saved one, `current`, or the form's when it could not be saved,
+/// with `errors`).
+#[allow(clippy::too_many_arguments)] // one flat call per render
 async fn build_with(
     state: &AppState,
     user: &CurrentUser,
     site: &Site,
+    current: &SitePolicy,
     policy: &SitePolicy,
     tab: PolicyTab,
     errors: &[PolicyError],
@@ -708,11 +772,16 @@ async fn build_with(
             &site.domain,
             user.account.plan,
             errors,
-            usize::from(policy.seo.index.is_empty()),
+            policy_seo::Blank {
+                index: usize::from(policy.seo.index.is_empty()),
+                exceptions: 0,
+            },
+            &latest.seo_counts(policy),
+            false,
         ),
         seo_gaps: rep.seo_gaps,
         ai_gaps: rep.ai_gaps,
-        rail: rail(site, policy, &rep, &latest, tab),
+        rail: rail(site, current, policy, &rep, &latest, tab),
         import_errors: Vec::new(),
         import_warnings: Vec::new(),
     })
@@ -725,7 +794,7 @@ fn from_form(
     fields: &[(String, String)],
     tab: PolicyTab,
     op: Option<&str>,
-) -> Result<(SitePolicy, usize), AppError> {
+) -> Result<(SitePolicy, policy_seo::Blank), AppError> {
     let mut p = current.clone();
     match tab {
         PolicyTab::Ai => {
@@ -734,7 +803,7 @@ fn from_form(
             if let Some(on) = probes_from_form(fields).map_err(AppError::BadRequest)? {
                 p.ai.probes = on;
             }
-            Ok((p, 0))
+            Ok((p, policy_seo::Blank::default()))
         }
         PolicyTab::Seo => {
             let (seo, blank) =
@@ -816,6 +885,8 @@ async fn preview(
     let tab = PolicyTab::from_post(q.tab.as_deref());
     let op = q.op.as_deref().filter(|_| tab == PolicyTab::Seo);
     let (policy, blank) = from_form(&current, &fields, tab, op)?;
+    let exceptions_table = op.is_some_and(|o| o.starts_with("ex-"));
+    let index_table = op.is_some() && !exceptions_table;
     let latest = latest(&state, &site).await?;
     let rep = latest.evaluate(&policy);
     let (cmps, seo) = match tab {
@@ -844,13 +915,14 @@ async fn preview(
                     user.account.plan,
                     &errors,
                     blank,
+                    &latest.seo_counts(&policy),
+                    exceptions_table,
                 )),
             )
         }
     };
-    let index_table = op.is_some();
-    let mut rail = rail(&site, &policy, &rep, &latest, tab);
-    rail.oob = index_table;
+    let mut rail = rail(&site, &current, &policy, &rep, &latest, tab);
+    rail.oob = index_table || exceptions_table;
     Ok(html(&PreviewFragment {
         rail,
         cmps,
@@ -860,6 +932,7 @@ async fn preview(
         },
         seo,
         index_table,
+        exceptions_table,
         base: format!("/s/{}", site.id),
         seo_gaps: rep.seo_gaps,
         ai_gaps: rep.ai_gaps,
@@ -883,7 +956,7 @@ async fn save(
         // Shown inline, in the form as it was sent; nothing is saved.
         let errors = save_errors(&state, &site, &policy).await?;
         if !errors.is_empty() {
-            let page = build_with(&state, &user, &site, &policy, tab, &errors).await?;
+            let page = build_with(&state, &user, &site, &current, &policy, tab, &errors).await?;
             return Ok(html(&page)?.into_response());
         }
     }
@@ -1043,13 +1116,18 @@ async fn import(
     }
 }
 
-fn history_view(r: &HistoryRow) -> HistoryView {
-    let who = match (&r.email, &r.api_key_name, r.via.as_str()) {
+/// Who made a policy change, as the history and the score trend name them.
+pub(crate) fn who(r: &HistoryRow) -> String {
+    match (&r.email, &r.api_key_name, r.via.as_str()) {
         (_, Some(k), _) => format!("API key “{k}”"),
         (Some(e), None, _) => e.clone(),
         (None, None, "migration") => "CodoSEO".to_owned(),
         (None, None, _) => "Someone".to_owned(),
-    };
+    }
+}
+
+fn history_view(r: &HistoryRow) -> HistoryView {
+    let who = who(r);
     let score = |label: &str, a: Option<i16>, b: Option<i16>| match (a, b) {
         (Some(a), Some(b)) => Some(format!("{label} {a} → {b}")),
         (None, Some(b)) => Some(format!("{label} {b}")),

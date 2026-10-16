@@ -77,7 +77,7 @@ pub fn crawl(w: &mut impl Write, audit: &Audit, verdict: &Verdict) -> std::io::R
             };
             let mut message = format!(
                 "{} ({}){}",
-                f.def.title,
+                f.title,
                 count_text(&f),
                 new_note(verdict, novelty)
             );

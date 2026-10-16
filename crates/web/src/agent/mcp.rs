@@ -8,8 +8,8 @@ use std::convert::Infallible;
 
 use codoseo_mcp::cloud::types::{
     AiAccessInfo, AiFixInfo, AiIncidentInfo, AiRecheckQueued, AuditIssueUrls, ChangesPage,
-    CrawlQueued, IssueUrlsPage, MonitoringRequested, PageInfo, PolicyInfo, QuickAuditState,
-    SiteHealth, SiteInfo,
+    CrawlQueued, IssueUrlsPage, MonitoringRequested, PageInfo, PolicyComparison, PolicyInfo,
+    PolicyPreview, QuickAuditState, SiteHealth, SiteInfo,
 };
 use codoseo_mcp::cloud::{AnonBackend, CloudBackend};
 
@@ -59,6 +59,11 @@ fn anon<T>(result: Result<T, String>) -> Result<T, String> {
     let label = if result.is_ok() { "ok" } else { "error" };
     metrics::api_request(Surface::Mcp, Tier::Anon, label);
     result
+}
+
+/// A policy an agent sent: the JSON `get_policy` returns under `policy`.
+fn policy_arg(v: serde_json::Value) -> Result<codoseo_policy::SitePolicy, String> {
+    serde_json::from_value(v).map_err(|e| format!("`policy` is not a policy: {e}"))
 }
 
 impl CloudBackend for AgentBackend {
@@ -117,6 +122,52 @@ impl CloudBackend for AgentBackend {
 
     async fn policy(&self, who: &ApiCaller, site_id: &str) -> Result<PolicyInfo, String> {
         outcome(self.service().policy(who, site_id).await)
+    }
+
+    async fn preview_policy(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        policy: serde_json::Value,
+    ) -> Result<PolicyPreview, String> {
+        outcome(
+            self.service()
+                .preview_policy(who, site_id, policy_arg(policy))
+                .await,
+        )
+    }
+
+    async fn set_policy(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        policy: serde_json::Value,
+        note: Option<String>,
+    ) -> Result<PolicyInfo, String> {
+        outcome(
+            self.service()
+                .save_policy(
+                    who,
+                    site_id,
+                    policy_arg(policy),
+                    codoseo_store::policy::Via::Mcp,
+                    note,
+                )
+                .await,
+        )
+    }
+
+    async fn compare_policy(
+        &self,
+        who: &ApiCaller,
+        site_id: &str,
+        policy: serde_json::Value,
+    ) -> Result<PolicyComparison, String> {
+        outcome(
+            self.service()
+                .compare_policy(who, site_id, policy_arg(policy))
+                .await,
+        )
     }
 
     async fn incident_fix(

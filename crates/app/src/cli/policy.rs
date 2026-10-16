@@ -261,6 +261,17 @@ fn slug<T: serde::Serialize>(v: &T) -> String {
 }
 
 /// Unknown keys are ignored, and said so on stderr.
+/// The policy a saved audit was judged under (`audit.policy.policy`), if it kept one.
+pub fn of_audit(audit: &codoseo_core::audit::Audit) -> Option<codoseo_policy::SitePolicy> {
+    let v = audit.policy.as_ref()?.get("policy")?;
+    Some(codoseo_policy::SitePolicy::from_json_lenient(v.clone()))
+}
+
+/// The thresholds a saved audit's checks ran under: its policy's, else the defaults.
+pub fn audit_thresholds(audit: &codoseo_core::audit::Audit) -> codoseo_checks::Thresholds {
+    of_audit(audit).map_or(codoseo_checks::Thresholds::DEFAULT, |p| p.thresholds())
+}
+
 pub fn warn_unknown(f: &LoadedFile) {
     for key in &f.warnings {
         eprintln!(

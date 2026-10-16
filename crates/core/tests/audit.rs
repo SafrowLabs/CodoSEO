@@ -52,6 +52,7 @@ fn audit() -> Audit {
                 no_depth: 0,
                 avg_response_ms: 120,
             },
+            excluded: Default::default(),
         },
         snapshot: Snapshot::from_output(&out),
         ai_access: None,

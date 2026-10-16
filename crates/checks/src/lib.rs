@@ -12,6 +12,7 @@ mod registry;
 mod score;
 mod site;
 mod summary;
+mod thresholds;
 
 use codoseo_core::check::CheckId;
 use codoseo_core::output::CrawlOutput;
@@ -19,23 +20,37 @@ use codoseo_core::page::PageRecord;
 use codoseo_core::report::CrawlReport;
 
 pub use inlinks::MAX_INLINK_SAMPLES;
-pub use page::page_issues;
+pub use page::{
+    THRESHOLD_CHECK_IDS, page_issues, page_issues_with, threshold_issues, threshold_mask,
+};
 pub use registry::{BASE_CHECKS, CHECKS, Category, CheckDef, Scope, def};
 pub use score::{health_score, points_regained};
+pub use thresholds::{Thresholds, duration_words, title_for};
 
 /// Runs the page checks only, replacing the page's issue bits. For `codoseo check` and
 /// callers that have one page and no crawl.
 pub fn check_page(page: &mut PageRecord) {
-    page.issues = page_issues(page);
+    check_page_with(page, &Thresholds::DEFAULT);
+}
+
+/// [`check_page`] under a site policy's thresholds.
+pub fn check_page_with(page: &mut PageRecord, t: &Thresholds) {
+    page.issues = page_issues_with(page, t);
 }
 
 /// Runs every check over a finished crawl. Sets `inlinks` and the issue bits on every page
 /// (replacing what was there, so running it again gives the same result) and returns the
 /// report.
 pub fn run_checks(out: &mut CrawlOutput) -> CrawlReport {
+    run_checks_with(out, &Thresholds::DEFAULT)
+}
+
+/// [`run_checks`] under a site policy's thresholds; the default ones give exactly the same
+/// report.
+pub fn run_checks_with(out: &mut CrawlOutput, t: &Thresholds) -> CrawlReport {
     inlinks::set_inlinks(out);
     for page in &mut out.pages {
-        check_page(page);
+        check_page_with(page, t);
     }
     let site_bits = site::site_issues(out);
     for (page, bits) in out.pages.iter_mut().zip(site_bits) {
@@ -60,13 +75,15 @@ pub fn run_checks(out: &mut CrawlOutput) -> CrawlReport {
         })
         .collect();
 
+    let total = t.base_checks();
     CrawlReport {
         health_score: health_score(&counts, out.pages.len() as u32),
-        checks_passed: (BASE_CHECKS - counts.len()) as u16,
-        checks_total: BASE_CHECKS as u16,
+        checks_passed: (total - counts.len()) as u16,
+        checks_total: total as u16,
         inlink_samples: inlinks::sample_inlinks(out),
         summary: summary::summarise(out),
         counts,
+        excluded: Default::default(),
     }
 }
 

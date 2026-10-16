@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Args;
-use codoseo_checks::run_checks;
 use codoseo_core::audit::{AUDIT_FORMAT_VERSION, Audit};
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
 use codoseo_core::output::CrawlOutput;
@@ -16,7 +15,7 @@ use codoseo_crawler::probe::{ProbeConfig, probe_from_env, run_probes};
 use codoseo_geo::probe::plan_probes;
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::RobotsTxt;
-use codoseo_policy::apply_to_crawl;
+use codoseo_policy::SitePolicy;
 use url::Url;
 
 use super::gate::{Gate, judge, parse_gate, summary_lines};
@@ -170,11 +169,11 @@ pub async fn run(args: CrawlArgs) -> Outcome {
     progress.clear();
     let mut out = result?;
 
-    let mut report = run_checks(&mut out);
-    // The policy file's SEO rules: their gaps are checks like any other, in the health score.
-    if let Some(p) = &policy {
-        apply_to_crawl(&p.policy, &mut out, &mut report, &Default::default(), &[]);
-    }
+    // Under the policy file: its thresholds, its SEO rules' gaps as checks like any other and
+    // its exceptions left out of the health score. Without one, the defaults.
+    let default = SitePolicy::default();
+    let judged = policy.as_ref().map_or(&default, |p| &p.policy);
+    let report = codoseo_policy::run_checks_with(judged, &mut out, &Default::default(), &[]);
     let duration_ms = out.duration_ms;
     // GEO stays out of the health score: it is a section of its own, judged under the policy
     // file's AI rules, or the default intent without one. `--fail-on` may gate on it.

@@ -22,8 +22,10 @@ use codoseo_mcp::cloud::types::{
     ActiveCrawl, AiAccessInfo, AiBotInfo, AiContentInfo, AiContentPage, AiEngineInfo, AiFixInfo,
     AiIncidentInfo, AiLagInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo, AiProbesInfo,
     AiRecheckInfo, AiRecheckQueued, AiRemedyInfo, AiRobotsInfo, AiSnippetInfo, ChangeInfo,
-    ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES, PageInfo,
-    PageIssue, PolicyInfo, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
+    ChangesPage, CrawlHealth, CrawlQueued, GapChange, IssueUrlsPage, MAX_AI_CONTENT_PAGES,
+    PageInfo, PageIssue, PolicyComparison, PolicyInfo, PolicyKeyChange, PolicyPreview,
+    PolicySaveOutcome, RedirectHop, RuleChange, ScoreChange, SiteHealth, SiteInfo, Usage, clip,
+    clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
@@ -198,31 +200,168 @@ impl<'a> AgentService<'a> {
     }
 
     /// Replaces the site's policy (`PUT /api/v1/sites/{site}/policy`), recorded in its history
-    /// as made through the API with this key, and answers like [`Self::policy`].
+    /// as made through the API with this key, and answers like [`Self::policy`] with what the
+    /// save did.
     pub async fn set_policy(
         &self,
         caller: &ApiCaller,
         site: &str,
         policy: Result<codoseo_policy::SitePolicy, String>,
     ) -> Reply<PolicyInfo> {
+        self.save_policy(caller, site, policy, codoseo_store::policy::Via::Api, None)
+            .await
+    }
+
+    /// [`Self::set_policy`] from `via` (the API or MCP), with a note for the history.
+    pub async fn save_policy(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        policy: Result<codoseo_policy::SitePolicy, String>,
+        via: codoseo_store::policy::Via,
+        note: Option<String>,
+    ) -> Reply<PolicyInfo> {
         self.metered(caller, async {
             let site = self.site(caller, site).await?;
             let policy = policy.map_err(AgentError::BadRequest)?;
             let actor = codoseo_store::policy::Actor {
-                via: codoseo_store::policy::Via::Api,
+                via,
                 account_id: Some(caller.account.id),
                 api_key_id: Some(caller.key_id),
             };
-            codoseo_store::policy::save(&self.state.pool, site.id, &policy, &actor)
-                .await
-                .map_err(|e| match e {
-                    codoseo_store::policy::SaveError::Invalid(_) => {
-                        AgentError::BadRequest(e.to_string())
-                    }
-                    codoseo_store::policy::SaveError::NotFound => AgentError::site_not_found(),
-                    codoseo_store::policy::SaveError::Db(e) => e.into(),
-                })?;
-            self.policy_info(site.id).await
+            let saved = codoseo_store::policy::save_with_note(
+                &self.state.pool,
+                site.id,
+                &policy,
+                &actor,
+                note.as_deref(),
+            )
+            .await
+            .map_err(|e| match e {
+                codoseo_store::policy::SaveError::Invalid(_) => {
+                    AgentError::BadRequest(e.to_string())
+                }
+                codoseo_store::policy::SaveError::NotFound => AgentError::site_not_found(),
+                codoseo_store::policy::SaveError::Db(e) => e.into(),
+            })?;
+            let mut info = self.policy_info(site.id).await?;
+            info.saved = Some(PolicySaveOutcome {
+                outcome: if saved.history_id.is_some() {
+                    "saved"
+                } else {
+                    "unchanged"
+                }
+                .to_owned(),
+                history_id: saved.history_id,
+                health: ScoreChange {
+                    before: saved.health.0,
+                    after: saved.health.1,
+                },
+                geo: ScoreChange {
+                    before: saved.geo.0,
+                    after: saved.geo.1,
+                },
+                ai_incidents_opened: saved.opened,
+                ai_incidents_resolved: saved.resolved,
+            });
+            Ok(info)
+        })
+        .await
+    }
+
+    /// What saving `policy` would do, without saving it (`preview_policy`,
+    /// `POST /api/v1/sites/{site}/policy/preview`).
+    pub async fn preview_policy(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        policy: Result<codoseo_policy::SitePolicy, String>,
+    ) -> Reply<PolicyPreview> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            let policy = policy.map_err(AgentError::BadRequest)?;
+            let pool = &self.state.pool;
+            let errors = match codoseo_store::policy::check(pool, site.id, &policy).await {
+                Ok(()) => Vec::new(),
+                Err(codoseo_store::policy::SaveError::Invalid(e)) => e,
+                Err(codoseo_store::policy::SaveError::NotFound) => {
+                    return Err(AgentError::site_not_found());
+                }
+                Err(codoseo_store::policy::SaveError::Db(e)) => return Err(e.into()),
+            };
+            let m = codoseo_store::policy::measure(pool, site.id, &policy).await?;
+            let (health, geo) = Self::score_changes(m.preview.as_ref());
+            Ok(PolicyPreview {
+                site_id: site.id,
+                valid: errors.is_empty(),
+                errors,
+                summary: codoseo_policy::diff::summary(&m.current, &policy),
+                crawl_id: m.crawl_id,
+                issues_muted: m.preview.as_ref().map_or(0, |p| p.muted),
+                issues_opened: m.preview.as_ref().map_or(0, |p| p.opened),
+                health,
+                geo,
+                report: m.after,
+            })
+        })
+        .await
+    }
+
+    /// The stored policy compared with `policy` on the latest crawl (`compare_policy`).
+    pub async fn compare_policy(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        policy: Result<codoseo_policy::SitePolicy, String>,
+    ) -> Reply<PolicyComparison> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            let policy = policy.map_err(AgentError::BadRequest)?;
+            let m = codoseo_store::policy::measure(&self.state.pool, site.id, &policy).await?;
+            let (health, geo) = Self::score_changes(m.preview.as_ref());
+            let rules = m
+                .after
+                .rules
+                .iter()
+                .filter_map(|after| {
+                    let before = m.before.rules.iter().find(|r| r.id == after.id)?;
+                    (before.status != after.status || before.text != after.text).then(|| {
+                        RuleChange {
+                            rule: after.id,
+                            before: before.status,
+                            after: after.status,
+                            before_text: before.text.clone(),
+                            after_text: after.text.clone(),
+                        }
+                    })
+                })
+                .collect();
+            Ok(PolicyComparison {
+                site_id: site.id,
+                crawl_id: m.crawl_id,
+                summary: codoseo_policy::diff::summary(&m.current, &policy),
+                changes: codoseo_policy::diff::changed_keys(&m.current, &policy)
+                    .into_iter()
+                    .map(|c| PolicyKeyChange {
+                        key: c.key,
+                        before: c.before,
+                        after: c.after,
+                    })
+                    .collect(),
+                rules,
+                seo_gaps: GapChange {
+                    before: m.before.seo_gaps,
+                    after: m.after.seo_gaps,
+                },
+                ai_gaps: GapChange {
+                    before: m.before.ai_gaps,
+                    after: m.after.ai_gaps,
+                },
+                issues_muted: m.preview.as_ref().map_or(0, |p| p.muted),
+                issues_opened: m.preview.as_ref().map_or(0, |p| p.opened),
+                health,
+                geo,
+            })
         })
         .await
     }
@@ -238,7 +377,25 @@ impl<'a> AgentService<'a> {
             report,
             crawl_id,
             updated_at,
+            saved: None,
         })
+    }
+
+    /// The health and GEO scores before and after of a save preview.
+    fn score_changes(p: Option<&codoseo_policy::SavePreview>) -> (ScoreChange, ScoreChange) {
+        let Some(p) = p else {
+            return (ScoreChange::default(), ScoreChange::default());
+        };
+        (
+            ScoreChange {
+                before: Some(i16::from(p.health.0)),
+                after: Some(i16::from(p.health.1)),
+            },
+            ScoreChange {
+                before: p.geo.map(|g| i16::from(g.0)),
+                after: p.geo.map(|g| i16::from(g.1)),
+            },
+        )
     }
 
     /// The site's open AI access incidents and those resolved in the last 90 days, one record
@@ -485,10 +642,13 @@ impl<'a> AgentService<'a> {
         let pool = &self.state.pool;
         let site = self.site(caller, site).await?;
         let check = parse_check(check)?;
+        let thresholds = codoseo_store::policy::get(pool, site.id)
+            .await?
+            .thresholds();
         let mut page = IssueUrlsPage {
             site_id: site.id,
             check,
-            title: def(check).title.to_owned(),
+            title: codoseo_checks::title_for(check, &thresholds).into_owned(),
             crawl_number: None,
             total: 0,
             limit: clamp_limit(limit),
@@ -530,12 +690,15 @@ impl<'a> AgentService<'a> {
             .ok_or_else(|| {
                 AgentError::NotFound("That URL is not in the latest crawl of this site.".to_owned())
             })?;
+        let thresholds = codoseo_store::policy::get(pool, site.id)
+            .await?
+            .thresholds();
         let mut issues: Vec<PageIssue> = IssueBits(page.issues)
             .iter()
             .filter_map(CheckId::from_bit)
             .map(|check| PageIssue {
                 check,
-                title: def(check).title.to_owned(),
+                title: codoseo_checks::title_for(check, &thresholds).into_owned(),
                 severity: def(check).severity,
             })
             .collect();
@@ -892,13 +1055,16 @@ pub async fn crawl_health(pool: &PgPool, crawl: &Crawl) -> Result<CrawlHealth, A
     failing.truncate(MAX_FAILING_CHECKS);
     let ids: Vec<CheckId> = failing.iter().map(|&(id, _)| id).collect();
     let mut examples = explorer::example_urls(pool, crawl.id, &ids, EXAMPLES_PER_CHECK).await?;
+    let thresholds = codoseo_store::policy::get(pool, crawl.site_id)
+        .await?
+        .thresholds();
     let failing_checks = failing
         .into_iter()
         .map(|(check, count)| {
             let d = def(check);
             FailingCheck {
                 check,
-                title: d.title.to_owned(),
+                title: codoseo_checks::title_for(check, &thresholds).into_owned(),
                 severity: d.severity,
                 count,
                 example_urls: examples

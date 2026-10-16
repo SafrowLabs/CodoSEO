@@ -10,7 +10,9 @@
 //! [`evaluate`] compares a policy with a crawl. The preferred address, index, parameter and
 //! must-work rules are judged on the crawl's pages ([`seo`]) and also mark the pages behind each
 //! gap with the policy checks ([`apply_to_crawl`]), so they are ordinary issues that cost health
-//! points; the thresholds and exceptions are kept in the format and applied in a later release.
+//! points. The thresholds change what the length, thin, slow and redirect checks flag
+//! ([`run_checks_with`]), and the exceptions and the pages kept out of search leave the health
+//! score ([`scored_counts`]). [`score::preview`] says what saving a policy would change.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,12 +27,17 @@ mod apply;
 pub mod diff;
 pub mod evaluate;
 pub mod robots;
+pub mod score;
 pub mod seo;
 pub mod template;
 
 pub use apply::{apply_to_crawl, policy_bits};
 pub use evaluate::{
     Gap, GapKind, PolicyInput, PolicyReport, RuleId, RulePart, RuleResult, Status, evaluate,
+};
+pub use score::{
+    SavePreview, exception_for, keep_out_met, preview, recheck, rescore_stored, run_checks_with,
+    scored_counts,
 };
 pub use seo::declared_checks;
 
@@ -296,30 +303,11 @@ pub struct Thresholds {
     pub image_alt: Option<bool>,
 }
 
-/// [`Thresholds`] with every default filled in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct EffectiveThresholds {
-    pub title_max: u16,
-    pub title_min: u16,
-    pub description_max: u16,
-    pub description_min: u16,
-    pub thin_words: u32,
-    pub slow_ms: u32,
-    pub max_redirect_hops: u8,
-    pub image_alt: bool,
-}
+/// [`Thresholds`] with every default filled in: what the checks compare with.
+pub use codoseo_checks::Thresholds as EffectiveThresholds;
 
-/// The built-in thresholds, as the checks use them today.
-pub const DEFAULT_THRESHOLDS: EffectiveThresholds = EffectiveThresholds {
-    title_max: 60,
-    title_min: 30,
-    description_max: 160,
-    description_min: 70,
-    thin_words: 200,
-    slow_ms: 1000,
-    max_redirect_hops: 1,
-    image_alt: true,
-};
+/// The built-in thresholds, as the checks use them without a policy.
+pub const DEFAULT_THRESHOLDS: EffectiveThresholds = EffectiveThresholds::DEFAULT;
 
 impl Thresholds {
     fn is_default(&self) -> bool {
@@ -497,6 +485,11 @@ impl SitePolicy {
     pub fn intent(&self) -> &Intent {
         &self.ai.intent
     }
+
+    /// The thresholds the checks run under: the policy's, defaults filled in.
+    pub fn thresholds(&self) -> EffectiveThresholds {
+        self.seo.thresholds.effective()
+    }
 }
 
 impl SeoRules {
@@ -575,6 +568,20 @@ impl SeoRules {
         }
         let mut exc = BTreeSet::new();
         for (i, e) in self.exceptions.iter().enumerate() {
+            if e.check.is_policy() {
+                errors.push(PolicyError::new(
+                    format!("seo.exceptions[{i}].check"),
+                    "a policy check can't be excepted: change the rule behind it instead",
+                ));
+            } else if codoseo_checks::def(e.check).scope == codoseo_checks::Scope::SiteWide {
+                errors.push(PolicyError::new(
+                    format!("seo.exceptions[{i}].check"),
+                    format!(
+                        "\"{}\" is about the whole site, so it can't be excepted for some pages",
+                        codoseo_checks::def(e.check).title
+                    ),
+                ));
+            }
             check_pattern(
                 errors,
                 format!("seo.exceptions[{i}].scope"),

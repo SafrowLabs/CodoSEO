@@ -1906,7 +1906,6 @@ a.sc:hover { border-color: var(--ghost-2); background: var(--surface-hover); }
 .pol-import > summary .icon { width: 14px; height: 14px; }
 .pol-import-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 0 18px 14px; }
 .pol-import-form input[type="file"] { max-width: 100%; font-size: 13px; }
-.pol-soon-list { margin: 12px 0 4px; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
 
 /* The SEO rules: index rules and must-work pages as rows (what · rule · how it compares). */
 .pol-fields { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end; padding: 0 18px 14px; }
@@ -1922,6 +1921,10 @@ a.sc:hover { border-color: var(--ghost-2); background: var(--surface-hover); }
 .pol-rules { display: flex; flex-direction: column; padding: 0 18px 14px; }
 .pol-rule { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 180px) minmax(200px, 1.6fr) auto; gap: 8px 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-faint); }
 .pol-rule.pol-must { grid-template-columns: minmax(150px, 1fr) 120px minmax(200px, 1.6fr); }
+.pol-rule.pol-thr { grid-template-columns: minmax(150px, 1fr) minmax(150px, 220px) minmax(200px, 1.6fr); }
+.pol-thr-input { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted-2); white-space: nowrap; }
+.pol-thr-input .input { width: 90px; }
+.pol-save-list { list-style: none; margin: 10px 0 8px; padding: 0; display: grid; gap: 4px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
 .pol-rule .pol-cmp { margin: 0; padding: 7px 10px; }
 .pol-rule-what { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12.5px; overflow-wrap: anywhere; }
 .pol-rule-what .input { width: 100%; }
@@ -1929,7 +1932,7 @@ a.sc:hover { border-color: var(--ghost-2); background: var(--surface-hover); }
 .pol-rules-foot { padding-top: 10px; }
 .pol-rules > .pol-cmp { margin: 0; }
 @media (max-width: 720px) {
-  .pol-rule, .pol-rule.pol-must { grid-template-columns: minmax(0, 1fr); }
+  .pol-rule, .pol-rule.pol-must, .pol-rule.pol-thr { grid-template-columns: minmax(0, 1fr); }
   .pol-rule-remove { justify-self: start; }
 }
 .pol-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }

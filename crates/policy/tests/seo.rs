@@ -594,6 +594,7 @@ fn crawl(pages: Vec<PageRecord>) -> (CrawlOutput, CrawlReport) {
         counts: vec![(CheckId::Noindex, 1)],
         inlink_samples: Vec::new(),
         summary: CrawlSummary::default(),
+        excluded: Default::default(),
     };
     (out, report)
 }

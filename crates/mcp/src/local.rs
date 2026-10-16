@@ -563,6 +563,14 @@ pub fn stop_reason_words(stop: &StopReason) -> String {
 fn build_summary(id: &AuditId, audit: &Audit) -> AuditSummary {
     let ranked = rank_failing(audit.report.counts.iter().copied());
     let total = ranked.len();
+    // A saved audit judged under a policy names its checks with the policy's thresholds.
+    let thresholds = audit
+        .policy
+        .as_ref()
+        .and_then(|p| p.get("policy"))
+        .map_or(codoseo_checks::Thresholds::DEFAULT, |v| {
+            codoseo_policy::SitePolicy::from_json_lenient(v.clone()).thresholds()
+        });
     let failing_checks = ranked
         .iter()
         .take(MAX_FAILING_CHECKS)
@@ -578,7 +586,7 @@ fn build_summary(id: &AuditId, audit: &Audit) -> AuditSummary {
                 .collect();
             FailingCheck {
                 check,
-                title: d.title.to_owned(),
+                title: codoseo_checks::title_for(check, &thresholds).into_owned(),
                 severity: d.severity,
                 count,
                 example_urls,
