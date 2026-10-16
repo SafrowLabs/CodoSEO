@@ -100,6 +100,11 @@ check_ids! {
     OgMissing = 41 => "og_missing",
     JsonldInvalid = 42 => "jsonld_invalid",
     HreflangMissingSelf = 43 => "hreflang_missing_self",
+    PolicyAddress = 44 => "policy_address",
+    PolicyIndexMismatch = 45 => "policy_index_mismatch",
+    PolicyKeepOutPartial = 46 => "policy_keep_out_partial",
+    PolicyParamCanonical = 47 => "policy_param_canonical",
+    MustWorkFailed = 48 => "must_work_failed",
 }
 
 // IDs are unique, below 64, and `ALL` lists them in ascending order. Each ID is written
@@ -120,6 +125,21 @@ const _: () = {
 };
 
 impl CheckId {
+    /// The checks a site policy declares (`Category::Policy` in the registry): set by the policy
+    /// pass after the other checks, and counted only when the policy has the rule behind them.
+    pub const POLICY: [CheckId; 5] = [
+        CheckId::PolicyAddress,
+        CheckId::PolicyIndexMismatch,
+        CheckId::PolicyKeepOutPartial,
+        CheckId::PolicyParamCanonical,
+        CheckId::MustWorkFailed,
+    ];
+
+    /// One of [`CheckId::POLICY`].
+    pub fn is_policy(self) -> bool {
+        CheckId::POLICY.contains(&self)
+    }
+
     /// The bit number in `IssueBits`.
     pub const fn bit(self) -> u8 {
         self as u8

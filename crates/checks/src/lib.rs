@@ -1,6 +1,8 @@
 //! The CodoSEO check registry and the checks themselves.
 //!
-//! [`CHECKS`] describes all 44 checks (severity, category, scope, title). Per-page checks
+//! [`CHECKS`] describes all 49 checks (severity, category, scope, title): the 44 every crawl runs
+//! ([`BASE_CHECKS`]) and the 5 policy checks a site policy's SEO rules turn on (set by
+//! `codoseo-policy` after [`run_checks`]). Per-page checks
 //! live in [`page`] and are run with [`page_issues`]. [`run_checks`] runs everything over a
 //! finished crawl and returns the report.
 
@@ -18,7 +20,7 @@ use codoseo_core::report::CrawlReport;
 
 pub use inlinks::MAX_INLINK_SAMPLES;
 pub use page::page_issues;
-pub use registry::{CHECKS, Category, CheckDef, Scope, def};
+pub use registry::{BASE_CHECKS, CHECKS, Category, CheckDef, Scope, def};
 pub use score::{health_score, points_regained};
 
 /// Runs the page checks only, replacing the page's issue bits. For `codoseo check` and
@@ -60,8 +62,8 @@ pub fn run_checks(out: &mut CrawlOutput) -> CrawlReport {
 
     CrawlReport {
         health_score: health_score(&counts, out.pages.len() as u32),
-        checks_passed: (CHECKS.len() - counts.len()) as u16,
-        checks_total: CHECKS.len() as u16,
+        checks_passed: (BASE_CHECKS - counts.len()) as u16,
+        checks_total: BASE_CHECKS as u16,
         inlink_samples: inlinks::sample_inlinks(out),
         summary: summary::summarise(out),
         counts,

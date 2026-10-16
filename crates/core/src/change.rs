@@ -38,6 +38,9 @@ pub enum ChangeKind {
     /// The llms.txt the site adopted stopped serving (5xx, 429 or no answer); with `after`
     /// `resolved`, it serves again or was removed on purpose.
     AiLlmsTxtUnavailable,
+    /// A page the site policy says must always work (a must-work path, a starred page or the home
+    /// page) did not answer 200 or was not indexable. Recorded on every crawl it keeps failing.
+    MustWorkFailed,
 }
 
 impl ChangeKind {
@@ -64,6 +67,7 @@ impl ChangeKind {
             ChangeKind::AiFetchBlocked => "ai_fetch_blocked",
             ChangeKind::AiContentMissing => "ai_content_missing",
             ChangeKind::AiLlmsTxtUnavailable => "ai_llms_txt_unavailable",
+            ChangeKind::MustWorkFailed => "must_work_failed",
         }
     }
 
@@ -90,6 +94,7 @@ impl ChangeKind {
             ChangeKind::AiFetchBlocked => "AI fetch blocked (synthetic)",
             ChangeKind::AiContentMissing => "Content missing from HTML (AI)",
             ChangeKind::AiLlmsTxtUnavailable => "llms.txt unavailable",
+            ChangeKind::MustWorkFailed => "Must-work page failed",
         }
     }
 
@@ -146,6 +151,7 @@ mod tests {
             ChangeKind::AiFetchBlocked,
             ChangeKind::AiContentMissing,
             ChangeKind::AiLlmsTxtUnavailable,
+            ChangeKind::MustWorkFailed,
         ];
         for kind in all {
             assert_eq!(

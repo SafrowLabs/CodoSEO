@@ -10,6 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+codoseo-checks.workspace = true
 codoseo-core.workspace = true
 codoseo-geo.workspace = true
 serde.workspace = true

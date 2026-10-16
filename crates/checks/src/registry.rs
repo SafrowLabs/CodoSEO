@@ -13,6 +13,9 @@ pub enum Category {
     Sitemap,
     Social,
     Schema,
+    /// The site policy's SEO rules: set by the policy pass, and only when the policy has the
+    /// rule behind them.
+    Policy,
 }
 
 /// What a check needs in order to run.
@@ -52,13 +55,13 @@ const fn d(
 }
 
 use Category::{
-    Content, Indexability, Links, OnPage, Response, Schema, Sitemap, Social, Technical,
+    Content, Indexability, Links, OnPage, Policy, Response, Schema, Sitemap, Social, Technical,
 };
 use Scope::{Page, Site, SiteWide};
 use Severity::{Critical as C, Notice as N, Warning as W};
 
 /// Every check, in `CheckId` order.
-pub static CHECKS: [CheckDef; 44] = [
+pub static CHECKS: [CheckDef; 49] = [
     d(
         CheckId::Http4xx,
         C,
@@ -355,7 +358,46 @@ pub static CHECKS: [CheckDef; 44] = [
         Page,
         "Hreflang has no entry for the page itself",
     ),
+    d(
+        CheckId::PolicyAddress,
+        W,
+        Policy,
+        Page,
+        "Page doesn't use the policy's preferred address",
+    ),
+    d(
+        CheckId::PolicyIndexMismatch,
+        W,
+        Policy,
+        Page,
+        "Page is indexed differently from the policy",
+    ),
+    d(
+        CheckId::PolicyKeepOutPartial,
+        N,
+        Policy,
+        Page,
+        "Kept out by robots.txt only, so search engines can still index it",
+    ),
+    d(
+        CheckId::PolicyParamCanonical,
+        N,
+        Policy,
+        Page,
+        "URL with an ignored parameter doesn't canonicalise to the clean URL",
+    ),
+    d(
+        CheckId::MustWorkFailed,
+        C,
+        Policy,
+        Page,
+        "Must-work page doesn't answer 200 or isn't indexable",
+    ),
 ];
+
+/// Checks every crawl runs: all but the [`Category::Policy`] ones, which count only when the
+/// site policy declares their rule.
+pub const BASE_CHECKS: usize = CHECKS.len() - CheckId::POLICY.len();
 
 /// The metadata for one check.
 pub fn def(id: CheckId) -> &'static CheckDef {

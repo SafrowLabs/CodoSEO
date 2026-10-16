@@ -7,8 +7,10 @@
 //! stored as JSON on the site (`sites.policy`) and written by hand as the `[policy]` table of a
 //! `codoseo.toml` file; both are the same serde shape, so a file exports and imports losslessly.
 //!
-//! The SEO types are all defined so the format is stable, but only the AI rules are evaluated so
-//! far ([`evaluate`]); the SEO evaluators arrive with their checks.
+//! [`evaluate`] compares a policy with a crawl. The preferred address, index, parameter and
+//! must-work rules are judged on the crawl's pages ([`seo`]) and also mark the pages behind each
+//! gap with the policy checks ([`apply_to_crawl`]), so they are ordinary issues that cost health
+//! points; the thresholds and exceptions are kept in the format and applied in a later release.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,12 +21,18 @@ use codoseo_geo::registry::Purpose;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod apply;
 pub mod diff;
 pub mod evaluate;
 pub mod robots;
+pub mod seo;
 pub mod template;
 
-pub use evaluate::{Gap, GapKind, PolicyInput, PolicyReport, RuleId, RuleResult, Status, evaluate};
+pub use apply::{apply_to_crawl, policy_bits};
+pub use evaluate::{
+    Gap, GapKind, PolicyInput, PolicyReport, RuleId, RulePart, RuleResult, Status, evaluate,
+};
+pub use seo::declared_checks;
 
 /// The policy format's version. A file or stored value with another version is refused (a file)
 /// or read as far as it goes (the database).
@@ -235,6 +243,14 @@ impl PathPattern {
         };
         glob(self.0.as_bytes(), subject.as_bytes())
     }
+}
+
+/// [`glob`] ignoring ASCII case: a parameter name against an `ignore_params` entry (`utm_*`).
+pub(crate) fn glob_ci(pattern: &str, text: &str) -> bool {
+    glob(
+        pattern.to_ascii_lowercase().as_bytes(),
+        text.to_ascii_lowercase().as_bytes(),
+    )
 }
 
 /// `*`-only glob matching, iterative with one backtrack point.

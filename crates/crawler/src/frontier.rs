@@ -28,6 +28,11 @@ pub struct Frontier {
     admitted: u32,
     cap: u32,
     capped: bool,
+    /// Pages that must be fetched whatever links lead to them (the site policy's must-work and
+    /// starred pages), each holding a place under the cap until a link admits it or link
+    /// exploration ends ([`Frontier::queue_reserved`]).
+    reserved: HashSet<u64>,
+    reserved_urls: Vec<Url>,
 }
 
 impl Frontier {
@@ -40,6 +45,47 @@ impl Frontier {
             admitted: 0,
             cap: max_pages,
             capped: false,
+            reserved: HashSet::new(),
+            reserved_urls: Vec::new(),
+        }
+    }
+
+    /// Holds a place under the cap for each of `urls` not seen yet, while places are left. A
+    /// reserved URL a link finds is queued at its depth like any other; the rest are queued by
+    /// [`Frontier::queue_reserved`]. Before anything is admitted, one place is kept for the start
+    /// page. Returns how many were reserved.
+    pub fn reserve(&mut self, urls: impl IntoIterator<Item = Url>) -> usize {
+        let cap = if self.admitted == 0 {
+            self.cap.saturating_sub(1)
+        } else {
+            self.cap
+        };
+        let mut n = 0;
+        for url in urls {
+            let hash = url_hash(&url);
+            if self.seen.contains(&hash) || self.reserved.contains(&hash) {
+                continue;
+            }
+            if self.admitted + self.reserved.len() as u32 >= cap {
+                break;
+            }
+            self.reserved.insert(hash);
+            self.reserved_urls.push(url);
+            n += 1;
+        }
+        n
+    }
+
+    /// Queues the reserved URLs no link found, with no depth, ahead of the sitemap-only URLs.
+    /// Called once link exploration is over.
+    pub fn queue_reserved(&mut self) {
+        for url in std::mem::take(&mut self.reserved_urls) {
+            let hash = url_hash(&url);
+            if self.reserved.remove(&hash) {
+                self.seen.insert(hash);
+                self.admitted += 1;
+                self.sitemap_only.push_back(Queued { url, depth: None });
+            }
         }
     }
 
@@ -129,7 +175,12 @@ impl Frontier {
         if self.seen.contains(&hash) {
             return false;
         }
-        if self.admitted >= self.cap {
+        if self.reserved.remove(&hash) {
+            self.seen.insert(hash);
+            self.admitted += 1;
+            return true;
+        }
+        if self.admitted + self.reserved.len() as u32 >= self.cap {
             self.capped = true;
             return false;
         }
@@ -170,6 +221,38 @@ mod tests {
         }
         assert!(f.capped());
         assert_eq!(f.queued(), 2);
+    }
+
+    #[test]
+    fn reserved_urls_keep_their_place_under_the_cap() {
+        let mut f = Frontier::new(4);
+        assert!(f.seed(u("https://e.com/")));
+        assert_eq!(
+            f.reserve([
+                u("https://e.com/must"),
+                u("https://e.com/linked"),
+                u("https://e.com/must"),
+            ]),
+            2
+        );
+        // One place left for links besides the two reserved.
+        assert!(f.push_link(u("https://e.com/a"), 0));
+        assert!(!f.push_link(u("https://e.com/b"), 0));
+        assert!(f.capped());
+        // A reserved URL a link finds is queued at its depth, and counted once.
+        assert!(f.push_link(u("https://e.com/linked"), 0));
+        f.pop();
+        assert!(f.advance());
+        assert_eq!(f.pop().unwrap().url.path(), "/a");
+        assert_eq!(f.pop().unwrap().depth, Some(1));
+        // The rest join after link exploration, before sitemap-only URLs.
+        f.queue_reserved();
+        f.add_sitemap_urls([u("https://e.com/s")]);
+        assert!(f.advance());
+        let q = f.pop().unwrap();
+        assert_eq!((q.url.path(), q.depth), ("/must", None));
+        assert!(f.pop().is_none());
+        assert!(!f.push_link(u("https://e.com/must"), 0));
     }
 
     #[test]

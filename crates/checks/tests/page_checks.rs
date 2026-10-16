@@ -159,9 +159,10 @@ fn each_page_check_triggers_on_its_fixture() {
         assert!(has(&p, *id), "{id:?} should trigger");
     }
     let tested: HashSet<CheckId> = cases.iter().map(|c| c.0).collect();
+    // The policy checks are set by the policy pass (codoseo-policy), not `page_issues`.
     let page_scope: HashSet<CheckId> = CHECKS
         .iter()
-        .filter(|d| d.scope == Scope::Page)
+        .filter(|d| d.scope == Scope::Page && !d.id.is_policy())
         .map(|d| d.id)
         .collect();
     assert_eq!(

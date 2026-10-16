@@ -83,6 +83,11 @@ pub struct CrawlConfig {
     /// (`/.well-known/tdmrep.json`). Off for no-signup audits, which keep no AI access report.
     #[serde(default = "yes")]
     pub site_signals: bool,
+    /// Pages fetched on every crawl even when no link or sitemap leads to them: the site
+    /// policy's must-work pages and the starred pages. Internal URLs only (others are ignored);
+    /// they count toward `max_pages` and keep their place under the cap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_seeds: Vec<Url>,
 }
 
 fn yes() -> bool {
