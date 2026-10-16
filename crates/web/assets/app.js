@@ -173,6 +173,52 @@
   // A recheck queued or running: look again every 10 seconds until its result is in.
   setInterval(() => { if (!document.hidden && $("[data-recheck-pending]")) refresh(); }, 10000);
 
+  // ── AI access: the Bots list and the robots.txt tester ──
+  // The search box filters the rows as you type (the server filters too, on Enter or without
+  // JavaScript); a group with no row left hides.
+  function filterBots(input) {
+    const q = input.value.trim().toLowerCase();
+    let shown = 0;
+    $$("tbody[data-bot-group]").forEach((tb) => {
+      let n = 0;
+      $$("tr.aia-brow", tb).forEach((tr) => {
+        const hit = !q || (tr.dataset.q || "").includes(q);
+        tr.hidden = !hit;
+        if (hit) n++;
+      });
+      tb.hidden = n === 0;
+      shown += n;
+    });
+    const none = $("[data-bot-nomatch]");
+    if (none) none.hidden = shown > 0 || !$("tbody[data-bot-group]");
+  }
+  document.addEventListener("input", (e) => {
+    if (e.target.matches && e.target.matches("[data-bot-search]")) filterBots(e.target);
+  });
+  // A picked row's panel came in: mark the row, and on a phone bring the panel into view.
+  document.addEventListener("htmx:afterSwap", (e) => {
+    const panel = e.detail.elt && e.detail.elt.id === "aia-panel" ? e.detail.elt : $("#aia-panel");
+    if (!panel || !e.detail.target || e.detail.target.id !== "aia-panel") return;
+    const token = panel.dataset.bot;
+    $$("tr.aia-brow").forEach((tr) => {
+      const on = tr.dataset.bot === token;
+      tr.classList.toggle("is-sel", on);
+      const a = $(".aia-bot-link", tr);
+      if (a) on ? a.setAttribute("aria-current", "true") : a.removeAttribute("aria-current");
+    });
+    if (window.matchMedia("(max-width: 760px)").matches) panel.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
+  });
+  // The tester answers a refused bot or path with a 400 that says why: show it in place.
+  document.addEventListener("htmx:beforeSwap", (e) => {
+    const d = e.detail;
+    const elt = d.requestConfig && d.requestConfig.elt;
+    if (d.xhr && d.xhr.status === 400 && elt && elt.closest && elt.closest("[data-swap-errors]")) {
+      d.shouldSwap = true;
+      d.isError = false;
+    }
+  });
+  document.addEventListener("htmx:load", () => { const i = $("[data-bot-search]"); if (i && i.value) filterBots(i); });
+
   // Programmatic navigation that goes through the same boosted path as a click.
   function go(href) {
     const a = document.createElement("a");

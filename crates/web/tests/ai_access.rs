@@ -175,9 +175,12 @@ async fn each_tab_has_its_own_address_and_headings() {
     assert!(body.contains(&format!(r#"Bots<span class="n">{total}</span>"#)));
     assert!(body.contains(r#"Key pages<span class="n">3</span>"#));
     assert!(body.contains(r#"Bot visits<span class="n">soon</span>"#));
-    // The robots.txt tab names the group each bot follows.
+    // The robots.txt tab shows the file, tested for the bot its own group names.
     assert!(body.contains("Fetched · HTTP 200"));
-    assert!(body.contains("Disallowed · line 6 · Disallow: /"));
+    assert!(body.contains("OAI-SearchBot can&#39;t fetch /"), "{body}");
+    assert!(body.contains(
+        r#"<div class="aia-rl is-hit"><span class="ln">6</span><span class="tx">Disallow: /</span><span class="nt">decides /</span></div>"#
+    ));
     // The visits tab shows no data, made up or real.
     let visits = tab_body(&app, &site, &cookie, "/visits").await;
     assert!(visits.contains("Nothing here is data yet."));
@@ -904,41 +907,150 @@ async fn robots_txt_content_is_escaped_everywhere_it_shows() {
 }
 
 #[tokio::test]
-async fn the_bots_table_opens_on_what_needs_attention() {
+async fn the_bots_list_opens_on_what_needs_attention() {
     let (app, site, cookie) = setup().await;
     app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
         .await;
     let body = tab_body(&app, &site, &cookie, "/bots").await;
-    // Nothing conflicts: every bot shows, and "Needs attention" can't be picked.
+    // Nothing conflicts: every bot shows, "All bots" is the current filter.
     let total = registry().bots.len();
+    let training = registry()
+        .bots
+        .iter()
+        .filter(|b| b.purpose == Purpose::Training)
+        .count();
+    let link = |show: &str| {
+        format!(
+            "/s/{}/ai-access/bots?show={show}&#38;group=purpose",
+            site.id
+        )
+    };
     assert!(
-        body.contains(
-            r#"id="aia-f-attn" value="attention" aria-controls="aia-bots-table" disabled>"#
-        ),
+        body.contains(&format!(
+            r#"<a href="{}" aria-current="true">All bots<span class="n">{total}</span></a>"#,
+            link("all")
+        )),
         "{body}"
     );
-    assert!(body.contains(r#"id="aia-f-all" value="all" aria-controls="aia-bots-table" checked>"#));
-    assert!(body.contains(&format!(r#"All bots<span class="n">{total}</span>"#)));
-    assert!(!body.contains(r#"class="aia-row is-attn"#));
+    assert!(body.contains(&format!(
+        r#"<a href="{}">Needs attention<span class="n">0</span></a>"#,
+        link("attention")
+    )));
+    assert!(body.contains(&format!(
+        r#"Training only<span class="n">{training}</span>"#
+    )));
+    assert_eq!(
+        body.matches(r#"<tr class="aia-row aia-brow"#).count(),
+        total
+    );
+    assert!(!body.contains("is-attn"));
+    assert!(body.contains("no conflicts"));
+    // The panel opens on the first bot.
+    let first = &registry().bots[0].token;
+    assert!(body.contains(&format!(
+        r#"id="aia-panel" aria-label="Selected bot: {first}""#
+    )));
 
     app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
         .await;
     let body = tab_body(&app, &site, &cookie, "/bots").await;
-    assert!(
-        body.contains(
-            r#"id="aia-f-attn" value="attention" aria-controls="aia-bots-table" checked>"#
-        )
-    );
-    assert!(body.contains(r#"Needs attention<span class="n">1</span>"#));
-    assert!(body.contains(r#"<tr class="aia-row is-attn is-attn-last" style="#));
-    assert_eq!(body.matches(r#"<tr class="aia-row is-attn"#).count(), 1);
+    assert!(body.contains(&format!(
+        r#"<a href="{}" aria-current="true">Needs attention<span class="n">1</span></a>"#,
+        link("attention")
+    )));
+    // Only the bot that needs attention shows, with its accent, under its group's count.
+    assert_eq!(body.matches(r#"<tr class="aia-row aia-brow"#).count(), 1);
     assert_eq!(
-        body.matches(r#"<tr class="aia-row is-ok" style="#).count(),
-        total - 1
+        body.matches(r#"<tr class="aia-row aia-brow is-attn is-sel" data-bot="OAI-SearchBot""#)
+            .count(),
+        1
     );
-    // The group says how many conflict; the others say none do (shown while filtered).
-    assert!(body.contains(r#"<span class="aia-group-flag">1 conflict</span>"#));
-    assert!(body.contains(r#"<tbody class="is-clear">"#));
+    assert!(body.contains(r#"<span class="aia-group-flag c-err">1 needs attention</span>"#));
+    assert!(body.contains(r#"<span class="aia-cell-head c-err">Disallowed</span><span class="aia-sub mono">line 6 · own group</span>"#));
+    assert!(body.contains(
+        r#"<span class="badge t-err" title="You allow it, but robots.txt blocks it">Blocked</span>"#
+    ));
+    // The panel opens on it: robots.txt says no, with the group's lines and the deciding one.
+    for needle in [
+        r#"id="aia-panel" aria-label="Selected bot: OAI-SearchBot""#,
+        "1 · Allowed by robots.txt?",
+        "No — a group names OAI-SearchBot",
+        "Line 6 “Disallow: /” decides the home page, so 3 of 3 key pages are off limits.",
+        r#"<div class="aia-rl"><span class="ln">5</span><span class="tx">User-agent: OAI-SearchBot</span><span class="nt"></span></div>"#,
+        r#"<div class="aia-rl is-hit"><span class="ln">6</span><span class="tx">Disallow: /</span><span class="nt">decides /</span></div>"#,
+        "0 of 3 key pages allowed; blocked: /, /docs/start, /pricing",
+        "Open the issue",
+        &format!("/s/{}/ai-access/intent#bot-OAI-SearchBot", site.id),
+    ] {
+        assert!(body.contains(needle), "missing {needle:?} in {body}");
+    }
+    let incident = geo::open_incidents(app.pool(), site.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.kind == codoseo_geo::findings::FindingKind::BotsBlocked)
+        .unwrap();
+    assert!(body.contains(&format!(
+        r#"href="/s/{}/ai-access#issue-{}">Open the issue</a>"#,
+        site.id, incident.id
+    )));
+
+    // Every bot, by company; the training filter; a search, without JavaScript.
+    let all = tab_body(&app, &site, &cookie, "/bots?show=all&group=company").await;
+    assert_eq!(all.matches(r#"<tr class="aia-row aia-brow"#).count(), total);
+    assert!(all.contains(r#"<span class="aia-group-name">OpenAI</span>"#));
+    assert!(all.contains(r#"By company</a>"#));
+    let t = tab_body(&app, &site, &cookie, "/bots?show=training").await;
+    assert_eq!(
+        t.matches(r#"<tr class="aia-row aia-brow"#).count(),
+        training
+    );
+    let q = tab_body(&app, &site, &cookie, "/bots?show=all&q=anthropic").await;
+    let anthropic = registry()
+        .bots
+        .iter()
+        .filter(|b| b.operator == "Anthropic")
+        .count();
+    assert_eq!(
+        q.matches(r#"<tr class="aia-row aia-brow"#).count(),
+        anthropic
+    );
+    assert!(q.contains(r#"value="anthropic""#));
+    let none = tab_body(&app, &site, &cookie, "/bots?show=all&q=nobody-at-all").await;
+    assert!(none.contains("No bot matches the search."));
+
+    // ?bot= picks the panel's bot, whatever the filter shows.
+    let gpt = tab_body(&app, &site, &cookie, "/bots?bot=gptbot").await;
+    assert!(gpt.contains(r#"id="aia-panel" aria-label="Selected bot: GPTBot""#));
+    assert!(gpt.contains(r#"class="aia-bots-layout has-pick""#));
+    assert!(gpt.contains("Yes — no group names it, so it uses User-agent: *"));
+    // htmx asking for the panel gets the panel alone.
+    let path = format!("/s/{}/ai-access/bots?show=all&bot=ClaudeBot", site.id);
+    let res = app
+        .get_with_headers(
+            &path,
+            Some(&cookie),
+            &[("hx-request", "true"), ("hx-target", "aia-panel")],
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(
+        res.body.trim_start().starts_with(
+            r#"<aside class="card aia-panel" id="aia-panel" aria-label="Selected bot: ClaudeBot""#
+        ),
+        "{}",
+        res.body
+    );
+    assert!(!res.body.contains("<html"));
+    // An unknown bot or filter falls back to the defaults.
+    let odd = tab_body(
+        &app,
+        &site,
+        &cookie,
+        "/bots?show=nope&group=nope&bot=Nobody",
+    )
+    .await;
+    assert!(odd.contains(r#"id="aia-panel" aria-label="Selected bot: OAI-SearchBot""#));
 }
 
 /// OAI-SearchBot kept out everywhere, PerplexityBot only from /docs/ (its home page is allowed).
@@ -1122,9 +1234,11 @@ async fn a_bot_that_follows_another_bots_group_says_so() {
     app.finished_crawl_with_robots(&site, pages(), (200, robots), Vec::new())
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
-    // The bots table: Applebot reads Googlebot's group.
+    // The bots list: Applebot reads Googlebot's group.
     assert!(
-        body.contains("Allowed · follows Googlebot&#39;s rules (line 2)"),
+        body.contains(
+            r#"<span class="aia-cell-head c-ok">Allowed</span><span class="aia-sub mono">line 2 · Googlebot&#39;s group · 1 of 3 key pages blocked</span>"#
+        ) || body.contains("line 2 · Googlebot&#39;s group"),
         "{body}"
     );
     // The incident: both are kept out of /docs/ by the same line.
@@ -1232,11 +1346,17 @@ fn waf(token: &str, page: usize) -> Option<(Verdict, ProbeFetch)> {
     }
 }
 
-/// Every tab of the AI access screen, one after the other: the Overview first, then the Bots,
-/// Key pages, robots.txt, Agent files & signals and Bot visits tabs.
+/// Every tab of the AI access screen, one after the other: the Overview first, then the Bots
+/// (every bot shown, not only those that need attention), Key pages, robots.txt, Agent files &
+/// signals and Bot visits tabs.
 async fn ai_access_body(app: &TestApp, site: &Site, cookie: &str) -> String {
     let mut out = String::new();
     for tab in TABS {
+        let tab = if tab == "/bots" {
+            "/bots?show=all"
+        } else {
+            tab
+        };
         out.push_str(&tab_body(app, site, cookie, tab).await);
     }
     out
@@ -1254,57 +1374,76 @@ fn section_of<'a>(body: &'a str, id: &str) -> &'a str {
 /// The tabs' paths under `/s/{site}/ai-access`, the Overview first.
 const TABS: [&str; 6] = ["", "/bots", "/pages", "/robots", "/files", "/visits"];
 
-/// One tab of the AI access screen (`""` for the Overview, else `/bots` and so on).
+/// One tab of the AI access screen (`""` for the Overview, else `/bots` and so on, with a query
+/// if need be).
 async fn tab_body(app: &TestApp, site: &Site, cookie: &str, tab: &str) -> String {
     let path = format!("/s/{}/ai-access{tab}", site.id);
     let res = app.get(&path, Some(cookie)).await;
     assert_eq!(res.status, StatusCode::OK, "{path}");
+    let current = path.split('?').next().unwrap();
     assert!(
         res.body
-            .contains(&format!(r#"href="{path}" aria-current="page""#)),
+            .contains(&format!(r#"href="{current}" aria-current="page""#)),
         "{path} is the current tab"
     );
     res.body
 }
 
 #[tokio::test]
-async fn the_fetch_check_section_shows_each_probed_bot() {
+async fn the_fetch_check_shows_in_each_bots_row_and_panel() {
     let (app, site, cookie) = setup().await;
     app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
 
-    // On the Bots tab, after the bots table, badged as synthetic.
+    // On the Bots tab, after the bots list, badged as synthetic.
     let tab = tab_body(&app, &site, &cookie, "/bots").await;
     assert!(
         tab.find(r#"id="aia-bots""#).unwrap() < tab.find(r#"id="aia-fetch""#).unwrap(),
         "section order"
     );
-    let section = section_of(&body, "aia-fetch");
+    let section = section_of(&tab, "aia-fetch");
     for needle in [
         ">Fetch check</h2>",
         r#"<span class="badge aia-synthetic">Synthetic</span>"#,
         "Sent each bot&#39;s documented user agent from CodoSEO&#39;s address on 3 pages, compared with CodoSEObot. Real bots come from their own addresses and may be treated differently.",
-        // The table.
-        "OAI-SearchBot",
-        "Challenged (Cloudflare)",
-        "Same as CodoSEObot",
-        "1 inconclusive",
-        "3/3",
-        "HTTP 403 · 5.1 KB vs 46.9 KB",
-        "“Just a moment...”",
-        "cf-mitigated: challenge",
-        // The bots that were not probed, by reason.
-        "Not probed",
-        "Not probed: no documented user agent",
-        "Claude-SearchBot",
-        "Not probed: verified search engine",
-        "Googlebot",
     ] {
         assert!(section.contains(needle), "missing {needle:?} in {section}");
     }
-    // ChatGPT-User was compared on two pages and timed out on one: still the same page.
-    assert!(section.contains("0/2"), "{section}");
+    // The two challenged bots need attention; the list opens on them.
+    assert!(
+        tab.contains(r#"Needs attention<span class="n">2</span>"#),
+        "{tab}"
+    );
+    for needle in [
+        r#"<span class="aia-cell-head c-err">Blocked · 403</span><span class="aia-sub">Cloudflare challenge on 3 of 3 pages</span>"#,
+        r#">Firewall blocks</span>"#,
+        // The panel: OAI-SearchBot as fetched, against CodoSEObot on the home page.
+        "2 · Reachable when fetched as OAI-SearchBot?",
+        "No — challenged (Cloudflare) on 3 of 3 pages",
+        r#"<span role="cell" class="mono">HTTP 200</span><span role="cell" class="mono c-err">HTTP 403</span>"#,
+        r#"<span role="cell" class="mono">46.9 KB</span><span role="cell" class="mono c-err">5.1 KB</span>"#,
+        r#"<span role="cell" class="mono">Example</span><span role="cell" class="mono c-err">Just a moment...</span>"#,
+        r#"<span role="cell" class="mono c-err">cf-mitigated: challenge</span>"#,
+        "Synthetic: both requests came from CodoSEO's servers",
+        "Open the issue",
+    ] {
+        assert!(tab.contains(needle), "missing {needle:?} in {tab}");
+    }
+    // Every bot: what each got, or why it wasn't fetched.
+    for needle in [
+        // ChatGPT-User was compared on two pages and timed out on one: still the same page.
+        r#"<span class="aia-cell-head c-ok">Same page as CodoSEObot</span><span class="aia-sub">2 of 2 pages</span>"#,
+        r#"<span class="aia-cell-head c-muted">Not checked</span><span class="aia-sub">no full user-agent published</span>"#,
+        r#"<span class="aia-cell-head c-muted">Not checked</span><span class="aia-sub">verified search engine</span>"#,
+        r#"<span class="aia-cell-head c-muted">—</span><span class="aia-sub">only search and user bots are fetched</span>"#,
+        r#"<span class="aia-cell-head c-muted">—</span><span class="aia-sub">control token</span>"#,
+    ] {
+        assert!(body.contains(needle), "missing {needle:?}");
+    }
+    let same = tab_body(&app, &site, &cookie, "/bots?bot=ChatGPT-User").await;
+    assert!(same.contains("Yes — it gets the same page as CodoSEObot"));
+    assert!(!same.contains("Open the issue"));
 
     // The incident it opened: synthetic, grade B, a line per bot from the probe evidence.
     let incident = section_of(&body, "aia-issues");
@@ -1343,11 +1482,16 @@ async fn bots_robots_txt_keeps_out_are_not_probed_and_unwanted_ones_are_expected
     app.finished_crawl_with_probes(&site, pages(), (200, BLOCK_OAI), &|r| probes_with(r, &waf))
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
-    let section = section_of(&body, "aia-fetch");
-    assert!(section.contains("Not probed: robots.txt"), "{section}");
     assert!(
-        section.contains("Expected: you don&#39;t ask for this bot, so it isn&#39;t reported"),
-        "{section}"
+        body.contains(r#"<span class="aia-cell-head c-muted">Not fetched</span><span class="aia-sub">robots.txt keeps it out, so we don&#39;t</span>"#),
+        "{body}"
+    );
+    // PerplexityBot's challenge is expected: muted, and not a status that asks for attention.
+    assert!(body.contains(r#"<span class="aia-cell-head c-muted">Blocked · 403</span>"#));
+    let panel = tab_body(&app, &site, &cookie, "/bots?bot=PerplexityBot").await;
+    assert!(
+        panel.contains("You don&#39;t ask for this bot, so it isn&#39;t reported."),
+        "{panel}"
     );
     // No fetch_blocked incident: the only challenged bot is one the owner blocks.
     assert!(!body.contains("(synthetic check)"), "{body}");
@@ -1385,7 +1529,7 @@ async fn the_fetch_check_says_why_there_are_no_results() {
         body.contains("Fetch checks are off for this site"),
         "{body}"
     );
-    assert!(!body.contains("Challenged (Cloudflare)"), "{body}");
+    assert!(!body.contains("Cloudflare challenge on"), "{body}");
 
     // A robots.txt that can't be read: no per-bot verdicts, so no probes.
     geo::set_ai_probes(app.pool(), site.id, true).await.unwrap();
@@ -2859,7 +3003,8 @@ async fn operator_logos_sit_beside_their_bots() {
         "{c}"
     );
     // Rows fade in one after another; each bot's status is keyed for the swap pulse.
-    assert!(body.contains(r#"<tr class="aia-row is-ok" style="--i:0">"#));
+    assert!(body.contains(r#"<tr class="aia-row aia-brow" data-bot="#));
+    assert!(body.contains(r#"style="--i:0">"#));
     assert!(body.contains(r#"data-state-key="bot-GPTBot" data-state="#));
     // The answer engines take their crawler's operator.
     let google = codoseo_web::operator_logo::logo("Google").unwrap();
@@ -3003,4 +3148,170 @@ async fn content_signals_and_markdown_are_advisory_issues_with_fixes() {
         .await,
         0
     );
+}
+
+#[tokio::test]
+async fn the_robots_tab_shows_the_file_and_tests_a_bot_against_it() {
+    let (app, site, cookie) = setup().await;
+    let robots = "# robots.txt\nUser-agent: *\nDisallow: /docs/\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: CCBot\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n";
+    app.finished_crawl_with_robots(&site, pages(), (200, robots), Vec::new())
+        .await;
+    let body = tab_body(&app, &site, &cookie, "/robots").await;
+    let total = registry().bots.len();
+    for needle in [
+        r#"<span class="badge t-ok">Fetched · HTTP 200</span>"#,
+        "https://example.com/robots.txt",
+        &format!("{} bytes", robots.len()),
+        "Unchanged since crawl #1",
+        r#"<div class="aia-rl is-comment"><span class="ln">1</span><span class="tx"># robots.txt</span><span class="nt"></span></div>"#,
+        &format!(
+            r#"<span class="ln">2</span><span class="tx">User-agent: *</span><span class="nt">{} bots</span>"#,
+            total - 2
+        ),
+        r#"<span class="ln">6</span><span class="tx">User-agent: GPTBot</span><span class="nt">2 bots</span>"#,
+        ">Test a bot against this file</h2>",
+        ">Groups in this file</h2>",
+        "lines 2–4 · 2 rules",
+        "GPTBot, CCBot</span> — lines 6–8 · Disallow: / · 2 registry bots",
+        "No Crawl-delay · no Content-Signal line · 1 sitemap",
+    ] {
+        assert!(body.contains(needle), "missing {needle:?} in {body}");
+    }
+    // A chip per likely bot; GPTBot's own group comes first and is tested on /.
+    assert!(body.contains(&format!(
+        r#"<a class="chip aia-tchip is-on" href="/s/{}/ai-access/robots?bot=GPTBot&#38;path=%2F" aria-current="true">GPTBot</a>"#,
+        site.id
+    )), "{body}");
+    assert!(body.contains("GPTBot can&#39;t fetch /"));
+
+    // Allowed: no group names it, the * group decides.
+    let path = |q: &str| format!("/s/{}/ai-access/robots/test?{q}", site.id);
+    let res = app
+        .get_hx(&path("bot=OAI-SearchBot&path=/pricing"), Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(
+        res.body
+            .trim_start()
+            .starts_with(r#"<div class="aia-robots-tab" id="aia-robots-tab">"#),
+        "{}",
+        res.body
+    );
+    assert!(!res.body.contains("<html"));
+    assert!(res.body.contains("OAI-SearchBot can fetch /pricing"));
+    assert!(
+        res.body.contains(
+            "No group names it, so User-agent: * (line 2) applies; line 4 “Allow: /” matches."
+        ),
+        "{}",
+        res.body
+    );
+    assert!(
+        res.body
+            .contains(r#"<div class="aia-rl is-hit"><span class="ln">4</span>"#)
+    );
+    assert!(
+        res.body
+            .contains(r#"<div class="aia-rl is-in"><span class="ln">3</span>"#)
+    );
+    // Disallowed: the longest match wins.
+    let res = app
+        .get_hx(&path("bot=OAI-SearchBot&path=/docs/start"), Some(&cookie))
+        .await;
+    assert!(
+        res.body
+            .contains("OAI-SearchBot can&#39;t fetch /docs/start")
+    );
+    assert!(res.body.contains("line 3 “Disallow: /docs/” matches."));
+    assert!(
+        res.body
+            .contains(r#"<span class="nt">decides /docs/start</span>"#)
+    );
+    // A bot the registry doesn't list is tested as written.
+    let res = app.get_hx(&path("bot=FooBot&path=/a"), Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(res.body.contains("FooBot can fetch /a"));
+    assert!(
+        res.body
+            .contains("It isn&#39;t in the registry: tested as the token written.")
+    );
+    assert!(
+        res.body
+            .contains(r#"<option value="FooBot" selected>FooBot</option>"#)
+    );
+    // Refused input is a 400 that says why, and nothing is tested.
+    for (q, why) in [
+        ("bot=GPTBot&path=docs", "The path must start with /."),
+        (
+            "bot=GPTBot&path=/a%20b",
+            "The path can&#39;t contain spaces or control characters.",
+        ),
+        (
+            "bot=%3Cscript%3E&path=/",
+            "A bot is a product token: letters, digits, - and _ only.",
+        ),
+    ] {
+        let res = app.get_hx(&path(q), Some(&cookie)).await;
+        assert_eq!(res.status, StatusCode::BAD_REQUEST, "{q}");
+        assert!(res.body.contains(why), "{q}: {}", res.body);
+        assert!(!res.body.contains("<script>"), "{q}");
+        assert!(!res.body.contains("can fetch"), "{q}");
+    }
+    let long = format!("bot=GPTBot&path=/{}", "a".repeat(1100));
+    assert_eq!(
+        app.get_hx(&path(&long), Some(&cookie)).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    // Without JavaScript the tester is the whole tab.
+    let res = app
+        .get(&path("bot=GPTBot&path=/pricing"), Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(res.body.contains("<html"));
+    assert!(res.body.contains("GPTBot can&#39;t fetch /pricing"));
+    // Another account can't test this site's file.
+    let (_, other) = app.login("bo@example.com").await;
+    assert_eq!(
+        app.get(&path("bot=GPTBot&path=/"), Some(&other))
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+
+    // A new file: changed in that crawl.
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let body = tab_body(&app, &site, &cookie, "/robots").await;
+    assert!(body.contains("Last changed: crawl #2"), "{body}");
+}
+
+#[tokio::test]
+async fn a_report_without_the_robots_body_says_it_appears_after_the_next_crawl() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    // A report stored before the body was kept.
+    sqlx::query("UPDATE ai_reports SET report = report #- '{robots,file}' WHERE site_id = $1")
+        .bind(site.id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let body = tab_body(&app, &site, &cookie, "/robots").await;
+    assert!(body.contains("Fetched · HTTP 200"));
+    assert!(body.contains("The file&#39;s text wasn&#39;t stored for this check; it appears here after the next crawl."), "{body}");
+    assert!(body.contains("so it can&#39;t be tested yet"));
+    assert!(!body.contains("aia-rl"));
+    assert!(!body.contains("Unchanged since"));
+    // The Bots tab still has its verdicts, without the excerpt.
+    let bots = tab_body(&app, &site, &cookie, "/bots").await;
+    assert!(bots.contains("No — a group names OAI-SearchBot"));
+    assert!(bots.contains(
+        "The file&#39;s text wasn&#39;t stored for this check. It appears after the next crawl."
+    ));
+    // A missing robots.txt: nothing to show, everything allowed.
+    app.finished_crawl_with_robots(&site, pages(), (404, ""), Vec::new())
+        .await;
+    let body = tab_body(&app, &site, &cookie, "/robots").await;
+    assert!(body.contains("None · HTTP 404"), "{body}");
+    assert!(body.contains("There is no robots.txt, so every path is allowed."));
 }

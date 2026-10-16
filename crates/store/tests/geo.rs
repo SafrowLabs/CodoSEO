@@ -3665,3 +3665,51 @@ async fn advisory_incidents_open_and_resolve_quietly() {
         "{changes:?}"
     );
 }
+
+/// The stored robots.txt body and since when it has been as it is.
+async fn robots_since(
+    pool: &PgPool,
+    site: Uuid,
+) -> Option<(String, codoseo_geo::report::RobotsSince)> {
+    let latest = geo::latest_report(pool, site).await.unwrap().unwrap();
+    latest
+        .report
+        .robots
+        .file
+        .map(|f| (f.body, f.since.expect("set when stored")))
+}
+
+#[tokio::test]
+async fn the_robots_body_is_stored_and_its_last_change_carried_forward() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool, "example.com").await;
+    let first = full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let (body, since) = robots_since(&db.pool, site).await.expect("a body");
+    assert_eq!(body, ALLOW_ALL);
+    assert_eq!(
+        (since.crawl_id, since.changed),
+        (first, false),
+        "first seen"
+    );
+
+    // The same file: still since the first crawl.
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let (_, since) = robots_since(&db.pool, site).await.unwrap();
+    assert_eq!((since.crawl_id, since.changed), (first, false));
+
+    // A failing robots.txt stores no body, and doesn't reset the history.
+    full_crawl(&db.pool, site, 503, "", None).await;
+    assert!(robots_since(&db.pool, site).await.is_none());
+    full_crawl(&db.pool, site, 200, ALLOW_ALL, None).await;
+    let (_, since) = robots_since(&db.pool, site).await.unwrap();
+    assert_eq!((since.crawl_id, since.changed), (first, false));
+
+    // Another file: changed in that crawl, and so it stays.
+    let changed = full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let (body, since) = robots_since(&db.pool, site).await.unwrap();
+    assert_eq!(body, BLOCK_OAI);
+    assert_eq!((since.crawl_id, since.changed), (changed, true));
+    full_crawl(&db.pool, site, 200, BLOCK_OAI, None).await;
+    let (_, since) = robots_since(&db.pool, site).await.unwrap();
+    assert_eq!((since.crawl_id, since.changed), (changed, true));
+}

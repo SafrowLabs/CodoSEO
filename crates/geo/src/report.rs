@@ -13,7 +13,9 @@ use codoseo_core::output::{CrawlOutput, LlmsSkip, WellKnownFile};
 use codoseo_core::page::PageRecord;
 use codoseo_core::url::url_hash;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use url::Url;
+use uuid::Uuid;
 
 use crate::content::{ContentReport, content_report};
 use crate::declared::{
@@ -26,8 +28,8 @@ use crate::markdown::{self, MarkdownReport};
 use crate::probe::ProbeReport;
 use crate::registry::{Honours, Purpose, registry};
 use crate::robots::{
-    AgentRules, ContentSignal, ContentUsage, GroupMatch, MatchedRule, Pair, RobotsAvailability,
-    RobotsTxt, availability, declared_pairs,
+    AgentRules, ContentSignal, ContentUsage, GroupMatch, MAX_ROBOTS_BYTES, MatchedRule, Pair,
+    RobotsAvailability, RobotsTxt, availability, declared_pairs,
 };
 
 /// Bumped when a stored report can no longer be read by the code that wrote the older shape.
@@ -143,6 +145,74 @@ fn same_origin(url: &Url, origin: &Url) -> bool {
 pub struct RobotsInfo {
     pub status: Option<u16>,
     pub availability: RobotsAvailability,
+    /// The file as fetched, when it answered 2xx; `None` otherwise and in reports written before
+    /// the body was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<RobotsBody>,
+}
+
+/// A robots.txt body as the report keeps it, for showing the file and testing paths against it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RobotsBody {
+    /// At most [`MAX_ROBOTS_BYTES`] (what Google reads, and what the verdicts were drawn from),
+    /// cut on a character boundary, without NUL characters.
+    pub body: String,
+    /// Bytes as fetched (the crawler reads no more than [`MAX_ROBOTS_BYTES`]).
+    pub bytes: u32,
+    /// The file reached the cap: it may be longer, and the rest was not read.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+    /// SHA-256 of the whole body as read (UTF-8), lower-case hex.
+    pub sha256: String,
+    /// Since when the file has had this hash: set when the report is stored, from the newest
+    /// earlier report with a body ([`robots_since`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<RobotsSince>,
+}
+
+/// The crawl a robots.txt body was first stored with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RobotsSince {
+    pub crawl_id: Uuid,
+    /// The hash differed from the one stored before it (it changed in that crawl); false when it
+    /// is merely the first body stored for the site.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub changed: bool,
+}
+
+impl RobotsBody {
+    /// The body of a robots.txt that answered 2xx, as kept.
+    pub fn new(body: &str) -> RobotsBody {
+        let mut cut = body.len().min(MAX_ROBOTS_BYTES);
+        while !body.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let digest = Sha256::digest(body.as_bytes());
+        RobotsBody {
+            body: body[..cut].replace('\0', ""),
+            bytes: u32::try_from(body.len()).unwrap_or(u32::MAX),
+            truncated: body.len() >= MAX_ROBOTS_BYTES,
+            sha256: digest.iter().map(|b| format!("{b:02x}")).collect(),
+            since: None,
+        }
+    }
+}
+
+/// Since when a robots.txt body with hash `sha256`, read by crawl `crawl_id`, has been as it is:
+/// carried from `previous` (the newest earlier stored body) when the hash is the same, else this
+/// crawl, marked `changed` when there was an earlier body to differ from. A `previous` without
+/// `since` (it can't be, once stored) counts as first seen now.
+pub fn robots_since(previous: Option<&RobotsBody>, sha256: &str, crawl_id: Uuid) -> RobotsSince {
+    match previous {
+        Some(p) if p.sha256 == sha256 => p.since.unwrap_or(RobotsSince {
+            crawl_id,
+            changed: false,
+        }),
+        previous => RobotsSince {
+            crawl_id,
+            changed: previous.is_some(),
+        },
+    }
 }
 
 /// One important URL a bot may not fetch.
@@ -516,6 +586,9 @@ pub fn build_report(out: &CrawlOutput, important: &[ImportantUrl]) -> AccessRepo
         robots: RobotsInfo {
             status,
             availability: avail,
+            file: robots_file
+                .filter(|_| avail == RobotsAvailability::Ok)
+                .map(|f| RobotsBody::new(&f.body)),
         },
         important,
         bots,

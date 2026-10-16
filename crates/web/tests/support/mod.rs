@@ -216,6 +216,23 @@ impl TestApp {
             .await
     }
 
+    /// A GET with extra request headers (`HX-Target`, ...).
+    pub async fn get_with_headers(
+        &self,
+        path: &str,
+        cookie: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> TestResponse {
+        let mut req = build(Method::GET, path, cookie, None, false);
+        for (name, value) in headers {
+            req.headers_mut().insert(
+                header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        self.send(req).await
+    }
+
     /// A form POST with extra request headers (`CF-Connecting-IP`, ...).
     pub async fn post_with_headers(
         &self,

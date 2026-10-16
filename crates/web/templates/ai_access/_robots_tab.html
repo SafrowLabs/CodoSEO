@@ -1,0 +1,60 @@
+{#- The robots.txt tab's content, with `rt: RobotsTab` and `base`: the file line by line, the
+    tester and the groups. The tester's form asks /robots/test for this whole block again (htmx),
+    so the file's marks follow the bot tested; without JavaScript it is a plain GET. -#}
+<div class="aia-robots-tab" id="aia-robots-tab">
+  <section class="card aia-section aia-robots" aria-labelledby="aia-robots">
+    <h2 class="sr-only" id="aia-robots">robots.txt</h2>
+    <div class="aia-robots-head">
+      <span class="badge {{ rt.status_class }}">{{ rt.status }}</span>
+      <span class="mono aia-robots-url">{{ rt.url }}</span>
+      <span>{% if let Some(sz) = rt.size %}{{ sz }} · {% endif %}<span title="{{ rt.checked_full }}">checked {{ rt.checked }}</span></span>
+      <span class="grow"></span>
+      {% if let Some(c) = rt.changed %}<span>{{ c }}</span>{% endif %}
+    </div>
+    {% if rt.truncated %}<p class="aia-robots-trunc">The file reached 500 KiB, the most Google reads: anything after it is ignored, and isn't shown here.</p>{% endif %}
+    {% if let Some(n) = rt.note %}<div class="aia-none"><p>{{ n }}</p></div>{% endif %}
+    {% if !rt.lines.is_empty() %}
+    <div class="aia-rfile" role="region" aria-label="robots.txt, line by line" tabindex="0">
+      {% for l in rt.lines %}<div class="aia-rl{% if !l.class.is_empty() %} {{ l.class }}{% endif %}"><span class="ln">{{ l.n }}</span><span class="tx">{{ l.text }}</span><span class="nt">{{ l.note }}</span></div>{% endfor %}
+    </div>
+    {% if rt.lines_more > 0 %}<p class="aia-robots-trunc">{{ rt.lines_more }} more lines not shown.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <div class="aia-robots-side">
+    <section class="card aia-section aia-tester" aria-labelledby="aia-tester">
+      <div class="card-head"><h2 class="card-title" id="aia-tester">Test a bot against this file</h2></div>
+      <div class="aia-tester-body">
+        <p class="aia-why c-muted">Pick a bot to highlight the group it obeys and the rule that decides the path.</p>
+        <div class="aia-chips">{% for c in rt.tester.chips %}<a class="chip aia-tchip{% if c.current %} is-on{% endif %}" href="{{ c.href }}"{% if c.current %} aria-current="true"{% endif %}>{{ c.token }}</a>{% endfor %}</div>
+        <form class="aia-tester-form" method="get" action="{{ base }}/ai-access/robots/test" hx-get="{{ base }}/ai-access/robots/test" hx-target="#aia-robots-tab" hx-swap="outerHTML" hx-push-url="true" data-swap-errors>
+          <label>Bot
+            <select class="select" name="bot">{% if let Some(o) = rt.tester.other %}<option value="{{ o }}" selected>{{ o }}</option>{% endif %}{% for o in rt.tester.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+          </label>
+          <label>Path
+            <input class="input mono" type="text" name="path" value="{{ rt.tester.path }}" maxlength="1024" spellcheck="false" autocomplete="off">
+          </label>
+          <button class="btn btn-sm" type="submit">Test</button>
+        </form>
+        <div class="aia-tresult" id="aia-tester-result" role="status">
+          {% if let Some(e) = rt.tester.error %}<b class="c-err">{{ e }}</b>
+          {% else if let Some(u) = rt.tester.unavailable %}<span class="c-muted">{{ u }}</span>
+          {% else if let Some(r) = rt.tester.result %}<b class="{{ r.class }}">{{ r.head }}</b><span>{{ r.why }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    <section class="card aia-section aia-rgroups" aria-labelledby="aia-rgroups">
+      <div class="card-head"><h2 class="card-title" id="aia-rgroups">Groups in this file</h2><span class="card-aside">{{ rt.groups.len() }}</span></div>
+      <div class="aia-rgroups-body">
+        {% for g in rt.groups %}<p><span class="mono">{{ g.agents }}</span> — {{ g.text }}</p>{% endfor %}
+        {% if rt.groups.is_empty() %}<p class="c-muted">No groups to show.</p>{% endif %}
+        {% if !rt.groups_foot.is_empty() %}<p class="c-muted">{{ rt.groups_foot }}</p>{% endif %}
+        <h3 class="aia-sec">Content-Signal lines</h3>
+        {% if rt.signals.is_empty() %}<p class="c-muted">None in robots.txt. A Content-Signal line states whether you allow search, AI answers and training: see <a href="{{ base }}/ai-access/files">Agent files &amp; signals</a>.</p>
+        {% else %}{% for s in rt.signals %}<p class="mono aia-path">{{ s }}</p>{% endfor %}{% endif %}
+      </div>
+    </section>
+  </div>
+</div>

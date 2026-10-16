@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use askama::Template;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderName, HeaderValue};
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
@@ -31,8 +31,7 @@ use codoseo_geo::incident::acceptable;
 use codoseo_geo::ledger;
 use codoseo_geo::llms::{LlmsState, LlmsTxtReport, SPEC_URL as LLMS_SPEC_URL};
 use codoseo_geo::probe::{
-    FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeReport, ProbeStop,
-    SkipReason, Verdict,
+    FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeStop,
 };
 use codoseo_geo::remedy::{Remedy, agent_prompt, copy_fix, developer_task};
 use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str, slug_str};
@@ -54,8 +53,10 @@ use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{Screen, Shell};
 use crate::render::{Hx, ToastKind, html, toast};
+use crate::routes::ai_access_bots::{self, BotPanel, BotsInput, BotsQuery, BotsTab};
+use crate::routes::ai_access_robots::{self, RobotsInput, RobotsQuery, RobotsTab};
 use crate::routes::ai_overview::{
-    self, GeoInput, Kpi, LookCard, LookInput, PolicyRow, ProductCard, RobotsView, Tab, TabLink,
+    self, GeoInput, Kpi, LookCard, LookInput, PolicyRow, ProductCard, Tab, TabLink,
 };
 use crate::routes::audit::site_id;
 use crate::state::AppState;
@@ -66,6 +67,7 @@ pub fn routes() -> Router<AppState> {
         .route("/s/{site}/ai-access/bots", get(bots_page))
         .route("/s/{site}/ai-access/pages", get(pages_page))
         .route("/s/{site}/ai-access/robots", get(robots_page))
+        .route("/s/{site}/ai-access/robots/test", get(robots_test))
         .route("/s/{site}/ai-access/files", get(files_page))
         .route("/s/{site}/ai-access/visits", get(visits_page))
         .route(
@@ -308,8 +310,10 @@ pub struct Overview {
     pub policy: Vec<PolicyRow>,
     /// The "Look closer" links to the other tabs.
     pub look: Vec<LookCard>,
-    /// The robots.txt tab.
-    pub robots: RobotsView,
+    /// The robots.txt tab, built only on that tab.
+    pub robots_tab: Option<RobotsTab>,
+    /// The Bots tab, built only on that tab.
+    pub bots_tab: Option<BotsTab>,
     /// `2 critical · 1 warning · 3 notices`, under the open issues.
     pub issue_counts: String,
     /// `Accepted 1 · Snoozed 0`
@@ -329,14 +333,8 @@ pub struct Overview {
     pub llms: LlmsCard,
     /// Content Signals in robots.txt and Markdown for agents: advisory checks.
     pub ready: ReadyCard,
-    /// Shown instead of the bots table when robots.txt gave no verdicts.
+    /// Shown instead of the bots list when robots.txt gave no verdicts.
     pub robots_callout: Option<Callout>,
-    /// `robots.txt · HTTP 200`
-    pub robots_aside: String,
-    pub bot_groups: Vec<BotGroup>,
-    /// Bots whose status conflicts with the intent ("Needs attention").
-    pub bot_attention: usize,
-    pub bot_total: usize,
     pub engines: Vec<EngineRow>,
     pub declared: Vec<DeclaredItem>,
     pub important: Vec<ImportantRow>,
@@ -505,9 +503,6 @@ pub struct FetchCheck {
     pub pages: Vec<UrlLink>,
     /// Why the run stopped before its last page.
     pub stop: Option<&'static str>,
-    pub rows: Vec<ProbeRowView>,
-    pub skipped: Vec<SkipGroup>,
-    pub skipped_total: usize,
 }
 
 /// What the screen says about open synthetic incidents while the fetch checks are off: they are
@@ -521,71 +516,6 @@ pub struct FetchEmpty {
     pub note: Option<&'static str>,
     /// Offer the intent form, where the switch is.
     pub intent_link: bool,
-}
-
-/// One probed bot: its intent, what it got and on how many pages.
-pub struct ProbeRowView {
-    pub token: String,
-    pub operator: String,
-    pub product: String,
-    pub stance: &'static str,
-    pub stance_class: &'static str,
-    /// `Challenged (Cloudflare)`, `Same as CodoSEObot`, `Not probed: robots.txt`
-    pub result: String,
-    /// A badge class, or empty for plain text.
-    pub result_class: &'static str,
-    pub result_tip: String,
-    /// `2/3`: pages treated worse than CodoSEObot, of those compared.
-    pub pages: String,
-    pub pages_class: &'static str,
-    /// `HTTP 403 · 5.1 KB vs 46.9 KB`
-    pub detail: String,
-    /// The probe's page title, as the probed site sent it.
-    pub title: Option<String>,
-    /// The challenge marker, or where a redirect ended.
-    pub extra: Option<String>,
-}
-
-/// Bots that were not probed for one reason.
-pub struct SkipGroup {
-    pub label: &'static str,
-    pub tokens: Vec<String>,
-}
-
-pub struct BotGroup {
-    pub label: &'static str,
-    pub stance: &'static str,
-    pub stance_class: &'static str,
-    pub count: String,
-    /// `2 conflicts`, or empty.
-    pub conflicts: String,
-    pub rows: Vec<BotRow>,
-}
-
-pub struct BotRow {
-    pub token: String,
-    pub operator: String,
-    pub product: String,
-    /// A control token: never crawls, only says what may be done with the content.
-    pub control: bool,
-    pub notes: String,
-    pub stance: &'static str,
-    pub stance_class: &'static str,
-    pub overridden: bool,
-    pub home: String,
-    pub home_class: &'static str,
-    pub home_tip: String,
-    pub blocked: String,
-    pub blocked_class: &'static str,
-    pub honours: &'static str,
-    pub honours_class: &'static str,
-    pub status: &'static str,
-    pub status_class: &'static str,
-    pub status_tip: &'static str,
-    /// The status conflicts with the intent: the row stays under "Needs attention".
-    pub attention: bool,
-    /// The last such row of its group (it draws no bottom border while the others are hidden).
-    pub last_attention: bool,
 }
 
 pub struct CauseChip {
@@ -645,6 +575,13 @@ pub struct ResolvedRow {
     pub resolution_tip: &'static str,
 }
 
+/// What a tab reads from its query, beyond the report.
+pub(crate) enum TabArgs {
+    None,
+    Bots(BotsQuery),
+    Robots(RobotsQuery),
+}
+
 async fn tab_page(
     state: AppState,
     user: CurrentUser,
@@ -665,12 +602,31 @@ async fn page(
     tab_page(state, user, site, Tab::Overview).await
 }
 
+/// The Bots tab; with htmx asking for `#aia-panel` (a row picked), only the bot's panel.
 async fn bots_page(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(site): Path<String>,
+    Query(query): Query<BotsQuery>,
+    hx: Hx,
 ) -> Result<Response, AppError> {
-    tab_page(state, user, site, Tab::Bots).await
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    let panel_only = hx.partial() && hx.target.as_deref() == Some("aia-panel");
+    let page = build_page(&state, &user, &site, Tab::Bots, TabArgs::Bots(query)).await?;
+    if panel_only
+        && let Some(p) = page
+            .view
+            .as_ref()
+            .and_then(|v| v.bots_tab.as_ref())
+            .and_then(|b| b.panel.as_ref())
+    {
+        return Ok(html(&BotPanelFragment {
+            p,
+            base: &page.base,
+        })?
+        .into_response());
+    }
+    Ok(html(&page)?.into_response())
 }
 
 async fn pages_page(
@@ -685,8 +641,48 @@ async fn robots_page(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(site): Path<String>,
+    Query(query): Query<RobotsQuery>,
 ) -> Result<Response, AppError> {
-    tab_page(state, user, site, Tab::Robots).await
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    robots_response(&state, &user, &site, query, false).await
+}
+
+/// "Test a bot against this file": the tester's verdict with the file marked for that bot. htmx
+/// gets the tab's content alone; without JavaScript it is the whole robots.txt tab. A refused
+/// bot or path is a 400 that says why.
+async fn robots_test(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+    Query(query): Query<RobotsQuery>,
+    hx: Hx,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    robots_response(&state, &user, &site, query, hx.partial()).await
+}
+
+async fn robots_response(
+    state: &AppState,
+    user: &CurrentUser,
+    site: &Site,
+    query: RobotsQuery,
+    fragment: bool,
+) -> Result<Response, AppError> {
+    let page = build_page(state, user, site, Tab::Robots, TabArgs::Robots(query)).await?;
+    let rt = page.view.as_ref().and_then(|v| v.robots_tab.as_ref());
+    let status = if rt.is_some_and(|rt| rt.tester.error.is_some()) {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::OK
+    };
+    let body = match rt {
+        Some(rt) if fragment => html(&RobotsFragment {
+            rt,
+            base: &page.base,
+        })?,
+        _ => html(&page)?,
+    };
+    Ok((status, body).into_response())
 }
 
 async fn files_page(
@@ -705,18 +701,44 @@ async fn visits_page(
     tab_page(state, user, site, Tab::Visits).await
 }
 
+/// The bot panel alone, for the htmx swap when a row is picked.
+#[derive(Template)]
+#[template(path = "ai_access/bot_panel_fragment.html")]
+pub struct BotPanelFragment<'a> {
+    pub p: &'a BotPanel,
+    pub base: &'a str,
+}
+
+/// The robots.txt tab's content alone, for the tester's htmx swap.
+#[derive(Template)]
+#[template(path = "ai_access/robots_fragment.html")]
+pub struct RobotsFragment<'a> {
+    pub rt: &'a RobotsTab,
+    pub base: &'a str,
+}
+
 async fn render_page(
     state: &AppState,
     user: &CurrentUser,
     site: &Site,
     tab: Tab,
 ) -> Result<Html<String>, AppError> {
+    html(&build_page(state, user, site, tab, TabArgs::None).await?)
+}
+
+async fn build_page(
+    state: &AppState,
+    user: &CurrentUser,
+    site: &Site,
+    tab: Tab,
+    args: TabArgs,
+) -> Result<AiAccessPage, AppError> {
     let shell = Shell::load(state, user, Some(site), Screen::AiAccess).await?;
     let base = format!("/s/{}", site.id);
     let pool = &state.pool;
     let Some(latest) = geo::latest_report(pool, site.id).await? else {
         let can_run = crawls::active(pool, site.id).await?.is_none();
-        return html(&AiAccessPage {
+        return Ok(AiAccessPage {
             shell,
             tabs: ai_overview::tab_links(&base, None, tab),
             tab: tab.key(),
@@ -786,26 +808,49 @@ async fn render_page(
         .count();
 
     let accepted_n = accepted.len();
-    let bot_groups = bot_groups(report, &intent);
     let probes_on = geo::get_ai_probes(pool, site.id).await?;
     let fetch = fetch_check(
         site,
         &base,
         report,
-        &intent,
         probes_on,
         state.config.probe_urls_for(user.account.plan) > 0,
     );
-    let bot_attention = bot_groups
-        .iter()
-        .flat_map(|g| &g.rows)
-        .filter(|r| r.attention)
-        .count();
-    let fetch_attention = fetch
-        .rows
-        .iter()
-        .filter(|r| matches!(r.result_class, "t-err" | "t-warn"))
-        .count();
+    let bots_input = BotsInput {
+        base: &base,
+        report,
+        intent: &intent,
+        fetch: &fetch,
+        open: &open,
+    };
+    let bot_attention = ai_access_bots::attention(&bots_input);
+    let bots_tab = match &args {
+        TabArgs::Bots(q) if report.has_verdicts() => Some(ai_access_bots::bots_tab(&bots_input, q)),
+        _ => None,
+    };
+    let robots_tab = match &args {
+        TabArgs::Robots(q) => {
+            let since = match report.robots.file.as_ref().and_then(|f| f.since) {
+                Some(s) => crawls::get(pool, site.id, s.crawl_id).await?.map(|c| {
+                    let at = c.finished_at.unwrap_or(c.queued_at);
+                    (format!("crawl #{}, {}", c.number, fmt::ago(at)), s.changed)
+                }),
+                None => None,
+            };
+            Some(ai_access_robots::robots_tab(
+                &RobotsInput {
+                    base: &base,
+                    report,
+                    url: ai_overview::robots_url(&site.start_url),
+                    checked: fmt::ago(latest.created_at),
+                    checked_full: fmt::datetime(latest.created_at),
+                    since,
+                },
+                q,
+            ))
+        }
+        _ => None,
+    };
     let (products, verdicts) = ai_overview::product_cards(report, &intent);
     let summary = crawl.as_ref().and_then(|c| c.summary());
     let geo_in = GeoInput {
@@ -820,7 +865,7 @@ async fn render_page(
         &base,
         report,
         &LookInput {
-            bot_attention: bot_attention + fetch_attention,
+            bot_attention,
             shells: report.content.as_ref().map(|c| c.shells().count()),
             files_missing: ai_overview::files_missing(report),
         },
@@ -869,7 +914,8 @@ async fn render_page(
         products,
         policy: ai_overview::policy_rows(report, &intent),
         look,
-        robots: ai_overview::robots_view(&site.start_url, report),
+        robots_tab,
+        bots_tab,
         issue_counts,
         set_aside: format!("Accepted {accepted_n} · Snoozed {snoozed_n}"),
         attention: asking.len(),
@@ -902,10 +948,6 @@ async fn render_page(
         llms: llms_card(report.llms_txt.as_ref(), report.llms_txt_skipped),
         ready: ready_card(report, &intent),
         robots_callout: robots_callout(report),
-        robots_aside: robots_aside(report),
-        bot_attention,
-        bot_total: registry().bots.len(),
-        bot_groups,
         engines: engine_rows(report, &intent),
         declared: declared_items(&report.declared),
         important: report
@@ -915,7 +957,7 @@ async fn render_page(
             .collect(),
         resolved: resolved.iter().map(resolved_row).collect(),
     };
-    html(&AiAccessPage {
+    Ok(AiAccessPage {
         shell,
         tabs: ai_overview::tab_links(&base, Some(report), tab),
         tab: tab.key(),
@@ -923,17 +965,6 @@ async fn render_page(
         empty: None,
         view: Some(view),
     })
-}
-
-/// What robots.txt answered, beside the bots table's filter (which carries the bot count).
-fn robots_aside(report: &AccessReport) -> String {
-    match (report.robots.availability, report.robots.status) {
-        (RobotsAvailability::Ok, Some(s)) => format!("robots.txt · HTTP {s}"),
-        (RobotsAvailability::Missing, Some(s)) => {
-            format!("no robots.txt (HTTP {s}): every bot may crawl")
-        }
-        _ => plural(registry().bots.len(), "bot", "bots"),
-    }
 }
 
 fn robots_callout(report: &AccessReport) -> Option<Callout> {
@@ -956,7 +987,7 @@ fn robots_callout(report: &AccessReport) -> Option<Callout> {
 // ---- the fetch check -------------------------------------------------------------------------
 
 /// `5.1 KB`, `812 B`; a body cut at the probe limit reads `over 256 KB`.
-fn size(f: &ProbeFetch) -> String {
+pub(crate) fn size(f: &ProbeFetch) -> String {
     if f.truncated {
         format!("over {} KB", MAX_PROBE_BODY / 1024)
     } else if f.bytes < 1024 {
@@ -967,7 +998,7 @@ fn size(f: &ProbeFetch) -> String {
 }
 
 /// `HTTP 403`, or why there was no response.
-fn status_text(f: &ProbeFetch) -> String {
+pub(crate) fn status_text(f: &ProbeFetch) -> String {
     match (f.status, f.error) {
         (Some(s), _) => format!("HTTP {s}"),
         (None, Some(e)) => format!(
@@ -1004,21 +1035,7 @@ fn fetch_summary(f: &ProbeFetch) -> String {
     parts.join(" · ")
 }
 
-fn verdict_label(v: &Verdict) -> String {
-    match v {
-        Verdict::Same => "Same as CodoSEObot".to_owned(),
-        Verdict::Challenged { vendor } => format!("Challenged ({})", vendor.label()),
-        Verdict::Blocked { status: Some(s) } => format!("Blocked ({s})"),
-        Verdict::Blocked { status: None } => "Blocked (connection dropped)".to_owned(),
-        Verdict::Diverted { .. } => "Redirected".to_owned(),
-        Verdict::Degraded => "Different page".to_owned(),
-        Verdict::Throttled => "Rate limited".to_owned(),
-        Verdict::Inconclusive { .. } => "Inconclusive".to_owned(),
-        Verdict::SkippedRobots => "Not probed: robots.txt".to_owned(),
-    }
-}
-
-fn inconclusive_tip(r: InconclusiveReason) -> &'static str {
+pub(crate) fn inconclusive_tip(r: InconclusiveReason) -> &'static str {
     match r {
         InconclusiveReason::BaselineFailed => {
             "CodoSEObot didn't get the page either, so there was nothing to compare with"
@@ -1034,14 +1051,6 @@ fn inconclusive_tip(r: InconclusiveReason) -> &'static str {
             "Worse than CodoSEObot once, with no time or requests left to confirm it"
         }
         InconclusiveReason::Stopped => "Not checked: the time limit came first",
-    }
-}
-
-pub(crate) fn skip_label(r: SkipReason) -> &'static str {
-    match r {
-        SkipReason::NoUserAgent => "Not probed: no documented user agent",
-        SkipReason::VerifiedSearchEngine => "Not probed: verified search engine",
-        SkipReason::NotProbedPurpose => "Not probed: training, ads and agents",
     }
 }
 
@@ -1068,9 +1077,6 @@ fn fetch_empty(title: &'static str, text: &'static str, intent_link: bool) -> Fe
         aside: String::new(),
         pages: Vec::new(),
         stop: None,
-        rows: Vec::new(),
-        skipped: Vec::new(),
-        skipped_total: 0,
     }
 }
 
@@ -1078,7 +1084,6 @@ fn fetch_check(
     site: &Site,
     base: &str,
     report: &AccessReport,
-    intent: &Intent,
     probes_on: bool,
     installed: bool,
 ) -> FetchCheck {
@@ -1127,30 +1132,6 @@ fn fetch_check(
         return out;
     }
 
-    let rows = probes
-        .bots
-        .iter()
-        .map(|token| probe_row(probes, intent, token))
-        .collect();
-    let mut skipped: Vec<SkipGroup> = Vec::new();
-    for reason in [
-        SkipReason::NoUserAgent,
-        SkipReason::VerifiedSearchEngine,
-        SkipReason::NotProbedPurpose,
-    ] {
-        let tokens: Vec<String> = probes
-            .skipped_bots
-            .iter()
-            .filter(|b| b.reason == reason)
-            .map(|b| b.token.clone())
-            .collect();
-        if !tokens.is_empty() {
-            skipped.push(SkipGroup {
-                label: skip_label(reason),
-                tokens,
-            });
-        }
-    }
     let n = probes.urls.len();
     FetchCheck {
         empty: None,
@@ -1173,139 +1154,6 @@ fn fetch_check(
             })
             .collect(),
         stop: probes.stop.map(stop_text),
-        rows,
-        skipped_total: probes.skipped_bots.len(),
-        skipped,
-    }
-}
-
-/// One bot's results over the probed pages. A bot treated worse than CodoSEObot anywhere shows
-/// that (the first such page's verdict); otherwise the same page, robots.txt or inconclusive.
-fn probe_row(probes: &ProbeReport, intent: &Intent, token: &str) -> ProbeRowView {
-    let bot = registry().bot(token);
-    let stance = bot.map_or(Stance::Any, |b| intent.effective(b));
-    let results: Vec<(&ProbeFetch, &codoseo_geo::probe::ProbeResult)> = probes
-        .urls
-        .iter()
-        .filter_map(|u| {
-            u.results
-                .iter()
-                .find(|r| r.token == token)
-                .map(|r| (&u.baseline, r))
-        })
-        .collect();
-    let positive = results
-        .iter()
-        .filter(|(_, r)| r.verdict.is_positive())
-        .count();
-    let inconclusive = results
-        .iter()
-        .filter(|(_, r)| matches!(r.verdict, Verdict::Inconclusive { .. }))
-        .count();
-    let skipped = results
-        .iter()
-        .filter(|(_, r)| r.verdict == Verdict::SkippedRobots)
-        .count();
-    let compared = results.len() - inconclusive - skipped;
-    let shown = results
-        .iter()
-        .find(|(_, r)| r.verdict.is_positive())
-        .or_else(|| results.iter().find(|(_, r)| r.verdict == Verdict::Same))
-        .or_else(|| {
-            results
-                .iter()
-                .find(|(_, r)| matches!(r.verdict, Verdict::Inconclusive { .. }))
-        })
-        .or(results.first());
-    let wanted = stance == Stance::Allow;
-    let (result, result_class, result_tip) = match shown.map(|(_, r)| &r.verdict) {
-        None => ("Not probed".to_owned(), "", String::new()),
-        Some(v @ Verdict::Same) => (
-            verdict_label(v),
-            "t-ok",
-            "The same page CodoSEObot got".to_owned(),
-        ),
-        Some(v @ Verdict::SkippedRobots) => (
-            verdict_label(v),
-            "",
-            "robots.txt keeps this bot out, so its user agent wasn't sent".to_owned(),
-        ),
-        Some(v @ Verdict::Inconclusive { reason }) => (
-            verdict_label(v),
-            "t-muted",
-            inconclusive_tip(*reason).to_owned(),
-        ),
-        Some(v) if !wanted => (
-            verdict_label(v),
-            "t-muted",
-            "Expected: you don't ask for this bot, so it isn't reported".to_owned(),
-        ),
-        Some(v @ (Verdict::Throttled | Verdict::Degraded)) => (
-            verdict_label(v),
-            "t-warn",
-            "Treated worse than CodoSEObot: see Open issues".to_owned(),
-        ),
-        Some(v) => (
-            verdict_label(v),
-            "t-err",
-            "Treated worse than CodoSEObot: see Open issues".to_owned(),
-        ),
-    };
-    let (detail, title, extra) = match shown {
-        Some((_, r)) if r.verdict == Verdict::SkippedRobots => (
-            format!(
-                "robots.txt disallows it on {} of {}",
-                skipped,
-                plural(results.len(), "page", "pages")
-            ),
-            None,
-            None,
-        ),
-        Some((baseline, r)) => match &r.fetch {
-            Some(f) => {
-                let mut detail = status_text(f);
-                if f.status.is_some() {
-                    detail.push_str(&format!(" · {} vs {}", size(f), size(baseline)));
-                }
-                if inconclusive > 0 && !matches!(r.verdict, Verdict::Inconclusive { .. }) {
-                    detail.push_str(&format!(" · {inconclusive} inconclusive"));
-                }
-                let extra = match (&r.verdict, &f.challenge) {
-                    (Verdict::Diverted { to }, _) => Some(format!("→ {to}")),
-                    (_, Some(c)) => Some(c.signal.clone()),
-                    _ => None,
-                };
-                // The same page needs no title: only what differs is shown.
-                let title = f.title.clone().filter(|_| r.verdict != Verdict::Same);
-                (detail, title, extra)
-            }
-            None => ("not requested".to_owned(), None, None),
-        },
-        None => (String::new(), None, None),
-    };
-    ProbeRowView {
-        token: token.to_owned(),
-        operator: bot.map(|b| b.operator.clone()).unwrap_or_default(),
-        product: bot.map(|b| b.product.clone()).unwrap_or_default(),
-        stance: stance_label(stance),
-        stance_class: stance_class(stance),
-        result,
-        result_class,
-        result_tip,
-        pages: if compared == 0 {
-            "—".to_owned()
-        } else {
-            format!("{positive}/{compared}")
-        },
-        pages_class: match (positive, wanted, result_class) {
-            (0, ..) => "c-muted",
-            (_, true, "t-warn") => "c-warn",
-            (_, true, _) => "c-err",
-            _ => "",
-        },
-        detail,
-        title,
-        extra,
     }
 }
 
@@ -1859,150 +1707,6 @@ fn incident_view(
         ),
         remedy_open: !accepted && snoozed_until.is_none() && progress.is_none(),
         progress,
-    }
-}
-
-fn rule_tip(rule: Option<&MatchedRule>, group: GroupMatch, token: &str) -> String {
-    match (rule, group, registry().robots_fallback(token)) {
-        (Some(r), g, _) => rule_line(r, g, token),
-        (None, GroupMatch::None, _) => "No group in robots.txt applies to this bot".to_owned(),
-        (None, GroupMatch::Fallback, Some(f)) => {
-            format!("No rule in the {f} group, whose rules {token} follows, matches the home page")
-        }
-        (None, ..) => "No rule in its group matches the home page".to_owned(),
-    }
-}
-
-fn bot_groups(report: &AccessReport, intent: &Intent) -> Vec<BotGroup> {
-    PURPOSES
-        .iter()
-        .filter_map(|&p| {
-            let bots: Vec<&Bot> = registry().bots.iter().filter(|b| b.purpose == p).collect();
-            if bots.is_empty() {
-                return None;
-            }
-            let stance = intent.purpose_stance(p);
-            let mut rows: Vec<BotRow> = bots.iter().map(|b| bot_row(report, intent, b)).collect();
-            if let Some(last) = rows.iter_mut().rev().find(|r| r.attention) {
-                last.last_attention = true;
-            }
-            let conflicts = rows.iter().filter(|r| r.attention).count();
-            Some(BotGroup {
-                label: purpose_label(p),
-                stance: stance_label(stance),
-                stance_class: stance_class(stance),
-                count: plural(bots.len(), "bot", "bots"),
-                conflicts: if conflicts == 0 {
-                    String::new()
-                } else {
-                    plural(conflicts, "conflict", "conflicts")
-                },
-                rows,
-            })
-        })
-        .collect()
-}
-
-pub(crate) fn bot_row(report: &AccessReport, intent: &Intent, bot: &Bot) -> BotRow {
-    let access = report.bot(&bot.token);
-    let stance = intent.effective(bot);
-    let total = report.important.len();
-    let home_allowed = access.and_then(|a| a.home_allowed);
-    let honoured = bot.honours_robots == Honours::Yes;
-    // A bot that reads another's group when none names it (Applebot, Googlebot's) says so.
-    let follows = access
-        .filter(|a| a.group == GroupMatch::Fallback)
-        .and_then(|_| registry().robots_fallback(&bot.token));
-    let home_text = |word: &str, line: Option<u32>| match (follows, line) {
-        (Some(f), Some(n)) => format!("{word} · follows {f}'s rules (line {n})"),
-        (Some(f), None) => format!("{word} · follows {f}'s rules"),
-        (None, Some(n)) if word == "Blocked" => format!("{word} · line {n}"),
-        (None, _) => word.to_owned(),
-    };
-    // Coloured by the intent: green where robots.txt does what you want, red or amber where it
-    // doesn't, plain where you have no preference.
-    let (home, home_class, home_tip) = match (access, home_allowed) {
-        (Some(a), Some(true)) => (
-            home_text("Allowed", a.home_rule.as_ref().map(|r| r.line)),
-            match stance {
-                Stance::Allow => "c-ok",
-                Stance::Block if honoured => "c-warn",
-                _ => "",
-            },
-            rule_tip(a.home_rule.as_ref(), a.group, &bot.token),
-        ),
-        (Some(a), Some(false)) => (
-            home_text("Blocked", a.home_rule.as_ref().map(|r| r.line)),
-            match stance {
-                Stance::Allow => "c-err",
-                Stance::Block => "c-ok",
-                Stance::Any => "",
-            },
-            rule_tip(a.home_rule.as_ref(), a.group, &bot.token),
-        ),
-        _ => ("—".to_owned(), "c-ghost", String::new()),
-    };
-    let blocked_n = access.map_or(0, |a| a.blocked.len());
-    let (honours, honours_class) = match bot.honours_robots {
-        Honours::Yes => ("Yes", ""),
-        Honours::Partial | Honours::No => ("May ignore", "c-muted"),
-        Honours::Unknown => ("Not stated", "c-muted"),
-    };
-    let (status, status_class, status_tip) = match stance {
-        Stance::Allow if blocked_n > 0 => (
-            "Conflicts",
-            if !honoured {
-                "t-muted"
-            } else if home_allowed == Some(false) {
-                "t-err"
-            } else {
-                "t-warn"
-            },
-            "You allow it, but robots.txt blocks it",
-        ),
-        Stance::Allow => ("OK", "t-ok", "Allowed, as you want"),
-        Stance::Block if home_allowed == Some(false) => ("OK", "t-ok", "Blocked, as you want"),
-        Stance::Block if honoured && home_allowed == Some(true) => (
-            "Conflicts",
-            "t-warn",
-            "You block it, but robots.txt lets it in",
-        ),
-        Stance::Block => (
-            "—",
-            "",
-            "Not blocked, but its operator doesn't promise to follow robots.txt",
-        ),
-        Stance::Any => ("—", "", "No preference: never reported"),
-    };
-    BotRow {
-        token: bot.token.clone(),
-        operator: bot.operator.clone(),
-        product: bot.product.clone(),
-        control: !bot.crawls,
-        notes: bot.notes.clone(),
-        stance: stance_label(stance),
-        stance_class: stance_class(stance),
-        overridden: intent.bot_override(&bot.token).is_some(),
-        home,
-        home_class,
-        home_tip,
-        blocked: if total == 0 {
-            "—".to_owned()
-        } else {
-            format!("{blocked_n}/{total}")
-        },
-        blocked_class: match (blocked_n, stance) {
-            (0, _) => "c-muted",
-            (_, Stance::Allow) => "c-err",
-            _ => "",
-        },
-        honours,
-        honours_class,
-        attention: status == "Conflicts",
-        last_attention: false,
-        status,
-        status_class,
-        status_tip,
     }
 }
 
@@ -3538,10 +3242,6 @@ mod tests {
         assert_eq!(
             rule_line(&rule, GroupMatch::Fallback, "Applebot"),
             "robots.txt line 5 · Disallow: / · User-agent: Googlebot (Applebot follows its rules)"
-        );
-        assert_eq!(
-            rule_tip(None, GroupMatch::Fallback, "Applebot"),
-            "No rule in the Googlebot group, whose rules Applebot follows, matches the home page"
         );
     }
 
