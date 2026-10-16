@@ -1052,15 +1052,94 @@ body.solo { overflow: auto; }
 
 /* ── AI access ──────────────────────────────────────── */
 
-.aia-head .aia-checked { font-size: 12.5px; color: var(--muted-2); white-space: nowrap; }
+.aia-head { align-items: flex-end; }
+.aia-title { min-width: 0; }
+.aia-head .aia-checked { margin-top: 4px; font-size: 12.5px; color: var(--muted-2); overflow-wrap: anywhere; }
 .aia-head .aia-checked a { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--ghost-2); text-underline-offset: 2px; }
 .aia-head .aia-checked a:hover { text-decoration-color: currentColor; }
+.aia-head-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .aia-banner { margin-bottom: 16px; }
 .aia-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
 
-/* Tiles: value with its "/N", and a line of context under it. */
-.aia-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.aia-tiles .tile:last-child { border-right: 0; }
+/* The tab bar: one link per tab, each its own URL. It scrolls sideways on a phone rather than
+   wrapping or widening the page. */
+.aia-tabbar { display: flex; gap: 2px; min-width: 0; margin: -2px 0 18px; overflow-x: auto; scrollbar-width: none; box-shadow: inset 0 -1px 0 var(--line); }
+.aia-tabbar::-webkit-scrollbar { display: none; }
+.aia-tab { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 42px; padding: 0 14px; font-size: 13.5px; font-weight: 500; color: var(--muted); white-space: nowrap; text-decoration: none; border-radius: var(--r-sm) var(--r-sm) 0 0; }
+.aia-tab:hover { color: var(--ink); background: var(--surface-hover); }
+.aia-tab[aria-current="page"] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--ink); }
+.aia-tab:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+.aia-tab .n { font: 11px var(--mono); color: var(--faint); font-weight: 400; }
+.aia-tab-note { margin: 0 2px; font-size: 12.5px; color: var(--muted-2); max-width: 96ch; }
+
+/* robots.txt failing: above everything on the Overview. */
+.aia-alert { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; padding: 12px 16px; border: 1px solid color-mix(in oklab, var(--err) 45%, var(--line)); border-radius: var(--r-lg); background: var(--err-bg); color: var(--ink-2); }
+.aia-alert .icon { flex: none; color: var(--err); margin-top: 2px; }
+.aia-alert b { display: block; font-weight: 600; color: var(--ink); }
+.aia-alert p { margin-top: 2px; font-size: 13px; }
+
+/* Tiles: value with its "/N", and two lines of context under it. */
+.aia-kpis { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 1px; background: var(--line-faint); }
+.aia-kpis .tile { border-right: 0; background: var(--surface); min-width: 0; }
+
+/* One card per AI product: the verdict and why. A dot carries the tone, never colour alone. */
+.aia-products .card-head { flex-wrap: wrap; row-gap: 6px; }
+.aia-prod-aside { font-size: 12.5px; color: var(--muted-2); }
+.aia-source { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--muted-2); border: 1px solid var(--line); border-radius: 5px; padding: 2px 7px; }
+.aia-prods { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); gap: 10px; padding: 14px 18px 18px; }
+.aia-prod { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px; border: 1px solid var(--line-soft); border-radius: var(--r-lg); background: var(--surface-2); color: var(--ink); text-decoration: none; transition: border-color 0.12s, background 0.12s; }
+.aia-prod:hover { border-color: var(--line); background: var(--surface-hover); }
+.aia-prod:focus-visible, .aia-look-card:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.aia-prod.is-warn { border-color: color-mix(in oklab, var(--warn-bar) 60%, var(--line)); }
+.aia-prod.is-crit { border-color: color-mix(in oklab, var(--err) 50%, var(--line)); background: var(--err-soft); }
+.aia-prod-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.aia-prod-name { min-width: 0; }
+.aia-prod-name b { display: block; font-size: 13.5px; font-weight: 600; }
+.aia-prod-name .aia-sub { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aia-verdict { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; }
+.aia-prod-why { font-size: 12px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+.aia-tone-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ghost); }
+.is-ok .aia-tone-dot { background: var(--ok-bar); }
+.is-warn .aia-tone-dot { background: var(--warn-bar); }
+.is-crit .aia-tone-dot { background: var(--err); }
+.is-note .aia-tone-dot { background: var(--faint); }
+.op-logo-md { width: 28px; height: 28px; border-radius: 8px; }
+.op-logo-md img { width: 16px; height: 16px; }
+
+/* Needs attention, and the policy against what bots get. */
+.aia-attn { min-width: 0; }
+.aia-attn-foot { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 2px 0; font-size: 12.5px; color: var(--muted-2); }
+.aia-pol { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 11px 18px; border-bottom: 1px solid var(--line-faint); }
+.aia-pol:last-child { border-bottom: 0; }
+.aia-pol-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; min-width: 0; }
+.aia-pol-actual { grid-column: 1 / -1; padding-left: 16px; font-size: 12px; color: var(--muted-2); overflow-wrap: anywhere; }
+.aia-pol-note { padding: 10px 18px 14px; font-size: 12px; line-height: 1.5; color: var(--muted-2); border-top: 1px solid var(--line-soft); }
+
+/* Look closer: one link per other tab. */
+.aia-look { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; padding: 14px 18px 18px; }
+.aia-look-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line-soft); border-radius: var(--r-lg); background: var(--surface-2); color: var(--ink); text-decoration: none; transition: border-color 0.12s, background 0.12s; }
+.aia-look-card:hover { border-color: var(--line); background: var(--surface-hover); }
+.aia-look-head { display: flex; align-items: baseline; gap: 8px; }
+.aia-look-head b { font-size: 13.5px; font-weight: 600; }
+.aia-look-n { font: 11.5px var(--mono); color: var(--faint); }
+.aia-look-status { font-size: 12.5px; font-weight: 600; }
+.aia-look-what { font-size: 12px; line-height: 1.45; color: var(--muted); }
+
+/* The robots.txt and Bot visits tabs. */
+.aia-robots-status { font-size: 12.5px; font-weight: 600; }
+.aia-robots-url { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.aia-robots-rule { font-size: 12px; }
+.aia-robots-table td:nth-child(2) { white-space: nowrap; }
+.aia-soon { background: color-mix(in oklab, var(--blue) 16%, var(--surface)); color: color-mix(in oklab, var(--blue) 55%, var(--ink)); }
+.aia-visits { margin-top: 0; }
+.aia-visits-main { display: grid; gap: 12px; }
+.aia-visits-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.aia-visits-text { font-size: 12.5px; line-height: 1.5; color: var(--muted-2); }
+.aia-visits-frame { display: grid; place-items: center; height: 200px; padding: 0 12px; border: 1px dashed var(--line); border-radius: var(--r); font-size: 12.5px; text-align: center; color: var(--faint-2); background: repeating-linear-gradient(0deg, transparent 0 43px, var(--line-faint) 43px 44px); }
+.aia-visits-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 10px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.aia-visits-grid > div { padding: 12px; border: 1px solid var(--line-soft); border-radius: var(--r); }
+.aia-visits-grid b { display: block; font-weight: 600; color: var(--ink); }
+.aia-visits-side ul { display: grid; gap: 6px; margin: 10px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-2); }
 .aia-of { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; color: var(--faint-2); margin-left: 3px; }
 .aia-tile-sub { font-size: 12px; color: var(--faint-2); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1394,20 +1473,18 @@ body.solo { overflow: auto; }
 .rules .rules-section th { text-align: left; padding: 14px 0 6px; font: 500 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
 .rules tbody tr.rules-section:first-child th { padding-top: 6px; }
 
-@media (max-width: 1080px) {
-  .aia-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .aia-tiles .tile:nth-child(2n) { border-right: 0; }
-  .aia-tiles .tile:nth-child(-n + 2) { border-bottom: 1px solid var(--line-faint); }
-}
 @media (max-width: 640px) {
-  .aia-head .aia-checked { order: 3; flex-basis: 100%; }
   .aia .card-head { flex-wrap: wrap; row-gap: 2px; }
   .aia .card-title { white-space: nowrap; }
   .aia-head .grow { display: none; }
-  .aia-head .btn { margin-left: auto; }
+  .aia-head .aia-title { flex-basis: 100%; }
+  .aia-source { margin-left: 0; }
   .aia-tile-sub { white-space: normal; }
-  .aia-tiles .tile { padding: 14px; }
-  .aia-tiles .tile-value { font-size: 22px; }
+  .aia-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aia-kpis .tile { padding: 14px; }
+  .aia-kpis .tile:first-child { grid-column: 1 / -1; }
+  .aia-kpis .tile-value { font-size: 22px; }
+  .aia-tab { padding: 0 11px; }
   /* An issue card: severity and title on top, its state chips under them, actions as plain buttons. */
   .aia-issue { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; padding: 14px 14px 14px 17px; }
   .aia-issue > * { grid-column: 1 / -1; }

@@ -4,6 +4,41 @@ AI access monitoring answers one question: can the AI crawlers and answer engine
 
 ![The AI access screen](images/ai-access/ai-access-hero.png)
 
+## The AI access screen
+
+The screen at `/s/{site}/ai-access` has six tabs, each its own address, so a tab can be linked and reloaded:
+
+| Tab | Address | What it shows |
+|---|---|---|
+| **Overview** | `/ai-access` | Score tiles, a verdict per AI product, what needs attention, your policy against what bots get, recently resolved issues |
+| **Bots** | `/ai-access/bots` | The AI bots table (opens on the bots that need attention) and the synthetic **Fetch check** |
+| **Key pages** | `/ai-access/pages` | **Content in raw HTML**, the important pages one by one, and the **AI answers** table (eligible, limited, excluded per engine) |
+| **robots.txt** | `/ai-access/robots` | What robots.txt answered, the group each bot follows and its rule for the home page, and any `Content-Signal` lines |
+| **Agent files & signals** | `/ai-access/files` | **llms.txt**, **Content Signals and Markdown**, and the other **Declared preferences** |
+| **Bot visits** | `/ai-access/visits` | Coming soon: real bot visits from your server logs. It shows no data until then |
+
+The header carries **Export issues** (CSV) and **JSON**, and **Site policy**, which opens the intent form (`/ai-access/intent`). The tab bar scrolls sideways on a phone.
+
+**The Overview**, top to bottom:
+
+- **Five tiles.** The crawl's [GEO score](scores.md) with its change since the previous crawl and its Essential and Extras points; how many of the ten AI products can find you; how many of the search and user-triggered bots can reach the home page (kept out by robots.txt or by a firewall, as the fetch check saw it); training bots blocked, against your policy; and key pages readable without JavaScript.
+- **Can AI products find and quote you?** One card per answer engine (the ten below), with its search crawler and, where the operator has one, its user-triggered fetcher. Each card has one verdict, read from robots.txt, the fetch check and page markup, never from traffic:
+
+  | Verdict | When |
+  |---|---|
+  | **Reachable** | robots.txt allows its search crawler on every key page, and our fetch as that crawler got the same page as CodoSEObot |
+  | **Allowed** | robots.txt allows it, but it wasn't fetched as that bot: its operator publishes no full user agent, it's a verified search engine, or no fetch check ran |
+  | **Limited** | Partly kept out: robots.txt blocks it on some key pages, page markup (`nosnippet`, `max-snippet`, …) limits some key pages in its answers, a fetch as it was redirected or got a different page, or its search crawler is kept out while its user-triggered fetcher still gets in |
+  | **Blocked** | robots.txt disallows its search crawler on the home page, or our fetch as it was blocked or challenged (and its user fetcher is kept out too, or it has none) |
+
+  The verdict is read against your policy for the search crawler, overrides included. A block you asked for reads **Blocked · per your policy**, muted; a bot your policy blocks that still gets in reads **Allowed · policy says Block**, as a warning. With no preference a block is shown muted and is not reported. Each card links to the Bots tab.
+- **Needs attention**: the open issues with every action (how to fix, the copy buttons, recheck, mark intended, accept, snooze), the accepted ones folded away, and their count by severity.
+- **Your policy vs what bots get**: per purpose, your stance and what robots.txt and the fetch check give those bots, with a dot that says whether they agree; and the page directives you accepted. **Edit in Site policy** opens the intent form.
+- **Recently resolved**: the last ten.
+- **Look closer**: a card per other tab with a one-line status.
+
+When robots.txt fails, the Overview opens on that, and the Bots tab shows a callout instead of the table.
+
 ## What is checked
 
 **robots.txt, per bot.** For each bot in the [registry](#the-public-registry) (OpenAI, Anthropic, Perplexity, Google, Apple, Meta, Amazon, Microsoft, DuckDuckGo, Mistral, Common Crawl and more) CodoSEO reads the group of your robots.txt that applies to its product token, applies the longest-match rule the way the operators describe, and records whether the home page and the other important pages are allowed, with the winning rule and its line. Important pages are the home page, the 20 most linked pages and any you star, up to 60. Control tokens such as `Google-Extended` never make requests but still decide what the operator may do, so they are listed too. Applebot, which Apple says follows Googlebot's rules when no group names it, is read that way. A robots.txt that answers 5xx or 429 is its own finding: crawlers are told to stay away until it recovers. One whose redirects never reach a file counts as missing, as RFC 9309 allows.
@@ -18,12 +53,12 @@ AI access monitoring answers one question: can the AI crawlers and answer engine
 
 robots.txt can let a bot in while the CDN or firewall in front of the site turns it away: Cloudflare AI Crawl Control, DataDome, Akamai and the like decide by user agent before the request ever reaches your server. So after each monitored crawl CodoSEO fetches a few important pages with the user agents of the AI search and user-triggered bots, and compares each answer with what its own crawler gets for the same page at the same moment.
 
-It is a **synthetic** check: the requests come from CodoSEO's address, not from the bots. The AI access screen shows the latest check, bot by bot, in its **Fetch check** section. Every result says it is synthetic: the badge on that section, "(synthetic check)" at the end of each finding title, `synthetic: true` in the JSON, and a banner in the CLI.
+It is a **synthetic** check: the requests come from CodoSEO's address, not from the bots. The AI access screen shows the latest check, bot by bot, in the **Fetch check** section of its **Bots** tab. Every result says it is synthetic: the badge on that section, "(synthetic check)" at the end of each finding title, `synthetic: true` in the JSON, and a banner in the CLI.
 
 <table>
   <tr>
     <td width="50%"><a href="images/ai-access/ai-access-probes-light.png"><img src="images/ai-access/ai-access-probes-light.png" alt="The Fetch check section of the AI access screen, with two synthetic incidents"></a><br>The Fetch check section and two synthetic incidents</td>
-    <td width="50%"><a href="images/ai-access/intent-probes-light.png"><img src="images/ai-access/intent-probes-light.png" alt="The fetch check switch in the intent form"></a><br>The switch under <b>Edit intent</b></td>
+    <td width="50%"><a href="images/ai-access/intent-probes-light.png"><img src="images/ai-access/intent-probes-light.png" alt="The fetch check switch in the intent form"></a><br>The switch under <b>Site policy</b></td>
   </tr>
 </table>
 
@@ -89,7 +124,7 @@ Log evidence (milestone C1) is what will tell the two apart.
 cargo test -p codoseo-crawler --test probe_corpus -- --nocapture
 ```
 
-**Switching it off.** The check is on by default for monitored sites. A site's owner can untick **Run synthetic fetch checks** under **Edit intent** on the AI access screen; from the next crawl no request is sent with an AI bot's user agent. A self-hosted install can set `CODOSEO_PROBE_URLS=0` (for the web and worker roles) to turn it off everywhere; the switch is then shown disabled and the AI access screen says fetch checks are turned off on this install. Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved: with the checks off nothing can judge them, so they are neither resolved nor updated. Anyone running a site can keep the check out: it follows robots.txt for each bot's token, and blocking `CodoSEObot` in robots.txt stops both the crawls and the probes. The [`/bot` page](https://codoseo.com/bot) explains this to site owners who see the requests.
+**Switching it off.** The check is on by default for monitored sites. A site's owner can untick **Run synthetic fetch checks** under **Site policy** on the AI access screen; from the next crawl no request is sent with an AI bot's user agent. A self-hosted install can set `CODOSEO_PROBE_URLS=0` (for the web and worker roles) to turn it off everywhere; the switch is then shown disabled and the AI access screen says fetch checks are turned off on this install. Open synthetic incidents stay open until fetch checks are turned back on or the issue is resolved: with the checks off nothing can judge them, so they are neither resolved nor updated. Anyone running a site can keep the check out: it follows robots.txt for each bot's token, and blocking `CodoSEObot` in robots.txt stops both the crawls and the probes. The [`/bot` page](https://codoseo.com/bot) explains this to site owners who see the requests.
 
 ## Content in raw HTML
 
@@ -115,7 +150,7 @@ It costs no extra requests: the crawler already fetched these pages, and the ver
 
 Script share alone never flags a page: a server-rendered Next.js page carries a large `__NEXT_DATA__` and its text as well. A `<noscript>` notice counts only on a page without an H1 and with a second sign of an app (a mount element or a page made of scripts), because a short post or note with a Disqus or form "enable JavaScript" notice is still a real page.
 
-**What you see.** The AI access screen has a **Content in raw HTML** card. Its header counts the pages checked and the shells among them ("5 pages · 2 shells", likely shells included). Each page shows its verdict, the words found, whether the title, H1, description, canonical and JSON-LD are in the HTML as served, and its internal links; under a shell or likely-shell page a **Signals** line says in words what gave it away: the app's mount element is empty, a noscript notice asks for JavaScript, inline script makes up most of the page, or it loads several scripts. The API and MCP name the same signals as `mount_empty`, `noscript_js`, `script_heavy` and `many_scripts`. `codoseo check` prints the same facts for one page.
+**What you see.** The AI access screen's **Key pages** tab has a **Content in raw HTML** card. Its header counts the pages checked and the shells among them ("5 pages · 2 shells", likely shells included). Each page shows its verdict, the words found, whether the title, H1, description, canonical and JSON-LD are in the HTML as served, and its internal links; under a shell or likely-shell page a **Signals** line says in words what gave it away: the app's mount element is empty, a noscript notice asks for JavaScript, inline script makes up most of the page, or it loads several scripts. The API and MCP name the same signals as `mount_empty`, `noscript_js`, `script_heavy` and `many_scripts`. `codoseo check` prints the same facts for one page.
 
 **The incident.** Shell or likely-shell important pages open one `content_missing` incident per site, with the pages as its members. It is **evidence grade A-**: read from the pages themselves, against a published measurement of how the bots fetch, not an operator's documentation of the page. Its summary starts with the fix (render the main content on the server, or prerender the page). It is raised only when at least one of the bots that don't render JavaScript (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User) is wanted under your intent and robots.txt lets it fetch a shell page. A page those bots may not fetch, or a bot you want blocked, raises nothing. Severity is Warning when the home page is a shell or half or more of the important HTML pages are, Notice otherwise. It is never Critical: the page may still reach people and search engines that render JavaScript. Only pages a crawl could judge change the incident: a shell page that answered an error, timed out or was not HTML this time keeps what the incident last knew about it, so one failed fetch neither resolves the incident nor reopens it a crawl later. A page that is no longer among the important pages leaves the incident. It resolves when every page it names was judged to have its content in the HTML (or thin), or left the important pages. The change kind `ai_content_missing` alerts at once by default.
 
@@ -216,7 +251,7 @@ A blocked bot is a mistake or a choice, and only you know which. The intent mode
 | AI training (GPTBot, ClaudeBot, Google-Extended, CCBot, ...) | No preference |
 | Ads | No preference |
 
-Set it per purpose, and override single bots, with **Edit intent** on the AI access screen of the web app (`/s/{site}/ai-access/intent`). Severity follows the intent: blocking GPTBot is nothing to report when you have no preference, and a warning or worse when you said you want training crawlers in. A bot you want blocked that can still crawl is reported too. A bot with no preference is never reported either way.
+Set it per purpose, and override single bots, with **Site policy** on the AI access screen of the web app (`/s/{site}/ai-access/intent`). Severity follows the intent: blocking GPTBot is nothing to report when you have no preference, and a warning or worse when you said you want training crawlers in. A bot you want blocked that can still crawl is reported too. A bot with no preference is never reported either way.
 
 The same form has **Page directives you use on purpose**: tick `nosnippet`, `max-snippet`, `noarchive`, `nocache` or `data-nosnippet` when you set it deliberately, and pages that carry it still show in the AI answers table but raise no issue. `noindex` is not offered: the SEO checks report it.
 
@@ -322,7 +357,7 @@ The site audit opens on an **AI & search · GEO audit** section, above the healt
 - the **Open AI issues** panel: open incidents by severity, the accepted and snoozed ones set aside, the weakest evidence grade among the open ones and how many of their fixes are being verified, and the first open incidents by name, each linked to its card on the AI access screen where Fix and Recheck are;
 - a placeholder for **real bot activity**, which arrives with log ingestion (C1). Until then nothing on the page is traffic.
 
-**Issues CSV** and **JSON** on the AI access screen download the site's open incidents and those resolved in the last 90 days: `kind`, `subject`, `severity`, `grade`, `title`, `state`, `first_seen`, `last_seen`, `resolved_at`, `resolved_by` (`crawl`, `recheck` or `intent`), `verified_at`, `affected_urls` and `sources`. The same rows come from the API ([`GET .../ai-access/incidents`](api.md#ai-access-incidents)). Text cells that start like a spreadsheet formula get a leading `'` in the CSV, since titles and URLs come from the crawled site.
+**Export issues** (CSV) and **JSON** on the AI access screen download the site's open incidents and those resolved in the last 90 days: `kind`, `subject`, `severity`, `grade`, `title`, `state`, `first_seen`, `last_seen`, `resolved_at`, `resolved_by` (`crawl`, `recheck` or `intent`), `verified_at`, `affected_urls` and `sources`. The same rows come from the API ([`GET .../ai-access/incidents`](api.md#ai-access-incidents)). Text cells that start like a spreadsheet formula get a leading `'` in the CSV, since titles and URLs come from the crawled site.
 
 ![An incident card with the How to fix panel open, and the Recheck now, Copy and Snooze actions](images/ai-access/ai-access-fix-light.png)
 

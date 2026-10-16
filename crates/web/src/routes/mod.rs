@@ -4,6 +4,7 @@ pub mod account;
 pub mod admin;
 pub mod ai_access;
 pub mod ai_bots;
+pub mod ai_overview;
 pub mod api;
 pub mod audit;
 pub mod audit_ai;

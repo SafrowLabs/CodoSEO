@@ -1,0 +1,51 @@
+{#- The robots.txt tab of the AI access screen. Included by ai_access/index.html with `v: Overview`
+    and `base`. -#}
+{%- import "partials/operator_logo.html" as op -%}
+<section class="card aia-section aia-robots" aria-labelledby="aia-robots">
+  <div class="card-head">
+    <h2 class="card-title" id="aia-robots">robots.txt</h2>
+    <span class="aia-robots-status {{ v.robots.status_class }}">{{ v.robots.status }}</span>
+    <span class="card-aside" title="{{ v.checked_full }}">Checked {{ v.checked }}</span>
+  </div>
+  <div class="aia-fetch-note">
+    <p><span class="mono aia-robots-url">{{ v.robots.url }}</span></p>
+    <p>{{ v.robots.explain }}</p>
+    {% if !v.robots.groups.is_empty() %}
+    <div class="aia-urls">
+      <span class="aia-urls-label">Groups</span>
+      {% for g in v.robots.groups %}<span class="chip">{{ g.0 }} · {{ g.1 }}</span>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% if v.robots.rows.is_empty() %}
+  <div class="aia-none"><b>No per-bot verdicts</b><p>{{ v.robots_aside }}</p></div>
+  {% else %}
+  <div class="aia-scroll">
+    <table class="aia-table aia-robots-table">
+      <thead>
+        <tr><th scope="col">Bot</th><th scope="col">Group it follows</th><th scope="col">Home page</th></tr>
+      </thead>
+      <tbody>
+        {% for r in v.robots.rows %}
+        <tr>
+          <th scope="row" class="aia-bot-cell"><span class="aia-op">{% call op::tile(r.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-token">{{ r.token }}</span><span class="aia-sub">{{ r.operator }}</span></span></span></th>
+          <td data-label="Group">{{ r.group }}</td>
+          <td data-label="Home page"><span class="mono aia-robots-rule {{ r.home_class }}">{{ r.home }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card aia-section" aria-labelledby="aia-robots-signals">
+  <div class="card-head"><h2 class="card-title" id="aia-robots-signals">Content-Signal lines</h2><span class="card-aside">{{ v.robots.signals.len() }}</span></div>
+  {% if v.robots.signals.is_empty() %}
+  <div class="aia-none"><b>None in robots.txt</b><p>A Content-Signal line states whether you allow search, AI answers and training. See <a href="{{ base }}/ai-access/files">Agent files &amp; signals</a>.</p></div>
+  {% else %}
+  <div class="rows">
+    {% for s in v.robots.signals %}<div class="aia-decl"><span class="mono aia-path">{{ s }}</span></div>{% endfor %}
+  </div>
+  {% endif %}
+</section>
