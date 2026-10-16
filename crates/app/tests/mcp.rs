@@ -101,11 +101,12 @@ fn tools_list_shows_all_10_tools_over_real_stdio() {
         "compare_audits",
         "probe_ai_fetch",
         "check_llms_txt",
+        "get_policy",
     ] {
         assert!(
             names.contains(&expected),
             "missing tool {expected} in {names:?}"
         );
     }
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 12);
 }
