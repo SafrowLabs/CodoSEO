@@ -18,6 +18,7 @@ const KEEP_RECHECKS: i64 = 20;
 pub struct RetentionReport {
     pub crawls_trimmed: u64,
     pub ai_incidents_trimmed: u64,
+    pub policy_history_trimmed: u64,
     pub ai_rechecks_pruned: u64,
     pub unclaimed_sites_deleted: u64,
     pub tokens_deleted: u64,
@@ -37,6 +38,7 @@ pub async fn run(
 ) -> Result<RetentionReport, sqlx::Error> {
     let mut crawls_trimmed = 0;
     let mut ai_incidents_trimmed = 0;
+    let mut policy_history_trimmed = 0;
     for plan in [Plan::Free, Plan::Lite, Plan::Pro, Plan::SelfHosted] {
         let days = match plan {
             Plan::SelfHosted => self_hosted_history_days.unwrap_or_else(|| {
@@ -50,6 +52,8 @@ pub async fn run(
         };
         crawls_trimmed += trim_plan_history(pool, &enum_slug(&plan), i64::from(days)).await?;
         ai_incidents_trimmed += trim_ai_incidents(pool, &enum_slug(&plan), i64::from(days)).await?;
+        policy_history_trimmed +=
+            trim_policy_history(pool, &enum_slug(&plan), i64::from(days)).await?;
     }
 
     // An open incident can be rechecked for months: keep each incident's newest
@@ -118,6 +122,7 @@ pub async fn run(
     Ok(RetentionReport {
         crawls_trimmed,
         ai_incidents_trimmed,
+        policy_history_trimmed,
         ai_rechecks_pruned,
         unclaimed_sites_deleted,
         tokens_deleted,
@@ -178,6 +183,25 @@ async fn trim_ai_incidents(pool: &PgPool, plan_value: &str, days: i64) -> Result
          WHERE i.site_id = s.id AND a.id = s.account_id AND a.plan = $1::plan \
            AND i.resolved_at IS NOT NULL \
            AND i.resolved_at <= now() - ($2 || ' days')::interval",
+    )
+    .bind(plan_value)
+    .bind(days.to_string())
+    .execute(pool)
+    .await?
+    .rows_affected())
+}
+
+/// Deletes policy history rows at least `days` old on sites of accounts on `plan_value`, the
+/// window the plan keeps its crawl history for. The policy itself is never trimmed.
+async fn trim_policy_history(
+    pool: &PgPool,
+    plan_value: &str,
+    days: i64,
+) -> Result<u64, sqlx::Error> {
+    Ok(sqlx::query(
+        "DELETE FROM policy_history h USING sites s, accounts a \
+         WHERE h.site_id = s.id AND a.id = s.account_id AND a.plan = $1::plan \
+           AND h.created_at <= now() - ($2 || ' days')::interval",
     )
     .bind(plan_value)
     .bind(days.to_string())
