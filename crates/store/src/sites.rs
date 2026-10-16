@@ -71,6 +71,25 @@ pub async fn starred_key_pages(
         .collect())
 }
 
+/// The starred pages' URLs, as the site's stored crawls know them (newest first; a starred page
+/// no stored crawl has is left out), so a crawl can fetch them even when no link leads there.
+pub async fn starred_urls(pool: &PgPool, site_id: Uuid) -> Result<Vec<url::Url>, sqlx::Error> {
+    let urls: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT ON (p.url_hash) p.url FROM pages p \
+         JOIN sites s ON s.id = p.site_id \
+         JOIN crawls c ON c.id = p.crawl_id \
+         WHERE p.site_id = $1 AND p.url_hash = ANY(s.key_pages) \
+         ORDER BY p.url_hash, c.created_at DESC",
+    )
+    .bind(site_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(urls
+        .into_iter()
+        .filter_map(|u| url::Url::parse(&u).ok())
+        .collect())
+}
+
 /// The account's sites, oldest first (the first one is the default after login).
 pub async fn list_for_account(pool: &PgPool, account_id: Uuid) -> Result<Vec<Site>, sqlx::Error> {
     let rows: Vec<SiteRow> = sqlx::query_as(&format!(

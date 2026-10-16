@@ -10,10 +10,18 @@
 //! A stored value is read leniently ([`SitePolicy::from_json_lenient`]), and a site whose
 //! `policy` is NULL reads its mirror columns, so a policy is never unreadable.
 
-use codoseo_policy::{PolicyError, SitePolicy};
+use std::collections::{HashMap, HashSet};
+
+use codoseo_core::check::IssueBits;
+use codoseo_core::page::{PageFields, PageRecord};
+use codoseo_core::plan::{Plan, PlanLimits};
+use codoseo_core::report::InlinkSample;
+use codoseo_geo::report::AccessReport;
+use codoseo_policy::{PolicyError, PolicyInput, SitePolicy};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
+use url::Url;
 use uuid::Uuid;
 
 /// Where a policy change came from (`policy_history.via`).
@@ -182,7 +190,8 @@ async fn latest_scores(
     .await
 }
 
-/// Validates and saves the site's policy, re-evaluates its AI access quietly, rescores the
+/// Validates and saves the site's policy (refusing more must-work pages than the plan allows,
+/// [`plan_errors`]), re-evaluates its AI access quietly, rescores the
 /// newest finished crawl and records the change, all in one transaction. Saving the policy it
 /// already has re-evaluates all the same but records no history row.
 pub async fn save(
@@ -197,6 +206,10 @@ pub async fn save(
 
     let mut tx = pool.begin().await?;
     let before = lock(&mut tx, site_id).await?.ok_or(SaveError::NotFound)?;
+    let refused = plan_errors(site_plan(&mut *tx, site_id).await?, &policy);
+    if !refused.is_empty() {
+        return Err(SaveError::Invalid(refused));
+    }
     let scores_before = latest_scores(&mut tx, site_id).await?;
     write(&mut tx, site_id, &policy).await?;
     let had_report: bool =
@@ -299,4 +312,270 @@ pub async fn history(
     .bind(limit)
     .fetch_all(pool)
     .await
+}
+
+// ---- plan limits -----------------------------------------------------------------------------
+
+/// The plan of the site's account (`None` for an unclaimed site).
+async fn site_plan<'e, E: sqlx::PgExecutor<'e>>(
+    db: E,
+    site_id: Uuid,
+) -> Result<Option<Plan>, sqlx::Error> {
+    let text: Option<String> = sqlx::query_scalar(
+        "SELECT a.plan::text FROM sites s LEFT JOIN accounts a ON a.id = s.account_id \
+         WHERE s.id = $1",
+    )
+    .bind(site_id)
+    .fetch_optional(db)
+    .await?
+    .flatten();
+    Ok(text.and_then(|t| serde_json::from_value(Value::String(t)).ok()))
+}
+
+/// What the plan refuses in `policy`: more must-work pages than [`PlanLimits::max_must_work`].
+pub fn plan_errors(plan: Option<Plan>, policy: &SitePolicy) -> Vec<PolicyError> {
+    let limits = plan.map_or_else(PlanLimits::quick_audit, PlanLimits::for_plan);
+    match limits.max_must_work {
+        Some(max) if policy.seo.must_work.len() > usize::from(max) => {
+            let plan = match plan {
+                Some(Plan::Free) => "the Free plan",
+                Some(Plan::Lite) => "the Lite plan",
+                Some(Plan::Pro) => "the Pro plan",
+                Some(Plan::SelfHosted) => "this install",
+                None => "a site without an account",
+            };
+            vec![PolicyError::new(
+                "seo.must_work",
+                format!(
+                    "{plan} allows {max} must-work pages and this policy lists {}; remove {} or \
+                     upgrade for more (the home page and starred pages don't count).",
+                    policy.seo.must_work.len(),
+                    policy.seo.must_work.len() - usize::from(max)
+                ),
+            )]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// [`plan_errors`] for the site's plan, before a save: every reason the policy can't be saved
+/// here, its own validation included.
+pub async fn check(pool: &PgPool, site_id: Uuid, policy: &SitePolicy) -> Result<(), SaveError> {
+    let mut errors = policy.validate().err().unwrap_or_default();
+    errors.extend(plan_errors(site_plan(pool, site_id).await?, policy));
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(SaveError::Invalid(errors))
+    }
+}
+
+// ---- the latest crawl, for evaluating a policy -----------------------------------------------
+
+/// Most stored inlinks read for the preferred address rule's link count; past it the count
+/// reads "at least".
+const MAX_POLICY_INLINKS: i64 = 20_000;
+
+/// The newest finished crawl as the policy rules read it: its pages (the fields the rules use),
+/// the stored links to pages that redirect (as indexes into `pages`), the starred pages' URLs and
+/// the site's origin.
+#[derive(Debug, Clone)]
+pub struct LatestCrawl {
+    pub crawl_id: Uuid,
+    /// Its place in the site's history (`#44`).
+    pub number: i64,
+    pub finished_at: Option<OffsetDateTime>,
+    pub origin: Url,
+    pub pages: Vec<PageRecord>,
+    pub inlinks: Vec<InlinkSample>,
+    pub inlinks_capped: bool,
+    pub starred: HashSet<u64>,
+    pub starred_urls: Vec<Url>,
+}
+
+impl LatestCrawl {
+    /// The input [`codoseo_policy::evaluate`] takes, with the crawl's AI access report.
+    pub fn input<'a>(&'a self, access: Option<&'a AccessReport>) -> PolicyInput<'a> {
+        PolicyInput {
+            pages: &self.pages,
+            origin: Some(&self.origin),
+            starred: Some(&self.starred),
+            starred_urls: &self.starred_urls,
+            inlinks: &self.inlinks,
+            inlinks_capped: self.inlinks_capped,
+            access,
+        }
+    }
+}
+
+/// The site's newest finished crawl that still has its pages (the latest two keep them), or
+/// `None` before the first.
+pub async fn latest_crawl(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<LatestCrawl>, sqlx::Error> {
+    let row: Option<(Uuid, Option<OffsetDateTime>, String)> = sqlx::query_as(
+        "SELECT c.id, c.finished_at, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id \
+         WHERE c.site_id = $1 AND c.status = 'done' \
+         ORDER BY c.finished_at DESC, c.created_at DESC, c.id DESC LIMIT 1",
+    )
+    .bind(site_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((crawl_id, finished_at, start_url)) = row else {
+        return Ok(None);
+    };
+    let number: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM crawls WHERE site_id = $1 \
+           AND (created_at, id) <= (SELECT created_at, id FROM crawls WHERE id = $2)",
+    )
+    .bind(site_id)
+    .bind(crawl_id)
+    .fetch_one(pool)
+    .await?;
+    type Row = (
+        String,
+        i64,
+        i16,
+        Option<String>,
+        bool,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    );
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT url, url_hash, status, content_type, in_sitemap, indexability::text, canonical, \
+                meta_robots, x_robots_tag, redirect_target, issues \
+         FROM pages WHERE crawl_id = $1 ORDER BY id",
+    )
+    .bind(crawl_id)
+    .fetch_all(pool)
+    .await?;
+    let pages: Vec<PageRecord> = rows
+        .into_iter()
+        .filter_map(
+            |(
+                url,
+                hash,
+                status,
+                content_type,
+                in_sitemap,
+                idx,
+                canonical,
+                robots,
+                xrt,
+                target,
+                issues,
+            )| {
+                let url = Url::parse(&url).ok()?;
+                Some(PageRecord {
+                    url,
+                    url_hash: crate::hash::from_db(hash),
+                    status: status as u16,
+                    redirect_chain: Vec::new(),
+                    response_ms: 0,
+                    size_bytes: 0,
+                    content_type,
+                    depth: None,
+                    in_sitemap,
+                    indexability: crate::crawl_queue::indexability_from_text(&idx),
+                    fields: PageFields {
+                        canonical: canonical.and_then(|c| Url::parse(&c).ok()),
+                        meta_robots: robots,
+                        x_robots_tag: xrt,
+                        ..PageFields::default()
+                    },
+                    inlinks: 0,
+                    outlinks_internal: 0,
+                    outlinks_external: 0,
+                    issues: IssueBits(crate::hash::from_db(issues)),
+                    key_hash: 0,
+                    redirect_target: target.and_then(|t| Url::parse(&t).ok()),
+                    outlinks_nofollow: 0,
+                    error: None,
+                })
+            },
+        )
+        .collect();
+    let index: HashMap<u64, u32> = pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.url_hash, i as u32))
+        .collect();
+    let by_url: HashMap<&str, u32> = pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.url.as_str(), i as u32))
+        .collect();
+    // Only links to pages that redirect: those are the ones the address rule counts, and finalize
+    // keeps every one of them.
+    let redirecting: Vec<i64> = pages
+        .iter()
+        .filter(|p| (300..400).contains(&p.status))
+        .map(|p| crate::hash::to_db(p.url_hash))
+        .collect();
+    let links: Vec<(i64, String)> = if redirecting.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as(
+            "SELECT target_url_hash, from_url FROM inlinks \
+             WHERE crawl_id = $1 AND target_url_hash = ANY($2) ORDER BY id LIMIT $3",
+        )
+        .bind(crawl_id)
+        .bind(&redirecting)
+        .bind(MAX_POLICY_INLINKS)
+        .fetch_all(pool)
+        .await?
+    };
+    let inlinks_capped = links.len() as i64 >= MAX_POLICY_INLINKS;
+    let inlinks = links
+        .into_iter()
+        .filter_map(|(target, from)| {
+            Some(InlinkSample {
+                target: *index.get(&crate::hash::from_db(target))?,
+                source: *by_url.get(from.as_str())?,
+                anchor: String::new(),
+                nofollow: false,
+            })
+        })
+        .collect();
+    let starred = crate::sites::starred_key_pages(pool, site_id).await?;
+    let starred_urls = crate::sites::starred_urls(pool, site_id).await?;
+    let origin = Url::parse(&start_url)
+        .ok()
+        .and_then(|u| u.join("/").ok())
+        .or_else(|| pages.first().and_then(|p| p.url.join("/").ok()))
+        .unwrap_or_else(|| Url::parse("https://invalid.example/").expect("a URL"));
+    Ok(Some(LatestCrawl {
+        crawl_id,
+        number,
+        finished_at,
+        origin,
+        pages,
+        inlinks,
+        inlinks_capped,
+        starred,
+        starred_urls,
+    }))
+}
+
+/// `policy` against the site's latest crawl, SEO rules on its stored pages and AI rules on its
+/// latest AI access report, and the crawl compared with (the newest finished crawl, else the AI
+/// access report's).
+pub async fn evaluate_latest(
+    pool: &PgPool,
+    site_id: Uuid,
+    policy: &SitePolicy,
+) -> Result<(codoseo_policy::PolicyReport, Option<Uuid>), sqlx::Error> {
+    let crawl = latest_crawl(pool, site_id).await?;
+    let ai = crate::geo::latest_report(pool, site_id).await?;
+    let access = ai.as_ref().map(|l| &l.report);
+    let report = match &crawl {
+        Some(c) => codoseo_policy::evaluate(policy, &c.input(access)),
+        None => codoseo_policy::evaluate(policy, &PolicyInput::ai_only(access)),
+    };
+    Ok((report, crawl.map(|c| c.crawl_id).or(ai.map(|l| l.crawl_id))))
 }

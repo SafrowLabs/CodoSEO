@@ -414,7 +414,7 @@ fn page_record_from_row(row: sqlx::postgres::PgRow) -> PageRecord {
 /// `pages.indexability` is a closed Postgres enum written by `codoseo-checks`, so every value
 /// the database can hold is listed here; the fallback only matters if a future migration adds
 /// a variant this build doesn't know about yet.
-fn indexability_from_text(text: &str) -> Indexability {
+pub(crate) fn indexability_from_text(text: &str) -> Indexability {
     match text {
         "indexable" => Indexability::Indexable,
         "noindex" => Indexability::Noindex,

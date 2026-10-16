@@ -57,7 +57,7 @@ async fn defaults_are_the_eight_instant_kinds_and_creating_them_twice_changes_no
         .fetch_one(&db.pool)
         .await
         .unwrap();
-    assert_eq!(n, 10);
+    assert_eq!(n, 11);
     for kind in [
         ChangeKind::BecameNoindex,
         ChangeKind::ErrorSpike,
