@@ -36,7 +36,7 @@
 
 <div class="cols aia-cols">
   <section class="aia-attn" aria-labelledby="aia-issues">
-    <div class="aia-section-head"><h2 id="aia-issues">Needs attention</h2><span class="chip" title="Accepted and snoozed issues aren't counted">{{ v.attention }}</span></div>
+    <div class="aia-section-head"><h2 id="aia-issues">Needs attention</h2><span class="chip" title="Accepted and snoozed issues aren't counted">{{ v.attention }}</span>{% if !v.copy_all.is_empty() %}<span class="grow"></span><button class="btn btn-sm" type="button" data-copy="{{ v.copy_all }}"><svg class="icon"><use href="#i-copy"/></svg>Copy all fix prompts</button>{% endif %}</div>
     {% if v.incidents.is_empty() %}
     <div class="card">
       <div class="empty aia-clear">

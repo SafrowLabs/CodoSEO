@@ -321,6 +321,9 @@ pub struct Overview {
     pub incidents: Vec<IncidentView>,
     /// Open issues that still ask for attention: neither accepted nor snoozed.
     pub attention: usize,
+    /// The agent prompts of every open, not accepted issue under a numbered header each; empty
+    /// when there are none.
+    pub copy_all: String,
     /// Incidents the owner accepted as they are, listed apart and not counted.
     pub accepted: Vec<IncidentView>,
     /// The empty "Open issues" state: its heading, its text and the mascot's mood.
@@ -919,6 +922,7 @@ async fn build_page(
         issue_counts,
         set_aside: format!("Accepted {accepted_n} · Snoozed {snoozed_n}"),
         attention: asking.len(),
+        copy_all: copy_all_prompts(&site.domain, &incidents),
         incidents,
         accepted,
         clear: if accepted_n > 0 {
@@ -1708,6 +1712,16 @@ fn incident_view(
         remedy_open: !accepted && snoozed_until.is_none() && progress.is_none(),
         progress,
     }
+}
+
+/// Every listed issue's agent prompt, each under `## n. Title (site)`.
+pub fn copy_all_prompts(domain: &str, incidents: &[IncidentView]) -> String {
+    incidents
+        .iter()
+        .enumerate()
+        .map(|(n, i)| format!("## {}. {} ({domain})\n\n{}", n + 1, i.title, i.copy_prompt))
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
 }
 
 fn cause_tip(c: &Cause) -> String {

@@ -74,21 +74,38 @@
   </div>
 
   <details class="aia-remedy"{% if i.remedy_open %} open{% endif %}>
-    <summary><svg class="icon chev"><use href="#i-chev"/></svg>How to fix</summary>
-    <div class="aia-remedy-body">
+    <summary><svg class="icon chev"><use href="#i-chev"/></svg>Fix</summary>
+    <div class="aia-remedy-body aia-fixpanel">
+      <fieldset class="aia-seg" aria-label="Format">
+        <input type="radio" name="fmt-{{ i.id }}" id="fmt-{{ i.id }}-fix" value="fix" checked><label for="fmt-{{ i.id }}-fix">Fix steps</label>
+        <input type="radio" name="fmt-{{ i.id }}" id="fmt-{{ i.id }}-task" value="task"><label for="fmt-{{ i.id }}-task">Dev ticket</label>
+        <input type="radio" name="fmt-{{ i.id }}" id="fmt-{{ i.id }}-prompt" value="prompt"><label for="fmt-{{ i.id }}-prompt">Agent prompt</label>
+      </fieldset>
       <p class="aia-why">{% for s in i.remedy.why %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</p>
-      <ol class="aia-steps">
-        {% for step in i.remedy.steps %}<li>{% for s in step %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</li>{% endfor %}
-      </ol>
-      {% if let Some(sn) = i.remedy.snippet %}
-      <div class="aia-fix">
-        <div class="aia-fix-head"><span>{{ sn.0 }}</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ sn.1 }}" aria-label="Copy these lines"><svg class="icon"><use href="#i-copy"/></svg>Copy</button></div>
-        <pre class="aia-snippet">{{ sn.1 }}</pre>
+      <div class="aia-fmt" data-fmt="fix">
+        {% if i.remedy.snippet.is_some() %}<ol class="aia-steps">
+          {% for step in i.remedy.steps %}<li>{% for s in step %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</li>{% endfor %}
+        </ol>{% endif %}
+        <div class="aia-fix">
+          <div class="aia-fix-head"><span>{% if let Some(sn) = i.remedy.snippet %}{{ sn.0 }}{% else %}Steps{% endif %}</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_fix }}"><svg class="icon"><use href="#i-copy"/></svg>Copy fix</button></div>
+          <pre class="aia-snippet">{{ i.copy_fix }}</pre>
+        </div>
       </div>
-      {% endif %}
+      <div class="aia-fmt" data-fmt="task">
+        <div class="aia-fix">
+          <div class="aia-fix-head"><span>Markdown ticket for whoever makes the change</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_task }}"><svg class="icon"><use href="#i-copy"/></svg>Copy ticket</button></div>
+          <pre class="aia-snippet">{{ i.copy_task }}</pre>
+        </div>
+      </div>
+      <div class="aia-fmt" data-fmt="prompt">
+        <div class="aia-fix">
+          <div class="aia-fix-head"><span>Prompt for a coding agent, site data fenced off</span><button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_prompt }}"><svg class="icon"><use href="#i-copy"/></svg>Copy prompt</button></div>
+          <pre class="aia-snippet">{{ i.copy_prompt }}</pre>
+        </div>
+      </div>
       {% if !i.remedy.verify.is_empty() %}
       <div class="aia-verify">
-        <span class="aia-urls-label">Check it worked</span>
+        <span class="aia-urls-label">How we confirm it</span>
         <ul>{% for v in i.remedy.verify %}<li>{% for s in v %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</li>{% endfor %}</ul>
       </div>
       {% endif %}
@@ -102,11 +119,6 @@
       <button class="btn btn-sm" type="submit" title="Check this issue again now, without a crawl"><svg class="icon"><use href="#i-crawls"/></svg>Recheck now</button>
     </form>
     {% endif %}
-    <span class="aia-copy" role="group" aria-label="Copy the fix">
-      <button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_fix }}" title="Just the change"><svg class="icon"><use href="#i-copy"/></svg>Copy fix</button>
-      <button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_task }}" title="A Markdown ticket for whoever makes the change"><svg class="icon"><use href="#i-copy"/></svg>Copy task</button>
-      <button class="btn btn-ghost btn-sm" type="button" data-copy="{{ i.copy_prompt }}" title="A prompt for a coding agent, with the site's data fenced off"><svg class="icon"><use href="#i-copy"/></svg>Copy prompt</button>
-    </span>
     <span class="grow"></span>
     {% if let Some(confirm) = i.intend %}
     <form method="post" action="{{ base }}/ai-access/incidents/{{ i.id }}/intended" hx-confirm="{{ confirm }}">

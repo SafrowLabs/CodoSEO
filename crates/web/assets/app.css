@@ -1221,7 +1221,13 @@ body.solo { overflow: auto; }
 .aia-limits b { font-weight: 600; color: var(--ink-2); }
 .aia-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
 .aia-actions form { margin: 0; }
-.aia-copy { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+.aia-fixpanel .aia-seg { justify-self: start; }
+.aia-fixpanel .aia-fmt { display: grid; gap: 8px; }
+.aia-fixpanel .aia-snippet { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.aia-fixpanel:has(input[value="fix"]:checked) .aia-fmt:not([data-fmt="fix"]),
+.aia-fixpanel:has(input[value="task"]:checked) .aia-fmt:not([data-fmt="task"]),
+.aia-fixpanel:has(input[value="prompt"]:checked) .aia-fmt:not([data-fmt="prompt"]) { display: none; }
+.aia-section-head .grow { flex: 1; }
 .aia-snooze { display: inline-flex; align-items: center; gap: 4px; }
 .aia-snooze .select { height: 28px; width: auto; padding-top: 0; padding-bottom: 0; font-size: 12.5px; }
 .aia-snooze-why { margin-top: 6px; font-size: 12px; color: var(--muted-2); }

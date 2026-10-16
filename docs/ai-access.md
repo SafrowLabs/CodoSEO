@@ -32,7 +32,7 @@ The header carries **Export issues** (CSV) and **JSON**, and **Site policy**, wh
   | **Blocked** | robots.txt disallows its search crawler on the home page, or our fetch as it was blocked or challenged (and its user fetcher is kept out too, or it has none) |
 
   The verdict is read against your policy for the search crawler, overrides included. A block you asked for reads **Blocked · per your policy**, muted; a bot your policy blocks that still gets in reads **Allowed · policy says Block**, as a warning. With no preference a block is shown muted and is not reported. Each card links to the Bots tab.
-- **Needs attention**: the open issues with every action (how to fix, the copy buttons, recheck, mark intended, accept, snooze), the accepted ones folded away, and their count by severity.
+- **Needs attention**: the open issues with every action (the Fix panel with its three copy formats, recheck, mark intended, accept, snooze), the accepted ones folded away, and their count by severity. **Copy all fix prompts** in the header copies the agent prompts of all open, not accepted issues, each under a numbered title and site; it is hidden when there are none.
 - **Your policy vs what bots get**: per purpose, your stance and what robots.txt and the fetch check give those bots, with a dot that says whether they agree; and the page directives you accepted. **Edit in Site policy** opens the intent form.
 - **Recently resolved**: the last ten.
 - **Look closer**: a card per other tab with a one-line status.
@@ -290,11 +290,11 @@ They are in the alert settings grid like any other kind, so email, Slack, Discor
 
 ## Fixing an incident
 
-Every incident card has a **How to fix** panel (open by default unless the incident is accepted, snoozed or being rechecked). It is built from the incident's own evidence and from what was true before it opened, so it names the bots, pages, rules, statuses and the CDN vendor CodoSEO actually saw, and says "undocumented" or "not recorded" where it has nothing. It is computed each time the card is shown, never stored, so a better template reaches every open incident at once. The panel has:
+Every incident card has a **Fix** panel (open by default unless the incident is accepted, snoozed or being rechecked). It is built from the incident's own evidence and from what was true before it opened, so it names the bots, pages, rules, statuses and the CDN vendor CodoSEO actually saw, and says "undocumented" or "not recorded" where it has nothing. It is computed each time the card is shown, never stored, so a better template reaches every open incident at once. The panel has:
 
 - **Why**, and what the evidence cannot tell (the [ledger's](#evidence-grades) limits for the finding);
 - the **steps**, in order, and for a robots.txt change a **snippet** with a Copy button: the exact lines, restoring the rules an earlier crawl found where it has them (otherwise `Allow` lines that each match one page);
-- **Check it worked**, for example a `curl -I` to run, and when to recheck;
+- **How we confirm it**, for example a `curl -I` to run, and when to recheck;
 - the finding's evidence grade and its sources.
 
 Under the card, **Copy fix** copies just the change (the snippet, else the steps), **Copy task** a Markdown ticket for whoever makes the change (severity, grade, affected URLs, before and now, the change, how to verify it, sources) and **Copy prompt** a prompt for a coding agent. The prompt puts everything that came from your site (titles, URLs, rules, header values) between `BEGIN UNTRUSTED SITE DATA` and `END UNTRUSTED SITE DATA` lines and tells the agent to treat it as data, never as instructions; control characters, backticks and those marker words are stripped from site strings and each is cut to a fixed length.

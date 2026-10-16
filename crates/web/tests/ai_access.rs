@@ -2118,9 +2118,12 @@ async fn a_card_shows_the_remedy_the_copy_buttons_and_the_honest_line() {
     let body = ai_access_body(&app, &site, &cookie).await;
     let card = card(&body, id);
     for needle in [
-        "How to fix",
+        "Fix steps",
+        "Dev ticket",
+        "Agent prompt",
+        "How we confirm it",
         "Copy fix",
-        "Copy task",
+        "Copy ticket",
         "Copy prompt",
         "data-copy=",
         "Recheck now",
@@ -3314,4 +3317,92 @@ async fn a_report_without_the_robots_body_says_it_appears_after_the_next_crawl()
     let body = tab_body(&app, &site, &cookie, "/robots").await;
     assert!(body.contains("None · HTTP 404"), "{body}");
     assert!(body.contains("There is no robots.txt, so every path is allowed."));
+}
+
+/// The first `data-copy` value at or after `marker` in `text`, still HTML-escaped.
+fn copy_after(text: &str, marker: &str) -> String {
+    let rest = &text[text.find(marker).unwrap_or_else(|| panic!("no {marker:?}"))..];
+    let from = rest.find("data-copy=\"").expect("a copy button") + "data-copy=\"".len();
+    rest[from..from + rest[from..].find('"').unwrap()].to_owned()
+}
+
+/// The "Copy all fix prompts" payload: the data-copy just before its label.
+fn copy_all(body: &str) -> Option<String> {
+    let at = body.find("Copy all fix prompts")?;
+    let head = &body[..at];
+    let from = head.rfind("data-copy=\"")? + "data-copy=\"".len();
+    Some(head[from..from + head[from..].find('"').unwrap()].to_owned())
+}
+
+#[tokio::test]
+async fn the_fix_panel_renders_all_three_formats_without_javascript() {
+    let (app, site, cookie, id) = blocked_incident().await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let c = card(&body, id);
+    // Radios drive the segmented control; with no CSS or JS all three panes stack.
+    for f in ["fix", "task", "prompt"] {
+        assert!(c.contains(&format!(r#"data-fmt="{f}""#)), "{c}");
+        assert!(c.contains(&format!(r#"id="fmt-{id}-{f}""#)), "{c}");
+    }
+    for label in ["Copy fix", "Copy ticket", "Copy prompt"] {
+        assert!(c.contains(label), "{c}");
+    }
+    // Each pane shows exactly what its button copies, and the texts differ.
+    let texts: Vec<&str> = c
+        .split("<pre class=\"aia-snippet\">")
+        .skip(1)
+        .map(|p| p.split("</pre>").next().unwrap())
+        .collect();
+    assert_eq!(texts.len(), 3, "{c}");
+    assert!(texts.iter().all(|t| !t.trim().is_empty()));
+    assert!(texts[2].contains("UNTRUSTED SITE DATA"), "{}", texts[2]);
+    assert_ne!(texts[0], texts[1]);
+    assert_ne!(texts[1], texts[2]);
+    for t in texts {
+        assert!(
+            c.contains(&format!(r#"data-copy="{t}""#)),
+            "button and pane differ for {t}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn copy_all_joins_the_open_prompts_and_leaves_out_accepted_ones() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_llms(&site, pages(), (200, BLOCK_OAI), llms_fetch(503, ""), true)
+        .await;
+    let open = geo::open_incidents(app.pool(), site.id).await.unwrap();
+    assert_eq!(open.len(), 2, "{open:?}");
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let all = copy_all(&body).expect("the button");
+    assert!(all.contains("## 1. ") && all.contains("## 2. "), "{all}");
+    assert!(all.contains(DOMAIN), "{all}");
+    let prompt_of = |body: &str, id: i64| copy_after(&card(body, id), "data-fmt=\"prompt\"");
+    for i in &open {
+        assert!(all.contains(&prompt_of(&body, i.id)), "missing {}", i.id);
+    }
+
+    // Accept the llms.txt one: its prompt leaves the payload.
+    let llms = open
+        .iter()
+        .find(|i| i.kind == codoseo_geo::findings::FindingKind::LlmsTxtUnavailable)
+        .unwrap();
+    let res = app
+        .post_hx(&action(&site, llms.id, "accept"), "", Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let body = ai_access_body(&app, &site, &cookie).await;
+    let one = copy_all(&body).expect("the button");
+    assert!(one.contains("## 1. ") && !one.contains("## 2. "), "{one}");
+    // The accepted card keeps its own panel.
+    assert!(!one.contains(&prompt_of(&body, llms.id)));
+}
+
+#[tokio::test]
+async fn copy_all_is_hidden_when_nothing_is_open() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
+        .await;
+    let body = ai_access_body(&app, &site, &cookie).await;
+    assert!(!body.contains("Copy all fix prompts"));
 }
