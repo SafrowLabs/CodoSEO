@@ -1,6 +1,7 @@
 //! `codoseo check`: one page, its fields, redirect chain and page issues.
 
 use std::io::Write;
+use std::path::PathBuf;
 
 use clap::Args;
 use codoseo_checks::{check_page, def};
@@ -21,9 +22,18 @@ pub struct CheckArgs {
     url: Url,
     #[arg(long, value_enum, default_value_t = PlainFormat::Table)]
     format: PlainFormat,
+    /// A site policy file to check first (default: ./codoseo.toml when there is one). One page
+    /// has no AI access report, so the policy changes nothing here yet; an invalid file is
+    /// still an error
+    #[arg(long, value_name = "FILE", conflicts_with = "no_policy")]
+    policy: Option<PathBuf>,
+    /// Ignore ./codoseo.toml
+    #[arg(long)]
+    no_policy: bool,
 }
 
 pub async fn run(args: CheckArgs) -> Outcome {
+    super::policy::resolve(args.policy.as_deref(), args.no_policy)?;
     let cfg = CrawlConfig {
         start_url: args.url,
         limits: CrawlLimits::default(),

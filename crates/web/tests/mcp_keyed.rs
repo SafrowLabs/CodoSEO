@@ -258,13 +258,14 @@ async fn setup(plan: Plan) -> Fixture {
     }
 }
 
-const KEYED_TOOLS: [&str; 13] = [
+const KEYED_TOOLS: [&str; 14] = [
     "accept_incident",
     "get_ai_access",
     "get_changes",
     "get_fix",
     "get_issue_urls",
     "get_page",
+    "get_policy",
     "get_site_health",
     "list_sites",
     "recheck_incident",
@@ -638,6 +639,98 @@ async fn get_ai_access_matches_rest_and_says_when_there_is_no_report() {
     assert_eq!(oai["home_allowed"], false);
     assert_eq!(oai["conflicts"], true);
     assert_eq!(full["engines"].as_array().unwrap().len(), 10);
+}
+
+#[tokio::test]
+async fn get_policy_matches_rest_in_json_and_toml_and_put_replaces_it() {
+    let f = setup(Plan::Lite).await;
+    let site = f.site.id;
+    let before = calls_today(&f.app, &f.account).await;
+    let policy = f
+        .rpc()
+        .call_ok("get_policy", json!({"site_id": site}))
+        .await;
+    assert_eq!(
+        calls_today(&f.app, &f.account).await,
+        before + 1,
+        "charged like any tool"
+    );
+    let res = rest_get(&f.app, &format!("/api/v1/sites/{site}/policy"), &f.key).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(policy, serde_json::from_str::<Value>(&res.body).unwrap());
+    assert_eq!(policy["site_id"], site.to_string());
+    assert_eq!(policy["policy"]["version"], 1);
+    assert_eq!(policy["policy"]["ai"]["probes"], true);
+    assert_eq!(policy["updated_at"], Value::Null);
+    assert!(policy["report"]["rules"].as_array().unwrap().len() >= 5);
+
+    // TOML when asked for, the same file `codoseo policy export` writes.
+    let res = f
+        .app
+        .send(
+            Request::builder()
+                .uri(format!("/api/v1/sites/{site}/policy"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", f.key))
+                .header(header::ACCEPT, "application/toml")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(
+        res.header("content-type"),
+        Some("application/toml; charset=utf-8")
+    );
+    assert!(res.body.starts_with("[policy]"), "{}", res.body);
+    assert!(codoseo_policy::parse_file(&res.body).is_ok());
+
+    // PUT a file: saved through the API, with the key in the history.
+    let put = |body: &'static str, ct: &'static str| {
+        Request::builder()
+            .method("PUT")
+            .uri(format!("/api/v1/sites/{site}/policy"))
+            .header(header::AUTHORIZATION, format!("Bearer {}", f.key))
+            .header(header::CONTENT_TYPE, ct)
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let res = f
+        .app
+        .send(put(
+            "[policy]\n[policy.ai]\npurposes = { training = \"block\" }\n",
+            "application/toml",
+        ))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let v: Value = serde_json::from_str(&res.body).unwrap();
+    assert_eq!(v["policy"]["ai"]["purposes"]["training"], "block");
+    assert!(v["updated_at"].is_string());
+    let h = codoseo_store::policy::history(f.app.pool(), site, 5)
+        .await
+        .unwrap();
+    assert_eq!(h[0].via, "api");
+    assert!(h[0].api_key_id.is_some());
+    // An invalid one is a 400 that says why, and changes nothing.
+    let res = f
+        .app
+        .send(put(
+            "{\"version\": 1, \"ai\": {\"accepted_directives\": [\"noindex\"]}}",
+            "application/json",
+        ))
+        .await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert!(res.body.contains("noindex"), "{}", res.body);
+    let again = f
+        .rpc()
+        .call_ok("get_policy", json!({"site_id": site}))
+        .await;
+    assert_eq!(again["policy"], v["policy"]);
+    // Another account's site, or none, is the usual not found.
+    let (is_error, text) = f
+        .rpc()
+        .call("get_policy", json!({"site_id": uuid::Uuid::new_v4()}))
+        .await;
+    assert!(is_error, "{text}");
 }
 
 /// A site with a `bots_blocked` incident (robots.txt) and `fetch_blocked` ones (probes); the
@@ -1426,6 +1519,13 @@ impl CloudBackend for Faulty {
         unimplemented!()
     }
     async fn run_crawl(&self, _: &ApiCaller, _: &str) -> Result<CrawlQueued, String> {
+        unimplemented!()
+    }
+    async fn policy(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+    ) -> Result<codoseo_mcp::cloud::types::PolicyInfo, String> {
         unimplemented!()
     }
     async fn incident_fix(&self, _: &ApiCaller, _: &str, _: i64) -> Result<AiFixInfo, String> {

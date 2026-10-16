@@ -156,8 +156,7 @@ pub(crate) async fn write(
     site_id: Uuid,
     policy: &SitePolicy,
 ) -> Result<(), sqlx::Error> {
-    let intent =
-        serde_json::to_value(&policy.ai.intent).expect("an intent always serializes");
+    let intent = serde_json::to_value(&policy.ai.intent).expect("an intent always serializes");
     sqlx::query("UPDATE sites SET policy = $2, ai_intent = $3, ai_probes = $4 WHERE id = $1")
         .bind(site_id)
         .bind(policy.to_json())

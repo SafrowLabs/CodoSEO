@@ -106,13 +106,15 @@ async fn the_migration_moves_every_intent_into_the_policy() {
         assert_eq!(stored, p.to_json());
     }
     // The customised ones say where their policy came from.
-    let rows: Vec<(Uuid, String)> = sqlx::query_as(
-        "SELECT site_id, via FROM policy_history ORDER BY site_id",
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap();
-    let mut want = vec![(sites[1], "migration".to_owned()), (sites[2], "migration".to_owned())];
+    let rows: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT site_id, via FROM policy_history ORDER BY site_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let mut want = vec![
+        (sites[1], "migration".to_owned()),
+        (sites[2], "migration".to_owned()),
+    ];
     want.sort();
     assert_eq!(rows, want);
 
@@ -220,7 +222,9 @@ fn nobody() -> Actor {
 
 fn training_blocked() -> SitePolicy {
     let mut p = SitePolicy::default();
-    p.ai.intent.purposes.insert(Purpose::Training, Stance::Block);
+    p.ai.intent
+        .purposes
+        .insert(Purpose::Training, Stance::Block);
     p
 }
 
@@ -232,7 +236,9 @@ async fn save_writes_the_mirror_and_a_history_row() {
 
     let mut p = training_blocked();
     p.ai.probes = false;
-    p.ai.intent.accepted_directives.insert(DirectiveSlug::Nosnippet);
+    p.ai.intent
+        .accepted_directives
+        .insert(DirectiveSlug::Nosnippet);
     let saved = policy::save(&db.pool, site, &p, &Actor::web(account))
         .await
         .unwrap();
@@ -248,7 +254,10 @@ async fn save_writes_the_mirror_and_a_history_row() {
             .fetch_one(&db.pool)
             .await
             .unwrap();
-    assert_eq!(serde_json::from_value::<Intent>(intent).unwrap(), p.ai.intent);
+    assert_eq!(
+        serde_json::from_value::<Intent>(intent).unwrap(),
+        p.ai.intent
+    );
     assert!(!probes);
 
     let h = policy::history(&db.pool, site, 10).await.unwrap();
@@ -257,8 +266,17 @@ async fn save_writes_the_mirror_and_a_history_row() {
     assert_eq!(h[0].via, "web");
     assert_eq!(h[0].account_id, Some(account));
     assert_eq!(h[0].email.as_deref(), Some("owner@example.com"));
-    assert!(h[0].summary.contains("ai.purposes.training: default → block"), "{}", h[0].summary);
-    assert!(h[0].summary.contains("ai.probes: true → false"), "{}", h[0].summary);
+    assert!(
+        h[0].summary
+            .contains("ai.purposes.training: default → block"),
+        "{}",
+        h[0].summary
+    );
+    assert!(
+        h[0].summary.contains("ai.probes: true → false"),
+        "{}",
+        h[0].summary
+    );
     assert_eq!(h[0].before, Some(SitePolicy::default().to_json()));
     assert_eq!(h[0].after, p.to_json());
     assert_eq!(h[0].crawl_id, None);
@@ -279,7 +297,9 @@ async fn an_invalid_policy_is_refused_and_nothing_changes() {
     let db = TestDb::new().await;
     let site = make_site(&db.pool).await;
     let mut p = SitePolicy::default();
-    p.ai.intent.accepted_directives.insert(DirectiveSlug::Noindex);
+    p.ai.intent
+        .accepted_directives
+        .insert(DirectiveSlug::Noindex);
     p.seo.must_work = vec!["pricing".into()];
     let err = policy::save(&db.pool, site, &p, &nobody())
         .await
@@ -288,8 +308,16 @@ async fn an_invalid_policy_is_refused_and_nothing_changes() {
         panic!("not a validation error: {err}");
     };
     assert_eq!(errors.len(), 2, "{errors:?}");
-    assert_eq!(policy::get(&db.pool, site).await.unwrap(), SitePolicy::default());
-    assert!(policy::history(&db.pool, site, 10).await.unwrap().is_empty());
+    assert_eq!(
+        policy::get(&db.pool, site).await.unwrap(),
+        SitePolicy::default()
+    );
+    assert!(
+        policy::history(&db.pool, site, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 
     let gone = policy::save(&db.pool, Uuid::new_v4(), &SitePolicy::default(), &nobody())
         .await
@@ -313,7 +341,11 @@ async fn save_re_evaluates_quietly_like_the_intent_save_did() {
         &db.pool,
         site,
         &training_blocked(),
-        &Actor { via: Via::MarkIntended, account_id: None, api_key_id: None },
+        &Actor {
+            via: Via::MarkIntended,
+            account_id: None,
+            api_key_id: None,
+        },
     )
     .await
     .unwrap();

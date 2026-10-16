@@ -11,6 +11,7 @@ mod llms;
 mod mcp;
 mod migrate;
 mod output;
+mod policy;
 mod probe;
 mod redirects;
 mod robots;
@@ -97,6 +98,8 @@ enum Command {
     Redirects(redirects::RedirectsArgs),
     /// Compare two saved audits (`crawl --format json`)
     Diff(diff::DiffArgs),
+    /// The site policy file (codoseo.toml): init, validate, export, import
+    Policy(policy::PolicyArgs),
     /// Run the local MCP server over stdio
     Mcp(mcp::McpArgs),
     /// Apply every pending Postgres migration from DATABASE_URL
@@ -121,6 +124,7 @@ pub async fn run(cli: Cli) -> Outcome {
         Command::LlmsTxt(args) => llms::run(args).await,
         Command::Redirects(args) => redirects::run(args).await,
         Command::Diff(args) => diff::run(args),
+        Command::Policy(args) => policy::run(args).await,
         Command::Mcp(args) => mcp::run(args).await,
         // The server roles log through `tracing`; the commands above print only their results.
         Command::Migrate(args) => {

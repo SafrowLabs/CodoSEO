@@ -23,7 +23,7 @@ use codoseo_mcp::cloud::types::{
     AiIncidentInfo, AiLagInfo, AiLlmsTxtInfo, AiNotProbedInfo, AiProbeBotInfo, AiProbesInfo,
     AiRecheckInfo, AiRecheckQueued, AiRemedyInfo, AiRobotsInfo, AiSnippetInfo, ChangeInfo,
     ChangesPage, CrawlHealth, CrawlQueued, IssueUrlsPage, MAX_AI_CONTENT_PAGES, PageInfo,
-    PageIssue, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
+    PageIssue, PolicyInfo, RedirectHop, SiteHealth, SiteInfo, Usage, clip, clip_change_text,
 };
 use codoseo_mcp::local::{stop_reason_code, stop_reason_words};
 use codoseo_mcp::types::{FailingCheck, MAX_FAILING_CHECKS, UrlRow, rank_failing};
@@ -186,6 +186,62 @@ impl<'a> AgentService<'a> {
     pub async fn ai_access(&self, caller: &ApiCaller, site: &str) -> Reply<AiAccessInfo> {
         self.metered(caller, self.ai_access_work(caller, site))
             .await
+    }
+
+    /// The site's policy and the latest crawl measured against it.
+    pub async fn policy(&self, caller: &ApiCaller, site: &str) -> Reply<PolicyInfo> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            self.policy_info(site.id).await
+        })
+        .await
+    }
+
+    /// Replaces the site's policy (`PUT /api/v1/sites/{site}/policy`), recorded in its history
+    /// as made through the API with this key, and answers like [`Self::policy`].
+    pub async fn set_policy(
+        &self,
+        caller: &ApiCaller,
+        site: &str,
+        policy: Result<codoseo_policy::SitePolicy, String>,
+    ) -> Reply<PolicyInfo> {
+        self.metered(caller, async {
+            let site = self.site(caller, site).await?;
+            let policy = policy.map_err(AgentError::BadRequest)?;
+            let actor = codoseo_store::policy::Actor {
+                via: codoseo_store::policy::Via::Api,
+                account_id: Some(caller.account.id),
+                api_key_id: Some(caller.key_id),
+            };
+            codoseo_store::policy::save(&self.state.pool, site.id, &policy, &actor)
+                .await
+                .map_err(|e| match e {
+                    codoseo_store::policy::SaveError::Invalid(_) => {
+                        AgentError::BadRequest(e.to_string())
+                    }
+                    codoseo_store::policy::SaveError::NotFound => AgentError::site_not_found(),
+                    codoseo_store::policy::SaveError::Db(e) => e.into(),
+                })?;
+            self.policy_info(site.id).await
+        })
+        .await
+    }
+
+    async fn policy_info(&self, site_id: Uuid) -> Result<PolicyInfo, AgentError> {
+        let pool = &self.state.pool;
+        let (policy, updated_at) = codoseo_store::policy::get_with_time(pool, site_id).await?;
+        let latest = geo::latest_report(pool, site_id).await?;
+        let report = codoseo_policy::evaluate(
+            &policy,
+            &codoseo_policy::PolicyInput::ai_only(latest.as_ref().map(|l| &l.report)),
+        );
+        Ok(PolicyInfo {
+            site_id,
+            policy,
+            report,
+            crawl_id: latest.map(|l| l.crawl_id),
+            updated_at,
+        })
     }
 
     /// The site's open AI access incidents and those resolved in the last 90 days, one record

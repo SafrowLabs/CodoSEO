@@ -32,6 +32,12 @@ pub struct Audit {
     /// saved before it existed and in any other producer's; readers must not require it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_access: Option<serde_json::Value>,
+    /// The site policy the run was judged under (`codoseo.toml`, or `--policy FILE`), as plain
+    /// JSON for the same reason: `{ "file", "hash", "policy", "report" }`, the report being
+    /// `codoseo_policy::PolicyReport`. Absent when no policy file was read; readers must not
+    /// require it. Adding it did not change [`AUDIT_FORMAT_VERSION`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<serde_json::Value>,
 }
 
 impl Audit {

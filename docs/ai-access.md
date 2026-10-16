@@ -17,7 +17,7 @@ The screen at `/s/{site}/ai-access` has six tabs, each its own address, so a tab
 | **Agent files & signals** | `/ai-access/files` | **llms.txt**, **Content Signals and Markdown**, and the other **Declared preferences** |
 | **Bot visits** | `/ai-access/visits` | Coming soon: real bot visits from your server logs. It shows no data until then |
 
-The header carries **Export issues** (CSV) and **JSON**, and **Site policy**, which opens the intent form (`/ai-access/intent`). The tab bar scrolls sideways on a phone.
+The header carries **Export issues** (CSV) and **JSON**, and **Site policy**, which opens the AI rules of the [site policy](policy.md) (`/s/{site}/policy?tab=ai`; the old `/ai-access/intent` address redirects there). The tab bar scrolls sideways on a phone.
 
 **The Overview**, top to bottom:
 
@@ -259,7 +259,7 @@ A blocked bot is a mistake or a choice, and only you know which. The intent mode
 | AI training (GPTBot, ClaudeBot, Google-Extended, CCBot, ...) | No preference |
 | Ads | No preference |
 
-Set it per purpose, and override single bots, with **Site policy** on the AI access screen of the web app (`/s/{site}/ai-access/intent`). Severity follows the intent: blocking GPTBot is nothing to report when you have no preference, and a warning or worse when you said you want training crawlers in. A bot you want blocked that can still crawl is reported too. A bot with no preference is never reported either way.
+The intent is the AI part of the [site policy](policy.md). Set it per purpose, and override single bots, on the **AI rules** tab of **Site policy** in the web app (`/s/{site}/policy?tab=ai`, also linked from the AI access screen), in a `codoseo.toml` file for the CLI, or with `PUT /api/v1/sites/{site}/policy`. Severity follows the intent: blocking GPTBot is nothing to report when you have no preference, and a warning or worse when you said you want training crawlers in. A bot you want blocked that can still crawl is reported too. A bot with no preference is never reported either way.
 
 The same form has **Page directives you use on purpose**: tick `nosnippet`, `max-snippet`, `noarchive`, `nocache` or `data-nosnippet` when you set it deliberately, and pages that carry it still show in the AI answers table but raise no issue. `noindex` is not offered: the SEO checks report it.
 

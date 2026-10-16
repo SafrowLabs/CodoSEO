@@ -1,6 +1,7 @@
-//! Daily cleanup: trims old crawl history past each plan's retention window, deletes
-//! unclaimed no-signup audits after 7 days, and clears out expired tokens/sessions and old
-//! failed (30 days) and finished (14 days) jobs, API usage counters past 35 days and API keys
+//! Daily cleanup: trims old crawl history (and site policy history) past each plan's retention
+//! window, deletes unclaimed no-signup audits after 7 days, and clears out expired
+//! tokens/sessions and old failed (30 days) and finished (14 days) jobs, API usage counters past
+//! 35 days and API keys
 //! revoked over 90 days ago, and prunes each AI access incident's finished rechecks to the newest
 //! 20. Each step is its own statement — these are independent cleanup passes, not one atomic
 //! unit (unlike `finalize`, which must be all-or-nothing).

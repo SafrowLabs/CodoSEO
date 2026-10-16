@@ -77,7 +77,7 @@
     <p>{{ e.text }}</p>
     {% if let Some(n) = e.note %}<p>{{ n }}</p>{% endif %}
     {% if let Some(stop) = v.fetch.stop %}<p>{{ stop }}</p>{% endif %}
-    {% if e.intent_link %}<a class="btn btn-sm" href="{{ base }}/ai-access/intent#probes"><svg class="icon"><use href="#i-settings"/></svg>Edit intent</a>{% endif %}
+    {% if e.intent_link %}<a class="btn btn-sm" href="{{ base }}/policy?tab=ai#probes"><svg class="icon"><use href="#i-settings"/></svg>Edit intent</a>{% endif %}
   </div>
   {% else %}
   <div class="aia-fetch-note">

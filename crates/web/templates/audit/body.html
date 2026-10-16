@@ -117,7 +117,7 @@
       </div>
       <div class="fx-foot">
         {% if !d.fixes.intended.is_empty() %}
-        <span class="fx-foot-line"><i class="sdot is-na" aria-hidden="true"></i><span>{{ d.fixes.intended.len() }} {% if d.fixes.intended.len() == 1 %}block{% else %}blocks{% endif %} marked intended, not counted:</span> <b>{{ d.fixes.intended|join(", ") }}</b>{% if !demo %} · <a class="au-link" href="{{ base }}/ai-access/intent">review</a>{% endif %}</span>
+        <span class="fx-foot-line"><i class="sdot is-na" aria-hidden="true"></i><span>{{ d.fixes.intended.len() }} {% if d.fixes.intended.len() == 1 %}block{% else %}blocks{% endif %} marked intended, not counted:</span> <b>{{ d.fixes.intended|join(", ") }}</b>{% if !demo %} · <a class="au-link" href="{{ base }}/policy?tab=ai">review</a>{% endif %}</span>
         {% endif %}
         {% if !d.fixes.fixed.is_empty() %}
         <span class="fx-foot-line"><b class="c-ok">✓ {{ d.fixes.fixed.len() }} fixed since last crawl:</b> <span>{{ d.fixes.fixed|join(" · ") }}</span></span>

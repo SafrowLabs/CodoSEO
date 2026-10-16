@@ -16,9 +16,10 @@ codoseo-crawler.workspace = true
 codoseo-geo.workspace = true
 codoseo-mcp.workspace = true
 codoseo-notify.workspace = true
+codoseo-policy.workspace = true
 codoseo-store.workspace = true
 rmcp = { workspace = true, features = ["transport-streamable-http-server"] }
-axum = { workspace = true, features = ["macros"] }
+axum = { workspace = true, features = ["macros", "multipart"] }
 askama.workspace = true
 askama_web.workspace = true
 tokio.workspace = true

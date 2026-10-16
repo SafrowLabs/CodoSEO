@@ -152,7 +152,10 @@ pub struct PolicyReport {
 impl PolicyReport {
     /// Rules the site meets.
     pub fn met(&self) -> usize {
-        self.rules.iter().filter(|r| r.status == Status::Met).count()
+        self.rules
+            .iter()
+            .filter(|r| r.status == Status::Met)
+            .count()
     }
 
     pub fn rule(&self, id: RuleId) -> Option<&RuleResult> {
@@ -169,11 +172,7 @@ pub fn evaluate(policy: &SitePolicy, input: &PolicyInput) -> PolicyReport {
         .iter()
         .filter(|g| g.kind == GapKind::Seo)
         .count() as u32;
-    report.ai_gaps = report
-        .gaps
-        .iter()
-        .filter(|g| g.kind == GapKind::Ai)
-        .count() as u32;
+    report.ai_gaps = report.gaps.iter().filter(|g| g.kind == GapKind::Ai).count() as u32;
     report
 }
 
@@ -318,7 +317,9 @@ fn evaluate_ai(policy: &SitePolicy, access: Option<&AccessReport>, out: &mut Pol
             gaps: restricted.len() as u32,
             text: restricted
                 .iter()
-                .map(|f| slug_from_str(&f.subject).map_or(f.subject.clone(), |d| label(d).to_owned()))
+                .map(|f| {
+                    slug_from_str(&f.subject).map_or(f.subject.clone(), |d| label(d).to_owned())
+                })
                 .collect::<Vec<_>>()
                 .join(" · ")
                 + " limit AI answers and aren't ticked",
@@ -459,7 +460,11 @@ fn purpose_rule(
         Some(format!(
             "{} {} follow robots.txt; block {} in your firewall.",
             names(&ignores),
-            if ignores.len() == 1 { "doesn't" } else { "don't" },
+            if ignores.len() == 1 {
+                "doesn't"
+            } else {
+                "don't"
+            },
             if ignores.len() == 1 { "it" } else { "them" }
         ))
     };

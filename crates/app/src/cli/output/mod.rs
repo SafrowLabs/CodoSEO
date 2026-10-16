@@ -629,6 +629,7 @@ mod tests {
                 sitemap: Default::default(),
             },
             ai_access,
+            policy: None,
         }
     }
 

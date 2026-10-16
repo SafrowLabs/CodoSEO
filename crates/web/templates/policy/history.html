@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page pol">
+  <div class="page-head">
+    <a class="icon-btn aia-back" href="{{ base }}/policy" aria-label="Back to Site policy"><svg class="icon"><use href="#i-arrow"/></svg></a>
+    <h1>Policy history</h1>
+  </div>
+  <p class="page-sub">Every change to {{ domain }}'s site policy: who made it and where, what changed, and the newest crawl's scores before and after, so a score jump can be traced to a policy edit.</p>
+  <section class="card" aria-label="Policy changes">
+    {% if rows.is_empty() %}
+    <p class="pol-desc card-pad">No changes yet: the policy is the defaults.</p>
+    {% else %}
+    <ol class="pol-history">
+      {% for r in rows %}
+      <li class="pol-hrow">
+        <div class="pol-hmeta"><time title="{{ r.when_full }}">{{ r.when }}</time> · {{ r.who }} · <span class="tag">{{ r.via }}</span></div>
+        <ul class="pol-hsum">{% for s in r.summary %}<li class="mono">{{ s }}</li>{% endfor %}</ul>
+        {% if !r.scores.is_empty() %}<div class="pol-hscores">{{ r.scores }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

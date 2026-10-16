@@ -107,7 +107,9 @@ mod tests {
     fn the_summary_names_each_changed_key() {
         let a = SitePolicy::default();
         let mut b = a.clone();
-        b.ai.intent.purposes.insert(Purpose::Training, Stance::Block);
+        b.ai.intent
+            .purposes
+            .insert(Purpose::Training, Stance::Block);
         b.ai.probes = false;
         assert_eq!(
             summary(&a, &b),

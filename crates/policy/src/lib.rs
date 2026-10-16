@@ -667,6 +667,51 @@ pub fn parse_file(text: &str) -> Result<ParsedFile, Vec<PolicyError>> {
     Ok(ParsedFile { policy, warnings })
 }
 
+/// A policy file read from disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedFile {
+    pub path: std::path::PathBuf,
+    pub policy: SitePolicy,
+    /// Unknown keys, ignored ([`ParsedFile::warnings`]).
+    pub warnings: Vec<String>,
+    /// [`file_hash`] of its bytes.
+    pub hash: String,
+}
+
+/// Reads and validates the policy file at `path`. The error is what to tell the user: the
+/// file's name, then one line per problem.
+pub fn load_file(path: &std::path::Path) -> Result<LoadedFile, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let text =
+        std::str::from_utf8(&bytes).map_err(|_| format!("{} is not UTF-8 text", path.display()))?;
+    let parsed = parse_file(text).map_err(|errors| {
+        format!(
+            "{} is not a valid policy:\n{}",
+            path.display(),
+            error_lines(&errors)
+        )
+    })?;
+    Ok(LoadedFile {
+        path: path.to_owned(),
+        policy: parsed.policy,
+        warnings: parsed.warnings,
+        hash: file_hash(&bytes),
+    })
+}
+
+impl LoadedFile {
+    /// What a saved audit keeps about the policy it was judged under: `{ "file", "hash",
+    /// "policy", "report" }`.
+    pub fn audit_section(&self, report: &PolicyReport) -> serde_json::Value {
+        serde_json::json!({
+            "file": self.path.display().to_string(),
+            "hash": self.hash,
+            "policy": self.policy,
+            "report": report,
+        })
+    }
+}
+
 /// A short, stable fingerprint of a policy file's bytes: `sha256:` and the first 16 hex digits.
 pub fn file_hash(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
@@ -697,7 +742,10 @@ mod tests {
         let e = Thresholds::default().effective();
         assert_eq!((e.title_min, e.title_max), (30, 60));
         assert_eq!((e.description_min, e.description_max), (70, 160));
-        assert_eq!((e.thin_words, e.slow_ms, e.max_redirect_hops), (200, 1000, 1));
+        assert_eq!(
+            (e.thin_words, e.slow_ms, e.max_redirect_hops),
+            (200, 1000, 1)
+        );
         let t = Thresholds {
             title_max: Some(65),
             ..Thresholds::default()

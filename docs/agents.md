@@ -11,7 +11,7 @@ Formats on this page were checked against the official documentation on 2026-10-
 | Transport | stdio | Streamable HTTP |
 | Runs | on your machine, via `codoseo` or `npx -y codoseo` | on codoseo.com (or `<BASE_URL>/mcp` self-hosted) |
 | Account | none | none for free audits of public sites; an API key (`cdo_...`, **Settings, API keys**) for your monitored sites |
-| Tools | 11 (`audit_site`, `check_ai_access`, `probe_ai_fetch`, ...) | 4 without a key (`quick_audit`, ...), 13 with one (`list_sites`, `get_ai_access`, `get_fix`, ...) |
+| Tools | 12 (`audit_site`, `check_ai_access`, `probe_ai_fetch`, `get_policy`, ...) | 4 without a key (`quick_audit`, ...), 14 with one (`list_sites`, `get_ai_access`, `get_fix`, `get_policy`, ...) |
 | Private and staging addresses | allowed | refused |
 
 Both give an agent the 44 SEO checks, the 9 AI & GEO checks and a fix for each AI access finding.

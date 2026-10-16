@@ -1,0 +1,60 @@
+---
+source: crates/app/tests/policy_cli.rs
+expression: text
+---
+# CodoSEO site policy: how this site is meant to work for search engines and AI.
+# `codoseo crawl` and `codoseo check` read ./codoseo.toml when it is there (or --policy FILE);
+# `codoseo policy validate` checks this file. Keys left out keep their defaults.
+# Docs: https://github.com/SafrowLabs/CodoSEO/blob/main/docs/policy.md
+
+[policy]
+version = 1
+
+# ---- SEO rules (evaluated from the next release; the format is stable) ----
+
+# The one form every page should use: other forms should 301 to it.
+# [policy.seo.address]
+# host = "apex"              # apex | www
+# trailing_slash = "without" # without | with | either
+
+# What search engines should index: path rules, top to bottom, the first match wins.
+# `*` matches anything, `/` included. keep_out expects a noindex tag or header.
+# [[policy.seo.index]]
+# pattern = "/checkout/*"
+# stance = "keep_out"         # index | keep_out | none
+
+# [policy.seo]
+# index_default = "none"      # what pages no rule matches should be
+# ignore_params = ["utm_*", "gclid", "fbclid"]  # parameters that don't change the page
+# pagination_param = "page"   # each page canonicalises to itself
+# must_work = ["/", "/pricing"]  # must answer 200 and be indexable on every crawl
+
+# Check thresholds; the defaults are shown.
+# [policy.seo.thresholds]
+# title_min = 30
+# title_max = 60
+# description_min = 70
+# description_max = 160
+# thin_words = 200
+# slow_ms = 1000
+# max_redirect_hops = 1
+# image_alt = true
+
+# Checks that don't apply to part of the site.
+# [[policy.seo.exceptions]]
+# check = "thin_content"
+# scope = "/stores/*"
+# note = "Store pages are short by design"
+
+# ---- AI rules ----
+
+[policy.ai]
+# Per purpose: allow | block | any (no preference: never reported either way).
+# Defaults: search and user_fetch allow; agent, training and ads any.
+# purposes = { search = "allow", user_fetch = "allow", agent = "any", training = "any", ads = "any" }
+# Per-bot exceptions, by robots.txt token (codoseo bots lists them).
+# bots = { "GPTBot" = "block" }
+# Page directives you use on purpose: nosnippet, max_snippet, noarchive, nocache, data_nosnippet.
+# accepted_directives = ["max_snippet"]
+# Synthetic fetch checks after each monitored crawl (the CLI runs them only with --probes).
+probes = true

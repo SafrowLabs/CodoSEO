@@ -105,6 +105,7 @@ codoseo diff baseline.json audit.json
 | `codoseo llms-txt <URL>` | Fetch the site's `/llms.txt` and check it against the llmstxt.org format and Lighthouse's audit (`--format table\|json\|markdown`). Informational, never scored; exits 2 if robots.txt disallows it |
 | `codoseo redirects <URL>` | Follow a URL's redirect chain hop by hop |
 | `codoseo diff <BEFORE> <AFTER>` | Compare two saved JSON audits; surface new issues and regressions |
+| `codoseo policy init\|validate\|export\|import` | The [site policy](docs/policy.md) file, `codoseo.toml`: write a starting file, check one, or move a monitored site's policy to and from the hosted app |
 | `codoseo mcp` | Run the local MCP server over stdio, for AI agents (see [MCP for AI agents](#mcp-for-ai-agents)) |
 | `codoseo web` | Serve the web app (see [Web app and self-hosting](#web-app-and-self-hosting)) |
 | `codoseo worker` | Claim and run crawls from the Postgres queue |
@@ -127,12 +128,15 @@ codoseo diff baseline.json audit.json
 | `--fail-on GATES` | — | Exit 1 when a gate fails: `critical`, `warning`, `geo`, `geo:critical\|warning\|notice` or an AI access finding kind such as `bots_blocked:search` (comma-separated; see [docs/ci.md](docs/ci.md)) |
 | `--baseline AUDIT.json` | — | Count only what is new or worse since this earlier audit |
 | `--probes` | off | Also fetch up to 5 important pages as each AI search and user-triggered bot (synthetic) |
+| `--policy FILE` | `./codoseo.toml` if present | Judge AI access under this [site policy](docs/policy.md) file's AI rules; the audit keeps its hash and report |
+| `--no-policy` | — | Ignore `./codoseo.toml` |
 
 **`check`**
 
 | Flag | Default | Description |
 |---|---|---|
 | `--format table\|json` | table | Output format |
+| `--policy FILE`, `--no-policy` | `./codoseo.toml` if present | Validate the policy file (one page has no AI access report, so it changes nothing else yet) |
 
 **`robots`**
 
@@ -328,7 +332,8 @@ The action installs the release binary (checksum verified), annotates the run an
 
 - `format_version`: `1` — `diff` rejects any other version
 - Audits written by a later `0.0.x` release that adds new checks still load; counts for unknown checks are skipped
-- `ai_access` (optional): `{ report, findings }` for [AI access](docs/ai-access.md), judged under the default intent. Audits without it still load and diff
+- `ai_access` (optional): `{ report, findings }` for [AI access](docs/ai-access.md), judged under the default intent, or under the AI rules of the [site policy](docs/policy.md) file the run read. Audits without it still load and diff
+- `policy` (optional): `{ file, hash, policy, report }` when a policy file was read. Adding it left `format_version` at `1`
 - `url_hash` and similar fields are unsigned 64-bit integers — treat them as opaque IDs; JavaScript and `jq` can lose precision on them
 
 ### Health score
@@ -370,7 +375,7 @@ Any other client that takes a stdio command (Cursor, Claude Desktop, ...) needs 
 { "mcpServers": { "codoseo": { "command": "codoseo", "args": ["mcp"] } } }
 ```
 
-Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_ai_access`, `check_llms_txt`, `check_redirects`, `compare_audits`, `probe_ai_fetch` (a synthetic check: fetches one page as each AI search and user-triggered bot and compares with CodoSEObot, with a remedy for each finding). Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
+Tools: `audit_site`, `get_audit`, `get_issue_urls`, `get_page`, `check_page`, `check_robots`, `check_ai_access`, `check_llms_txt`, `check_redirects`, `compare_audits`, `get_policy` (reads a [site policy](docs/policy.md) file), `probe_ai_fetch` (a synthetic check: fetches one page as each AI search and user-triggered bot and compares with CodoSEObot, with a remedy for each finding). Audits are cached as JSON under your user cache directory (`~/.cache/codoseo/audits/` on Linux, `~/Library/Caches/codoseo/audits/` on macOS).
 
 ### Hosted server (codoseo.com)
 
@@ -462,7 +467,8 @@ crates/
   checks/     — the 44 SEO check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
   geo/        — AI bot registry (CC0 data), robots.txt verdicts, AI access report and findings
-  mcp/        — MCP server: the 11 local tools and the hosted tools, over rmcp
+  mcp/        — MCP server: the 12 local tools and the hosted tools, over rmcp
+  policy/     — the site policy: codoseo.toml, validation, evaluation against a crawl
   store/      — Postgres: migrations, crawl and jobs queues, queries for the web app
   web/        — the web app: axum routes, askama templates, htmx, bundled assets
   app/        — CLI (the `codoseo` binary)

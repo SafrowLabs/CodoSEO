@@ -339,10 +339,25 @@ mod tests {
         assert!(!s.file.contains("User-agent: PerplexityBot"), "{}", s.file);
         assert!(s.file.contains("User-agent: GPTBot\n"));
         assert!(s.file.contains("User-agent: CCBot\n"));
-        assert!(s.file.trim_end().ends_with("Sitemap: https://shop.example.com/sitemap.xml"));
-        assert!(s.diff.iter().any(|d| d.sign == Sign::Removed && d.text == "User-agent: PerplexityBot"));
-        assert!(s.diff.iter().any(|d| d.sign == Sign::Added && d.text == "User-agent: GPTBot"));
-        assert_eq!(s.added, s.diff.iter().filter(|d| d.sign == Sign::Added).count());
+        assert!(
+            s.file
+                .trim_end()
+                .ends_with("Sitemap: https://shop.example.com/sitemap.xml")
+        );
+        assert!(
+            s.diff
+                .iter()
+                .any(|d| d.sign == Sign::Removed && d.text == "User-agent: PerplexityBot")
+        );
+        assert!(
+            s.diff
+                .iter()
+                .any(|d| d.sign == Sign::Added && d.text == "User-agent: GPTBot")
+        );
+        assert_eq!(
+            s.added,
+            s.diff.iter().filter(|d| d.sign == Sign::Added).count()
+        );
     }
 
     #[test]

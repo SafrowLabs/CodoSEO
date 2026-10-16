@@ -13,10 +13,10 @@ use codoseo_core::output::{Progress, StopReason};
 use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::crawl::crawl;
 use codoseo_crawler::probe::{ProbeConfig, probe_from_env, run_probes};
-use codoseo_geo::assess_with_defaults;
 use codoseo_geo::probe::plan_probes;
-use codoseo_geo::report::{build_report, important_urls};
+use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::RobotsTxt;
+use codoseo_policy::{PolicyInput, evaluate};
 use url::Url;
 
 use super::gate::{Gate, judge, parse_gate, summary_lines};
@@ -65,6 +65,13 @@ pub struct CrawlArgs {
     /// and compare with CodoSEObot (a synthetic check; off by default)
     #[arg(long)]
     probes: bool,
+    /// Judge AI access under this site policy file's AI rules (default: ./codoseo.toml when
+    /// there is one); the audit JSON keeps the file's hash and the policy report
+    #[arg(long, value_name = "FILE", conflicts_with = "no_policy")]
+    policy: Option<PathBuf>,
+    /// Ignore ./codoseo.toml: judge AI access under the default intent
+    #[arg(long)]
+    no_policy: bool,
 }
 
 impl CrawlArgs {
@@ -125,6 +132,7 @@ pub async fn run(args: CrawlArgs) -> Outcome {
         .as_deref()
         .map(super::diff::load)
         .transpose()?;
+    let policy = super::policy::resolve(args.policy.as_deref(), args.no_policy)?;
     let mut saves = Vec::new();
     for path in &args.save {
         let format = CrawlFormat::from_extension(path).ok_or_else(|| {
@@ -145,13 +153,21 @@ pub async fn run(args: CrawlArgs) -> Outcome {
 
     let report = run_checks(&mut out);
     let duration_ms = out.duration_ms;
-    // GEO stays out of the health score: it is a section of its own, judged under the default
-    // intent because the CLI has nowhere to keep an owner's. `--fail-on` may gate on it.
-    let ai_access = if args.probes && stop_message(&out.stop).is_none() {
-        assess_with_probes(&out).await
-    } else {
-        assess_with_defaults(&out)
-    };
+    // GEO stays out of the health score: it is a section of its own, judged under the policy
+    // file's AI rules, or the default intent without one. `--fail-on` may gate on it.
+    let intent = policy
+        .as_ref()
+        .map(|p| p.policy.ai.intent.clone())
+        .unwrap_or_default();
+    let important = important_urls(&out.pages, &out.origin, &Default::default());
+    let mut access = build_report(&out, &important);
+    if args.probes && stop_message(&out.stop).is_none() {
+        probe(&out, &mut access).await;
+    }
+    let ai_access = codoseo_geo::section_with(out.origin.as_str(), &access, &intent);
+    let policy_section = policy
+        .as_ref()
+        .map(|p| p.audit_section(&evaluate(&p.policy, &PolicyInput::ai_only(Some(&access)))));
     let audit = Audit {
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -163,6 +179,7 @@ pub async fn run(args: CrawlArgs) -> Outcome {
         report,
         snapshot: Snapshot::from_output_owned(out),
         ai_access: Some(ai_access),
+        policy: policy_section,
     };
 
     let verdict = judge(&audit, baseline.as_ref(), &args.fail_on);
@@ -191,20 +208,18 @@ pub async fn run(args: CrawlArgs) -> Outcome {
     })
 }
 
-/// [`assess_with_defaults`] plus the synthetic fetch probes of up to [`PROBE_URLS`] important
-/// pages, kept in `report.probes` and judged in the findings. A site robots.txt gives no verdicts
-/// for, or with no HTML 200 page to probe, gets the section without probes.
-async fn assess_with_probes(out: &CrawlOutput) -> serde_json::Value {
-    let important = important_urls(&out.pages, &out.origin, &Default::default());
-    let mut access = build_report(out, &important);
+/// The synthetic fetch probes of up to [`PROBE_URLS`] important pages, kept in `access.probes`
+/// and judged in the findings. A site robots.txt gives no verdicts for, or with no HTML 200 page
+/// to probe, keeps the report without probes.
+async fn probe(out: &CrawlOutput, access: &mut AccessReport) {
     let robots = out
         .robots
         .as_ref()
         .and_then(|r| RobotsTxt::from_response(Some(r.status), r.body.as_bytes()));
-    if let Some(plan) = plan_probes(&access, robots.as_ref(), PROBE_URLS) {
+    if let Some(plan) = plan_probes(access, robots.as_ref(), PROBE_URLS) {
         // Like the crawl, a self-run command may probe private and internal addresses.
         let mut cfg = ProbeConfig::new(
-            &access,
+            access,
             plan,
             AddressPolicy::AllowPrivate,
             PROBE_BUDGET,
@@ -213,7 +228,6 @@ async fn assess_with_probes(out: &CrawlOutput) -> serde_json::Value {
         cfg.from = probe_from_env();
         access.probes = Some(run_probes(cfg).await);
     }
-    codoseo_geo::section(out.origin.as_str(), &access)
 }
 
 /// Why the crawl never got going, for the stop reasons that mean it could not run.

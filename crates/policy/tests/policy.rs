@@ -11,8 +11,8 @@ use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::{Purpose, Stance};
 use codoseo_policy::{
-    Address, Exception, HostPref, IndexRule, IndexStance, PathPattern, PolicyInput, RuleId, Slash,
-    SitePolicy, Status, Thresholds, evaluate, parse_file,
+    Address, Exception, HostPref, IndexRule, IndexStance, PathPattern, PolicyInput, RuleId,
+    SitePolicy, Slash, Status, Thresholds, evaluate, parse_file,
 };
 use proptest::prelude::*;
 use url::Url;
@@ -63,12 +63,16 @@ fn the_design_example_parses() {
     assert_eq!(p.seo.thresholds.effective().title_max, 65);
     assert_eq!(p.seo.thresholds.effective().title_min, 30);
     assert_eq!(p.seo.exceptions[0].check, CheckId::ThinContent);
+    assert_eq!(p.ai.intent.purpose_stance(Purpose::Training), Stance::Block);
     assert_eq!(
-        p.ai.intent.purpose_stance(Purpose::Training),
-        Stance::Block
+        p.ai.intent.bot_override("perplexity-user"),
+        Some(Stance::Block)
     );
-    assert_eq!(p.ai.intent.bot_override("perplexity-user"), Some(Stance::Block));
-    assert!(p.ai.intent.accepted_directives.contains(&DirectiveSlug::MaxSnippet));
+    assert!(
+        p.ai.intent
+            .accepted_directives
+            .contains(&DirectiveSlug::MaxSnippet)
+    );
     assert!(p.ai.probes);
 }
 
@@ -79,7 +83,10 @@ fn toml_and_json_round_trip_the_full_example() {
     let back = parse_file(&toml).unwrap();
     assert_eq!(back.policy, p, "{toml}");
     let json = p.to_json();
-    assert_eq!(serde_json::from_value::<SitePolicy>(json.clone()).unwrap(), p);
+    assert_eq!(
+        serde_json::from_value::<SitePolicy>(json.clone()).unwrap(),
+        p
+    );
     assert_eq!(SitePolicy::from_json_lenient(json), p);
 }
 
@@ -101,7 +108,10 @@ fn unknown_keys_are_warnings_not_errors() {
     assert!(!parsed.policy.ai.probes);
     let mut w = parsed.warnings;
     w.sort();
-    assert_eq!(w, ["policy.ai.botz", "policy.future", "policy.seo.tresholds"]);
+    assert_eq!(
+        w,
+        ["policy.ai.botz", "policy.future", "policy.seo.tresholds"]
+    );
 }
 
 #[test]
@@ -142,14 +152,32 @@ fn validation_names_each_problem() {
          [policy.ai]\naccepted_directives = [\"noindex\"]\n",
     );
     let joined = e.join("\n");
-    assert!(joined.contains("version: version 2 is not supported"), "{joined}");
-    assert!(joined.contains("seo.index[0].pattern: a pattern starts with /"), "{joined}");
-    assert!(joined.contains("seo.index[2].pattern: \"/a\" is listed twice"), "{joined}");
+    assert!(
+        joined.contains("version: version 2 is not supported"),
+        "{joined}"
+    );
+    assert!(
+        joined.contains("seo.index[0].pattern: a pattern starts with /"),
+        "{joined}"
+    );
+    assert!(
+        joined.contains("seo.index[2].pattern: \"/a\" is listed twice"),
+        "{joined}"
+    );
     assert!(joined.contains("seo.ignore_params[0]"), "{joined}");
     assert!(joined.contains("seo.must_work[0]"), "{joined}");
-    assert!(joined.contains("title_min (70) must be below title_max (60)"), "{joined}");
-    assert!(joined.contains("seo.thresholds.slow_ms: 5 is out of range"), "{joined}");
-    assert!(joined.contains("ai.accepted_directives: noindex can't be accepted"), "{joined}");
+    assert!(
+        joined.contains("title_min (70) must be below title_max (60)"),
+        "{joined}"
+    );
+    assert!(
+        joined.contains("seo.thresholds.slow_ms: 5 is out of range"),
+        "{joined}"
+    );
+    assert!(
+        joined.contains("ai.accepted_directives: noindex can't be accepted"),
+        "{joined}"
+    );
 }
 
 #[test]
@@ -298,13 +326,21 @@ fn report(robots: &str) -> AccessReport {
 fn ai_rules_read_the_findings_by_purpose() {
     let r = report("User-agent: *\nAllow: /\n\nUser-agent: OAI-SearchBot\nDisallow: /\n");
     let mut p = SitePolicy::default();
-    p.ai.intent.purposes.insert(Purpose::Training, Stance::Block);
+    p.ai.intent
+        .purposes
+        .insert(Purpose::Training, Stance::Block);
     let rep = evaluate(&p, &PolicyInput::ai_only(Some(&r)));
 
     let search = rep.rule(RuleId::AiSearch).unwrap();
     assert_eq!(search.status, Status::Gaps);
     assert_eq!(search.gaps, 1);
-    assert!(search.text.contains("OAI-SearchBot is blocked by robots.txt"), "{}", search.text);
+    assert!(
+        search
+            .text
+            .contains("OAI-SearchBot is blocked by robots.txt"),
+        "{}",
+        search.text
+    );
 
     let training = rep.rule(RuleId::AiTraining).unwrap();
     assert_eq!(training.status, Status::Gaps, "{}", training.text);
@@ -314,7 +350,11 @@ fn ai_rules_read_the_findings_by_purpose() {
     assert_eq!(rep.rule(RuleId::AiAds).unwrap().status, Status::NotChecked);
     assert_eq!(rep.ai_gaps as usize, rep.gaps.len());
     assert_eq!(rep.seo_gaps, 0);
-    assert!(rep.gaps.iter().any(|g| g.subject.as_deref() == Some("OAI-SearchBot")));
+    assert!(
+        rep.gaps
+            .iter()
+            .any(|g| g.subject.as_deref() == Some("OAI-SearchBot"))
+    );
 }
 
 #[test]
@@ -331,7 +371,9 @@ fn a_met_rule_and_the_no_report_case() {
 fn blocking_bots_that_ignore_robots_has_limited_effect() {
     let r = report("User-agent: *\nDisallow: /\n");
     let mut p = SitePolicy::default();
-    p.ai.intent.purposes.insert(Purpose::UserFetch, Stance::Block);
+    p.ai.intent
+        .purposes
+        .insert(Purpose::UserFetch, Stance::Block);
     let rep = evaluate(&p, &PolicyInput::ai_only(Some(&r)));
     let user = rep.rule(RuleId::AiUserFetch).unwrap();
     // Only when the registry lists a user fetcher that doesn't follow robots.txt.

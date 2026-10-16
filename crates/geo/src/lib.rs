@@ -40,7 +40,16 @@ pub fn assess_with_defaults(out: &CrawlOutput) -> serde_json::Value {
 /// `{ "report", "findings", "remedies" }` for an access report under the default intent: the
 /// shape of an audit's AI access section.
 pub fn section(origin: &str, access: &report::AccessReport) -> serde_json::Value {
-    let found = findings::findings(access, &Intent::default());
+    section_with(origin, access, &Intent::default())
+}
+
+/// [`section`] under the owner's `intent` (a site policy file's AI rules).
+pub fn section_with(
+    origin: &str,
+    access: &report::AccessReport,
+    intent: &Intent,
+) -> serde_json::Value {
+    let found = findings::findings(access, intent);
     let remedies = remedy::finding_remedies(origin, access, &found);
     serde_json::json!({ "report": access, "findings": found, "remedies": remedies })
 }

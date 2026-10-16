@@ -326,15 +326,15 @@ async fn saving_the_intent_re_evaluates_the_latest_report_quietly() {
 
     // The form: a segmented control per purpose and a select per bot.
     let form = app
-        .get(&format!("/s/{}/ai-access/intent", site.id), Some(&cookie))
+        .get(&format!("/s/{}/policy?tab=ai", site.id), Some(&cookie))
         .await;
     assert_eq!(form.status, StatusCode::OK);
     for needle in [
         r#"name="p.search" value="allow" checked"#,
         r#"name="p.training" value="any" checked"#,
         r#"name="b.GPTBot""#,
-        "Per-bot overrides",
-        "Save intent",
+        "set one differently",
+        "Save policy",
         "Reset to defaults",
     ] {
         assert!(form.body.contains(needle), "missing {needle:?}");
@@ -980,7 +980,7 @@ async fn the_bots_list_opens_on_what_needs_attention() {
         r#"<div class="aia-rl is-hit"><span class="ln">6</span><span class="tx">Disallow: /</span><span class="nt">decides /</span></div>"#,
         "0 of 3 key pages allowed; blocked: /, /docs/start, /pricing",
         "Open the issue",
-        &format!("/s/{}/ai-access/intent#bot-OAI-SearchBot", site.id),
+        &format!("/s/{}/policy?tab=ai#bot-OAI-SearchBot", site.id),
     ] {
         assert!(body.contains(needle), "missing {needle:?} in {body}");
     }
@@ -1187,13 +1187,10 @@ async fn mark_intended_on_restricted_answers_accepts_the_directive() {
 
     // The intent form shows it ticked, and unticking it brings the issue back.
     let form = app
-        .get(&format!("/s/{}/ai-access/intent", site.id), Some(&cookie))
+        .get(&format!("/s/{}/policy?tab=ai", site.id), Some(&cookie))
         .await
         .body;
-    assert!(
-        form.contains("Page directives you use on purpose"),
-        "{form}"
-    );
+    assert!(form.contains("Answer limits you use on purpose"), "{form}");
     assert!(
         form.contains(r#"name="d" value="nosnippet" checked>"#),
         "{form}"
@@ -1519,7 +1516,7 @@ async fn the_fetch_check_says_why_there_are_no_results() {
         body.contains("Fetch checks are off for this site"),
         "{body}"
     );
-    assert!(body.contains(&format!(r#"href="/s/{}/ai-access/intent#probes""#, site.id)));
+    assert!(body.contains(&format!(r#"href="/s/{}/policy?tab=ai#probes""#, site.id)));
     assert!(body.contains(STAY_OPEN), "{body}");
     // Even with a stored probe report.
     app.finished_crawl_with_probes(&site, pages(), (200, OPEN), &|r| probes_with(r, &waf))
@@ -1548,10 +1545,11 @@ async fn the_probe_switch_is_saved_with_the_intent() {
     app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
         .await;
     let path = format!("/s/{}/ai-access/intent", site.id);
-    let form = app.get(&path, Some(&cookie)).await.body;
+    let page = format!("/s/{}/policy?tab=ai", site.id);
+    let form = app.get(&page, Some(&cookie)).await.body;
     for needle in [
         r#"id="probes""#,
-        "Run synthetic fetch checks",
+        "Run fetch checks",
         r#"type="hidden" name="probes" value="off""#,
         r#"name="probes" value="on" checked"#,
     ] {
@@ -1564,7 +1562,7 @@ async fn the_probe_switch_is_saved_with_the_intent() {
     assert!(!geo::get_ai_probes(app.pool(), site.id).await.unwrap());
     let bots = tab_body(&app, &site, &cookie, "/bots").await;
     assert!(bots.contains("Fetch checks are off for this site"));
-    let form = app.get(&path, Some(&cookie)).await.body;
+    let form = app.get(&page, Some(&cookie)).await.body;
     assert!(
         !form.contains(r#"name="probes" value="on" checked"#),
         "{form}"
@@ -1731,7 +1729,8 @@ async fn probe_urls_zero_turns_the_checks_off_for_the_whole_install() {
 
     // The intent form can't switch them on, and saving it leaves the site's switch alone.
     let path = format!("/s/{}/ai-access/intent", site.id);
-    let form = app.get(&path, Some(&cookie)).await.body;
+    let page = format!("/s/{}/policy?tab=ai", site.id);
+    let form = app.get(&page, Some(&cookie)).await.body;
     assert!(form.contains("turned off on this install"), "{form}");
     assert!(!form.contains(r#"type="hidden" name="probes""#), "{form}");
     assert!(form.contains(r#"value="on" checked disabled"#), "{form}");
@@ -3018,7 +3017,7 @@ async fn operator_logos_sit_beside_their_bots() {
 
     // The intent form shows the same tiles.
     let intent = app
-        .get(&format!("/s/{}/ai-access/intent", site.id), Some(&cookie))
+        .get(&format!("/s/{}/policy?tab=ai", site.id), Some(&cookie))
         .await
         .body;
     assert!(intent.contains(&tile("sm", openai)), "{intent}");
