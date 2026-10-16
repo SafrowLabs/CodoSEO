@@ -156,8 +156,13 @@ fn a_geo_regression_against_the_baseline_fails_the_build_with_a_sarif_result() {
     let run = &doc["runs"][0];
     assert_eq!(run["originalUriBaseIds"]["SITE"]["uri"], after.as_str());
     let rules = run["tool"]["driver"]["rules"].as_array().expect("rules");
-    // 44 SEO checks and 9 AI & GEO checks, one rule each.
-    assert_eq!(rules.len(), 53);
+    // 44 SEO checks, 5 site policy checks and 9 AI & GEO checks, one rule each.
+    assert_eq!(rules.len(), 58);
+    assert!(
+        rules
+            .iter()
+            .any(|r| r["id"] == "seo/must_work_failed" && r["properties"]["category"] == "Policy")
+    );
     let rule = &rules[r["ruleIndex"].as_u64().expect("an index") as usize];
     assert_eq!(rule["id"], "geo/bots_blocked");
     assert_eq!(rule["properties"]["evidenceGrade"], "A");
@@ -350,4 +355,69 @@ fn the_action_run_step_fails_on_a_geo_regression_and_writes_its_outputs() {
     assert_eq!(results(&doc, "geo/bots_blocked")[0]["baselineState"], "new");
     let summary = fs::read_to_string(dir.path().join("summary.md")).expect("the job summary");
     assert!(summary.contains("AI access"), "{summary}");
+}
+
+#[test]
+fn a_policy_file_turns_on_its_checks_and_gates() {
+    let url = serve(
+        clean_site()
+            // Linked from nowhere: the policy's must-work list fetches it.
+            .page("/cart", Page::status(500, "down")),
+    );
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let policy = dir.path().join("codoseo.toml");
+    fs::write(
+        &policy,
+        "[policy]\nversion = 1\n[policy.seo]\nmust_work = [\"/cart\"]\n",
+    )
+    .expect("write the policy");
+    let audit = dir.path().join("audit.json");
+    let sarif = dir.path().join("out.sarif");
+    crawl(&url)
+        .arg("--policy")
+        .arg(&policy)
+        .args(["--fail-on", "must_work", "--save"])
+        .arg(&audit)
+        .arg("--save")
+        .arg(&sarif)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("policy:must_work"))
+        .stderr(predicate::str::contains("/cart answers 500"));
+    let doc = assert_valid_sarif(&fs::read_to_string(&sarif).expect("the SARIF file"));
+    let failed = results(&doc, "seo/must_work_failed");
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert_eq!(failed[0]["level"], "error");
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&audit).expect("the audit")).expect("json");
+    assert_eq!(saved["report"]["checks_total"], 45);
+    assert_eq!(saved["policy"]["report"]["seo_gaps"], 1);
+
+    // The saved audit against the file: one gap, exit 1; without the rule, none.
+    codoseo()
+        .args(["policy", "check", "--audit"])
+        .arg(&audit)
+        .arg("--policy")
+        .arg(&policy)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("must_work"))
+        .stdout(predicate::str::contains("1 SEO gap"));
+    fs::write(&policy, "[policy]\nversion = 1\n").expect("write the policy");
+    codoseo()
+        .args(["policy", "check", "--audit"])
+        .arg(&audit)
+        .arg("--policy")
+        .arg(&policy)
+        .args(["--format", "json"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("\"seo_gaps\": 0"));
+
+    // A policy gate needs a policy file.
+    crawl(&url)
+        .args(["--no-policy", "--fail-on", "policy"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("needs a policy file"));
 }

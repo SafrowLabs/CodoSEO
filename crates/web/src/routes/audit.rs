@@ -883,6 +883,7 @@ fn category_label(c: Category) -> &'static str {
         Category::Sitemap => "Sitemap",
         Category::Social => "Social",
         Category::Schema => "Schema",
+        Category::Policy => "Policy",
     }
 }
 
@@ -1021,6 +1022,7 @@ fn time_bars(t: &ResponseBuckets) -> Vec<HBar> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codoseo_checks::BASE_CHECKS;
     use codoseo_core::report::StatusCounts;
     use codoseo_store::crawl_queue::CrawlTrigger;
     use time::Duration;
@@ -1051,8 +1053,8 @@ mod tests {
             started_at: Some(finished - Duration::minutes(1)),
             finished_at: Some(finished),
             health_score: Some(80),
-            checks_passed: Some((CHECKS.len() - s.counts.len()) as i16),
-            checks_total: Some(CHECKS.len() as i16),
+            checks_passed: Some((BASE_CHECKS - s.counts.len()) as i16),
+            checks_total: Some(BASE_CHECKS as i16),
             geo_score: geo,
             geo_checks_passed: geo.map(|_| 9),
             geo_checks_applicable: geo.map(|_| 11),
@@ -1131,8 +1133,8 @@ mod tests {
             text(&card(&d, "overall").detail),
             format!(
                 "{} of {} checks pass",
-                CHECKS.len() - 1 + 9,
-                CHECKS.len() + 11
+                BASE_CHECKS - 1 + 9,
+                BASE_CHECKS + 11
             )
         );
         assert_eq!(text(&card(&d, "seo").change), "No change");

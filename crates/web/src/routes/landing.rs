@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use codoseo_checks::{CHECKS, Category};
+use codoseo_checks::{BASE_CHECKS, CHECKS, Category};
 use codoseo_core::plan::{ManualAllowance, Plan, PlanLimits, Schedule};
 
 use crate::config::UmamiConfig;
@@ -515,7 +515,7 @@ fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) 
     Landing {
         url: url.to_owned(),
         error,
-        checks: CHECKS.len(),
+        checks: BASE_CHECKS,
         host: base
             .split_once("://")
             .map_or(base.as_str(), |(_, host)| host)
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn every_check_is_in_a_listed_category() {
         let listed: usize = categories().iter().map(|c| c.count).sum();
-        assert_eq!(listed, CHECKS.len());
+        assert_eq!(listed, BASE_CHECKS, "every check but the policy ones");
     }
 
     #[test]

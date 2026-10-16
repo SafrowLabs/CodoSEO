@@ -16,7 +16,7 @@ use codoseo_crawler::probe::{ProbeConfig, probe_from_env, run_probes};
 use codoseo_geo::probe::plan_probes;
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::RobotsTxt;
-use codoseo_policy::{PolicyInput, evaluate};
+use codoseo_policy::apply_to_crawl;
 use url::Url;
 
 use super::gate::{Gate, judge, parse_gate, summary_lines};
@@ -90,6 +90,7 @@ impl CrawlArgs {
             address_policy: AddressPolicy::AllowPrivate,
             user_agent: USER_AGENT.to_owned(),
             site_signals: true,
+            extra_seeds: Vec::new(),
         }
     }
 }
@@ -133,6 +134,13 @@ pub async fn run(args: CrawlArgs) -> Outcome {
         .map(super::diff::load)
         .transpose()?;
     let policy = super::policy::resolve(args.policy.as_deref(), args.no_policy)?;
+    if policy.is_none()
+        && let Some(g) = args.fail_on.iter().find(|g| g.needs_policy())
+    {
+        return Err(CliError::msg(format!(
+            "--fail-on {g} needs a policy file: add ./codoseo.toml (codoseo policy init) or pass --policy FILE"
+        )));
+    }
     let mut saves = Vec::new();
     for path in &args.save {
         let format = CrawlFormat::from_extension(path).ok_or_else(|| {
@@ -147,11 +155,26 @@ pub async fn run(args: CrawlArgs) -> Outcome {
     let progress = ProgressLine {
         enabled: std::io::stderr().is_terminal(),
     };
-    let result = crawl(cfg.clone(), |p| progress.update(p)).await;
+    // The policy's must-work pages are fetched even when no link leads there.
+    let mut run_cfg = cfg.clone();
+    if let Some(p) = &policy {
+        run_cfg.extra_seeds = p
+            .policy
+            .seo
+            .must_work
+            .iter()
+            .filter_map(|path| cfg.start_url.join(path).ok())
+            .collect();
+    }
+    let result = crawl(run_cfg, |p| progress.update(p)).await;
     progress.clear();
     let mut out = result?;
 
-    let report = run_checks(&mut out);
+    let mut report = run_checks(&mut out);
+    // The policy file's SEO rules: their gaps are checks like any other, in the health score.
+    if let Some(p) = &policy {
+        apply_to_crawl(&p.policy, &mut out, &mut report, &Default::default(), &[]);
+    }
     let duration_ms = out.duration_ms;
     // GEO stays out of the health score: it is a section of its own, judged under the policy
     // file's AI rules, or the default intent without one. `--fail-on` may gate on it.
@@ -165,9 +188,15 @@ pub async fn run(args: CrawlArgs) -> Outcome {
         probe(&out, &mut access).await;
     }
     let ai_access = codoseo_geo::section_with(out.origin.as_str(), &access, &intent);
-    let policy_section = policy
-        .as_ref()
-        .map(|p| p.audit_section(&evaluate(&p.policy, &PolicyInput::ai_only(Some(&access)))));
+    let policy_section = policy.as_ref().map(|p| {
+        let snapshot = Snapshot::from_output(&out);
+        p.audit_section(&super::policy::report_for(
+            &p.policy,
+            &snapshot,
+            &report,
+            Some(&access),
+        ))
+    });
     let audit = Audit {
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),

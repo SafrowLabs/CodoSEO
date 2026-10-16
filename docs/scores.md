@@ -2,7 +2,7 @@
 
 Every finished crawl of a monitored site has three scores out of 100:
 
-- **SEO**, the health score: how the site does on the 44 SEO checks.
+- **SEO**, the health score: how the site does on the 44 SEO checks, plus the site policy checks its policy turns on.
 - **GEO**: how ready the site is for AI products, from the [AI access](ai-access.md) checks and a few SEO checks that help AI understand pages.
 - **Overall**: the two blended, `round(0.6 × SEO + 0.4 × GEO)`.
 
@@ -11,6 +11,8 @@ No-signup audits have only the SEO score: they have no AI access evaluation. Cra
 ## SEO
 
 100 minus the cost of every failing check, never below 0. A failing check costs `cap × (0.25 + 0.75 × share)`: the cap is 15 for a Critical check, 5 for a Warning and 1 for a Notice, and the share is the part of the crawled pages it fails on (all of it for a site-wide check). One failing page costs a quarter of the cap, every page all of it.
+
+Site policy gaps cost points too. When the [site policy](policy.md) declares an SEO rule, its check joins the crawl and counts like any other: `must_work_failed` (Critical), `policy_address` and `policy_index_mismatch` (Warning), `policy_keep_out_partial` and `policy_param_canonical` (Notice). A rule the policy doesn't declare adds no check, so the checks total is 44 plus one per declared check, and a site with the default policy scores exactly as before.
 
 ## GEO
 

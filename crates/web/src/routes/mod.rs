@@ -24,6 +24,7 @@ pub mod legal;
 pub mod mcp;
 pub mod monitoring;
 pub mod policy;
+pub mod policy_seo;
 pub mod quick;
 pub mod rankorg;
 pub mod search;

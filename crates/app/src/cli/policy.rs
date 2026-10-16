@@ -1,15 +1,22 @@
 //! `codoseo policy`: the site policy file (`codoseo.toml`). `init` writes a starting file,
-//! `validate` checks one, and `export`/`import` move a monitored site's policy to and from the
-//! hosted app over the REST API. `crawl` and `check` read the file too ([`resolve`]).
+//! `validate` checks one, `check --audit` compares a saved audit with one, and `export`/`import`
+//! move a monitored site's policy to and from the hosted app over the REST API. `crawl` and
+//! `check` read the file too ([`resolve`]).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
 use codoseo_core::crawl::AddressPolicy;
+use codoseo_core::report::CrawlReport;
+use codoseo_core::snapshot::Snapshot;
 use codoseo_crawler::fetch::{Fetcher, FetcherConfig};
+use codoseo_geo::report::AccessReport;
 use codoseo_policy::template::init_file;
-use codoseo_policy::{DEFAULT_FILE, HostPref, LoadedFile, Slash, load_file, parse_file};
+use codoseo_policy::{
+    DEFAULT_FILE, HostPref, LoadedFile, PolicyInput, PolicyReport, SitePolicy, Slash, Status,
+    evaluate, load_file, parse_file,
+};
 use url::Url;
 
 use super::{CliError, EXIT_FAIL_ON, EXIT_OK, Outcome};
@@ -29,6 +36,8 @@ enum PolicyCommand {
     Init(InitArgs),
     /// Check a policy file (default ./codoseo.toml): exit 1 when it is not valid
     Validate(ValidateArgs),
+    /// Compare a saved audit (`crawl --save audit.json`) with a policy file: exit 1 on any gap
+    Check(CheckArgs),
     /// Download a monitored site's policy as TOML (REST API, needs an API key)
     Export(ExportArgs),
     /// Replace a monitored site's policy with a file (REST API, needs an API key)
@@ -52,6 +61,25 @@ struct InitArgs {
 struct ValidateArgs {
     /// The file to check (default ./codoseo.toml)
     file: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct CheckArgs {
+    /// The audit to compare, as `codoseo crawl --save audit.json` wrote it
+    #[arg(long, value_name = "FILE")]
+    audit: PathBuf,
+    /// The policy file (default ./codoseo.toml)
+    #[arg(long, value_name = "FILE")]
+    policy: Option<PathBuf>,
+    /// `text` (one line per rule and gap) or `json` (the report)
+    #[arg(long, default_value = "text")]
+    format: CheckFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum CheckFormat {
+    Text,
+    Json,
 }
 
 #[derive(Debug, Args)]
@@ -88,6 +116,7 @@ pub async fn run(args: PolicyArgs) -> Outcome {
     match args.command {
         PolicyCommand::Init(a) => init(a).await,
         PolicyCommand::Validate(a) => validate(a),
+        PolicyCommand::Check(a) => check(a),
         PolicyCommand::Export(a) => export(a).await,
         PolicyCommand::Import(a) => import(a).await,
     }
@@ -148,6 +177,87 @@ fn validate(args: ValidateArgs) -> Outcome {
             Ok(EXIT_FAIL_ON)
         }
     }
+}
+
+/// The policy against a crawl the CLI made: its pages, its inlink samples (every link to a page
+/// that redirects is among them) and its AI access report.
+pub fn report_for(
+    policy: &SitePolicy,
+    snapshot: &Snapshot,
+    report: &CrawlReport,
+    access: Option<&AccessReport>,
+) -> PolicyReport {
+    evaluate(
+        policy,
+        &PolicyInput {
+            pages: &snapshot.pages,
+            origin: Some(&snapshot.origin),
+            inlinks: &report.inlink_samples,
+            access,
+            ..PolicyInput::default()
+        },
+    )
+}
+
+fn check(args: CheckArgs) -> Outcome {
+    let path = args.policy.unwrap_or_else(|| PathBuf::from(DEFAULT_FILE));
+    let file = load_file(&path).map_err(|e| CliError::msg(one_line(&e)))?;
+    warn_unknown(&file);
+    let audit = super::diff::load(&args.audit)?;
+    let access: Option<AccessReport> = audit
+        .ai_access
+        .as_ref()
+        .and_then(|a| a.get("report"))
+        .and_then(|r| serde_json::from_value(r.clone()).ok());
+    let rep = report_for(
+        &file.policy,
+        &audit.snapshot,
+        &audit.report,
+        access.as_ref(),
+    );
+    match args.format {
+        CheckFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&file.audit_section(&rep))?
+            );
+        }
+        CheckFormat::Text => {
+            for r in &rep.rules {
+                println!(
+                    "{:<17} {:<13} {}",
+                    super::clean(&slug(&r.id)),
+                    match r.status {
+                        Status::Met => "met".to_owned(),
+                        Status::Gaps => format!("{} gaps", r.gaps),
+                        Status::Partly => "partly".to_owned(),
+                        Status::NotChecked => "not checked".to_owned(),
+                        Status::LimitedEffect => "limited effect".to_owned(),
+                    },
+                    super::clean(&r.text)
+                );
+            }
+            println!(
+                "{} SEO {} · {} AI {}",
+                rep.seo_gaps,
+                if rep.seo_gaps == 1 { "gap" } else { "gaps" },
+                rep.ai_gaps,
+                if rep.ai_gaps == 1 { "gap" } else { "gaps" }
+            );
+        }
+    }
+    Ok(if rep.gaps.is_empty() {
+        EXIT_OK
+    } else {
+        EXIT_FAIL_ON
+    })
+}
+
+fn slug<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_value(v)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 
 /// Unknown keys are ignored, and said so on stderr.
@@ -271,13 +381,16 @@ async fn import(args: ImportArgs) -> Outcome {
         return Err(api_error(status, &body));
     }
     let v: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-    let gaps = v["report"]["ai_gaps"].as_u64().unwrap_or(0);
+    let gaps = |key: &str| {
+        let n = v["report"][key].as_u64().unwrap_or(0);
+        format!("{n} {}", if n == 1 { "gap" } else { "gaps" })
+    };
     println!(
-        "{} imported into site {} · {} AI {}",
+        "{} imported into site {} · SEO {} · AI {}",
         path.display(),
         args.remote.site.trim(),
-        gaps,
-        if gaps == 1 { "gap" } else { "gaps" }
+        gaps("seo_gaps"),
+        gaps("ai_gaps")
     );
     Ok(EXIT_OK)
 }

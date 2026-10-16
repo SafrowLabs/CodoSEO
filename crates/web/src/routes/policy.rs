@@ -1,16 +1,18 @@
 //! `/s/{site}/policy`: the site policy, how the owner means the site to work for search engines
 //! and AI bots ([`codoseo_policy::SitePolicy`]).
 //!
-//! Two tabs: AI rules (what each kind of AI bot should get, per-bot exceptions, the answer limits
-//! used on purpose and the fetch check switch; the old AI access intent form) and SEO rules (the
-//! format is stable and imports keep them, but they are evaluated from the next release, so the
-//! tab says what is coming). The right rail compares the rules with the latest crawl ("Your rules
-//! vs crawl #N") and, on the AI tab, suggests the robots.txt that matches, diffed against the
-//! file that crawl read.
+//! Two tabs: SEO rules (the preferred address, what search engines should index, URL parameters
+//! that don't change the page and the pages that must always work, [`crate::routes::policy_seo`];
+//! thresholds and exceptions come next) and AI rules (what each kind of AI bot should get, per-bot
+//! exceptions, the answer limits used on purpose and the fetch check switch; the old AI access
+//! intent form). The right rail compares every rule with the latest crawl ("Your rules vs crawl
+//! #N", SEO and AI gaps together) and, on the AI tab, suggests the robots.txt that matches, diffed
+//! against the file that crawl read.
 //!
 //! Every change of a field posts the form to `/policy/preview` (htmx), which answers with the
-//! rail and, out of band, each rule's compare line, so the comparison follows the edit before
-//! anything is saved. Saving goes through [`codoseo_store::policy::save`] like every other policy
+//! rail and, out of band, each rule's compare line and the tabs' gap counts, so the comparison
+//! follows the edit before anything is saved. On the SEO tab it also lists what would stop the
+//! rules from saving; "Add rule" and "Remove" re-render the index rules the same way. Saving goes through [`codoseo_store::policy::save`] like every other policy
 //! change; `/policy/export` downloads the policy as `codoseo.toml`, `/policy/import` takes one
 //! back (its errors shown inline), and `/policy/history` lists every change.
 
@@ -26,9 +28,11 @@ use codoseo_geo::report::{AccessReport, slug_str};
 use codoseo_geo::{Intent, Stance};
 use codoseo_policy::evaluate::{BotNow, bot_now, directive_pages};
 use codoseo_policy::robots::{Sign, suggest};
-use codoseo_policy::{GapKind, PolicyInput, PolicyReport, RuleId, SitePolicy, Status, evaluate};
+use codoseo_policy::{
+    GapKind, PolicyError, PolicyInput, PolicyReport, RuleId, SitePolicy, Status, evaluate,
+};
 use codoseo_store::geo;
-use codoseo_store::policy::{self, Actor, HistoryRow, Via};
+use codoseo_store::policy::{self, Actor, HistoryRow, LatestCrawl, SaveError, Via};
 use codoseo_store::sites::Site;
 use serde::Deserialize;
 use time::OffsetDateTime;
@@ -43,6 +47,7 @@ use crate::routes::ai_access::{
     save_policy, stance_label, stance_slug,
 };
 use crate::routes::audit::site_id;
+use crate::routes::policy_seo::{self, SeoView};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -62,7 +67,7 @@ const HISTORY_SHOWN: i64 = 100;
 /// Lines of the robots.txt suggestion the rail shows.
 const ROBOTS_LINES_SHOWN: usize = 300;
 
-/// Which tab: AI rules until the SEO rules are evaluated.
+/// Which tab: SEO rules unless the address asks for the AI rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyTab {
     Seo,
@@ -71,6 +76,15 @@ pub enum PolicyTab {
 
 impl PolicyTab {
     fn from_query(q: Option<&str>) -> PolicyTab {
+        match q {
+            Some("ai") => PolicyTab::Ai,
+            _ => PolicyTab::Seo,
+        }
+    }
+
+    /// A form post names its tab; one that doesn't is the AI form (as it was before the SEO
+    /// rules had a form, and as the old intent address posts it).
+    fn from_post(q: Option<&str>) -> PolicyTab {
         match q {
             Some("seo") => PolicyTab::Seo,
             _ => PolicyTab::Ai,
@@ -88,6 +102,8 @@ impl PolicyTab {
 #[derive(Debug, Default, Deserialize)]
 pub struct TabQuery {
     tab: Option<String>,
+    /// On a SEO preview: `add` (a blank index rule) or `remove:{i}`.
+    op: Option<String>,
 }
 
 // ---- views -----------------------------------------------------------------------------------
@@ -102,7 +118,7 @@ pub struct Cmp {
     pub text: String,
 }
 
-fn cmp(id: String, report: &PolicyReport, rule: RuleId) -> Cmp {
+pub(crate) fn cmp(id: String, report: &PolicyReport, rule: RuleId) -> Cmp {
     let Some(r) = report.rule(rule) else {
         return Cmp {
             id,
@@ -220,6 +236,8 @@ pub struct RobotsView {
 
 /// The comparison rail.
 pub struct Rail {
+    /// Swapped out of band (a preview whose main target is something else).
+    pub oob: bool,
     /// `Your rules vs crawl #44`, or `Your rules` before the first crawl.
     pub title: String,
     pub has_report: bool,
@@ -249,8 +267,8 @@ pub struct PolicyPage {
     pub probes_installed: bool,
     /// The saved policy differs from the defaults (on this tab).
     pub custom: bool,
-    /// SEO rules the policy holds (from an import), kept but not evaluated yet.
-    pub seo_rules: usize,
+    /// The SEO tab's sections.
+    pub seo: SeoView,
     pub seo_gaps: u32,
     pub ai_gaps: u32,
     pub rail: Rail,
@@ -266,6 +284,11 @@ pub struct PreviewFragment {
     pub rail: Rail,
     pub cmps: Vec<Cmp>,
     pub limits: Vec<LimitView>,
+    /// On the SEO tab: its sections' compare lines and errors.
+    pub seo: Option<SeoView>,
+    /// Re-render the index rules (after "Add rule" or "Remove"); the rest goes out of band.
+    pub index_table: bool,
+    pub base: String,
     pub seo_gaps: u32,
     pub ai_gaps: u32,
 }
@@ -350,16 +373,45 @@ fn via_label(via: &str) -> &'static str {
 
 // ---- building --------------------------------------------------------------------------------
 
-/// The latest AI access report and the crawl it came from (`#4`, when).
+/// The latest crawl the rules are compared with: its pages (the SEO rules), its AI access
+/// report (the AI rules) and the crawl that report came from (`#4`, when).
 struct Latest {
+    crawl: Option<LatestCrawl>,
     report: Option<AccessReport>,
     crawl_number: Option<i64>,
     created_at: Option<OffsetDateTime>,
 }
 
+impl Latest {
+    fn input(&self) -> PolicyInput<'_> {
+        match &self.crawl {
+            Some(c) => c.input(self.report.as_ref()),
+            None => PolicyInput::ai_only(self.report.as_ref()),
+        }
+    }
+
+    fn evaluate(&self, policy: &SitePolicy) -> PolicyReport {
+        evaluate(policy, &self.input())
+    }
+
+    /// The crawl compared with: the newest finished one, else the AI access report's.
+    fn number(&self) -> Option<i64> {
+        self.crawl.as_ref().map(|c| c.number).or(self.crawl_number)
+    }
+
+    fn at(&self) -> Option<OffsetDateTime> {
+        self.crawl
+            .as_ref()
+            .and_then(|c| c.finished_at)
+            .or(self.created_at)
+    }
+}
+
 async fn latest(state: &AppState, site: &Site) -> Result<Latest, AppError> {
+    let crawl = policy::latest_crawl(&state.pool, site.id).await?;
     let Some(l) = geo::latest_report(&state.pool, site.id).await? else {
         return Ok(Latest {
+            crawl,
             report: None,
             crawl_number: None,
             created_at: None,
@@ -375,6 +427,7 @@ async fn latest(state: &AppState, site: &Site) -> Result<Latest, AppError> {
     .fetch_one(&state.pool)
     .await?;
     Ok(Latest {
+        crawl,
         report: Some(l.report),
         crawl_number: Some(number),
         created_at: Some(l.created_at),
@@ -565,11 +618,12 @@ fn rail(
     tab: PolicyTab,
 ) -> Rail {
     Rail {
-        title: match latest.crawl_number {
+        oob: false,
+        title: match latest.number() {
             Some(n) => format!("Your rules vs crawl #{n}"),
             None => "Your rules".to_owned(),
         },
-        has_report: latest.report.is_some(),
+        has_report: latest.report.is_some() || latest.crawl.is_some(),
         met: rep.met(),
         seo_gaps: rep.seo_gaps,
         ai_gaps: rep.ai_gaps,
@@ -599,7 +653,7 @@ fn rail(
 }
 
 fn compared(latest: &Latest) -> String {
-    match (latest.crawl_number, latest.created_at) {
+    match (latest.number(), latest.at()) {
         (Some(n), Some(at)) => format!(
             "Compared with crawl #{n} · {} · the comparison follows your edits before you save",
             fmt::ago(at)
@@ -615,9 +669,22 @@ async fn build(
     policy: &SitePolicy,
     tab: PolicyTab,
 ) -> Result<PolicyPage, AppError> {
+    build_with(state, user, site, policy, tab, &[]).await
+}
+
+/// The page for `policy` (the saved one, or the form's when it could not be saved, with
+/// `errors`).
+async fn build_with(
+    state: &AppState,
+    user: &CurrentUser,
+    site: &Site,
+    policy: &SitePolicy,
+    tab: PolicyTab,
+    errors: &[PolicyError],
+) -> Result<PolicyPage, AppError> {
     let shell = Shell::load(state, user, Some(site), Screen::Policy).await?;
     let latest = latest(state, site).await?;
-    let rep = evaluate(policy, &PolicyInput::ai_only(latest.report.as_ref()));
+    let rep = latest.evaluate(policy);
     let pages = state.config.probe_urls_for(user.account.plan);
     let default = SitePolicy::default();
     Ok(PolicyPage {
@@ -635,7 +702,14 @@ async fn build(
             PolicyTab::Ai => policy.ai != default.ai,
             PolicyTab::Seo => policy.seo != default.seo,
         },
-        seo_rules: seo_rule_count(policy),
+        seo: policy_seo::view(
+            &policy.seo,
+            &rep,
+            &site.domain,
+            user.account.plan,
+            errors,
+            usize::from(policy.seo.index.is_empty()),
+        ),
         seo_gaps: rep.seo_gaps,
         ai_gaps: rep.ai_gaps,
         rail: rail(site, policy, &rep, &latest, tab),
@@ -644,27 +718,45 @@ async fn build(
     })
 }
 
-/// The SEO rules a policy holds, counted the way the SEO tab will list them.
-fn seo_rule_count(p: &SitePolicy) -> usize {
-    let s = &p.seo;
-    usize::from(s.address.is_some())
-        + s.index.len()
-        + usize::from(s.index_default != codoseo_policy::IndexStance::None)
-        + s.ignore_params.len()
-        + usize::from(s.pagination_param.is_some())
-        + s.must_work.len()
-        + usize::from(s.thresholds != Default::default())
-        + s.exceptions.len()
+/// The policy the form describes: the saved one with the rules of the tab the form is on. The
+/// SEO form also says how many blank index rules to show (after "Add rule").
+fn from_form(
+    current: &SitePolicy,
+    fields: &[(String, String)],
+    tab: PolicyTab,
+    op: Option<&str>,
+) -> Result<(SitePolicy, usize), AppError> {
+    let mut p = current.clone();
+    match tab {
+        PolicyTab::Ai => {
+            p.ai.intent =
+                intent_from_form(&current.ai.intent, fields).map_err(AppError::BadRequest)?;
+            if let Some(on) = probes_from_form(fields).map_err(AppError::BadRequest)? {
+                p.ai.probes = on;
+            }
+            Ok((p, 0))
+        }
+        PolicyTab::Seo => {
+            let (seo, blank) =
+                policy_seo::from_form(&current.seo, fields, op).map_err(AppError::BadRequest)?;
+            p.seo = seo;
+            Ok((p, blank))
+        }
+    }
 }
 
-/// The policy the form describes: the saved one with the AI rules the form sets.
-fn from_form(current: &SitePolicy, fields: &[(String, String)]) -> Result<SitePolicy, AppError> {
-    let mut p = current.clone();
-    p.ai.intent = intent_from_form(&current.ai.intent, fields).map_err(AppError::BadRequest)?;
-    if let Some(on) = probes_from_form(fields).map_err(AppError::BadRequest)? {
-        p.ai.probes = on;
+/// Why a policy can't be saved on this site: its own validation and the plan's must-work cap.
+async fn save_errors(
+    state: &AppState,
+    site: &Site,
+    policy: &SitePolicy,
+) -> Result<Vec<PolicyError>, AppError> {
+    match policy::check(&state.pool, site.id, policy).await {
+        Ok(()) => Ok(Vec::new()),
+        Err(SaveError::Invalid(e)) => Ok(e),
+        Err(SaveError::NotFound) => Err(AppError::NotFound),
+        Err(SaveError::Db(e)) => Err(e.into()),
     }
-    Ok(p)
 }
 
 fn page_url(site: &Site, tab: PolicyTab) -> String {
@@ -721,24 +813,54 @@ async fn preview(
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
     let current = policy::get(&state.pool, site.id).await?;
-    let policy = from_form(&current, &fields)?;
-    let tab = PolicyTab::from_query(q.tab.as_deref());
+    let tab = PolicyTab::from_post(q.tab.as_deref());
+    let op = q.op.as_deref().filter(|_| tab == PolicyTab::Seo);
+    let (policy, blank) = from_form(&current, &fields, tab, op)?;
     let latest = latest(&state, &site).await?;
-    let rep = evaluate(&policy, &PolicyInput::ai_only(latest.report.as_ref()));
-    let cmps = PURPOSES
-        .iter()
-        .map(|&p| {
-            cmp(
-                format!("cmp-{}", purpose_slug(p)),
-                &rep,
-                RuleId::for_purpose(p),
+    let rep = latest.evaluate(&policy);
+    let (cmps, seo) = match tab {
+        PolicyTab::Ai => (
+            PURPOSES
+                .iter()
+                .map(|&p| {
+                    cmp(
+                        format!("cmp-{}", purpose_slug(p)),
+                        &rep,
+                        RuleId::for_purpose(p),
+                    )
+                })
+                .collect(),
+            None,
+        ),
+        PolicyTab::Seo => {
+            // What would stop a save, shown as the owner types.
+            let errors = save_errors(&state, &site, &policy).await?;
+            (
+                Vec::new(),
+                Some(policy_seo::view(
+                    &policy.seo,
+                    &rep,
+                    &site.domain,
+                    user.account.plan,
+                    &errors,
+                    blank,
+                )),
             )
-        })
-        .collect();
+        }
+    };
+    let index_table = op.is_some();
+    let mut rail = rail(&site, &policy, &rep, &latest, tab);
+    rail.oob = index_table;
     Ok(html(&PreviewFragment {
-        rail: rail(&site, &policy, &rep, &latest, tab),
+        rail,
         cmps,
-        limits: limits(&policy.ai.intent, latest.report.as_ref()),
+        limits: match tab {
+            PolicyTab::Ai => limits(&policy.ai.intent, latest.report.as_ref()),
+            PolicyTab::Seo => Vec::new(),
+        },
+        seo,
+        index_table,
+        base: format!("/s/{}", site.id),
         seo_gaps: rep.seo_gaps,
         ai_gaps: rep.ai_gaps,
     })?
@@ -750,18 +872,28 @@ async fn save(
     user: CurrentUser,
     hx: Hx,
     Path(site): Path<String>,
+    Query(q): Query<TabQuery>,
     axum::Form(fields): axum::Form<Vec<(String, String)>>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
     let current = policy::get(&state.pool, site.id).await?;
-    let policy = from_form(&current, &fields)?;
+    let tab = PolicyTab::from_post(q.tab.as_deref());
+    let (policy, _) = from_form(&current, &fields, tab, None)?;
+    if tab == PolicyTab::Seo {
+        // Shown inline, in the form as it was sent; nothing is saved.
+        let errors = save_errors(&state, &site, &policy).await?;
+        if !errors.is_empty() {
+            let page = build_with(&state, &user, &site, &policy, tab, &errors).await?;
+            return Ok(html(&page)?.into_response());
+        }
+    }
     let outcome = save_policy(&state, &site, &policy, Actor::web(user.id())).await?;
     respond(
         &state,
         &user,
         &site,
         hx,
-        PolicyTab::Ai,
+        tab,
         &format!("Policy saved · {outcome}"),
     )
     .await
@@ -993,9 +1125,11 @@ mod tests {
     }
 
     #[test]
-    fn the_tab_defaults_to_ai() {
-        assert_eq!(PolicyTab::from_query(None), PolicyTab::Ai);
-        assert_eq!(PolicyTab::from_query(Some("seo")), PolicyTab::Seo);
-        assert_eq!(PolicyTab::from_query(Some("other")), PolicyTab::Ai);
+    fn the_tab_reads_its_slug() {
+        assert_eq!(PolicyTab::from_query(None), PolicyTab::Seo);
+        assert_eq!(PolicyTab::from_query(Some("ai")), PolicyTab::Ai);
+        assert_eq!(PolicyTab::from_query(Some("other")), PolicyTab::Seo);
+        assert_eq!(PolicyTab::from_post(None), PolicyTab::Ai);
+        assert_eq!(PolicyTab::from_post(Some("seo")), PolicyTab::Seo);
     }
 }

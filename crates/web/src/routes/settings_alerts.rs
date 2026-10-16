@@ -223,6 +223,9 @@ fn note(kind: ChangeKind) -> &'static str {
             "a page's content is missing from its HTML, so AI crawlers cannot read it"
         }
         ChangeKind::AiLlmsTxtUnavailable => "the llms.txt you published stopped serving",
+        ChangeKind::MustWorkFailed => {
+            "a page your site policy says must always work failed, on every crawl it fails"
+        }
         _ => "",
     }
 }

@@ -12,7 +12,7 @@
       <a class="btn" href="{{ base }}/policy/history"><svg class="icon"><use href="#i-calendar"/></svg>History</a>
       <a class="btn" href="{{ base }}/policy/export" hx-boost="false" download><svg class="icon"><use href="#i-download"/></svg>Export</a>
       <button class="btn" type="submit" form="policy-reset"{% if !custom %} disabled title="Already the defaults"{% endif %}>Reset to defaults</button>
-      {% if tab == "ai" %}<button class="btn btn-primary" type="submit" form="policy-form"><svg class="icon"><use href="#i-check"/></svg>Save policy</button>{% endif %}
+      <button class="btn btn-primary" type="submit" form="policy-form"><svg class="icon"><use href="#i-check"/></svg>Save policy</button>
     </div>
   </header>
 
@@ -25,7 +25,7 @@
 
   <div class="pol-bar">
     <nav class="aia-tabbar pol-tabs" aria-label="Policy sections">
-      <a class="aia-tab" href="{{ base }}/policy?tab=seo"{% if tab == "seo" %} aria-current="page"{% endif %}>SEO rules<span class="n" id="tab-seo-gaps">{% if seo_rules > 0 %}{{ seo_rules }} kept{% else %}next release{% endif %}</span></a>
+      <a class="aia-tab" href="{{ base }}/policy?tab=seo"{% if tab == "seo" %} aria-current="page"{% endif %}>SEO rules<span class="n" id="tab-seo-gaps">{{ seo_gaps }} {% if seo_gaps == 1 %}gap{% else %}gaps{% endif %}</span></a>
       <a class="aia-tab" href="{{ base }}/policy?tab=ai"{% if tab == "ai" %} aria-current="page"{% endif %}>AI rules<span class="n" id="tab-ai-gaps">{{ ai_gaps }} {% if ai_gaps == 1 %}gap{% else %}gaps{% endif %}</span></a>
     </nav>
     <span class="grow"></span>
@@ -35,22 +35,9 @@
   <div class="pol-grid">
     <div class="pol-main">
       {% if tab == "seo" %}
-      <section class="card card-pad pol-soon" aria-labelledby="h-seo-soon">
-        <h2 class="card-title" id="h-seo-soon">SEO rules arrive in the next release</h2>
-        <p class="pol-desc">Your policy file can already hold them: <code>codoseo.toml</code> keeps every key below, imports and exports them, and the checks start comparing the site with them in the next release.</p>
-        <ul class="pol-soon-list">
-          <li><b>Preferred address</b> · the one host and trailing-slash form every page should use; other forms 301 to it.</li>
-          <li><b>What search engines should index</b> · path rules (<code>/checkout/*</code> keep out), first match wins.</li>
-          <li><b>URL parameters that don't change the page</b> · <code>utm_*</code>, <code>gclid</code>, sort orders; pagination kept apart.</li>
-          <li><b>Pages that must always work</b> · 200 and indexable on every crawl, alerting at once when one fails.</li>
-          <li><b>Check thresholds</b> · title and description length, thin pages, slow pages, redirect hops.</li>
-          <li><b>Exceptions</b> · checks that don't apply to part of the site, left out of the health score.</li>
-        </ul>
-        {% if seo_rules > 0 %}<p class="pol-desc">This site's policy holds {{ seo_rules }} SEO {% if seo_rules == 1 %}rule{% else %}rules{% endif %} from an import. They are kept and will be checked from the next release.</p>{% endif %}
-        <p class="pol-desc"><a href="{{ base }}/policy?tab=ai">Set the AI rules now</a> · <a href="{{ base }}/policy/export" hx-boost="false" download>export the file</a></p>
-      </section>
+      {% include "policy/_seo.html" %}
       {% else %}
-      <form id="policy-form" class="pol-form" method="post" action="{{ base }}/policy">
+      <form id="policy-form" class="pol-form" method="post" action="{{ base }}/policy?tab=ai">
         <div class="stack" hx-post="{{ base }}/policy/preview?tab=ai" hx-trigger="change" hx-include="#policy-form" hx-target="#pol-rail" hx-swap="outerHTML" hx-sync="this:replace">
           {% for p in purposes %}
           <section class="card pol-purpose" aria-labelledby="h-{{ p.slug }}">

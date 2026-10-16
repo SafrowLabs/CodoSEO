@@ -256,6 +256,18 @@ Every crawled page is evaluated against these checks. Severity: **C** = Critical
 | Open Graph title or image is missing | N | `og_missing` |
 | Hreflang has no entry for the page itself | N | `hreflang_missing_self` |
 
+### Site policy
+
+Five more checks run only when the [site policy](docs/policy.md) declares the rule behind them; they then count toward the health score and the checks total like the others.
+
+| Check | Severity | Slug |
+|---|---|---|
+| Must-work page doesn't answer 200 or isn't indexable | C | `must_work_failed` |
+| Page doesn't use the policy's preferred address | W | `policy_address` |
+| Page is indexed differently from the policy | W | `policy_index_mismatch` |
+| Kept out by robots.txt only, so search engines can still index it | N | `policy_keep_out_partial` |
+| URL with an ignored parameter doesn't canonicalise to the clean URL | N | `policy_param_canonical` |
+
 ## The 9 AI & GEO checks
 
 Next to the 44 SEO checks, every crawl runs 9 AI & GEO checks, one per kind of [AI access](docs/ai-access.md) finding: 44 + 9 = 53 checks in all. They are judged against your intent (which bots you want in or out) and are **not part of the health score**, which stays SEO-only. In CI, `--fail-on geo` (or a single kind) can still fail a build on them ([docs/ci.md](docs/ci.md)).

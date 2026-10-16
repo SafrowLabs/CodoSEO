@@ -750,6 +750,26 @@ pub fn seo_hint(id: CheckId) -> (&'static str, &'static str) {
             "Hreflang sets need an entry for the page itself.",
             "Add a hreflang link for each page's own language and URL.",
         ),
+        CheckId::PolicyAddress => (
+            "Your site policy names one preferred address; other forms split signals and cost a redirect hop.",
+            "301-redirect every other host and trailing-slash form to the preferred one, and point canonicals and internal links straight at it.",
+        ),
+        CheckId::PolicyIndexMismatch => (
+            "Your site policy says these pages should be indexed, or kept out, and they aren't.",
+            "Add noindex to pages to keep out; remove noindex or the robots.txt block from pages to index. Or change the rule on the Site policy screen.",
+        ),
+        CheckId::PolicyKeepOutPartial => (
+            "robots.txt stops crawling, not indexing: search engines can still list these URLs from links.",
+            "Allow crawling these URLs in robots.txt and add a noindex tag or X-Robots-Tag header.",
+        ),
+        CheckId::PolicyParamCanonical => (
+            "URLs that differ only by a parameter that doesn't change the page compete with the clean URL.",
+            "Point each one's canonical at the URL without the parameter (keep the pagination parameter).",
+        ),
+        CheckId::MustWorkFailed => (
+            "Your site policy says this page must always work, and on this crawl it didn't.",
+            "Make the page answer 200 without noindex, or take it off the must-work list if it moved for good.",
+        ),
     }
 }
 

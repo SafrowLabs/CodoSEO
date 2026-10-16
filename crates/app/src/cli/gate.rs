@@ -3,7 +3,8 @@
 //!
 //! A gate is an SEO severity (`critical`, `warning`: a failing check at that severity or worse), a
 //! GEO severity (`geo:critical`, `geo:warning`, `geo:notice`), a GEO finding kind with an optional
-//! subject (`bots_blocked`, `answers_restricted:nosnippet`) or `geo`, the default GEO set. GEO never
+//! subject (`bots_blocked`, `answers_restricted:nosnippet`) or `geo`, the default GEO set, or a
+//! site policy gap (`policy`, `policy:<address|index|params|must_work|ai>`, `must_work`). GEO never
 //! touches the health score; a gate only decides the exit code.
 //!
 //! Without a baseline every result counts. With one, only what is new counts: a page that now
@@ -23,6 +24,7 @@ use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{Finding, FindingKind};
 use codoseo_geo::incident::{OpenIncident, Transition, reconcile};
 use codoseo_geo::registry::Purpose;
+use codoseo_policy::{Gap, GapKind, PolicyReport, RuleId};
 
 use super::output::{severity_label, slug};
 
@@ -45,6 +47,58 @@ pub enum Gate {
         kind: FindingKind,
         subject: Option<String>,
     },
+    /// A gap between the site and its policy file: any (`policy`), or one rule's.
+    Policy(Option<PolicyRule>),
+}
+
+/// The part of the policy a `policy:` gate is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyRule {
+    Address,
+    Index,
+    Params,
+    MustWork,
+    /// Any AI rule.
+    Ai,
+}
+
+impl PolicyRule {
+    const ALL: [PolicyRule; 5] = [
+        PolicyRule::Address,
+        PolicyRule::Index,
+        PolicyRule::Params,
+        PolicyRule::MustWork,
+        PolicyRule::Ai,
+    ];
+
+    fn slug(self) -> &'static str {
+        match self {
+            PolicyRule::Address => "address",
+            PolicyRule::Index => "index",
+            PolicyRule::Params => "params",
+            PolicyRule::MustWork => "must_work",
+            PolicyRule::Ai => "ai",
+        }
+    }
+
+    fn covers(self, rule: RuleId) -> bool {
+        match self {
+            PolicyRule::Address => rule == RuleId::Address,
+            PolicyRule::Index => rule == RuleId::Index,
+            PolicyRule::Params => rule == RuleId::Params,
+            PolicyRule::MustWork => rule == RuleId::MustWork,
+            PolicyRule::Ai => rule.kind() == GapKind::Ai,
+        }
+    }
+}
+
+/// A policy rule's label in a tripped result: `policy:must_work`, `policy:ai_search`.
+pub fn policy_rule_label(rule: RuleId) -> String {
+    let slug = serde_json::to_value(rule)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    format!("policy:{slug}")
 }
 
 impl fmt::Display for Gate {
@@ -61,6 +115,9 @@ impl fmt::Display for Gate {
                 kind,
                 subject: Some(s),
             } => write!(f, "{}:{s}", kind.slug()),
+            Gate::Policy(None) => f.write_str("policy"),
+            Gate::Policy(Some(PolicyRule::MustWork)) => f.write_str("must_work"),
+            Gate::Policy(Some(r)) => write!(f, "policy:{}", r.slug()),
         }
     }
 }
@@ -98,7 +155,7 @@ fn directives() -> Vec<String> {
 fn accepted() -> String {
     let kinds: Vec<&str> = KINDS.iter().map(|k| k.slug()).collect();
     format!(
-        "critical, warning, geo, geo:critical, geo:warning, geo:notice, or an AI access finding kind ({}) optionally followed by :subject",
+        "critical, warning, geo, geo:critical, geo:warning, geo:notice, policy, policy:<address|index|params|must_work|ai>, must_work, or an AI access finding kind ({}) optionally followed by :subject",
         kinds.join(", ")
     )
 }
@@ -110,7 +167,18 @@ pub fn parse_gate(raw: &str) -> Result<Gate, String> {
         "critical" => return Ok(Gate::Seo(Severity::Critical)),
         "warning" => return Ok(Gate::Seo(Severity::Warning)),
         "geo" => return Ok(Gate::GeoDefault),
+        "policy" => return Ok(Gate::Policy(None)),
+        "must_work" => return Ok(Gate::Policy(Some(PolicyRule::MustWork))),
         _ => {}
+    }
+    if let Some(rule) = value.strip_prefix("policy:") {
+        return PolicyRule::ALL
+            .into_iter()
+            .find(|r| r.slug() == rule)
+            .map(|r| Gate::Policy(Some(r)))
+            .ok_or_else(|| {
+                format!("`{raw}`: policy takes address, index, params, must_work or ai")
+            });
     }
     let (head, subject) = match value.split_once(':') {
         Some((h, s)) => (h, Some(s)),
@@ -175,7 +243,7 @@ impl Gate {
     /// Whether an AI access finding trips this gate.
     pub fn matches(&self, f: &Finding) -> bool {
         match self {
-            Gate::Seo(_) => false,
+            Gate::Seo(_) | Gate::Policy(_) => false,
             // Severity orders most severe first, so "this bad or worse" is `<=`.
             Gate::GeoAt(s) => f.severity <= *s,
             Gate::GeoDefault => match f.kind {
@@ -198,6 +266,37 @@ impl Gate {
             }
         }
     }
+}
+
+impl Gate {
+    /// Whether a policy gap trips this gate.
+    pub fn matches_gap(&self, g: &Gap) -> bool {
+        match self {
+            Gate::Policy(None) => true,
+            Gate::Policy(Some(r)) => r.covers(g.rule),
+            _ => false,
+        }
+    }
+
+    /// The gate is about the site policy, so it needs a policy file.
+    pub fn needs_policy(&self) -> bool {
+        matches!(self, Gate::Policy(_))
+    }
+}
+
+/// The policy report saved in an audit (`policy.report`); `None` without a policy file.
+pub fn audit_policy(audit: &Audit) -> Option<PolicyReport> {
+    audit
+        .policy
+        .as_ref()
+        .and_then(|p| p.get("report"))
+        .and_then(|r| serde_json::from_value(r.clone()).ok())
+}
+
+/// What identifies a gap across two audits: its rule and what it is about (its text when it has
+/// no subject).
+fn gap_key(g: &Gap) -> (RuleId, String) {
+    (g.rule, g.subject.clone().unwrap_or_else(|| g.text.clone()))
 }
 
 /// How a result compares with the baseline.
@@ -344,6 +443,32 @@ pub fn judge(audit: &Audit, baseline: Option<&Audit>, gates: &[Gate]) -> Verdict
                 rule: finding_rule(f),
                 severity: f.severity,
                 text: format!("{}{novelty}", f.title),
+            });
+        }
+    }
+    if gates.iter().any(Gate::needs_policy)
+        && let Some(rep) = audit_policy(audit)
+    {
+        let before: HashSet<(RuleId, String)> = baseline
+            .and_then(audit_policy)
+            .map(|b| b.gaps.iter().map(gap_key).collect())
+            .unwrap_or_default();
+        for g in &rep.gaps {
+            if !gates.iter().any(|gate| gate.matches_gap(g)) || before.contains(&gap_key(g)) {
+                continue;
+            }
+            v.tripped.push(Tripped {
+                rule: policy_rule_label(g.rule),
+                severity: g.severity,
+                text: format!(
+                    "{}{}",
+                    g.text,
+                    if v.baseline {
+                        " (new since the baseline)"
+                    } else {
+                        ""
+                    }
+                ),
             });
         }
     }
@@ -539,15 +664,103 @@ mod tests {
         assert!(parse_gate("answers_restricted:nosnippet").is_ok());
         assert!(parse_gate("content_missing:x").is_err());
         assert!(parse_gate("bogus").unwrap_err().contains("bots_blocked"));
+        assert_eq!(parse_gate("policy"), Ok(Gate::Policy(None)));
+        assert_eq!(
+            parse_gate("must_work"),
+            Ok(Gate::Policy(Some(PolicyRule::MustWork)))
+        );
+        assert_eq!(
+            parse_gate("policy:must_work"),
+            Ok(Gate::Policy(Some(PolicyRule::MustWork)))
+        );
+        assert_eq!(
+            parse_gate("Policy:AI"),
+            Ok(Gate::Policy(Some(PolicyRule::Ai)))
+        );
+        assert!(parse_gate("policy:thresholds").is_err());
         for g in [
             "critical",
             "geo",
             "geo:warning",
             "bots_blocked",
             "answers_restricted:noarchive",
+            "policy",
+            "policy:address",
+            "policy:index",
+            "policy:params",
+            "policy:ai",
+            "must_work",
         ] {
             assert_eq!(parse_gate(g).unwrap().to_string(), g);
         }
+    }
+
+    fn gap(rule: RuleId, subject: &str) -> Gap {
+        Gap {
+            rule,
+            kind: rule.kind(),
+            severity: Severity::Critical,
+            text: format!("{subject} failed"),
+            subject: Some(subject.to_owned()),
+        }
+    }
+
+    fn audit_with(gaps: Vec<Gap>) -> Audit {
+        let report = PolicyReport {
+            gaps,
+            ..PolicyReport::default()
+        };
+        Audit {
+            format_version: 1,
+            tool_version: "test".to_owned(),
+            created_at: 0,
+            duration_ms: 0,
+            start_url: url::Url::parse("https://example.com/").unwrap(),
+            report: codoseo_core::report::CrawlReport {
+                health_score: 100,
+                checks_passed: 44,
+                checks_total: 44,
+                counts: Vec::new(),
+                inlink_samples: Vec::new(),
+                summary: Default::default(),
+            },
+            snapshot: codoseo_core::snapshot::Snapshot {
+                origin: url::Url::parse("https://example.com/").unwrap(),
+                stop: codoseo_core::output::StopReason::Completed,
+                pages: Vec::new(),
+                robots: None,
+                sitemap: Default::default(),
+            },
+            ai_access: None,
+            policy: Some(serde_json::json!({ "report": report })),
+        }
+    }
+
+    #[test]
+    fn policy_gates_trip_on_their_rules_gaps_and_new_ones_only_against_a_baseline() {
+        let now = audit_with(vec![
+            gap(RuleId::MustWork, "/cart"),
+            gap(RuleId::Address, "x"),
+            gap(RuleId::AiTraining, "GPTBot"),
+        ]);
+        let rules = |gates: &[&str], base: Option<&Audit>| {
+            let gates: Vec<Gate> = gates.iter().map(|g| parse_gate(g).unwrap()).collect();
+            judge(&now, base, &gates)
+                .tripped
+                .into_iter()
+                .map(|t| t.rule)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rules(&["policy"], None).len(), 3);
+        assert_eq!(rules(&["must_work"], None), ["policy:must_work"]);
+        assert_eq!(rules(&["policy:ai"], None), ["policy:ai_training"]);
+        assert_eq!(rules(&["policy:index"], None), Vec::<String>::new());
+        assert!(rules(&["critical"], None).is_empty(), "no failing checks");
+        let base = audit_with(vec![gap(RuleId::MustWork, "/cart")]);
+        let v = judge(&now, Some(&base), &[Gate::Policy(None)]);
+        let tripped: Vec<&str> = v.tripped.iter().map(|t| t.rule.as_str()).collect();
+        assert_eq!(tripped, ["policy:address", "policy:ai_training"]);
+        assert!(v.tripped[0].text.ends_with("(new since the baseline)"));
     }
 
     fn finding(kind: FindingKind, subject: &str, severity: Severity) -> Finding {
