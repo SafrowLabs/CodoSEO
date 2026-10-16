@@ -46,11 +46,8 @@ pub fn routes() -> Router<AppState> {
 const PAGE_SIZE: usize = 100;
 /// Stored inlinks shown in the Inlinks tab.
 const INLINKS_SHOWN: i64 = 50;
-/// Thresholds the grid and the details tab highlight (matching the checks where one exists).
+/// Thresholds the grid highlights (the default checks'; the details tab follows the site policy).
 const TITLE_MAX_CHARS: usize = 60;
-const TITLE_MIN_CHARS: usize = 30;
-const DESCRIPTION_MAX_CHARS: usize = 155;
-const DESCRIPTION_MIN_CHARS: usize = 70;
 const THIN_WORDS: u32 = 200;
 const DEEP_CLICKS: u32 = 4;
 const SLOW_MS: u32 = 1000;
@@ -308,7 +305,10 @@ pub struct Field {
 }
 
 pub struct IssueChip {
-    pub title: &'static str,
+    pub title: String,
+    /// The site policy excepts this check here: the exception's note (or a default line). The
+    /// issue stays, out of the health score.
+    pub excepted: Option<String>,
     /// `sev-*` class.
     pub sev: &'static str,
     pub href: String,
@@ -911,7 +911,10 @@ async fn detail_panel(
         headers: None,
     };
     match tab {
-        Tab::Details => view.details = Some(details_tab(&base, &p)),
+        Tab::Details => {
+            let policy = codoseo_store::policy::get(&state.pool, site.id).await?;
+            view.details = Some(details_tab(&base, &p, &policy));
+        }
         Tab::Serp => view.serp = Some(serp_view(&p)),
         Tab::Inlinks => {
             let links =
@@ -966,7 +969,8 @@ fn text_field(k: &'static str, text: Option<&str>, html_ok: bool) -> Field {
     }
 }
 
-fn details_tab(base: &str, p: &PageDetail) -> DetailsTab {
+fn details_tab(base: &str, p: &PageDetail, policy: &codoseo_policy::SitePolicy) -> DetailsTab {
+    let t = policy.thresholds();
     let html_ok = is_html_ok(p.status, p.content_type.as_deref());
     let (index_label, index_class) = indexability_view(p.indexability);
     let canonical = match p
@@ -1018,13 +1022,16 @@ fn details_tab(base: &str, p: &PageDetail) -> DetailsTab {
         length_field(
             "Title length",
             p.title.as_deref(),
-            (TITLE_MIN_CHARS, TITLE_MAX_CHARS),
+            (usize::from(t.title_min), usize::from(t.title_max)),
         ),
         text_field("Meta description", p.meta_description.as_deref(), html_ok),
         length_field(
             "Description length",
             p.meta_description.as_deref(),
-            (DESCRIPTION_MIN_CHARS, DESCRIPTION_MAX_CHARS),
+            (
+                usize::from(t.description_min),
+                usize::from(t.description_max),
+            ),
         ),
         text_field("H1-1", p.h1.first().map(String::as_str), html_ok),
         field("H2 count", p.h2.len().to_string(), ""),
@@ -1035,7 +1042,7 @@ fn details_tab(base: &str, p: &PageDetail) -> DetailsTab {
             Some(n) if html_ok => field(
                 "Word count",
                 fmt::thousands(n),
-                if n < THIN_WORDS { "c-warn" } else { "" },
+                if n < t.thin_words { "c-warn" } else { "" },
             ),
             _ => field("Word count", "—", "c-ghost"),
         },
@@ -1061,7 +1068,7 @@ fn details_tab(base: &str, p: &PageDetail) -> DetailsTab {
             Some(ms) => field(
                 "Response time",
                 format!("{} ms", fmt::thousands(ms)),
-                if ms > SLOW_MS { "c-err" } else { "" },
+                if ms > t.slow_ms { "c-err" } else { "" },
             ),
             None => field("Response time", "—", "c-ghost"),
         },
@@ -1081,7 +1088,15 @@ fn details_tab(base: &str, p: &PageDetail) -> DetailsTab {
     let issues = checks
         .into_iter()
         .map(|id| IssueChip {
-            title: def(id).title,
+            title: codoseo_checks::title_for(id, &t).into_owned(),
+            excepted: url::Url::parse(&p.url).ok().and_then(|u| {
+                let e = codoseo_policy::exception_for(&policy.seo, id, &u)?;
+                Some(if e.note.trim().is_empty() {
+                    format!("Excepted by the site policy for {}", e.scope.as_str())
+                } else {
+                    e.note.clone()
+                })
+            }),
             sev: severity_badge(def(id).severity),
             href: format!("{base}/explorer?filter=check:{}", id.slug()),
         })

@@ -258,8 +258,9 @@ async fn setup(plan: Plan) -> Fixture {
     }
 }
 
-const KEYED_TOOLS: [&str; 14] = [
+const KEYED_TOOLS: [&str; 17] = [
     "accept_incident",
+    "compare_policy",
     "get_ai_access",
     "get_changes",
     "get_fix",
@@ -268,16 +269,19 @@ const KEYED_TOOLS: [&str; 14] = [
     "get_policy",
     "get_site_health",
     "list_sites",
+    "preview_policy",
     "recheck_incident",
     "run_crawl",
+    "set_policy",
     "snooze_incident",
     "unaccept_incident",
     "unsnooze_incident",
 ];
 
 /// The tools that change something, and whether repeating one changes nothing more.
-const WRITING_TOOLS: [(&str, bool); 6] = [
+const WRITING_TOOLS: [(&str, bool); 7] = [
     ("run_crawl", false),
+    ("set_policy", true),
     ("recheck_incident", false),
     ("snooze_incident", true),
     ("unsnooze_incident", true),
@@ -731,6 +735,105 @@ async fn get_policy_matches_rest_in_json_and_toml_and_put_replaces_it() {
         .call("get_policy", json!({"site_id": uuid::Uuid::new_v4()}))
         .await;
     assert!(is_error, "{text}");
+}
+
+#[tokio::test]
+async fn preview_set_and_compare_policy_over_mcp_and_rest() {
+    let f = setup(Plan::Lite).await;
+    let site = f.site.id;
+    // Thin under 50 words: none of the fixture pages is thin then.
+    let policy = json!({"version": 1, "seo": {"thresholds": {"thin_words": 50, "title_max": 65}}});
+    let before = calls_today(&f.app, &f.account).await;
+    let preview = f
+        .rpc()
+        .call_ok("preview_policy", json!({"site_id": site, "policy": policy}))
+        .await;
+    assert_eq!(calls_today(&f.app, &f.account).await, before + 1, "charged");
+    assert_eq!(preview["valid"], true, "{preview}");
+    assert!(
+        preview["summary"]
+            .as_str()
+            .unwrap()
+            .contains("seo.thresholds.thin_words: default → 50")
+    );
+    assert!(preview["crawl_id"].is_string());
+    let health_before = preview["health"]["before"].as_i64().unwrap();
+    let health_after = preview["health"]["after"].as_i64().unwrap();
+    assert!(preview["issues_muted"].as_u64().is_some());
+    // REST answers the same.
+    let res = f
+        .app
+        .send(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/sites/{site}/policy/preview"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", f.key))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(policy.to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(serde_json::from_str::<Value>(&res.body).unwrap(), preview);
+
+    // An invalid policy previews with its errors, and is refused by set_policy.
+    let bad = json!({"version": 1, "seo": {"exceptions": [{"check": "must_work_failed", "scope": "/x"}]}});
+    let p = f
+        .rpc()
+        .call_ok("preview_policy", json!({"site_id": site, "policy": bad}))
+        .await;
+    assert_eq!(p["valid"], false);
+    assert_eq!(p["errors"][0]["path"], "seo.exceptions[0].check");
+    let (is_error, text) = f
+        .rpc()
+        .call("set_policy", json!({"site_id": site, "policy": bad}))
+        .await;
+    assert!(is_error && text.contains("policy check"), "{text}");
+
+    let cmp = f
+        .rpc()
+        .call_ok("compare_policy", json!({"site_id": site, "policy": policy}))
+        .await;
+    assert_eq!(cmp["changes"].as_array().unwrap().len(), 2, "{cmp}");
+    assert_eq!(cmp["changes"][0]["key"], "seo.thresholds.thin_words");
+    assert_eq!(cmp["changes"][0]["before"], Value::Null);
+    assert_eq!(cmp["changes"][0]["after"], 50);
+    assert_eq!(cmp["health"], preview["health"]);
+
+    let saved = f
+        .rpc()
+        .call_ok(
+            "set_policy",
+            json!({"site_id": site, "policy": policy, "note": "from the agent"}),
+        )
+        .await;
+    assert_eq!(saved["saved"]["outcome"], "saved", "{saved}");
+    assert_eq!(saved["saved"]["health"]["before"], health_before);
+    assert_eq!(saved["saved"]["health"]["after"], health_after);
+    assert_eq!(saved["policy"]["seo"]["thresholds"]["thin_words"], 50);
+    let h = codoseo_store::policy::history(f.app.pool(), site, 1)
+        .await
+        .unwrap();
+    assert_eq!(h[0].via, "mcp");
+    assert!(
+        h[0].summary.ends_with("— from the agent"),
+        "{}",
+        h[0].summary
+    );
+    assert_eq!(h[0].health_after.map(i64::from), Some(health_after));
+    // The same again changes nothing and records nothing.
+    let again = f
+        .rpc()
+        .call_ok("set_policy", json!({"site_id": site, "policy": policy}))
+        .await;
+    assert_eq!(again["saved"]["outcome"], "unchanged");
+    assert_eq!(again["saved"]["history_id"], Value::Null);
+    // get_policy has no `saved`.
+    let read = f
+        .rpc()
+        .call_ok("get_policy", json!({"site_id": site}))
+        .await;
+    assert!(read.get("saved").is_none());
 }
 
 /// A site with a `bots_blocked` incident (robots.txt) and `fetch_blocked` ones (probes); the
@@ -1526,6 +1629,31 @@ impl CloudBackend for Faulty {
         _: &ApiCaller,
         _: &str,
     ) -> Result<codoseo_mcp::cloud::types::PolicyInfo, String> {
+        unimplemented!()
+    }
+    async fn preview_policy(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: serde_json::Value,
+    ) -> Result<codoseo_mcp::cloud::types::PolicyPreview, String> {
+        unimplemented!()
+    }
+    async fn set_policy(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: serde_json::Value,
+        _: Option<String>,
+    ) -> Result<codoseo_mcp::cloud::types::PolicyInfo, String> {
+        unimplemented!()
+    }
+    async fn compare_policy(
+        &self,
+        _: &ApiCaller,
+        _: &str,
+        _: serde_json::Value,
+    ) -> Result<codoseo_mcp::cloud::types::PolicyComparison, String> {
         unimplemented!()
     }
     async fn incident_fix(&self, _: &ApiCaller, _: &str, _: i64) -> Result<AiFixInfo, String> {

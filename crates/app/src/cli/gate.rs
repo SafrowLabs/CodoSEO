@@ -480,24 +480,26 @@ pub fn judge(audit: &Audit, baseline: Option<&Audit>, gates: &[Gate]) -> Verdict
 /// changes the diff reports at that severity.
 fn seo_tripped(audit: &Audit, v: &Verdict, threshold: Severity) -> Vec<Tripped> {
     let mut out = Vec::new();
+    let thresholds = crate::cli::policy::audit_thresholds(audit);
     for (id, pages) in &audit.report.counts {
         let d = def(*id);
         if d.severity > threshold {
             continue;
         }
+        let title = codoseo_checks::title_for(*id, &thresholds);
         let text = if !v.baseline {
             match (d.scope, pages) {
-                (Scope::SiteWide, _) => format!("{} (site-wide)", d.title),
-                (_, 1) => format!("{} (1 page)", d.title),
-                (_, n) => format!("{} ({n} pages)", d.title),
+                (Scope::SiteWide, _) => format!("{} (site-wide)", title),
+                (_, 1) => format!("{} (1 page)", title),
+                (_, n) => format!("{} ({n} pages)", title),
             }
         } else {
             let new = v.new_issues.iter().filter(|(c, _)| c == id).count();
             match (d.scope, new) {
                 (_, 0) => continue,
-                (Scope::SiteWide, _) => format!("{} (site-wide, new since the baseline)", d.title),
-                (_, 1) => format!("{} (1 page new since the baseline)", d.title),
-                (_, n) => format!("{} ({n} pages new since the baseline)", d.title),
+                (Scope::SiteWide, _) => format!("{} (site-wide, new since the baseline)", title),
+                (_, 1) => format!("{} (1 page new since the baseline)", title),
+                (_, n) => format!("{} ({n} pages new since the baseline)", title),
             }
         };
         out.push(Tripped {
@@ -723,6 +725,7 @@ mod tests {
                 counts: Vec::new(),
                 inlink_samples: Vec::new(),
                 summary: Default::default(),
+                excluded: Default::default(),
             },
             snapshot: codoseo_core::snapshot::Snapshot {
                 origin: url::Url::parse("https://example.com/").unwrap(),

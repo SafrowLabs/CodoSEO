@@ -31,6 +31,13 @@ inputs:
     description: Where to write the audit (JSON), the baseline for the next run.
     required: false
     default: codoseo-audit.json
+  policy:
+    description: >-
+      A site policy file (codoseo.toml) to judge the site under: its rules, check thresholds and exceptions (excepted
+      results are SARIF suppressions). Empty uses ./codoseo.toml when the repository has one; a path that does not
+      exist fails the run.
+    required: false
+    default: ""
   max-pages:
     description: Most pages to crawl.
     required: false
@@ -83,6 +90,7 @@ runs:
         CODOSEO_BASELINE: ${{ inputs.baseline }}
         CODOSEO_SARIF: ${{ inputs.sarif }}
         CODOSEO_AUDIT: ${{ inputs.audit }}
+        CODOSEO_POLICY: ${{ inputs.policy }}
         CODOSEO_MAX_PAGES: ${{ inputs.max-pages }}
         CODOSEO_MAX_TIME: ${{ inputs.max-time }}
         CODOSEO_RPS: ${{ inputs.rps }}

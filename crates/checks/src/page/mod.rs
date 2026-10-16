@@ -18,31 +18,70 @@ mod technical;
 use codoseo_core::check::{CheckId, IssueBits};
 use codoseo_core::page::PageRecord;
 
-type PageCheck = fn(&PageRecord) -> bool;
+use crate::Thresholds;
 
-/// Every Page-scope check, in `CheckId` order.
-const PAGE_CHECKS: [(CheckId, PageCheck); 30] = [
+type PageCheck = fn(&PageRecord) -> bool;
+type ThresholdCheck = fn(&PageRecord, &Thresholds) -> bool;
+
+/// The Page-scope checks whose verdict depends on the [`Thresholds`], in `CheckId` order. Each
+/// reads only page fields the database keeps, so a policy save can run them again on a stored
+/// crawl.
+const THRESHOLD_CHECKS: [(CheckId, ThresholdCheck); 8] = [
+    (CheckId::RedirectChain, response::redirect_chain),
+    (CheckId::TitleTooLong, onpage::title_too_long),
+    (CheckId::TitleTooShort, onpage::title_too_short),
+    (CheckId::DescriptionTooLong, onpage::description_too_long),
+    (CheckId::DescriptionTooShort, onpage::description_too_short),
+    (CheckId::ThinContent, content::thin_content),
+    (CheckId::ImagesMissingAlt, content::images_missing_alt),
+    (CheckId::SlowResponse, technical::slow_response),
+];
+
+/// The checks the [`Thresholds`] change.
+pub const THRESHOLD_CHECK_IDS: [CheckId; 8] = {
+    let mut ids = [CheckId::Http4xx; 8];
+    let mut i = 0;
+    while i < 8 {
+        ids[i] = THRESHOLD_CHECKS[i].0;
+        i += 1;
+    }
+    ids
+};
+
+/// The issue bits of [`THRESHOLD_CHECK_IDS`].
+pub fn threshold_mask() -> u64 {
+    THRESHOLD_CHECK_IDS
+        .iter()
+        .fold(0, |m, id| m | (1u64 << id.bit()))
+}
+
+/// The threshold checks ([`THRESHOLD_CHECK_IDS`]) that fail on this page under `t`.
+pub fn threshold_issues(page: &PageRecord, t: &Thresholds) -> IssueBits {
+    let mut bits = IssueBits::default();
+    for (id, check) in THRESHOLD_CHECKS {
+        if check(page, t) {
+            bits.set_check(id);
+        }
+    }
+    bits
+}
+
+/// Every other Page-scope check, in `CheckId` order.
+const PAGE_CHECKS: [(CheckId, PageCheck); 22] = [
     (CheckId::Http4xx, response::http_4xx),
     (CheckId::Http5xx, response::http_5xx),
     (CheckId::FetchFailed, response::fetch_failed),
     (CheckId::RedirectLoop, response::redirect_loop),
     (CheckId::Redirected, response::redirected),
-    (CheckId::RedirectChain, response::redirect_chain),
     (CheckId::Noindex, response::noindex),
     (CheckId::Canonicalised, response::canonicalised),
     (CheckId::CanonicalMissing, response::canonical_missing),
     (CheckId::BlockedByRobots, response::blocked_by_robots),
     (CheckId::TitleMissing, onpage::title_missing),
-    (CheckId::TitleTooLong, onpage::title_too_long),
-    (CheckId::TitleTooShort, onpage::title_too_short),
     (CheckId::TitleMultiple, onpage::title_multiple),
     (CheckId::DescriptionMissing, onpage::description_missing),
-    (CheckId::DescriptionTooLong, onpage::description_too_long),
-    (CheckId::DescriptionTooShort, onpage::description_too_short),
     (CheckId::H1Missing, onpage::h1_missing),
     (CheckId::H1Multiple, onpage::h1_multiple),
-    (CheckId::ThinContent, content::thin_content),
-    (CheckId::ImagesMissingAlt, content::images_missing_alt),
     (CheckId::NoInternalOutlinks, technical::no_internal_outlinks),
     (
         CheckId::NofollowInternalLinks,
@@ -51,15 +90,19 @@ const PAGE_CHECKS: [(CheckId, PageCheck); 30] = [
     (CheckId::DeepPage, technical::deep_page),
     (CheckId::MixedContent, technical::mixed_content),
     (CheckId::NotHttps, technical::not_https),
-    (CheckId::SlowResponse, technical::slow_response),
     (CheckId::OgMissing, social::og_missing),
     (CheckId::JsonldInvalid, social::jsonld_invalid),
     (CheckId::HreflangMissingSelf, social::hreflang_missing_self),
 ];
 
-/// The Page-scope checks that fail on this page.
+/// The Page-scope checks that fail on this page, under the default thresholds.
 pub fn page_issues(page: &PageRecord) -> IssueBits {
-    let mut bits = IssueBits::default();
+    page_issues_with(page, &Thresholds::DEFAULT)
+}
+
+/// The Page-scope checks that fail on this page under `t`.
+pub fn page_issues_with(page: &PageRecord, t: &Thresholds) -> IssueBits {
+    let mut bits = threshold_issues(page, t);
     for (id, check) in PAGE_CHECKS {
         if check(page) {
             bits.set_check(id);

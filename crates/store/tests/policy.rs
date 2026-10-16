@@ -205,6 +205,7 @@ async fn full_crawl(pool: &PgPool, site: Uuid, robots: &str) -> Uuid {
         counts: Vec::new(),
         inlink_samples: Vec::new(),
         summary: CrawlSummary::default(),
+        excluded: Default::default(),
     };
     finalize(pool, crawl, site, WORKER, &out, &report, &[], Some(&input))
         .await
@@ -407,4 +408,179 @@ async fn a_site_without_a_policy_reads_its_mirror_columns() {
         .await
         .unwrap();
     assert!(mirror);
+}
+
+// ---- the latest crawl judged again ---------------------------------------------------------
+
+/// A finished crawl of `pages`, checked like the worker checks one (default policy).
+async fn checked_crawl(pool: &PgPool, site: Uuid, pages: Vec<PageRecord>) -> Uuid {
+    let crawl: Uuid = sqlx::query_scalar(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, worker_id) \
+         VALUES ($1, 'example.com', 'manual', 2, 'running', $2) RETURNING id",
+    )
+    .bind(site)
+    .bind(WORKER)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let mut out = CrawlOutput {
+        origin: Url::parse("https://example.com/").unwrap(),
+        pages,
+        links: LinkGraph::default(),
+        robots: None,
+        sitemap: SitemapSummary::default(),
+        stop: StopReason::Completed,
+        duration_ms: 1,
+        signals: SiteSignals::default(),
+    };
+    let report =
+        codoseo_policy::run_checks_with(&SitePolicy::default(), &mut out, &HashSet::new(), &[]);
+    finalize(pool, crawl, site, WORKER, &out, &report, &[], None)
+        .await
+        .unwrap();
+    crawl
+}
+
+fn thin_site() -> Vec<PageRecord> {
+    let mut pages: Vec<PageRecord> = ["/", "/a", "/b", "/stores/paris", "/stores/rome"]
+        .iter()
+        .map(|p| page(p))
+        .collect();
+    for p in &mut pages[..3] {
+        p.fields.word_count = 400;
+    }
+    pages
+}
+
+async fn crawl_state(pool: &PgPool, crawl: Uuid) -> (Option<i16>, Value, Vec<i64>) {
+    let (health, summary): (Option<i16>, Value) =
+        sqlx::query_as("SELECT health_score, summary FROM crawls WHERE id = $1")
+            .bind(crawl)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let bits: Vec<i64> =
+        sqlx::query_scalar("SELECT issues FROM pages WHERE crawl_id = $1 ORDER BY url")
+            .bind(crawl)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    (health, summary, bits)
+}
+
+fn has(bits: i64, id: codoseo_core::check::CheckId) -> bool {
+    IssueBits(bits as u64).has_check(id)
+}
+
+#[tokio::test]
+async fn save_judges_only_the_latest_crawl_again_and_records_the_scores() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool).await;
+    let account = make_account(&db.pool).await;
+    let older = checked_crawl(&db.pool, site, thin_site()).await;
+    let latest = checked_crawl(&db.pool, site, thin_site()).await;
+    let older_before = crawl_state(&db.pool, older).await;
+    let (health_before, summary_before, _) = crawl_state(&db.pool, latest).await;
+    assert_eq!(
+        older_before.0, health_before,
+        "the same pages, the same score"
+    );
+    let thin = codoseo_core::check::CheckId::ThinContent;
+    let thin_count = |s: &Value| {
+        s["counts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c[0] == "thin_content")
+            .map_or(0, |c| c[1].as_u64().unwrap())
+    };
+    assert_eq!(thin_count(&summary_before), 2);
+
+    // Thin under 80 words: the 100-word store pages are no longer thin.
+    let mut p = SitePolicy::default();
+    p.seo.thresholds.thin_words = Some(80);
+    let preview = policy::measure(&db.pool, site, &p)
+        .await
+        .unwrap()
+        .preview
+        .expect("a crawl to preview on");
+    assert_eq!((preview.muted, preview.opened), (2, 0));
+    let saved = policy::save(&db.pool, site, &p, &Actor::web(account))
+        .await
+        .unwrap();
+    let (health_after, summary_after, bits_after) = crawl_state(&db.pool, latest).await;
+    assert!(
+        health_after > health_before,
+        "{health_before:?} → {health_after:?}"
+    );
+    assert_eq!(saved.health, (health_before, health_after));
+    assert_eq!(i16::from(preview.health.1), health_after.unwrap());
+    assert_eq!(thin_count(&summary_after), 0);
+    assert!(bits_after.iter().all(|b| !has(*b, thin)));
+    // The older crawl keeps what it was judged under.
+    assert_eq!(crawl_state(&db.pool, older).await, older_before);
+
+    // The history row carries the scores and pins the latest crawl.
+    let rows = policy::history_for_crawls(&db.pool, &[latest, older])
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.crawl_id, Some(latest));
+    assert_eq!((row.health_before, row.health_after), saved.health);
+    assert_eq!(row.email.as_deref(), Some("owner@example.com"));
+    assert!(
+        row.summary.contains("seo.thresholds.thin_words"),
+        "{}",
+        row.summary
+    );
+
+    // An exception keeps the issue on the page but leaves the score: the summary says so.
+    let mut e = SitePolicy::default();
+    e.seo.exceptions = vec![codoseo_policy::Exception {
+        check: thin,
+        scope: codoseo_policy::PathPattern("/stores/*".into()),
+        note: "Short by design".into(),
+    }];
+    policy::save_with_note(&db.pool, site, &e, &Actor::web(account), Some("ticket 12"))
+        .await
+        .unwrap();
+    let (health_e, summary_e, bits_e) = crawl_state(&db.pool, latest).await;
+    assert_eq!(thin_count(&summary_e), 2, "the pages keep the issue");
+    assert_eq!(
+        summary_e["excluded"]["counts"],
+        json!([["thin_content", 2]])
+    );
+    assert_eq!(health_e, health_after, "excepted, it costs nothing");
+    assert_eq!(bits_e.iter().filter(|b| has(**b, thin)).count(), 2);
+    let stored = codoseo_store::crawls::latest_done(&db.pool, site)
+        .await
+        .unwrap()
+        .unwrap()
+        .summary()
+        .unwrap();
+    assert_eq!(stored.excluded.of(thin), 2);
+    let last = &policy::history(&db.pool, site, 1).await.unwrap()[0];
+    assert!(last.summary.ends_with("— ticket 12"), "{}", last.summary);
+
+    // Back to the defaults: the latest crawl reads as it was finished.
+    policy::save(&db.pool, site, &SitePolicy::default(), &Actor::web(account))
+        .await
+        .unwrap();
+    let (health_d, summary_d, _) = crawl_state(&db.pool, latest).await;
+    assert_eq!(health_d, health_before);
+    assert_eq!(summary_d["counts"], summary_before["counts"]);
+    assert!(summary_d.get("excluded").is_none());
+    assert_eq!(crawl_state(&db.pool, older).await, older_before);
+}
+
+#[tokio::test]
+async fn a_long_note_is_refused() {
+    let db = TestDb::new().await;
+    let site = make_site(&db.pool).await;
+    let note = "x".repeat(policy::MAX_NOTE + 1);
+    let err = policy::save_with_note(&db.pool, site, &training_blocked(), &nobody(), Some(&note))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SaveError::Invalid(_)), "{err}");
 }

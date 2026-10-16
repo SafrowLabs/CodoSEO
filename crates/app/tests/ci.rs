@@ -252,6 +252,68 @@ fn seo_results_in_sarif_are_one_per_page() {
 }
 
 #[test]
+fn excepted_results_are_sarif_suppressions_and_thresholds_name_the_rules() {
+    let url = serve(
+        SiteBuilder::new()
+            .html(
+                "/",
+                "Home page title for tests here",
+                &["/stores/a", "/stores/b"],
+            )
+            .html("/stores/a", "Store A page title for tests here", &["/"])
+            .html("/stores/b", "Store B page title for tests here", &["/"]),
+    );
+    let file = std::env::temp_dir().join(format!("codoseo-ci-policy-{}.toml", std::process::id()));
+    fs::write(
+        &file,
+        "[policy]\nversion = 1\n[policy.seo.thresholds]\ntitle_max = 20\ntitle_min = 10\n\
+         [[policy.seo.exceptions]]\ncheck = \"thin_content\"\nscope = \"/stores/*\"\n\
+         note = \"Store pages are short by design\"\n",
+    )
+    .expect("a temp file");
+    let out = crawl(&url)
+        .args(["--format", "sarif", "--policy"])
+        .arg(&file)
+        .output()
+        .expect("the binary runs");
+    let _ = fs::remove_file(&file);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let doc = assert_valid_sarif(&String::from_utf8(out.stdout).expect("utf-8"));
+    let thin = results(&doc, "seo/thin_content");
+    assert_eq!(thin.len(), 3, "{doc:#}");
+    for r in &thin {
+        let uri = artifact(r)["uri"].as_str().unwrap_or_default().to_owned();
+        if uri.starts_with("stores/") {
+            assert_eq!(
+                r["suppressions"],
+                serde_json::json!([{ "kind": "external", "justification": "Store pages are short by design" }]),
+                "{uri}"
+            );
+        } else {
+            assert!(r.get("suppressions").is_none(), "{uri}");
+        }
+    }
+    // The title rule names the policy's number, and its results are flagged under it.
+    let rules = doc["runs"][0]["tool"]["driver"]["rules"]
+        .as_array()
+        .unwrap();
+    let long = rules
+        .iter()
+        .find(|r| r["id"] == "seo/title_too_long")
+        .unwrap();
+    assert_eq!(
+        long["shortDescription"]["text"],
+        "Title is over 20 characters"
+    );
+    assert_eq!(results(&doc, "seo/title_too_long").len(), 3);
+}
+
+#[test]
 fn fail_on_save_and_baseline_reject_what_they_do_not_know() {
     for bad in [
         "notice",

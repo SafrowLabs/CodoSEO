@@ -3,6 +3,7 @@
 use codoseo_core::page::{FetchFailure, Indexability, PageRecord};
 
 use super::is_indexable;
+use crate::Thresholds;
 
 pub fn http_4xx(p: &PageRecord) -> bool {
     (400..500).contains(&p.status)
@@ -31,8 +32,9 @@ pub fn redirected(p: &PageRecord) -> bool {
     (300..400).contains(&p.status) && p.error.is_none()
 }
 
-pub fn redirect_chain(p: &PageRecord) -> bool {
-    p.redirect_chain.len() >= 2
+/// More hops than the thresholds allow (1 by default: a chain of 2 or more).
+pub fn redirect_chain(p: &PageRecord, t: &Thresholds) -> bool {
+    p.redirect_chain.len() > usize::from(t.max_redirect_hops)
 }
 
 pub fn noindex(p: &PageRecord) -> bool {

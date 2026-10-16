@@ -3,7 +3,7 @@
 # next run's baseline) and a Markdown report for the job summary, then hands back the exit code.
 #
 # Inputs (environment): CODOSEO_URL, CODOSEO_FAIL_ON, CODOSEO_BASELINE, CODOSEO_SARIF,
-# CODOSEO_AUDIT, CODOSEO_MAX_PAGES, CODOSEO_MAX_TIME, CODOSEO_RPS, CODOSEO_ARGS (extra flags,
+# CODOSEO_AUDIT, CODOSEO_POLICY, CODOSEO_MAX_PAGES, CODOSEO_MAX_TIME, CODOSEO_RPS, CODOSEO_ARGS (extra flags,
 # split on spaces), GITHUB_OUTPUT, GITHUB_STEP_SUMMARY, RUNNER_TEMP.
 #
 # Exit codes are codoseo's: 0 passed, 1 a --fail-on gate failed, 2 the crawl could not run.
@@ -22,6 +22,7 @@ args=(crawl "$CODOSEO_URL" --format github --save "$sarif" --save "$audit" --sav
 [ -n "${CODOSEO_MAX_TIME:-}" ] && args+=(--max-time "$CODOSEO_MAX_TIME")
 [ -n "${CODOSEO_RPS:-}" ] && args+=(--rps "$CODOSEO_RPS")
 [ -n "${CODOSEO_FAIL_ON:-}" ] && args+=(--fail-on "$CODOSEO_FAIL_ON")
+[ -n "${CODOSEO_POLICY:-}" ] && args+=(--policy "$CODOSEO_POLICY")
 if [ -n "${CODOSEO_BASELINE:-}" ]; then
   if [ -f "$CODOSEO_BASELINE" ]; then
     args+=(--baseline "$CODOSEO_BASELINE")

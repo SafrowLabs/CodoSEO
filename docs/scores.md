@@ -14,6 +14,15 @@ No-signup audits have only the SEO score: they have no AI access evaluation. Cra
 
 Site policy gaps cost points too. When the [site policy](policy.md) declares an SEO rule, its check joins the crawl and counts like any other: `must_work_failed` (Critical), `policy_address` and `policy_index_mismatch` (Warning), `policy_keep_out_partial` and `policy_param_canonical` (Notice). A rule the policy doesn't declare adds no check, so the checks total is 44 plus one per declared check, and a site with the default policy scores exactly as before.
 
+The policy's [check thresholds](policy.md#thresholds-and-exceptions) decide which pages a check fails on (a longer title limit flags fewer titles); `image_alt = false` takes the alt text check out of the checks total.
+
+**Pages the policy takes out.** The formula stays the same, but the share is counted on what the policy leaves in:
+
+- An **exception** keeps the issue on the pages it matches but takes them out of that check's count.
+- A page an index rule keeps out of search (`keep_out`) that does carry `noindex`, as the rule asks, leaves the score entirely: its issues and its page.
+
+So the share is the check's count minus its excluded pages, over the crawled pages minus the excluded pages. A check whose failing pages are all excepted no longer costs anything. The report's `excluded` field (`{ "pages": n, "counts": [[slug, n], ...] }`) holds what was taken out.
+
 ## GEO
 
 The GEO score has two tiers.
@@ -68,4 +77,4 @@ A failing check loses `cap × (0.25 + 0.75 × share)` of its weight, at most all
 
 ## When the scores are computed
 
-The GEO and Overall scores are written when a crawl finishes, in the same transaction as its AI access report and incidents, under your intent at that moment. When you change your intent ("Mark intended", or the intent settings), the newest finished crawl is scored again straight away. Older crawls keep the score they were finished with. A recheck does not change a crawl's score. It writes no report, so the next crawl scores what it found.
+The scores are written when a crawl finishes, in the same transaction as its AI access report and incidents, under your [site policy](policy.md) at that moment. When you save the policy (the policy screen, the API, MCP `set_policy`, an import or "Mark intended"), the newest finished crawl is judged again straight away: its SEO checks under the new thresholds, exceptions and rules, then its AI access, GEO and Overall scores. The change is a pin on the score trend. Older crawls keep the score they were finished with. A recheck does not change a crawl's score. It writes no report, so the next crawl scores what it found.

@@ -99,8 +99,11 @@ pub struct ChangeView {
     pub after: String,
     /// ` critical`, ` warning`, ` resolved` or empty, appended to the `.after` class.
     pub after_class: &'static str,
-    /// AI access changes link to that screen instead of the explorer.
+    /// AI access changes link to that screen, policy changes to its history, instead of the
+    /// explorer.
     pub ai_href: Option<String>,
+    /// The label of `ai_href`'s link.
+    pub link_label: &'static str,
     /// The values are sentences (AI access findings) and wrap instead of scrolling.
     pub wrap: bool,
 }
@@ -180,11 +183,24 @@ async fn page(
     let history = reports::health_history(pool, site.id, HISTORY).await?;
 
     let in_tab = severity.map_or(counts.total(), |s| counts.severity(s));
-    let views = rows
+    // The policy changes that judged this crawl again come first, on the tabs notices show on:
+    // a score that moved without a crawl is explained here.
+    let policy_rows = if matches!(severity, None | Some(Severity::Notice)) {
+        codoseo_store::policy::history_for_crawls(pool, &[latest.id]).await?
+    } else {
+        Vec::new()
+    };
+    let views = policy_rows
         .iter()
-        .map(|c| change_view(&site, &base, c, &previous, &latest))
+        .rev()
+        .map(|r| policy_view(&base, r))
+        .chain(
+            rows.iter()
+                .map(|c| change_view(&site, &base, c, &previous, &latest)),
+        )
         .collect::<Vec<_>>();
-    let nothing = (counts.total() == 0).then(|| {
+    let shown_changes = views.len() - policy_rows.len();
+    let nothing = (counts.total() == 0 && policy_rows.is_empty()).then(|| {
         format!(
             "Nothing changed between #{} and #{}.",
             previous.number, latest.number
@@ -197,10 +213,10 @@ async fn page(
         ),
         None => "No changes in this crawl.".to_owned(),
     });
-    let more = (in_tab > views.len() as i64).then(|| {
+    let more = (in_tab > shown_changes as i64).then(|| {
         format!(
             "Showing the first {} of {} changes.",
-            fmt::thousands(views.len() as i64),
+            fmt::thousands(shown_changes as i64),
             fmt::thousands(in_tab)
         )
     });
@@ -484,7 +500,42 @@ fn change_view(
             Severity::Notice => "",
         },
         ai_href: ai.then(|| format!("{base}/ai-access")),
+        link_label: "AI access",
         wrap: ai,
+    }
+}
+
+/// A policy change that judged the latest crawl again, as a row among its changes: what changed
+/// and what it did to the scores. It alerts no one: the owner made it.
+fn policy_view(base: &str, r: &codoseo_store::policy::HistoryRow) -> ChangeView {
+    let moves: Vec<String> = [
+        ("Health", r.health_before, r.health_after),
+        ("GEO", r.geo_before, r.geo_after),
+    ]
+    .into_iter()
+    .filter_map(|(name, a, b)| match (a, b) {
+        (Some(a), Some(b)) => Some(format!("{name} {a} → {b}")),
+        _ => None,
+    })
+    .collect();
+    ChangeView {
+        severity: "notice",
+        severity_label: "Policy",
+        title: format!("Policy changed by {}", crate::routes::policy::who(r)),
+        path: None,
+        href: None,
+        mode: "No alert",
+        mode_icon: "i-check",
+        before: r.summary.clone(),
+        after: if moves.is_empty() {
+            "No score change".to_owned()
+        } else {
+            moves.join(" · ")
+        },
+        after_class: "",
+        ai_href: Some(format!("{base}/policy/history")),
+        link_label: "Policy history",
+        wrap: true,
     }
 }
 

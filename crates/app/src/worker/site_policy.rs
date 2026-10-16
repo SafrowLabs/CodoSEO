@@ -10,7 +10,7 @@ use codoseo_core::report::CrawlReport;
 use codoseo_core::snapshot::Snapshot;
 use codoseo_geo::report::AccessReport;
 use codoseo_policy::seo::must_work_rows;
-use codoseo_policy::{PolicyInput, PolicyReport, SitePolicy, Status, apply_to_crawl, evaluate};
+use codoseo_policy::{PolicyInput, PolicyReport, SitePolicy, Status, evaluate, run_checks_with};
 use sqlx::PgPool;
 use url::Url;
 use uuid::Uuid;
@@ -79,9 +79,10 @@ impl SitePolicyRun {
         }
     }
 
-    /// The policy pass after `run_checks`.
-    pub fn apply(&self, out: &mut CrawlOutput, report: &mut CrawlReport) {
-        apply_to_crawl(&self.policy, out, report, &self.starred, &self.starred_urls);
+    /// Every check over the finished crawl under the policy: its thresholds, then the policy
+    /// pass (the SEO rules' gaps as checks) and its exceptions in the score.
+    pub fn run_checks(&self, out: &mut CrawlOutput) -> CrawlReport {
+        run_checks_with(&self.policy, out, &self.starred, &self.starred_urls)
     }
 
     /// The policy against this crawl, SEO and AI rules.

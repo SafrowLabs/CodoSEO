@@ -1,0 +1,18 @@
+<div class="pol-rules" id="seo-exceptions">
+  <input type="hidden" name="ex.form" value="1">
+  {% for e in seo.exception_rows %}
+  <div class="pol-rule pol-exc">
+    <span class="pol-rule-what">
+      <select class="select" name="ex.check" aria-label="Check for exception {{ e.index + 1 }}">{% for o in e.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+      <input class="input" name="ex.note" value="{{ e.note }}" placeholder="Why: store pages are short by design" aria-label="Why, for exception {{ e.index + 1 }}" autocomplete="off" maxlength="200">
+    </span>
+    <input class="input mono" name="ex.scope" value="{{ e.scope }}" placeholder="/stores/*" aria-label="Pages exception {{ e.index + 1 }} applies to" autocomplete="off" spellcheck="false">
+    <div class="pol-cmp {{ e.cmp.class }}" id="{{ e.cmp.id }}" aria-live="polite"><b>{{ e.cmp.head }}</b><span>{{ e.cmp.text }}</span></div>
+    <button class="btn btn-sm btn-ghost pol-rule-remove" type="button" hx-post="{{ base }}/policy/preview?tab=seo&amp;op=ex-remove:{{ e.index }}" hx-include="#policy-form" hx-target="#seo-exceptions" hx-swap="outerHTML" aria-label="Remove exception {{ e.index + 1 }}">Remove</button>
+  </div>
+  {% else %}
+  <p class="pol-desc">No exceptions: every check counts on every page.</p>
+  {% endfor %}
+  {% for e in seo.exception_errors %}<p class="pol-field-error" role="alert">{{ e }}</p>{% endfor %}
+  <div class="pol-rules-foot"><button class="btn btn-sm" type="button" hx-post="{{ base }}/policy/preview?tab=seo&amp;op=ex-add" hx-include="#policy-form" hx-target="#seo-exceptions" hx-swap="outerHTML"><svg class="icon"><use href="#i-plus"/></svg>Add exception</button></div>
+</div>

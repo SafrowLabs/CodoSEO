@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use codoseo_checks::{Scope, def, points_regained};
+use codoseo_checks::{Scope, Thresholds, def, points_regained, title_for};
 use codoseo_core::check::{CheckId, Severity};
 use codoseo_geo::findings::{Evidence, FindingKind};
 use codoseo_geo::llms::LlmsState;
@@ -160,6 +160,8 @@ pub struct FixInput<'a> {
     /// Example URLs per failing SEO check.
     pub examples: &'a HashMap<CheckId, Vec<String>>,
     pub ai: Option<AiFixInput<'a>>,
+    /// The site policy's thresholds, which the check titles name.
+    pub thresholds: Thresholds,
 }
 
 /// The checks of a stored summary this version knows, with their counts.
@@ -291,12 +293,34 @@ pub fn fix_list(input: FixInput<'_>) -> FixList {
     if let Some(s) = input.current {
         let counts = known_counts(s);
         let pages = s.report_summary.pages;
-        for ((id, points), &(_, n)) in points_regained(&counts, pages).into_iter().zip(&counts) {
+        // The score leaves out what the site policy excludes, so the points do too.
+        let scored: Vec<(CheckId, u32)> = counts
+            .iter()
+            .filter_map(|&(id, n)| {
+                let left = n.saturating_sub(s.excluded.of(id));
+                (left > 0).then_some((id, left))
+            })
+            .collect();
+        let regained: HashMap<CheckId, f64> =
+            points_regained(&scored, pages.saturating_sub(s.excluded.pages))
+                .into_iter()
+                .collect();
+        for &(id, n) in &counts {
+            let points = regained.get(&id).copied().unwrap_or(0.0);
             let d = def(id);
+            let title = title_for(id, &input.thresholds);
             let site_wide = d.scope == Scope::SiteWide;
             let (why, fix) = seo_hint(id);
+            let left_out = s.excluded.of(id);
             let evidence = if site_wide {
                 format!("Site-wide. {why}")
+            } else if left_out > 0 {
+                format!(
+                    "On {} of {} ({} excluded from the health score by the site policy). {why}",
+                    fmt::thousands(n),
+                    fmt::pages(pages),
+                    fmt::thousands(left_out)
+                )
             } else {
                 format!("On {} of {}. {why}", fmt::thousands(n), fmt::pages(pages))
             };
@@ -311,13 +335,13 @@ pub fn fix_list(input: FixInput<'_>) -> FixList {
                         .collect()
                 })
                 .unwrap_or_default();
-            let prompt = seo_prompt(d.title, &evidence, fix, &urls, n);
+            let prompt = seo_prompt(&title, &evidence, fix, &urls, n);
             rows.push(FixRow {
                 id: format!("fx-seo-{}", id.slug()),
                 severity: d.severity,
                 kind: "seo",
                 fresh: has_previous && diff.new_seo.contains(&id),
-                title: d.title.to_owned(),
+                title: title.into_owned(),
                 evidence: summary_segments(&evidence),
                 gain,
                 gain_tip,
@@ -788,6 +812,7 @@ mod tests {
                 ..Default::default()
             },
             counts: counts.iter().map(|(s, n)| ((*s).to_owned(), *n)).collect(),
+            excluded: Default::default(),
             geo,
         }
     }
@@ -867,6 +892,7 @@ mod tests {
                 CheckId::Http4xx,
                 vec!["https://example.com/gone".to_owned()],
             )]),
+            thresholds: Thresholds::DEFAULT,
             ai: None,
         })
     }

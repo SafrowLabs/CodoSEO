@@ -109,6 +109,7 @@ fn empty_report() -> CrawlReport {
         counts: Vec::new(),
         inlink_samples: Vec::new(),
         summary: CrawlSummary::default(),
+        excluded: Default::default(),
     }
 }
 

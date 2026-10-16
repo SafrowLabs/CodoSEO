@@ -204,7 +204,8 @@ async fn the_seo_tab_is_the_default_and_compares_each_rule_with_the_latest_crawl
         "Answers 500.",
         "200, indexable.",
         "Your plan checks up to",
-        "Coming next",
+        "Check thresholds",
+        "Exceptions",
         // The rail lists the SEO gaps with the AI ones.
         "/down answers 500",
         r#"<span class="pol-tag pol-tag-seo">SEO</span>"#,
@@ -605,5 +606,168 @@ async fn another_account_gets_nothing() {
     assert_eq!(
         policy::get(app.pool(), site.id).await.unwrap(),
         SitePolicy::default()
+    );
+}
+
+// ---- thresholds, exceptions and "When you save" ------------------------------------------
+
+fn store_pages() -> Vec<PageRecord> {
+    let mut a = page(DOMAIN, "/stores/a");
+    a.fields.word_count = 100;
+    let mut b = page(DOMAIN, "/stores/b");
+    b.fields.word_count = 90;
+    vec![page(DOMAIN, "/"), page(DOMAIN, "/pricing"), a, b]
+}
+
+/// The SEO form with a thin threshold and an exception for the store pages.
+const STORE_FORM: &str = "a.host=none&ix.default=none&params=&pagination=&must=\
+    &t.title_max=60&t.title_min=30&t.description_max=160&t.description_min=70\
+    &t.thin_words=95&t.slow=1&t.max_redirect_hops=1&t.image_alt=flag\
+    &ex.form=1&ex.check=thin_content&ex.scope=%2Fstores%2F*&ex.note=Store+pages+are+short";
+
+#[tokio::test]
+async fn thresholds_and_exceptions_count_pages_and_say_what_a_save_does() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl(&site, store_pages(), Vec::new()).await;
+    let res = app
+        .get(&format!("/s/{}/policy?tab=seo", site.id), Some(&cookie))
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    for needle in [
+        "Check thresholds",
+        r#"name="t.thin_words" value="200""#,
+        r#"id="cmp-t-thin_words" aria-live="polite"><b>2 pages</b><span>under 200 words, as the default</span>"#,
+        r#"name="t.slow" value="1""#,
+        "Exceptions",
+        "No exceptions: every check counts on every page.",
+        "Add exception",
+        "When you save",
+        "<b>0</b> issues become intended or excepted",
+    ] {
+        assert!(res.body.contains(needle), "missing {needle:?}");
+    }
+    assert!(!res.body.contains("Coming next"));
+
+    let url = format!("/s/{}/policy/preview?tab=seo", site.id);
+    let res = app.post_hx(&url, STORE_FORM, Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    let body = &res.body;
+    for needle in [
+        r#"id="cmp-t-thin_words" aria-live="polite" hx-swap-oob="true"><b>1 page</b><span>under 95 words (default flags 2)</span>"#,
+        r#"id="cmp-ex-0" aria-live="polite" hx-swap-oob="true"><b>1 page</b><span>excluded from the health score</span>"#,
+        // /stores/a is no longer thin and /stores/b is excepted.
+        "<b>2</b> issues become intended or excepted",
+        "<b>0</b> new issues open now",
+        "Health score <b>",
+        " → ",
+    ] {
+        assert!(body.contains(needle), "missing {needle:?} in {body}");
+    }
+    assert_eq!(
+        policy::get(app.pool(), site.id).await.unwrap(),
+        SitePolicy::default(),
+        "nothing saved"
+    );
+
+    // Add exception: the exceptions come back with a blank row.
+    let res = app
+        .post_hx(&format!("{url}&op=ex-add"), STORE_FORM, Some(&cookie))
+        .await;
+    assert!(
+        res.body
+            .starts_with(r#"<div class="pol-rules" id="seo-exceptions">"#),
+        "{}",
+        res.body
+    );
+    assert_eq!(res.body.matches(r#"name="ex.scope""#).count(), 2);
+    let res = app
+        .post_hx(&format!("{url}&op=ex-remove:0"), STORE_FORM, Some(&cookie))
+        .await;
+    assert_eq!(res.body.matches(r#"name="ex.scope""#).count(), 0);
+
+    // Inline validation as the owner types.
+    let res = app
+        .post_hx(
+            &url,
+            "a.host=none&t.title_min=70&t.title_max=60&ex.form=1&ex.check=must_work_failed&ex.scope=%2Fx",
+            Some(&cookie),
+        )
+        .await;
+    assert!(
+        res.body
+            .contains("title_min (70) must be below title_max (60)"),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains("a policy check can"), "{}", res.body);
+}
+
+#[tokio::test]
+async fn saving_thresholds_rescores_the_latest_crawl_with_a_pin_and_a_change_row() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl(&site, store_pages(), Vec::new()).await;
+    let latest = app.finished_crawl(&site, store_pages(), Vec::new()).await;
+    let health = |app: &TestApp| {
+        let pool = app.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, Option<i16>>("SELECT health_score FROM crawls WHERE id = $1")
+                .bind(latest)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    };
+    let before = health(&app).await;
+    let res = app
+        .post_hx(
+            &format!("/s/{}/policy?tab=seo", site.id),
+            STORE_FORM,
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    let saved = policy::get(app.pool(), site.id).await.unwrap();
+    assert_eq!(saved.seo.thresholds.thin_words, Some(95));
+    assert_eq!(saved.seo.exceptions.len(), 1);
+    let after = health(&app).await;
+    assert!(after > before, "{before} → {after}");
+
+    // The score trend pins the change on the crawl it judged again.
+    let res = app
+        .get(&format!("/s/{}/audit", site.id), Some(&cookie))
+        .await;
+    assert!(
+        res.body.contains("Policy changed by ana@example.com"),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains(&format!("Health {before} → {after}.")));
+    // The Changes page lists it with the crawl's changes.
+    let res = app
+        .get(&format!("/s/{}/changes", site.id), Some(&cookie))
+        .await;
+    assert!(
+        res.body.contains("Policy changed by ana@example.com"),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains(&format!("Health {before} → {after}")));
+    // The explorer marks the excepted issue, with the note.
+    let b = &store_pages()[3];
+    let res = app
+        .get_hx(
+            &format!(
+                "/s/{}/explorer/detail?sel={:016x}&tab=details",
+                site.id, b.url_hash
+            ),
+            Some(&cookie),
+        )
+        .await;
+    assert!(res.body.contains("Page has under 95 words"), "{}", res.body);
+    assert!(
+        res.body.contains("Excepted · Store pages are short"),
+        "{}",
+        res.body
     );
 }

@@ -85,7 +85,8 @@ fn pascal(slug: &str) -> String {
         .collect()
 }
 
-fn seo_rule(d: &CheckDef) -> Value {
+fn seo_rule(d: &CheckDef, t: &codoseo_checks::Thresholds) -> Value {
+    let title = codoseo_checks::title_for(d.id, t);
     let scope = match d.scope {
         Scope::Page => "Checked on each page on its own.",
         Scope::Site => "Checked across the whole crawl and reported on each page it affects.",
@@ -95,13 +96,13 @@ fn seo_rule(d: &CheckDef) -> Value {
     let help = if policy {
         format!(
             "{}. Site policy check, severity {}. {scope} It runs when the policy file (codoseo.toml) declares its rule, and then counts toward the health score.",
-            d.title,
+            title,
             severity_word(d.severity)
         )
     } else {
         format!(
             "{}. {} check, severity {}. {scope} It counts toward the health score. Run `codoseo check <url>` to inspect one page.",
-            d.title,
+            title,
             category_label(d.category),
             severity_word(d.severity)
         )
@@ -109,9 +110,9 @@ fn seo_rule(d: &CheckDef) -> Value {
     json!({
         "id": seo_rule_id(d.id),
         "name": pascal(d.id.slug()),
-        "shortDescription": { "text": d.title },
+        "shortDescription": { "text": title },
         "fullDescription": { "text": cap(&help) },
-        "help": { "text": help, "markdown": format!("**{}**\n\n{help}", d.title) },
+        "help": { "text": help, "markdown": format!("**{title}**\n\n{help}") },
         "helpUri": if policy {
             format!("{REPO}/blob/main/docs/policy.md")
         } else {
@@ -254,6 +255,24 @@ fn fix_of(audit: &Audit, f: &Finding) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Why the policy leaves check `id` on `page` out of the health score, as a SARIF suppression's
+/// justification: the exception's note, or that the page is kept out of search as asked.
+fn suppression(
+    policy: &codoseo_policy::SitePolicy,
+    id: CheckId,
+    page: &codoseo_core::page::PageRecord,
+) -> Option<String> {
+    if let Some(e) = codoseo_policy::exception_for(&policy.seo, id, &page.url) {
+        return Some(if e.note.trim().is_empty() {
+            format!("Excepted by the site policy for {}", e.scope.as_str())
+        } else {
+            e.note.clone()
+        });
+    }
+    codoseo_policy::keep_out_met(&policy.seo, page)
+        .then(|| "Kept out of search by the site policy, as it asks".to_owned())
+}
+
 pub fn crawl(w: &mut impl Write, audit: &Audit, verdict: &Verdict) -> Result<(), CliError> {
     serde_json::to_writer_pretty(&mut *w, &document(audit, verdict))?;
     writeln!(w)?;
@@ -262,7 +281,11 @@ pub fn crawl(w: &mut impl Write, audit: &Audit, verdict: &Verdict) -> Result<(),
 
 /// The SARIF log for one audit.
 pub fn document(audit: &Audit, verdict: &Verdict) -> Value {
-    let mut rules: Vec<Value> = CHECKS.iter().map(seo_rule).collect();
+    // The audit's policy: its thresholds name the checks, and its exceptions (and the pages it
+    // keeps out of search as asked) are suppressions: reported, out of the health score.
+    let policy = crate::cli::policy::of_audit(audit).unwrap_or_default();
+    let thresholds = policy.thresholds();
+    let mut rules: Vec<Value> = CHECKS.iter().map(|d| seo_rule(d, &thresholds)).collect();
     let mut index: BTreeMap<String, usize> = CHECKS
         .iter()
         .enumerate()
@@ -282,33 +305,37 @@ pub fn document(audit: &Audit, verdict: &Verdict) -> Value {
     for (id, _) in &audit.report.counts {
         let d = def(*id);
         let rule = seo_rule_id(*id);
-        let mut push = |uri: &str, url: Option<&str>| {
+        let title = codoseo_checks::title_for(*id, &thresholds);
+        let mut push = |uri: &str, url: Option<&str>, suppressed: Option<String>| {
             let mut r = json!({
                 "ruleId": rule,
                 "ruleIndex": index[&rule],
                 "level": level(d.severity),
-                "message": { "text": format!("{}: {uri}", d.title) },
+                "message": { "text": format!("{title}: {uri}") },
                 "locations": location(uri, origin),
                 "partialFingerprints": fingerprints(&fingerprint(&[&rule, uri])),
             });
             if let Some(s) = state(verdict.issue(*id, url)) {
                 r["baselineState"] = json!(s);
             }
+            if let Some(justification) = suppressed {
+                r["suppressions"] = json!([{ "kind": "external", "justification": justification }]);
+            }
             results.push(r);
         };
         if d.scope == Scope::SiteWide {
-            push(start, None);
+            push(start, None, None);
             continue;
         }
-        let pages: Vec<&str> = audit
+        let pages: Vec<&codoseo_core::page::PageRecord> = audit
             .snapshot
             .pages
             .iter()
             .filter(|p| p.issues.has_check(*id))
-            .map(|p| p.url.as_str())
             .collect();
-        for url in pages.iter().take(MAX_PER_RULE) {
-            push(url, Some(url));
+        for p in pages.iter().take(MAX_PER_RULE) {
+            let url = p.url.as_str();
+            push(url, Some(url), suppression(&policy, *id, p));
         }
         if pages.len() > MAX_PER_RULE {
             omitted.insert(rule.clone(), pages.len() - MAX_PER_RULE);

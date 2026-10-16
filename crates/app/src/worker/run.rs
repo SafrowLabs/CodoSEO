@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use codoseo_checks::run_checks;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
 use codoseo_core::output::{
     BLOCKED_REASON_PREFIX, LiveProgress, Progress, StopReason, UNREACHABLE_REASON_PREFIX,
@@ -433,9 +432,9 @@ async fn run_one_crawl(
         return Err(stop_reason_message(&out.stop));
     }
 
-    let mut report = run_checks(&mut out);
-    // The policy pass: the SEO rules' gaps become the policy checks, counted in the score.
-    site_policy.apply(&mut out, &mut report);
+    // Under the site policy: its thresholds, its SEO rules' gaps as the policy checks, and its
+    // exceptions left out of the score. A no-signup audit runs under the default policy.
+    let report = site_policy.run_checks(&mut out);
     let previous = crawl_queue
         .previous_snapshot(claimed.site_id)
         .await

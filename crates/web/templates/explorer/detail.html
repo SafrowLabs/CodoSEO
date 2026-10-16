@@ -13,7 +13,7 @@
     <div class="fields">
       {% for f in d.fields %}<div class="field-row"><span class="k">{{ f.k }}</span><span class="v {{ f.class }}" title="{{ f.v }}">{% if let Some(h) = f.href %}<a class="url" href="{{ h }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ f.v }}</a>{% else %}{{ f.v }}{% endif %}</span></div>
       {% endfor %}
-      <div class="field-row" style="grid-column:1/-1"><span class="k">Issues</span><span class="v" style="white-space:normal;display:flex;flex-wrap:wrap;gap:6px">{% for i in d.issues %}<a class="badge {{ i.sev }}" href="{{ i.href }}">{{ i.title }}</a>{% else %}<span class="c-ok">No issues on this URL</span>{% endfor %}</span></div>
+      <div class="field-row" style="grid-column:1/-1"><span class="k">Issues</span><span class="v" style="white-space:normal;display:flex;flex-wrap:wrap;gap:6px">{% for i in d.issues %}<a class="badge {{ i.sev }}" href="{{ i.href }}">{{ i.title }}</a>{% if let Some(note) = i.excepted %}<span class="tag" title="{{ note }}">Excepted · {{ note }}</span>{% endif %}{% else %}<span class="c-ok">No issues on this URL</span>{% endfor %}</span></div>
     </div>
   {% endif %}
   {% if let Some(s) = p.serp %}

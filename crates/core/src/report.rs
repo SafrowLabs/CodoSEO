@@ -50,6 +50,57 @@ pub struct CrawlReport {
     pub counts: Vec<(CheckId, u32)>,
     pub inlink_samples: Vec<InlinkSample>,
     pub summary: CrawlSummary,
+    /// What the site policy leaves out of the health score: its exceptions and the pages it keeps
+    /// out of search that are kept out. `counts` still holds every failing page; the score is
+    /// drawn from `counts` less these. Empty (and not written) without a policy.
+    #[serde(default, skip_serializing_if = "ExcludedCounts::is_empty")]
+    pub excluded: ExcludedCounts,
+}
+
+/// The part of a report's counts the site policy leaves out of the health score.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExcludedCounts {
+    /// Pages left out of the score entirely (also from its page count): pages the policy keeps
+    /// out of search that carry `noindex`, as it asks.
+    #[serde(default)]
+    pub pages: u32,
+    /// Per check, in `CheckId` order, the failing pages left out of its count: by an exception,
+    /// or on one of the `pages` above.
+    #[serde(default, deserialize_with = "known_counts")]
+    pub counts: Vec<(CheckId, u32)>,
+}
+
+impl ExcludedCounts {
+    pub fn is_empty(&self) -> bool {
+        self.pages == 0 && self.counts.is_empty()
+    }
+
+    /// How many failing pages of `id` are left out.
+    pub fn of(&self, id: CheckId) -> u32 {
+        self.counts
+            .iter()
+            .find(|(c, _)| *c == id)
+            .map_or(0, |&(_, n)| n)
+    }
+}
+
+impl CrawlReport {
+    /// The counts the health score is drawn from: [`CrawlReport::counts`] less what the policy
+    /// leaves out, checks left with no page dropped.
+    pub fn scored_counts(&self) -> Vec<(CheckId, u32)> {
+        self.counts
+            .iter()
+            .filter_map(|&(id, n)| {
+                let left = n.saturating_sub(self.excluded.of(id));
+                (left > 0).then_some((id, left))
+            })
+            .collect()
+    }
+
+    /// The page count the health score is drawn over.
+    pub fn scored_pages(&self) -> u32 {
+        self.summary.pages.saturating_sub(self.excluded.pages)
+    }
 }
 
 /// Reads `counts`, dropping entries whose check slug is unknown.

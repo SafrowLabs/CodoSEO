@@ -56,6 +56,10 @@ pub struct StoredSummary {
     /// Failing checks as `(slug, affected pages)`; slugs this version doesn't know are kept
     /// as-is so callers can skip them.
     pub counts: Vec<(String, u32)>,
+    /// What the site policy leaves out of the health score (its exceptions, and the pages it
+    /// keeps out of search that are kept out); empty without a policy.
+    #[serde(default)]
+    pub excluded: codoseo_core::report::ExcludedCounts,
     /// The GEO score with its per-check breakdown, beside the crawl's `geo_score` column.
     #[serde(default)]
     pub geo: Option<GeoScore>,

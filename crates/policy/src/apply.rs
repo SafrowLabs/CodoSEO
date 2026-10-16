@@ -1,9 +1,9 @@
 //! The policy pass over a finished crawl: after `run_checks`, the SEO rules' gaps become the
-//! policy check bits on the pages, and the report counts them like any other check.
+//! policy check bits on the pages, the report counts them like any other check, and the score
+//! leaves out what the exceptions and the kept-out pages take out of it.
 
 use std::collections::HashSet;
 
-use codoseo_checks::{BASE_CHECKS, health_score};
 use codoseo_core::check::{CheckId, IssueBits};
 use codoseo_core::output::CrawlOutput;
 use codoseo_core::report::CrawlReport;
@@ -22,10 +22,12 @@ fn policy_mask() -> u64 {
     CheckId::POLICY.iter().fold(0, |m, c| m | (1u64 << c.bit()))
 }
 
-/// Runs the policy's SEO rules over a crawl `run_checks` has just checked: replaces the policy
-/// check bits on every page, adds the failing ones to `report.counts`, counts the declared rules'
-/// checks in `checks_total` and rescores. Running it again gives the same result, and the
-/// default policy (no SEO rules) changes nothing.
+/// Runs the policy's SEO rules over a crawl `run_checks` has just checked (under the policy's
+/// thresholds, [`crate::run_checks_with`]): replaces the policy check bits on every page, adds the
+/// failing ones to `report.counts`, counts the declared rules' checks in `checks_total` and
+/// rescores, leaving out of the score what the policy excludes ([`crate::scored_counts`]).
+/// Running it again gives the same result, and the default policy (no SEO rules) changes
+/// nothing.
 pub fn apply_to_crawl(
     policy: &SitePolicy,
     out: &mut CrawlOutput,
@@ -35,7 +37,10 @@ pub fn apply_to_crawl(
 ) {
     let mask = policy_mask();
     // Nothing declared and nothing to clear: the report stays exactly as `run_checks` made it.
-    if declared_checks(&policy.seo).is_empty() && out.pages.iter().all(|p| p.issues.0 & mask == 0) {
+    if declared_checks(&policy.seo).is_empty()
+        && policy.seo.exceptions.is_empty()
+        && out.pages.iter().all(|p| p.issues.0 & mask == 0)
+    {
         return;
     }
     let bits = {
@@ -65,8 +70,6 @@ pub fn apply_to_crawl(
         }
     }
     report.counts.sort_by_key(|(id, _)| *id);
-    let total = BASE_CHECKS + declared_checks(&policy.seo).len();
-    report.checks_total = total as u16;
-    report.checks_passed = total.saturating_sub(report.counts.len()) as u16;
-    report.health_score = health_score(&report.counts, out.pages.len() as u32);
+    report.checks_total = crate::score::checks_total(policy);
+    crate::score::score_report(policy, &out.pages, report);
 }

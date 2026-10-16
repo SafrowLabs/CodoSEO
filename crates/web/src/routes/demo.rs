@@ -212,6 +212,8 @@ pub fn demo(now: OffsetDateTime) -> Result<DemoPage, AppError> {
         crawl: &latest,
         recent: &recent,
         changes: &changes,
+        policy_pins: &HashMap::new(),
+        thresholds: codoseo_checks::Thresholds::DEFAULT,
         times: &times,
         next: Some(now + Duration::days(6) + Duration::hours(21)),
         failed: None,

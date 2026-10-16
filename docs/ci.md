@@ -75,6 +75,8 @@ fail-on critical,geo: 1 result failed against the baseline
 
 A baseline saved before audits had an AI access section makes every AI access finding new. Without `--baseline` every result counts.
 
+The [site policy](policy.md#thresholds-and-exceptions) changes what is flagged: a baseline judged under other thresholds can make results "new" or "fixed" that come from the policy alone. On a monitored site, saving the policy judges the latest crawl again, so comparing it with the crawl before shows the same kind of change.
+
 The usual setup: keep the audit of each run on your main branch, and pass it as the baseline when you check a pull request or a deploy preview.
 
 ## Output formats and `--save`
@@ -105,6 +107,9 @@ codoseo crawl https://example.com --format github --fail-on critical,geo \
 - **Locations** are the page URLs. A site has no source files, and GitHub rejects absolute `https:` URIs next to its file source root, so each `artifactLocation.uri` is the page's path relative to the `SITE` base (`uriBaseId: "SITE"`), and `originalUriBaseIds.SITE` is the site's origin: `about/team` under `https://example.com/` is `https://example.com/about/team`. The home page is `./`; robots.txt findings point at `robots.txt`, llms.txt findings at `llms.txt`.
 - **`partialFingerprints`** (`primaryLocationLineHash` and `codoseo/v1`) are stable per rule and URL (per rule, subject and site for AI access), so code scanning tracks an alert across runs and closes it when the result goes away.
 - **`baselineState`** (`new`, `updated`, `unchanged`) is set on every result when `--baseline` is given.
+- **`suppressions`**: a result for an issue the [site policy](policy.md#thresholds-and-exceptions) excepts, or on a page an index rule keeps out that carries `noindex` as asked, has `"suppressions": [{"kind": "external", "justification": "<note>"}]`. Without a note the justification is "Excepted by the site policy for <scope>" or "Kept out of search by the site policy, as it asks". GitHub code scanning shows these alerts as dismissed.
+
+Rule short descriptions and messages name the thresholds in use ("Title is over 65 characters").
 
 In GitHub code scanning the alerts show with the page path as their "file", without a code preview, because the path is not a file in your repository.
 
@@ -123,6 +128,7 @@ In GitHub code scanning the alerts show with the page path as their "file", with
 | `max-time` | `600` | Longest crawl, in seconds. |
 | `rps` | `5` | Requests per second. |
 | `version` | | The release to install (`0.2.0`, `v0.2.0` or `latest`). Empty: the release the action is used at when that is a version tag (`SafrowLabs/CodoSEO@v0.2.0`), else the latest release. |
+| `policy` | | A `codoseo.toml` path, passed as `--policy`. Empty: `./codoseo.toml` when the repository has one. |
 | `args` | | Extra `crawl` flags, separated by spaces (for example `--probes`). |
 
 Outputs: `exit-code` (`0`, `1` or `2`), `sarif` and `audit` (the paths). The step fails with the CLI's exit code.

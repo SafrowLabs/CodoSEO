@@ -38,6 +38,7 @@ pub fn routes() -> Router<AppState> {
         .route("/sites/{site}/changes", get(changes))
         .route("/sites/{site}/ai-access", get(ai_access))
         .route("/sites/{site}/policy", get(get_policy).put(put_policy))
+        .route("/sites/{site}/policy/preview", post(preview_policy))
         .route("/sites/{site}/ai-access/incidents", get(incident_export))
         .route(
             "/sites/{site}/ai-access/incidents/{id}/fix",
@@ -273,8 +274,46 @@ async fn get_policy(
     }
 }
 
+/// A policy from a request body: a `codoseo.toml` (`Content-Type: application/toml`, unknown
+/// keys ignored) or the JSON `get_policy` returns under `policy`.
+fn policy_body(
+    headers: &axum::http::HeaderMap,
+    body: &[u8],
+) -> Result<codoseo_policy::SitePolicy, String> {
+    let toml = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("toml"));
+    match std::str::from_utf8(body) {
+        Err(_) => Err("The body is not UTF-8 text.".to_owned()),
+        Ok(text) if toml => codoseo_policy::parse_file(text)
+            .map(|f| f.policy)
+            .map_err(|e| codoseo_policy::error_lines(&e)),
+        Ok(text) => serde_json::from_str::<codoseo_policy::SitePolicy>(text)
+            .map_err(|e| format!("The body is not a policy: {e}")),
+    }
+}
+
+/// What saving a policy (a body as [`put_policy`] takes) would do, without saving it.
+async fn preview_policy(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Response {
+    let policy = policy_body(&headers, &body);
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .preview_policy(&caller, &site, policy)
+            .await,
+    )
+}
+
 /// Replaces the site's policy: a `codoseo.toml` (`Content-Type: application/toml`, unknown keys
-/// ignored) or the JSON `get_policy` returns under `policy`.
+/// ignored) or the JSON `get_policy` returns under `policy`. Answers like `get_policy`, with
+/// `saved`: what the save did to the latest crawl's scores.
 async fn put_policy(
     State(state): State<AppState>,
     caller: ApiCaller,
@@ -282,18 +321,7 @@ async fn put_policy(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
-    let toml = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.contains("toml"));
-    let policy = match std::str::from_utf8(&body) {
-        Err(_) => Err("The body is not UTF-8 text.".to_owned()),
-        Ok(text) if toml => codoseo_policy::parse_file(text)
-            .map(|f| f.policy)
-            .map_err(|e| codoseo_policy::error_lines(&e)),
-        Ok(text) => serde_json::from_str::<codoseo_policy::SitePolicy>(text)
-            .map_err(|e| format!("The body is not a policy: {e}")),
-    };
+    let policy = policy_body(&headers, &body);
     respond(
         StatusCode::OK,
         AgentService::new(&state)

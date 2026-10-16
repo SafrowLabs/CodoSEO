@@ -47,7 +47,7 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
             writeln!(
                 w,
                 "| {} | `{}` | {} | {} |",
-                f.def.title,
+                f.title,
                 f.def.id.slug(),
                 count_text(&f),
                 examples

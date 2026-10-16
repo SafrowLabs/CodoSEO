@@ -1,4 +1,5 @@
 {% if index_table %}{% if let Some(seo) = seo %}{% include "policy/_seo_index.html" %}{% endif %}
+{% endif %}{% if exceptions_table %}{% if let Some(seo) = seo %}{% include "policy/_seo_exceptions.html" %}{% endif %}
 {% endif %}{% include "policy/_rail.html" %}
 {% for c in cmps %}<div class="pol-cmp {{ c.class }}" id="{{ c.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ c.head }}</b><span>{{ c.text }}</span></div>
 {% endfor %}{% for l in limits %}<span class="pol-found {{ l.found_class }}" id="{{ l.found_id }}" hx-swap-oob="true">{{ l.found }}</span>
@@ -9,6 +10,9 @@
 {% endif %}<div class="pol-cmp {{ seo.address_cmp.class }}" id="{{ seo.address_cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ seo.address_cmp.head }}</b><span>{{ seo.address_cmp.text }}</span></div>
 <div class="pol-cmp {{ seo.params_cmp.class }}" id="{{ seo.params_cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ seo.params_cmp.head }}</b><span>{{ seo.params_cmp.text }}</span></div>
 <div class="pol-rules" id="seo-must-rows" aria-live="polite" hx-swap-oob="true">{% include "policy/_seo_must.html" %}</div>
+{% for t in seo.thresholds %}<div class="pol-cmp {{ t.cmp.class }}" id="{{ t.cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ t.cmp.head }}</b><span>{{ t.cmp.text }}</span></div>
+{% endfor %}{% if !exceptions_table %}{% for e in seo.exception_rows %}<div class="pol-cmp {{ e.cmp.class }}" id="{{ e.cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ e.cmp.head }}</b><span>{{ e.cmp.text }}</span></div>
+{% endfor %}{% endif %}
 <div id="seo-errors" hx-swap-oob="true">{% include "policy/_seo_errors.html" %}</div>
 {% endif %}<span class="n" id="tab-seo-gaps" hx-swap-oob="true">{{ seo_gaps }} {% if seo_gaps == 1 %}gap{% else %}gaps{% endif %}</span>
 <span class="n" id="tab-ai-gaps" hx-swap-oob="true">{{ ai_gaps }} {% if ai_gaps == 1 %}gap{% else %}gaps{% endif %}</span>

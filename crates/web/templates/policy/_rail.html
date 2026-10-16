@@ -15,6 +15,18 @@
     {% endif %}
   </section>
 
+  {% if let Some(s) = rail.save %}
+  <section class="card card-pad pol-save" aria-labelledby="h-save" id="pol-save">
+    <h2 class="card-title" id="h-save">When you save</h2>
+    <ul class="pol-save-list" aria-live="polite">
+      <li><b>{{ s.muted }}</b> {% if s.muted == 1 %}issue becomes{% else %}issues become{% endif %} intended or excepted and {% if s.muted == 1 %}leaves{% else %}leave{% endif %} the score</li>
+      <li><b>{{ s.opened }}</b> new {% if s.opened == 1 %}issue opens{% else %}issues open{% endif %} now, without waiting for a crawl</li>
+      <li>Health score <b>{{ s.health }}</b> · GEO score <b>{{ s.geo }}</b></li>
+    </ul>
+    <p class="pol-save-note">Every change is kept in <a href="{{ rail.base }}/policy/history">History</a> with who made it, so a score jump can be traced to a policy edit.</p>
+  </section>
+  {% endif %}
+
   {% if let Some(r) = rail.robots %}
   <section class="card pol-robots" aria-labelledby="h-robots">
     <div class="card-head">

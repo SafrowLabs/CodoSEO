@@ -4,17 +4,18 @@
 use codoseo_core::page::PageRecord;
 
 use super::{char_len, is_blank};
+use crate::Thresholds;
 
 pub fn title_missing(p: &PageRecord) -> bool {
     p.is_html_ok() && is_blank(&p.fields.title)
 }
 
-pub fn title_too_long(p: &PageRecord) -> bool {
-    p.is_html_ok() && char_len(&p.fields.title) > 60
+pub fn title_too_long(p: &PageRecord, t: &Thresholds) -> bool {
+    p.is_html_ok() && char_len(&p.fields.title) > usize::from(t.title_max)
 }
 
-pub fn title_too_short(p: &PageRecord) -> bool {
-    p.is_html_ok() && (1..30).contains(&char_len(&p.fields.title))
+pub fn title_too_short(p: &PageRecord, t: &Thresholds) -> bool {
+    p.is_html_ok() && (1..usize::from(t.title_min)).contains(&char_len(&p.fields.title))
 }
 
 pub fn title_multiple(p: &PageRecord) -> bool {
@@ -25,12 +26,13 @@ pub fn description_missing(p: &PageRecord) -> bool {
     p.is_html_ok() && is_blank(&p.fields.meta_description)
 }
 
-pub fn description_too_long(p: &PageRecord) -> bool {
-    p.is_html_ok() && char_len(&p.fields.meta_description) > 160
+pub fn description_too_long(p: &PageRecord, t: &Thresholds) -> bool {
+    p.is_html_ok() && char_len(&p.fields.meta_description) > usize::from(t.description_max)
 }
 
-pub fn description_too_short(p: &PageRecord) -> bool {
-    p.is_html_ok() && (1..70).contains(&char_len(&p.fields.meta_description))
+pub fn description_too_short(p: &PageRecord, t: &Thresholds) -> bool {
+    p.is_html_ok()
+        && (1..usize::from(t.description_min)).contains(&char_len(&p.fields.meta_description))
 }
 
 pub fn h1_missing(p: &PageRecord) -> bool {
