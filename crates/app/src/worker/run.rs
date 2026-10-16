@@ -18,7 +18,7 @@ use codoseo_diff::{diff, key_pages};
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::{RobotsAvailability, availability};
 use codoseo_store::crawl_queue::{ClaimedCrawl, CrawlQueue, CrawlTrigger};
-use codoseo_store::finalize::finalize;
+use codoseo_store::finalize::finalize_with_policy;
 use codoseo_store::geo::{self, GeoInput};
 use codoseo_store::jobs::JobQueue;
 use codoseo_web::metrics;
@@ -29,6 +29,7 @@ use tracing::Instrument;
 use url::Url;
 
 use crate::worker::probes::{self, ProbeSettings};
+use crate::worker::site_policy::{self, SitePolicyRun};
 
 /// How often a crawl's progress callback is allowed to write a heartbeat.
 const HEARTBEAT_THROTTLE: Duration = Duration::from_secs(2);
@@ -323,6 +324,13 @@ async fn run_one_crawl(
     }
 
     let start_url = Url::parse(&claimed.start_url).map_err(|e| format!("bad start URL: {e}"))?;
+    // The site policy, and the pages it says must always work. A no-signup audit is judged under
+    // the default policy, which declares no SEO rules: nothing changes for it.
+    let site_policy = if claimed.trigger == CrawlTrigger::Quick {
+        SitePolicyRun::default()
+    } else {
+        site_policy::load(pool, claimed.site_id).await?
+    };
     let plan = resolve_plan(pool, claimed.site_id).await?;
     let limits = limits_for(plan, &claimed.crawl_settings);
     let max_pages = limits.max_pages.unwrap_or(CrawlLimits::default().max_pages);
@@ -341,6 +349,7 @@ async fn run_one_crawl(
     let _running = metrics::crawl_started(crate::worker::budget::reserved_bytes(max_pages));
     tracing::info!(max_pages, attempt = claimed.attempt, "crawl started");
 
+    let extra_seeds = site_policy.extra_seeds(&start_url);
     let cfg = CrawlConfig {
         start_url,
         limits: CrawlLimits {
@@ -355,6 +364,8 @@ async fn run_one_crawl(
         user_agent: USER_AGENT.to_owned(),
         // A no-signup audit keeps no AI access report, so it asks for nothing beyond pages.
         site_signals: claimed.trigger != CrawlTrigger::Quick,
+        // Must-work and starred pages are fetched even when no link leads there.
+        extra_seeds,
     };
 
     let crawl_id = claimed.id;
@@ -422,7 +433,9 @@ async fn run_one_crawl(
         return Err(stop_reason_message(&out.stop));
     }
 
-    let report = run_checks(&mut out);
+    let mut report = run_checks(&mut out);
+    // The policy pass: the SEO rules' gaps become the policy checks, counted in the score.
+    site_policy.apply(&mut out, &mut report);
     let previous = crawl_queue
         .previous_snapshot(claimed.site_id)
         .await
@@ -432,24 +445,21 @@ async fn run_one_crawl(
     let with_geo = claimed.trigger != CrawlTrigger::Quick;
     // The pages the user starred: key pages for the diff, important pages for AI access. Loaded
     // once, and only when either needs them.
-    let starred = if previous.is_some() || with_geo {
-        codoseo_store::sites::starred_key_pages(pool, claimed.site_id)
-            .await
-            .map_err(|e| format!("could not load starred pages: {e}"))?
-    } else {
-        Default::default()
-    };
-    let changes = match previous {
+    let starred = &site_policy.starred;
+    // A must-work page that fails is a change on every crawl it keeps failing, so it alerts.
+    let must_work = site_policy.must_work_changes(&out, &report, previous.as_ref());
+    let mut changes = match previous {
         Some(prev) => {
             let curr = codoseo_core::snapshot::Snapshot::from_output(&out);
             // Key pages: the origin, the top 20 by inlinks and the pages the user starred.
-            let key = key_pages(&curr, &starred);
+            let key = key_pages(&curr, starred);
             diff(&prev, &curr, &key)
         }
         None => Vec::new(),
     };
+    changes.extend(must_work);
     let mut geo = with_geo.then(|| {
-        let important = important_urls(&out.pages, &out.origin, &starred);
+        let important = important_urls(&out.pages, &out.origin, starred);
         GeoInput::new(build_report(&out, &important))
     });
     // llms.txt adoption outlives a crawl that did not fetch the file: it follows the newest
@@ -481,7 +491,11 @@ async fn run_one_crawl(
     }
     drop(liveness);
 
-    finalize(
+    // What the policy screen and the API show for this crawl, kept in `summary.policy`.
+    let policy_report = (claimed.trigger != CrawlTrigger::Quick)
+        .then(|| site_policy.report(&out, &report, geo.as_ref().map(|g| &g.report)));
+
+    finalize_with_policy(
         pool,
         claimed.id,
         claimed.site_id,
@@ -490,6 +504,7 @@ async fn run_one_crawl(
         &report,
         &changes,
         geo.as_ref(),
+        policy_report.as_ref(),
     )
     .await
     .map_err(|e| format!("finalize failed: {e}"))?;

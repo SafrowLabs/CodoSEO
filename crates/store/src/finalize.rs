@@ -10,6 +10,7 @@ use codoseo_core::change::Change;
 use codoseo_core::output::CrawlOutput;
 use codoseo_core::page::{AiMeta, Indexability, PageRecord};
 use codoseo_core::report::CrawlReport;
+use codoseo_policy::PolicyReport;
 use serde::Serialize;
 use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -41,6 +42,26 @@ pub async fn finalize(
     changes: &[Change],
     geo: Option<&GeoInput>,
 ) -> Result<(), sqlx::Error> {
+    finalize_with_policy(
+        pool, crawl_id, site_id, worker_id, out, report, changes, geo, None,
+    )
+    .await
+}
+
+/// [`finalize`], also keeping the site policy's comparison with the crawl in
+/// `crawls.summary.policy` (a [`PolicyReport`]); `None` keeps none, as for a no-signup audit.
+#[allow(clippy::too_many_arguments)] // one flat call per finished crawl, as every caller reads it
+pub async fn finalize_with_policy(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    site_id: Uuid,
+    worker_id: &str,
+    out: &CrawlOutput,
+    report: &CrawlReport,
+    changes: &[Change],
+    geo: Option<&GeoInput>,
+    policy: Option<&PolicyReport>,
+) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
     copy_pages(&mut tx, crawl_id, site_id, &out.pages).await?;
@@ -55,7 +76,10 @@ pub async fn finalize(
     };
     insert_changes(&mut tx, crawl_id, site_id, &geo_changes).await?;
 
-    let summary = build_summary(out, report);
+    let mut summary = build_summary(out, report);
+    if let Some(p) = policy {
+        summary["policy"] = serde_json::to_value(p).expect("a policy report always serializes");
+    }
     let result = sqlx::query(
         "UPDATE crawls SET status = 'done', finished_at = now(), health_score = $2, \
          checks_passed = $3, checks_total = $4, summary = $5 \

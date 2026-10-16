@@ -372,6 +372,7 @@ fn title(c: &ChangeRow) -> String {
         ChangeKind::AiFetchBlocked => "AI fetch blocked (synthetic)".to_owned(),
         ChangeKind::AiContentMissing => "Content missing from HTML (AI)".to_owned(),
         ChangeKind::AiLlmsTxtUnavailable => "llms.txt unavailable".to_owned(),
+        ChangeKind::MustWorkFailed => "Must-work page failed".to_owned(),
     }
 }
 
@@ -421,6 +422,11 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
         ChangeKind::AiLlmsTxtUnavailable if value == "llms.txt served" => {
             "llms.txt served".to_owned()
         }
+        ChangeKind::MustWorkFailed => match value.parse::<u16>() {
+            Ok(200..=299) => format!("{value}, indexable"),
+            Ok(_) => format!("HTTP {value}"),
+            Err(_) => value.to_owned(),
+        },
         _ => value.to_owned(),
     }
 }

@@ -1,4 +1,4 @@
-<aside class="pol-rail" id="pol-rail" aria-label="Your rules compared with the site">
+<aside class="pol-rail" id="pol-rail" aria-label="Your rules compared with the site"{% if rail.oob %} hx-swap-oob="true"{% endif %}>
   <section class="card card-pad pol-vs" aria-labelledby="h-vs">
     <h2 class="card-title" id="h-vs">{{ rail.title }}</h2>
     <div class="pol-kpis">

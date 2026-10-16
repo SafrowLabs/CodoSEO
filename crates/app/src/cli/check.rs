@@ -41,6 +41,7 @@ pub async fn run(args: CheckArgs) -> Outcome {
         address_policy: AddressPolicy::AllowPrivate,
         user_agent: USER_AGENT.to_owned(),
         site_signals: true,
+        extra_seeds: Vec::new(),
     };
     let mut page = inspect_page(&cfg).await?;
     check_page(&mut page);

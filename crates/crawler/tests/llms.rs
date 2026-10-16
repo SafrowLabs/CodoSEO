@@ -25,6 +25,7 @@ fn cfg(start: Url) -> CrawlConfig {
         address_policy: AddressPolicy::AllowPrivate,
         user_agent: USER_AGENT.to_owned(),
         site_signals: true,
+        extra_seeds: Vec::new(),
     }
 }
 

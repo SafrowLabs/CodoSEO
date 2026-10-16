@@ -123,7 +123,7 @@ async fn the_page_lists_the_default_email_channel_and_the_default_rules() {
             vec![email]
         );
     }
-    assert_eq!(res.body.matches(" checked").count(), 10, "{}", res.body);
+    assert_eq!(res.body.matches(" checked").count(), 11, "{}", res.body);
     // The sidebar links here.
     assert!(res.body.contains("href=\"/settings/alerts\""));
 }
@@ -637,9 +637,9 @@ async fn grid_toggles_persist() {
     assert!(instant(ChangeKind::TitleChanged).await);
     assert!(instant(ChangeKind::SiteMoved).await);
 
-    // And the page shows it: 10 defaults - 1 + 1 = 10 boxes checked.
+    // And the page shows it: 11 defaults - 1 + 1 = 11 boxes checked.
     let page = app.get("/settings/alerts", Some(&cookie)).await;
-    assert_eq!(page.body.matches(" checked").count(), 10);
+    assert_eq!(page.body.matches(" checked").count(), 11);
     // Back on.
     app.post_hx(
         "/settings/alerts/rules",

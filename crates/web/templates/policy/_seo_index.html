@@ -1,0 +1,20 @@
+<div class="pol-rules" id="seo-index">
+  {% for r in seo.index_rows %}
+  <div class="pol-rule">
+    <span class="pol-rule-what">
+      <input class="input mono" name="ix.pattern" value="{{ r.pattern }}" placeholder="/checkout/*" aria-label="Path pattern {{ r.index + 1 }}" autocomplete="off" spellcheck="false">
+      <span class="pol-rule-note" id="{{ r.note_id }}">{{ r.note }}</span>
+    </span>
+    <select class="select" name="ix.stance" aria-label="Rule for {% if r.pattern.is_empty() %}the new pattern{% else %}{{ r.pattern }}{% endif %}">{% for o in r.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    <div class="pol-cmp {{ r.cmp.class }}" id="{{ r.cmp.id }}" aria-live="polite"><b>{{ r.cmp.head }}</b><span>{{ r.cmp.text }}</span></div>
+    <button class="btn btn-sm btn-ghost pol-rule-remove" type="button" hx-post="{{ base }}/policy/preview?tab=seo&amp;op=remove:{{ r.index }}" hx-include="#policy-form" hx-target="#seo-index" hx-swap="outerHTML" aria-label="Remove the rule {{ r.pattern }}">Remove</button>
+  </div>
+  {% endfor %}
+  <div class="pol-rule">
+    <span class="pol-rule-what"><b>Everything else</b><span class="pol-rule-note" id="note-ix-else">{{ seo.default_note }}</span></span>
+    <select class="select" name="ix.default" aria-label="Rule for every other page">{% for o in seo.default_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    <div class="pol-cmp {{ seo.default_cmp.class }}" id="{{ seo.default_cmp.id }}" aria-live="polite"><b>{{ seo.default_cmp.head }}</b><span>{{ seo.default_cmp.text }}</span></div>
+  </div>
+  {% for e in seo.index_errors %}<p class="pol-field-error" role="alert">{{ e }}</p>{% endfor %}
+  <div class="pol-rules-foot"><button class="btn btn-sm" type="button" hx-post="{{ base }}/policy/preview?tab=seo&amp;op=add" hx-include="#policy-form" hx-target="#seo-index" hx-swap="outerHTML"><svg class="icon"><use href="#i-plus"/></svg>Add rule</button></div>
+</div>

@@ -52,6 +52,9 @@ pub struct PlanLimits {
     /// Manual AI access rechecks an account may ask for in 24 hours (follow-ups the system
     /// queues don't count); `None` means unlimited.
     pub ai_rechecks_per_day: Option<u16>,
+    /// Pages a site policy may list as must-work (`seo.must_work`); `None` means unlimited. The
+    /// home page and starred pages are checked on top of them.
+    pub max_must_work: Option<u16>,
 }
 
 const HOUR: u64 = 3600;
@@ -73,6 +76,7 @@ impl PlanLimits {
                 probe_max_requests: 30,
                 llms_link_checks: 5,
                 ai_rechecks_per_day: Some(3),
+                max_must_work: Some(5),
             },
             Plan::Lite => PlanLimits {
                 max_sites: Some(5),
@@ -88,6 +92,7 @@ impl PlanLimits {
                 probe_max_requests: 70,
                 llms_link_checks: 20,
                 ai_rechecks_per_day: Some(20),
+                max_must_work: Some(20),
             },
             Plan::Pro => PlanLimits {
                 max_sites: Some(10),
@@ -103,6 +108,7 @@ impl PlanLimits {
                 probe_max_requests: 120,
                 llms_link_checks: 20,
                 ai_rechecks_per_day: Some(60),
+                max_must_work: Some(50),
             },
             // No plan caps, but finite defaults so a calendar or faceted search
             // can't crawl forever. Self-hosters can raise them in config.
@@ -121,6 +127,7 @@ impl PlanLimits {
                 probe_max_requests: 160,
                 llms_link_checks: 20,
                 ai_rechecks_per_day: None,
+                max_must_work: None,
             },
         }
     }
@@ -143,6 +150,8 @@ impl PlanLimits {
             // No site signals, so no llms.txt.
             llms_link_checks: 0,
             ai_rechecks_per_day: Some(0),
+            // A no-signup audit is judged under the default policy, which lists none.
+            max_must_work: Some(0),
         }
     }
 }

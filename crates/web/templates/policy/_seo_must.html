@@ -1,0 +1,11 @@
+{% if seo.must_rows.is_empty() %}
+<div class="pol-cmp {{ seo.must_cmp.class }}" id="{{ seo.must_cmp.id }}"><b>{{ seo.must_cmp.head }}</b><span>{% if seo.must_cmp.text.is_empty() %}Add a page to check it, the home page and your starred pages on every crawl.{% else %}{{ seo.must_cmp.text }}{% endif %}</span></div>
+{% else %}
+{% for m in seo.must_rows %}
+<div class="pol-rule pol-must">
+  <span class="pol-rule-what mono">{{ m.path }}</span>
+  <span class="pol-rule-note">{{ m.why }}</span>
+  <div class="pol-cmp {{ m.cmp.class }}"><b>{{ m.cmp.head }}</b><span>{{ m.cmp.text }}</span></div>
+</div>
+{% endfor %}
+{% endif %}

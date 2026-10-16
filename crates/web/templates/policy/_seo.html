@@ -1,0 +1,78 @@
+<form id="policy-form" class="pol-form" method="post" action="{{ base }}/policy?tab=seo">
+  <div id="seo-errors">{% include "policy/_seo_errors.html" %}</div>
+  <div class="stack" hx-post="{{ base }}/policy/preview?tab=seo" hx-trigger="change" hx-include="#policy-form" hx-target="#pol-rail" hx-swap="outerHTML" hx-sync="this:replace">
+    <section class="card pol-purpose" aria-labelledby="h-address">
+      <div class="aia-purpose-main">
+        <div class="aia-purpose-text">
+          <h2 class="card-title" id="h-address">Preferred address</h2>
+          <p>The one form every page should use. Other forms should 301 to it, and canonicals and internal links should point at it.</p>
+        </div>
+      </div>
+      <div class="pol-fields">
+        <fieldset class="pol-field">
+          <legend>Host</legend>
+          <div class="aia-seg pol-seg">{% for o in seo.hosts %}<input type="radio" id="{{ o.id }}" name="a.host" value="{{ o.value }}"{% if o.checked %} checked{% endif %}><label for="{{ o.id }}"{% if o.value != "none" %} class="mono"{% endif %}>{{ o.label }}</label>{% endfor %}</div>
+        </fieldset>
+        <fieldset class="pol-field">
+          <legend>Ending</legend>
+          <div class="aia-seg pol-seg">{% for o in seo.slashes %}<input type="radio" id="{{ o.id }}" name="a.slash" value="{{ o.value }}"{% if o.checked %} checked{% endif %}><label for="{{ o.id }}">{{ o.label }}</label>{% endfor %}</div>
+        </fieldset>
+      </div>
+      {% for e in seo.address_errors %}<p class="pol-field-error" role="alert">{{ e }}</p>{% endfor %}
+      <div class="pol-cmp {{ seo.address_cmp.class }}" id="{{ seo.address_cmp.id }}" aria-live="polite"><b>{{ seo.address_cmp.head }}</b><span>{{ seo.address_cmp.text }}</span></div>
+    </section>
+
+    <section class="card pol-purpose" aria-labelledby="h-index">
+      <div class="aia-purpose-main">
+        <div class="aia-purpose-text">
+          <h2 class="card-title" id="h-index">What search engines should index</h2>
+          <p>Path rules, top to bottom; the first match wins. “Keep out” expects a noindex tag or header: robots.txt alone stops crawling, not indexing. <code>*</code> matches anything, <code>/</code> included.</p>
+        </div>
+      </div>
+      {% include "policy/_seo_index.html" %}
+    </section>
+
+    <section class="card pol-purpose" aria-labelledby="h-params">
+      <div class="aia-purpose-main">
+        <div class="aia-purpose-text">
+          <h2 class="card-title" id="h-params">URL parameters that don’t change the page</h2>
+          <p>URLs that differ only by these should canonicalise to the clean URL. The pagination parameter is treated separately: each page canonicalises to itself.</p>
+        </div>
+      </div>
+      <div class="pol-fields">
+        <label class="pol-field pol-field-grow" for="seo-params"><span>Parameters, separated by commas</span><input class="input mono" id="seo-params" name="params" value="{{ seo.params }}" placeholder="utm_*, gclid, fbclid, sort, ref" autocomplete="off" spellcheck="false"></label>
+        <label class="pol-field" for="seo-pagination"><span>Pagination</span><input class="input mono pol-input-sm" id="seo-pagination" name="pagination" value="{{ seo.pagination }}" placeholder="page" autocomplete="off" spellcheck="false"></label>
+      </div>
+      {% for e in seo.params_errors %}<p class="pol-field-error" role="alert">{{ e }}</p>{% endfor %}
+      <div class="pol-cmp {{ seo.params_cmp.class }}" id="{{ seo.params_cmp.id }}" aria-live="polite"><b>{{ seo.params_cmp.head }}</b><span>{{ seo.params_cmp.text }}</span></div>
+    </section>
+
+    <section class="card pol-purpose" aria-labelledby="h-must">
+      <div class="aia-purpose-main">
+        <div class="aia-purpose-text">
+          <h2 class="card-title" id="h-must">Pages that must always work</h2>
+          <p>These must answer 200 and be indexable on every crawl, which fetches them even when no link leads there. A failure alerts at once instead of waiting for the digest. {{ seo.must_cap }}</p>
+        </div>
+      </div>
+      <div class="pol-fields">
+        <label class="pol-field pol-field-grow" for="seo-must"><span>One path per line</span><textarea class="input mono pol-textarea" id="seo-must" name="must" rows="4" placeholder="/pricing&#10;/checkout/cart" spellcheck="false">{{ seo.must }}</textarea></label>
+      </div>
+      {% for e in seo.must_errors %}<p class="pol-field-error" role="alert">{{ e }}</p>{% endfor %}
+      <div class="pol-rules" id="seo-must-rows" aria-live="polite">{% include "policy/_seo_must.html" %}</div>
+    </section>
+
+    <section class="card card-pad pol-soon" aria-labelledby="h-seo-next">
+      <h2 class="card-title" id="h-seo-next">Coming next</h2>
+      <ul class="pol-soon-list">
+        <li><b>Check thresholds</b> · title and description length, thin pages, slow pages, redirect hops.</li>
+        <li><b>Exceptions</b> · checks that don't apply to part of the site, left out of the health score.</li>
+      </ul>
+      <p class="pol-desc">A <code>codoseo.toml</code> can already hold both: imports and exports keep them.</p>
+    </section>
+  </div>
+
+  <div class="aia-savebar pol-savebar">
+    <button class="btn btn-primary" type="submit"><svg class="icon"><use href="#i-check"/></svg>Save policy</button>
+    <span class="pol-save-note">Gaps become issues on the next crawl and cost health points like any other check. Every change is kept in <a href="{{ base }}/policy/history">History</a>.</span>
+  </div>
+</form>

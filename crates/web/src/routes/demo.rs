@@ -16,7 +16,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use codoseo_checks::{CHECKS, health_score};
+use codoseo_checks::{BASE_CHECKS, health_score};
 use codoseo_core::change::ChangeKind;
 use codoseo_core::check::{CheckId, Severity};
 use codoseo_geo::Intent;
@@ -110,8 +110,8 @@ fn crawl(
         started_at: Some(finished - Duration::seconds(41)),
         finished_at: Some(finished),
         health_score: Some(score),
-        checks_passed: Some((CHECKS.len() - counts) as i16),
-        checks_total: Some(CHECKS.len() as i16),
+        checks_passed: Some((BASE_CHECKS - counts) as i16),
+        checks_total: Some(BASE_CHECKS as i16),
         // The demo has no AI access fixture to score.
         geo_score: None,
         geo_checks_passed: None,

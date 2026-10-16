@@ -230,16 +230,13 @@ impl<'a> AgentService<'a> {
     async fn policy_info(&self, site_id: Uuid) -> Result<PolicyInfo, AgentError> {
         let pool = &self.state.pool;
         let (policy, updated_at) = codoseo_store::policy::get_with_time(pool, site_id).await?;
-        let latest = geo::latest_report(pool, site_id).await?;
-        let report = codoseo_policy::evaluate(
-            &policy,
-            &codoseo_policy::PolicyInput::ai_only(latest.as_ref().map(|l| &l.report)),
-        );
+        let (report, crawl_id) =
+            codoseo_store::policy::evaluate_latest(pool, site_id, &policy).await?;
         Ok(PolicyInfo {
             site_id,
             policy,
             report,
-            crawl_id: latest.map(|l| l.crawl_id),
+            crawl_id,
             updated_at,
         })
     }

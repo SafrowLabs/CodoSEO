@@ -40,6 +40,7 @@ fn an_endless_faceted_site_crawls_in_flat_memory() {
         address_policy: AddressPolicy::AllowPrivate,
         user_agent: USER_AGENT.to_owned(),
         site_signals: true,
+        extra_seeds: Vec::new(),
     };
 
     PEAK.reset_peak_usage();
@@ -107,6 +108,7 @@ fn fifty_thousand_pages_stay_within_the_memory_budget() {
         address_policy: AddressPolicy::AllowPrivate,
         user_agent: USER_AGENT.to_owned(),
         site_signals: true,
+        extra_seeds: Vec::new(),
     };
 
     PEAK.reset_peak_usage();

@@ -28,6 +28,7 @@ fn cfg(start: Url) -> CrawlConfig {
         address_policy: AddressPolicy::AllowPrivate,
         user_agent: USER_AGENT.to_owned(),
         site_signals: true,
+        extra_seeds: Vec::new(),
     }
 }
 
@@ -642,4 +643,32 @@ async fn a_missing_tdmrep_is_recorded_with_its_status() {
     let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
     let tdm = out.signals.tdmrep.expect("the request was answered");
     assert_eq!((tdm.status, tdm.body.as_str()), (404, ""));
+}
+
+#[tokio::test]
+async fn extra_seeds_are_fetched_within_the_page_cap_even_unlinked() {
+    let site = SiteBuilder::new()
+        .html("/", "Home", &["/a", "/b", "/c", "/linked"])
+        .html("/a", "A", &[])
+        .html("/b", "B", &[])
+        .html("/c", "C", &[])
+        .html("/linked", "Linked", &[])
+        .page("/must", Page::status(500, "down"))
+        .start()
+        .await;
+    let mut c = cfg_pages(site.url("/"), 4);
+    c.extra_seeds = vec![
+        site.url("/must"),
+        site.url("/linked"),
+        // Another site's page is never fetched.
+        Url::parse("https://elsewhere.example/x").unwrap(),
+    ];
+    let out = crawl(c, |_| {}).await.unwrap();
+    let paths: Vec<&str> = out.pages.iter().map(|p| p.url.path()).collect();
+    // The home page, the two reserved pages and one more link fit the cap of 4.
+    assert_eq!(out.pages.len(), 4, "{paths:?}");
+    assert_eq!(page(&out, "/must").status, 500);
+    assert_eq!(depth_of(&out, "/must"), None, "no link leads there");
+    assert_eq!(depth_of(&out, "/linked"), Some(1), "a link found it first");
+    assert_eq!(out.stop, StopReason::PageLimit);
 }

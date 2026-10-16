@@ -1,14 +1,16 @@
 //! The policy against a crawl: one result per rule (met, how many gaps, not checked, ...) and the
 //! gaps themselves, the way the policy screen's comparison rail and the API show them.
 //!
-//! Only the AI rules are evaluated so far. They are not a second judge: the gaps are the AI
-//! access findings ([`codoseo_geo::findings::findings`]) under the policy's intent, regrouped by
-//! purpose, so the policy screen and the AI access screen always agree.
+//! The SEO rules (preferred address, what to index, URL parameters, pages that must work) are
+//! judged on the crawl's pages by [`crate::seo`]. The AI rules are not a second judge: their gaps
+//! are the AI access findings ([`codoseo_geo::findings::findings`]) under the policy's intent,
+//! regrouped by purpose, so the policy screen and the AI access screen always agree.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use codoseo_core::check::Severity;
 use codoseo_core::page::PageRecord;
+use codoseo_core::report::InlinkSample;
 use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{Finding, FindingKind, evaluated_kinds, findings};
 use codoseo_geo::intent::{Intent, Stance};
@@ -33,13 +35,22 @@ pub const PURPOSES: [Purpose; 5] = [
     Purpose::Ads,
 ];
 
-/// What a policy is evaluated against. Only `access` is read so far; the pages, the origin and
-/// the starred pages are for the SEO rules.
+/// What a policy is evaluated against: the crawl's pages for the SEO rules, its AI access report
+/// for the AI rules. Empty pages mean there is no crawl to compare with yet.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PolicyInput<'a> {
     pub pages: &'a [PageRecord],
+    /// The crawl's settled origin; the first page's when `None`.
     pub origin: Option<&'a Url>,
+    /// The starred pages' URL hashes (`sites.key_pages`): must-work pages too.
     pub starred: Option<&'a HashSet<u64>>,
+    /// The starred pages' URLs, for those the crawl did not reach.
+    pub starred_urls: &'a [Url],
+    /// Internal links, as indexes into `pages` (the report's inlink samples, or the stored
+    /// inlinks): the preferred address rule counts the links to addresses that only redirect.
+    pub inlinks: &'a [InlinkSample],
+    /// The links are a sample, so counts read "at least".
+    pub inlinks_capped: bool,
     /// The crawl's AI access report; `None` before the first crawl that made one.
     pub access: Option<&'a AccessReport>,
 }
@@ -106,6 +117,21 @@ pub enum Status {
     LimitedEffect,
 }
 
+/// One row of a rule with several: an index rule (by its pattern, or `Everything else`) or a
+/// must-work page (by its path).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RulePart {
+    /// `/checkout/*`, `Everything else`, `/pricing`.
+    pub subject: String,
+    /// `6 pages`, `4 URLs linked`; `Home`, `Listed`, `Starred` for a must-work page.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    pub status: Status,
+    #[serde(default)]
+    pub gaps: u32,
+    pub text: String,
+}
+
 /// One rule's result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleResult {
@@ -118,6 +144,9 @@ pub struct RuleResult {
     /// Up to [`MAX_RULE_URLS`] pages the result is about.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub urls: Vec<String>,
+    /// One result per index rule or must-work page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<RulePart>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +179,11 @@ pub struct PolicyReport {
 }
 
 impl PolicyReport {
+    /// The SEO rules' gaps, or the AI rules'.
+    pub fn gaps_of(&self, kind: GapKind) -> impl Iterator<Item = &Gap> {
+        self.gaps.iter().filter(move |g| g.kind == kind)
+    }
+
     /// Rules the site meets.
     pub fn met(&self) -> usize {
         self.rules
@@ -163,9 +197,13 @@ impl PolicyReport {
     }
 }
 
-/// Evaluates the policy. Without an access report every AI rule is "not checked".
+/// Evaluates the policy: the SEO rules on the pages, then the AI rules. Without pages every SEO
+/// rule is "not checked", and without an access report every AI rule.
 pub fn evaluate(policy: &SitePolicy, input: &PolicyInput) -> PolicyReport {
     let mut report = PolicyReport::default();
+    let seo = crate::seo::evaluate_seo(policy, input);
+    report.rules = seo.rules;
+    report.gaps = seo.gaps;
     evaluate_ai(policy, input.access, &mut report);
     report.seo_gaps = report
         .gaps
@@ -281,6 +319,7 @@ fn evaluate_ai(policy: &SitePolicy, access: Option<&AccessReport>, out: &mut Pol
             gaps: 0,
             text: "Not checked yet: needs a crawl that read the key pages.".to_owned(),
             urls: Vec::new(),
+            parts: Vec::new(),
         }
     } else if restricted.is_empty() {
         RuleResult {
@@ -289,6 +328,7 @@ fn evaluate_ai(policy: &SitePolicy, access: Option<&AccessReport>, out: &mut Pol
             gaps: 0,
             text: "No page markup limits AI answers beyond what you accept.".to_owned(),
             urls: Vec::new(),
+            parts: Vec::new(),
         }
     } else {
         let mut urls: Vec<String> = Vec::new();
@@ -324,6 +364,7 @@ fn evaluate_ai(policy: &SitePolicy, access: Option<&AccessReport>, out: &mut Pol
                 .join(" · ")
                 + " limit AI answers and aren't ticked",
             urls,
+            parts: Vec::new(),
         }
     };
     out.rules.push(rule);
@@ -386,6 +427,7 @@ fn purpose_rule(
         gaps: 0,
         text: text.to_owned(),
         urls: Vec::new(),
+        parts: Vec::new(),
     };
     if judged.is_empty() || (stance == Stance::Any && overrides == 0) {
         return (
@@ -493,6 +535,7 @@ fn purpose_rule(
             gaps: bad.len() as u32,
             text,
             urls: Vec::new(),
+            parts: Vec::new(),
         }
     } else if let Some(l) = limited {
         RuleResult {
@@ -501,6 +544,7 @@ fn purpose_rule(
             gaps: 0,
             text: l,
             urls: Vec::new(),
+            parts: Vec::new(),
         }
     } else {
         RuleResult {
@@ -513,6 +557,7 @@ fn purpose_rule(
                 format!("All {} get what you want.", judged.len())
             },
             urls: Vec::new(),
+            parts: Vec::new(),
         }
     };
     (rule, gaps)

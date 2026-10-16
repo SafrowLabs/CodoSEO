@@ -1,4 +1,14 @@
-{% include "policy/_rail.html" %}
+{% if index_table %}{% if let Some(seo) = seo %}{% include "policy/_seo_index.html" %}{% endif %}
+{% endif %}{% include "policy/_rail.html" %}
 {% for c in cmps %}<div class="pol-cmp {{ c.class }}" id="{{ c.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ c.head }}</b><span>{{ c.text }}</span></div>
 {% endfor %}{% for l in limits %}<span class="pol-found {{ l.found_class }}" id="{{ l.found_id }}" hx-swap-oob="true">{{ l.found }}</span>
-{% endfor %}<span class="n" id="tab-ai-gaps" hx-swap-oob="true">{{ ai_gaps }} {% if ai_gaps == 1 %}gap{% else %}gaps{% endif %}</span>
+{% endfor %}{% if let Some(seo) = seo %}{% if !index_table %}{% for r in seo.index_rows %}<div class="pol-cmp {{ r.cmp.class }}" id="{{ r.cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ r.cmp.head }}</b><span>{{ r.cmp.text }}</span></div>
+<span class="pol-rule-note" id="{{ r.note_id }}" hx-swap-oob="true">{{ r.note }}</span>
+{% endfor %}<div class="pol-cmp {{ seo.default_cmp.class }}" id="{{ seo.default_cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ seo.default_cmp.head }}</b><span>{{ seo.default_cmp.text }}</span></div>
+<span class="pol-rule-note" id="note-ix-else" hx-swap-oob="true">{{ seo.default_note }}</span>
+{% endif %}<div class="pol-cmp {{ seo.address_cmp.class }}" id="{{ seo.address_cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ seo.address_cmp.head }}</b><span>{{ seo.address_cmp.text }}</span></div>
+<div class="pol-cmp {{ seo.params_cmp.class }}" id="{{ seo.params_cmp.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ seo.params_cmp.head }}</b><span>{{ seo.params_cmp.text }}</span></div>
+<div class="pol-rules" id="seo-must-rows" aria-live="polite" hx-swap-oob="true">{% include "policy/_seo_must.html" %}</div>
+<div id="seo-errors" hx-swap-oob="true">{% include "policy/_seo_errors.html" %}</div>
+{% endif %}<span class="n" id="tab-seo-gaps" hx-swap-oob="true">{{ seo_gaps }} {% if seo_gaps == 1 %}gap{% else %}gaps{% endif %}</span>
+<span class="n" id="tab-ai-gaps" hx-swap-oob="true">{{ ai_gaps }} {% if ai_gaps == 1 %}gap{% else %}gaps{% endif %}</span>

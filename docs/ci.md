@@ -32,6 +32,10 @@ Comma-separated, or repeat the flag. Any gate that fails makes the exit code `1`
 | `geo:critical`, `geo:warning`, `geo:notice` | An AI access finding at that severity or worse. |
 | `<kind>` | An AI access finding of that kind: `robots_unavailable`, `bots_blocked`, `bots_not_blocked`, `answers_restricted`, `fetch_blocked`, `content_missing`, `llms_txt_unavailable`, `content_signals_missing`, `markdown_unavailable`. |
 | `<kind>:<subject>` | One subject of a kind. `bots_blocked` and `bots_not_blocked` take a purpose (`search`, `user_fetch`, `agent`, `training`, `ads`); `answers_restricted` a directive (`noindex`, `nosnippet`, `max_snippet`, `noarchive`, `nocache`, `data_nosnippet`); `fetch_blocked` a cause (`challenge_cloudflare`, `blocked_403`, ...). |
+| `policy` | Any gap between the site and its [site policy](policy.md) file, SEO or AI. Needs a policy file (`./codoseo.toml` or `--policy FILE`); without one the command stops before it crawls. |
+| `policy:address`, `policy:index`, `policy:params`, `policy:must_work` | A gap of that SEO rule: the preferred address, what to index, URL parameters, pages that must always work. |
+| `policy:ai` | A gap of any AI rule. |
+| `must_work` | The same as `policy:must_work`: a page the policy says must always work did not answer 200 or was not indexable. |
 
 `geo` covers the four regressions that take a site out of AI answers:
 
@@ -47,6 +51,12 @@ The AI access checks are judged under the default intent: AI search and user-tri
 ```sh
 codoseo crawl https://example.com --fail-on critical,geo
 codoseo crawl https://example.com --fail-on warning --fail-on bots_blocked:search
+```
+
+Policy gaps are reported as `policy:<rule>` (`policy:must_work`, `policy:ai_training`); with a baseline, only gaps its policy report did not have count. The SEO rules' gaps are also ordinary checks (`must_work_failed` is Critical, so `--fail-on critical` catches a broken must-work page too), and they cost health points.
+
+```sh
+codoseo crawl https://example.com --policy codoseo.toml --fail-on critical,must_work
 ```
 
 After the report, `crawl` prints on stderr what each gate made of the run:

@@ -1,0 +1,6 @@
+{% if !seo.errors.is_empty() %}
+<div class="pol-errors" role="alert">
+  <b>These rules can't be saved yet:</b>
+  <ul>{% for e in seo.errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}

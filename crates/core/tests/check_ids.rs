@@ -5,13 +5,13 @@ use codoseo_core::check::{CheckId, IssueBits};
 #[test]
 fn check_ids_are_dense_unique_and_below_64() {
     let bits: Vec<u8> = CheckId::ALL.iter().map(|c| c.bit()).collect();
-    assert_eq!(bits, (0..44).collect::<Vec<u8>>());
+    assert_eq!(bits, (0..49).collect::<Vec<u8>>());
     for c in CheckId::ALL {
         assert_eq!(CheckId::from_bit(c.bit()), Some(c));
     }
-    assert_eq!(CheckId::from_bit(44), None);
+    assert_eq!(CheckId::from_bit(49), None);
     let slugs: HashSet<_> = CheckId::ALL.iter().map(|c| c.slug()).collect();
-    assert_eq!(slugs.len(), 44);
+    assert_eq!(slugs.len(), 49);
     assert_eq!(
         serde_json::to_string(&CheckId::TitleMissing).unwrap(),
         "\"title_missing\""
@@ -29,7 +29,7 @@ fn slug_matches_serde_name_for_every_check() {
 }
 
 /// The persisted bit of every check. Never edit an existing row; new checks are appended.
-const PINNED: [(&str, u8); 44] = [
+const PINNED: [(&str, u8); 49] = [
     ("http_4xx", 0),
     ("http_5xx", 1),
     ("fetch_failed", 2),
@@ -74,6 +74,11 @@ const PINNED: [(&str, u8); 44] = [
     ("og_missing", 41),
     ("jsonld_invalid", 42),
     ("hreflang_missing_self", 43),
+    ("policy_address", 44),
+    ("policy_index_mismatch", 45),
+    ("policy_keep_out_partial", 46),
+    ("policy_param_canonical", 47),
+    ("must_work_failed", 48),
 ];
 
 #[test]
@@ -88,6 +93,8 @@ fn stable_values_never_move() {
     assert_eq!(CheckId::RobotsBlocksSite as u8, 11);
     assert_eq!(CheckId::LinksToBroken as u8, 27);
     assert_eq!(CheckId::HreflangMissingSelf as u8, 43);
+    assert_eq!(CheckId::PolicyAddress as u8, 44);
+    assert_eq!(CheckId::MustWorkFailed as u8, 48);
 }
 
 #[test]

@@ -53,6 +53,7 @@ fn category_label(c: Category) -> &'static str {
         Category::Sitemap => "Sitemap",
         Category::Social => "Social",
         Category::Schema => "Schema",
+        Category::Policy => "Policy",
     }
 }
 
@@ -90,19 +91,32 @@ fn seo_rule(d: &CheckDef) -> Value {
         Scope::Site => "Checked across the whole crawl and reported on each page it affects.",
         Scope::SiteWide => "A fact about the whole site, reported once.",
     };
-    let help = format!(
-        "{}. {} check, severity {}. {scope} It counts toward the health score. Run `codoseo check <url>` to inspect one page.",
-        d.title,
-        category_label(d.category),
-        severity_word(d.severity)
-    );
+    let policy = d.category == Category::Policy;
+    let help = if policy {
+        format!(
+            "{}. Site policy check, severity {}. {scope} It runs when the policy file (codoseo.toml) declares its rule, and then counts toward the health score.",
+            d.title,
+            severity_word(d.severity)
+        )
+    } else {
+        format!(
+            "{}. {} check, severity {}. {scope} It counts toward the health score. Run `codoseo check <url>` to inspect one page.",
+            d.title,
+            category_label(d.category),
+            severity_word(d.severity)
+        )
+    };
     json!({
         "id": seo_rule_id(d.id),
         "name": pascal(d.id.slug()),
         "shortDescription": { "text": d.title },
         "fullDescription": { "text": cap(&help) },
         "help": { "text": help, "markdown": format!("**{}**\n\n{help}", d.title) },
-        "helpUri": format!("{REPO}#the-44-seo-checks"),
+        "helpUri": if policy {
+            format!("{REPO}/blob/main/docs/policy.md")
+        } else {
+            format!("{REPO}#the-44-seo-checks")
+        },
         "defaultConfiguration": { "level": level(d.severity) },
         "properties": {
             "tags": ["seo", category_label(d.category).to_ascii_lowercase()],

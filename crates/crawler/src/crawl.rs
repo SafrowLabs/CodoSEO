@@ -122,6 +122,15 @@ pub async fn crawl_shared(
 
     let mut run = Run::new(&cfg, &origin, rules, &sitemap_urls, started);
     run.stop = stop;
+    // Before the start page's links are queued, so they can't take the reserved places.
+    let scope = &run.scope;
+    let extras: Vec<Url> = cfg
+        .extra_seeds
+        .iter()
+        .filter_map(|u| normalize(u, u.as_str()))
+        .filter(|u| scope.is_internal(u))
+        .collect();
+    run.frontier.reserve(extras);
     if let Some((url, result)) = start {
         run.record_start(url, result);
         on_progress(run.progress(0), &run.pages);
@@ -338,6 +347,7 @@ impl Run {
                     continue;
                 }
                 if let Some(urls) = sitemap_urls.take() {
+                    self.frontier.queue_reserved();
                     let scope = &self.scope;
                     self.frontier
                         .add_sitemap_urls(urls.into_iter().filter(|u| scope.is_internal(u)));

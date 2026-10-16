@@ -28,6 +28,16 @@ async fn setup() -> (TestApp, Site, String) {
     (app, site, cookie)
 }
 
+/// On the Free plan, which allows 5 must-work pages.
+async fn setup_free() -> (TestApp, Site, String) {
+    let app = TestApp::new().await;
+    let (account, cookie) = app
+        .login_with_plan("ana@example.com", Some(codoseo_core::plan::Plan::Free))
+        .await;
+    let site = app.site(&account, DOMAIN).await;
+    (app, site, cookie)
+}
+
 fn toast_message(res: &TestResponse) -> String {
     let raw = res.header("hx-trigger").expect("a toast");
     let v: serde_json::Value = serde_json::from_str(raw).expect("json trigger");
@@ -57,12 +67,12 @@ async fn upload(app: &TestApp, site: &Site, cookie: &str, file: &str) -> TestRes
 }
 
 #[tokio::test]
-async fn the_ai_tab_is_the_default_and_compares_with_the_latest_crawl() {
+async fn the_ai_tab_compares_with_the_latest_crawl() {
     let (app, site, cookie) = setup().await;
     app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
         .await;
     let res = app
-        .get(&format!("/s/{}/policy", site.id), Some(&cookie))
+        .get(&format!("/s/{}/policy?tab=ai", site.id), Some(&cookie))
         .await;
     assert_eq!(res.status, StatusCode::OK);
     let body = &res.body;
@@ -106,25 +116,245 @@ async fn the_ai_tab_is_the_default_and_compares_with_the_latest_crawl() {
     )));
 }
 
+/// The mockup's shop: a keep-out rule met, one partly met (robots.txt only), one with a gap,
+/// an ignored parameter on an indexable page and a must-work page answering 500.
+fn shop_pages() -> Vec<PageRecord> {
+    let mut cart = page(DOMAIN, "/checkout/cart");
+    cart.indexability = codoseo_core::page::Indexability::Noindex;
+    cart.fields.meta_robots = Some("noindex".to_owned());
+    cart.in_sitemap = false;
+    let mut account = page(DOMAIN, "/account/orders");
+    account.status = 0;
+    account.content_type = None;
+    account.indexability = codoseo_core::page::Indexability::BlockedByRobots;
+    let mut down = page(DOMAIN, "/down");
+    down.status = 500;
+    down.indexability = codoseo_core::page::Indexability::ServerError;
+    vec![
+        page(DOMAIN, "/"),
+        page(DOMAIN, "/pricing"),
+        cart,
+        account,
+        page(DOMAIN, "/search?q=shirt"),
+        page(DOMAIN, "/collections/winter?sort=price"),
+        down,
+    ]
+}
+
+const SHOP_POLICY: &str = r#"
+[policy]
+version = 1
+[policy.seo.address]
+host = "apex"
+trailing_slash = "without"
+[[policy.seo.index]]
+pattern = "/checkout/*"
+stance = "keep_out"
+[[policy.seo.index]]
+pattern = "/account/*"
+stance = "keep_out"
+[[policy.seo.index]]
+pattern = "/search*"
+stance = "keep_out"
+[policy.seo]
+index_default = "index"
+ignore_params = ["utm_*", "sort"]
+pagination_param = "page"
+must_work = ["/pricing", "/down"]
+"#;
+
 #[tokio::test]
-async fn the_seo_tab_says_what_is_coming() {
-    let (app, site, cookie) = setup().await;
+async fn the_seo_tab_is_the_default_and_compares_each_rule_with_the_latest_crawl() {
+    let (app, site, cookie) = setup_free().await;
+    app.finished_crawl(&site, shop_pages(), Vec::new()).await;
+    let p = codoseo_policy::parse_file(SHOP_POLICY).unwrap().policy;
+    let account = site.account_id.unwrap();
+    policy::save(app.pool(), site.id, &p, &policy::Actor::web(account))
+        .await
+        .unwrap();
     let res = app
-        .get(&format!("/s/{}/policy?tab=seo", site.id), Some(&cookie))
+        .get(&format!("/s/{}/policy", site.id), Some(&cookie))
         .await;
     assert_eq!(res.status, StatusCode::OK);
+    let body = &res.body;
     for needle in [
-        "SEO rules arrive in the next release",
-        "Preferred address",
-        "Pages that must always work",
-        "Check thresholds",
-        "Exceptions",
         r#"aria-current="page">SEO rules"#,
+        // Tab labels count the gaps: /search* and ?sort= and /down, plus /account/* partly.
+        r#"id="tab-seo-gaps">4 gaps</span>"#,
+        "Preferred address",
+        r#"name="a.host" value="apex" checked"#,
+        "https://www.example.com",
+        r#"name="a.slash" value="without" checked"#,
+        r#"id="cmp-address" aria-live="polite"><b>Met</b>"#,
+        "What search engines should index",
+        r#"name="ix.pattern" value="/checkout/*""#,
+        r#"id="cmp-ix-0" aria-live="polite"><b>Met</b>"#,
+        r#"id="cmp-ix-1" aria-live="polite"><b>Partly</b>"#,
+        "Google can still index the URLs from links",
+        r#"id="note-ix-1">1 URL linked</span>"#,
+        r#"id="cmp-ix-2" aria-live="polite"><b>1 gap</b>"#,
+        "Everything else",
+        r#"id="cmp-ix-else" aria-live="polite"><b>Met</b>"#,
+        "URL parameters that don’t change the page",
+        r#"name="params" value="utm_*, sort""#,
+        r#"id="cmp-params" aria-live="polite"><b>1 gap</b>"#,
+        "1 ?sort= page canonicalises to itself",
+        "Pages that must always work",
+        "/pricing\n/down",
+        "Answers 500.",
+        "200, indexable.",
+        "Your plan checks up to",
+        "Coming next",
+        // The rail lists the SEO gaps with the AI ones.
+        "/down answers 500",
+        r#"<span class="pol-tag pol-tag-seo">SEO</span>"#,
+        r#"/policy/preview?tab=seo" hx-trigger="change""#,
+        r#"action="/s/"#,
     ] {
-        assert!(res.body.contains(needle), "missing {needle:?}");
+        assert!(
+            body.contains(&needle.replace("\\n", "\n")),
+            "missing {needle:?}"
+        );
     }
-    assert!(!res.body.contains(r#"id="policy-form""#));
-    assert!(!res.body.contains("robots.txt that matches"));
+    assert!(!body.contains("robots.txt that matches"));
+}
+
+#[tokio::test]
+async fn the_seo_preview_follows_the_form_lists_errors_and_adds_rules() {
+    let (app, site, cookie) = setup_free().await;
+    app.finished_crawl(&site, shop_pages(), Vec::new()).await;
+    let url = format!("/s/{}/policy/preview?tab=seo", site.id);
+    let res = app
+        .post_hx(
+            &url,
+            "a.host=www&a.slash=without&ix.pattern=%2Fsearch*&ix.stance=index&ix.default=none&params=&pagination=&must=",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    let body = &res.body;
+    assert!(
+        body.starts_with(r#"<aside class="pol-rail" id="pol-rail""#),
+        "{body}"
+    );
+    assert!(body.contains(r#"id="cmp-address" aria-live="polite" hx-swap-oob="true"><b>"#));
+    assert!(body.contains(r#"id="cmp-ix-0" aria-live="polite" hx-swap-oob="true"><b>Met</b>"#));
+    assert!(body.contains(r#"id="tab-seo-gaps" hx-swap-oob="true""#));
+    assert!(body.contains(r#"id="seo-must-rows""#));
+    assert_eq!(
+        policy::get(app.pool(), site.id).await.unwrap(),
+        SitePolicy::default(),
+        "nothing saved"
+    );
+    // What would stop a save shows as the owner types.
+    let res = app
+        .post_hx(
+            &url,
+            "a.host=none&ix.pattern=checkout&ix.stance=keep_out&ix.default=none&must=%2Fa%0A%2Fb%0A%2Fc%0A%2Fd%0A%2Fe%0A%2Ff",
+            Some(&cookie),
+        )
+        .await;
+    assert!(
+        res.body
+            .contains(r#"<div id="seo-errors" hx-swap-oob="true">"#)
+    );
+    assert!(res.body.contains("a pattern starts with /"), "{}", res.body);
+    assert!(res.body.contains("the Free plan allows 5 must-work pages"));
+    // Add rule: the rules come back with a blank one, the rest out of band.
+    let res = app
+        .post_hx(
+            &format!("{url}&op=add"),
+            "a.host=none&ix.pattern=%2Fsearch*&ix.stance=keep_out&ix.default=none",
+            Some(&cookie),
+        )
+        .await;
+    assert!(
+        res.body
+            .starts_with(r#"<div class="pol-rules" id="seo-index">"#),
+        "{}",
+        res.body
+    );
+    assert_eq!(res.body.matches(r#"name="ix.pattern""#).count(), 2);
+    assert!(res.body.contains(
+        r#"id="pol-rail" aria-label="Your rules compared with the site" hx-swap-oob="true""#
+    ));
+    // Remove: one fewer.
+    let res = app
+        .post_hx(
+            &format!("{url}&op=remove:0"),
+            "a.host=none&ix.pattern=%2Fsearch*&ix.stance=keep_out&ix.default=none",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.body.matches(r#"name="ix.pattern""#).count(), 0);
+}
+
+#[tokio::test]
+async fn saving_the_seo_rules_keeps_the_ai_rules_and_refuses_what_the_plan_does_not_allow() {
+    let (app, site, cookie) = setup_free().await;
+    let mut before = SitePolicy::default();
+    before.ai.probes = false;
+    let account = site.account_id.unwrap();
+    policy::save(app.pool(), site.id, &before, &policy::Actor::web(account))
+        .await
+        .unwrap();
+    let res = app
+        .post_hx(
+            &format!("/s/{}/policy?tab=seo", site.id),
+            "a.host=apex&a.slash=with&ix.pattern=%2Fcheckout%2F*&ix.stance=keep_out&ix.pattern=&ix.stance=keep_out&ix.default=index&params=utm_*%2C+gclid&pagination=page&must=%2Fpricing",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(toast_message(&res).starts_with("Policy saved"));
+    assert_eq!(
+        res.header("hx-replace-url"),
+        Some(format!("/s/{}/policy?tab=seo", site.id).as_str())
+    );
+    let p = policy::get(app.pool(), site.id).await.unwrap();
+    assert_eq!(
+        p.seo.address,
+        Some(codoseo_policy::Address {
+            host: codoseo_policy::HostPref::Apex,
+            trailing_slash: codoseo_policy::Slash::With
+        })
+    );
+    assert_eq!(p.seo.index.len(), 1);
+    assert_eq!(p.seo.ignore_params, ["utm_*", "gclid"]);
+    assert_eq!(p.seo.must_work, ["/pricing"]);
+    assert!(!p.ai.probes, "the AI rules are kept");
+
+    // Six must-work pages on Free: shown inline, nothing saved.
+    let res = app
+        .post_hx(
+            &format!("/s/{}/policy?tab=seo", site.id),
+            "a.host=none&ix.default=none&must=%2Fa%0A%2Fb%0A%2Fc%0A%2Fd%0A%2Fe%0A%2Ff",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(res.header("hx-trigger").is_none(), "no toast");
+    assert!(res.body.contains("These rules can't be saved yet"));
+    assert!(
+        res.body
+            .contains(r#"<p class="pol-field-error" role="alert">the Free plan allows 5"#)
+    );
+    assert!(
+        res.body.contains("/a\n/b")
+            || res.body.contains(
+                "/a
+/b"
+            ),
+        "the form as sent"
+    );
+    assert_eq!(
+        policy::get(app.pool(), site.id)
+            .await
+            .unwrap()
+            .seo
+            .must_work,
+        ["/pricing"]
+    );
 }
 
 #[tokio::test]
@@ -268,12 +498,12 @@ async fn export_and_import_round_trip_and_bad_files_say_why() {
     let h = policy::history(app.pool(), site.id, 5).await.unwrap();
     assert_eq!(h[0].via, "import");
 
-    // The SEO tab says it keeps them.
+    // The SEO tab shows the imported rule in its form.
     let seo = app
         .get(&format!("/s/{}/policy?tab=seo", site.id), Some(&cookie))
         .await;
     assert!(
-        seo.body.contains("holds 1 SEO rule from an import"),
+        seo.body.contains(r#"name="must" rows="4" placeholder="/pricing&#10;/checkout/cart" spellcheck="false">/pricing</textarea>"#),
         "{}",
         seo.body
     );
