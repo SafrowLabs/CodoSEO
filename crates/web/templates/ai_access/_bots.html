@@ -1,0 +1,99 @@
+{#- The Bots tab of the AI access screen. Included by ai_access/index.html with `v: Overview` and
+    `base`. -#}
+{%- import "partials/operator_logo.html" as op -%}
+<p class="aia-tab-note">Fetch checks are synthetic: CodoSEO requests your pages with each bot's user agent, from its own address. The real bots may be treated differently.</p>
+  <section class="card aia-section aia-botcard" aria-labelledby="aia-bots">
+    <div class="card-head aia-bots-head">
+      <h2 class="card-title" id="aia-bots">AI bots</h2>
+      {% if v.robots_callout.is_none() %}
+      <fieldset class="tabs aia-filter">
+        <legend class="sr-only">Show</legend>
+        <input class="sr-only" type="radio" name="aia-filter" id="aia-f-attn" value="attention" aria-controls="aia-bots-table"{% if v.bot_attention > 0 %} checked{% else %} disabled{% endif %}><label class="tab" for="aia-f-attn">Needs attention<span class="n">{{ v.bot_attention }}</span></label>
+        <input class="sr-only" type="radio" name="aia-filter" id="aia-f-all" value="all" aria-controls="aia-bots-table"{% if v.bot_attention == 0 %} checked{% endif %}><label class="tab" for="aia-f-all">All bots<span class="n">{{ v.bot_total }}</span></label>
+      </fieldset>
+      {% endif %}
+      <span class="card-aside">{{ v.robots_aside }}</span>
+    </div>
+    {% if let Some(c) = v.robots_callout %}
+    <div class="card-pad">
+      <div class="aia-callout" role="note"><svg class="icon"><use href="#i-alert"/></svg><div><b>{{ c.title }}</b><p>{{ c.text }}</p></div></div>
+    </div>
+    {% else %}
+    <div class="aia-scroll">
+      <table class="aia-table aia-bots-table" id="aia-bots-table">
+        <thead>
+          <tr><th scope="col">Bot</th><th scope="col">Your intent</th><th scope="col">Home page</th><th scope="col" class="r">Important pages blocked</th><th scope="col">Follows robots.txt</th><th scope="col">Status</th></tr>
+        </thead>
+        {% for g in v.bot_groups %}
+        <tbody{% if g.conflicts.is_empty() %} class="is-clear"{% endif %}>
+          <tr class="aia-group"><th colspan="6" scope="colgroup"><span class="aia-group-name">{{ g.label }}</span><span class="aia-group-meta">intent <span class="badge {{ g.stance_class }}">{{ g.stance }}</span><span class="aia-dot">·</span>{{ g.count }}{% if g.conflicts.is_empty() %}<span class="aia-group-none"><span class="aia-dot">·</span>no conflicts</span>{% else %}<span class="aia-dot">·</span><span class="aia-group-flag">{{ g.conflicts }}</span>{% endif %}</span></th></tr>
+          {% for r in g.rows %}
+          <tr class="aia-row {% if r.attention %}is-attn{% if r.last_attention %} is-attn-last{% endif %}{% else %}is-ok{% endif %}" style="--i:{{ loop.index0 }}">
+            <th scope="row" class="aia-bot-cell"><span class="aia-op">{% call op::tile(r.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-token">{{ r.token }}</span>{% if r.control %}<span class="tag" title="{{ r.notes }}">control token</span>{% endif %}<span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></span></span></th>
+            <td data-label="Intent"><span class="aia-inline"><span class="badge {{ r.stance_class }}">{{ r.stance }}</span>{% if r.overridden %}<span class="tag" title="Set for this bot, not by its purpose">override</span>{% endif %}</span></td>
+            <td data-label="Home"><span class="{{ r.home_class }}"{% if !r.home_tip.is_empty() %} title="{{ r.home_tip }}"{% endif %}>{{ r.home }}</span></td>
+            <td data-label="Blocked" class="r num"><span class="{{ r.blocked_class }}">{{ r.blocked }}</span></td>
+            <td data-label="Follows robots.txt"><span class="{{ r.honours_class }}">{{ r.honours }}</span></td>
+            <td class="aia-status" data-state-key="bot-{{ r.token }}" data-state="{{ r.status }}">{% if r.status == "—" %}<span class="c-ghost" title="{{ r.status_tip }}">—</span>{% else %}<span class="badge {{ r.status_class }}" title="{{ r.status_tip }}">{{ r.status }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card aia-section aia-fetch" aria-labelledby="aia-fetch">
+    <div class="card-head">
+      <h2 class="card-title" id="aia-fetch">Fetch check</h2>
+      <span class="badge aia-synthetic">Synthetic</span>
+      {% if v.fetch.empty.is_none() %}<span class="card-aside">{{ v.fetch.aside }}</span>{% endif %}
+    </div>
+    {% if let Some(e) = v.fetch.empty %}
+    <div class="aia-none aia-fetch-empty">
+      <b>{{ e.title }}</b>
+      <p>{{ e.text }}</p>
+      {% if let Some(n) = e.note %}<p>{{ n }}</p>{% endif %}
+      {% if let Some(stop) = v.fetch.stop %}<p>{{ stop }}</p>{% endif %}
+      {% if e.intent_link %}<a class="btn btn-sm" href="{{ base }}/ai-access/intent#probes"><svg class="icon"><use href="#i-settings"/></svg>Edit intent</a>{% endif %}
+    </div>
+    {% else %}
+    <div class="aia-fetch-note">
+      <p>{{ v.fetch.note }}</p>
+      <div class="aia-urls">
+        <span class="aia-urls-label">Pages</span>
+        {% for u in v.fetch.pages %}{% if let Some(h) = u.href %}<a class="url" href="{{ h }}">{{ u.path }}</a>{% else %}<span class="mono aia-path">{{ u.path }}</span>{% endif %}{% endfor %}
+      </div>
+      {% if let Some(stop) = v.fetch.stop %}<p class="aia-fetch-stop">{{ stop }}</p>{% endif %}
+    </div>
+    <div class="aia-scroll">
+      <table class="aia-table aia-probe-table">
+        <thead>
+          <tr><th scope="col">Bot</th><th scope="col">Your intent</th><th scope="col">Result</th><th scope="col" class="r">Pages affected</th><th scope="col">Detail</th></tr>
+        </thead>
+        <tbody>
+          {% for r in v.fetch.rows %}
+          <tr class="aia-row" style="--i:{{ loop.index0 }}">
+            <th scope="row" class="aia-bot-cell"><span class="aia-op">{% call op::tile(r.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-token">{{ r.token }}</span><span class="aia-sub">{{ r.operator }} · {{ r.product }}</span></span></span></th>
+            <td data-label="Intent"><span class="badge {{ r.stance_class }}">{{ r.stance }}</span></td>
+            <td class="aia-status" data-state-key="probe-{{ r.token }}" data-state="{{ r.result }}">{% if r.result_class.is_empty() %}<span class="c-muted"{% if !r.result_tip.is_empty() %} title="{{ r.result_tip }}"{% endif %}>{{ r.result }}</span>{% else %}<span class="badge {{ r.result_class }}" title="{{ r.result_tip }}">{{ r.result }}</span>{% endif %}</td>
+            <td data-label="Affected" class="r num"><span class="{{ r.pages_class }}">{{ r.pages }}</span></td>
+            <td data-label="Detail" class="aia-wide aia-probe-detail"><span class="aia-lines"><span>{{ r.detail }}</span>{% if let Some(t) = r.title %}<span class="aia-probe-title">“{{ t }}”</span>{% endif %}{% if let Some(x) = r.extra %}<span class="mono aia-probe-extra">{{ x }}</span>{% endif %}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if v.fetch.skipped_total > 0 %}
+    <details class="aia-details aia-skipped">
+      <summary><svg class="icon chev"><use href="#i-chev"/></svg>Not probed<span class="chip">{{ v.fetch.skipped_total }}</span></summary>
+      <div class="aia-skip-groups">
+        {% for g in v.fetch.skipped %}
+        <div class="aia-skip"><span class="aia-skip-label">{{ g.label }}</span><span class="aia-chips">{% for t in g.tokens %}<span class="aia-kv">{{ t }}</span>{% endfor %}</span></div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+    {% endif %}
+  </section>

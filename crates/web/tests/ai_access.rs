@@ -61,20 +61,30 @@ async fn the_screen_shows_the_report_and_the_open_incidents() {
     app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
         .await;
 
-    let res = app
-        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
-        .await;
-    assert_eq!(res.status, StatusCode::OK);
-    let body = &res.body;
+    let overview = tab_body(&app, &site, &cookie, "").await;
+    let body = &ai_access_body(&app, &site, &cookie).await;
     for needle in [
         "<h1>AI access</h1>",
         "Can AI assistants and search engines reach, read and quote your site?",
         "crawl #2",
-        "Edit intent",
+        "Site policy",
+        // The tab bar.
+        r#"<nav class="aia-tabbar" aria-label="AI access sections">"#,
         // Tiles.
-        "AI search bots allowed",
+        "GEO score",
+        "AI products that can find you",
+        "user bots reachable",
         "Training bots blocked",
-        "Quotable in Google AI",
+        "Readable without JS",
+        // A card per AI product: ChatGPT's search crawler is kept out, its user fetcher isn't.
+        "Can AI products find and quote you?",
+        "From robots.txt, fetch checks and page markup · not live traffic",
+        "OAI-SearchBot · ChatGPT-User",
+        "ChatGPT-User can still open a page someone asks about.",
+        // The policy, what was resolved and the links to the other tabs.
+        "Your policy vs what bots get",
+        "Look closer",
+        "Needs attention",
         // The incident, its evidence and its action.
         "OAI-SearchBot is blocked by robots.txt",
         "sev-critical",
@@ -98,6 +108,90 @@ async fn the_screen_shows_the_report_and_the_open_incidents() {
     }
     // Found by the second crawl, so it was alerted: no baseline chip.
     assert!(!body.contains(">Baseline<"));
+    // The Overview holds the incident and the verdicts; the tables are on their own tabs.
+    assert!(overview.contains("OAI-SearchBot is blocked by robots.txt"));
+    assert!(overview.contains(&format!(r#"href="/s/{}/ai-access/bots""#, site.id)));
+    assert!(!overview.contains("aia-bots-table"));
+    assert!(!overview.contains(r#"id="aia-content""#));
+}
+
+#[tokio::test]
+async fn each_tab_has_its_own_address_and_headings() {
+    let (app, site, cookie) = setup().await;
+    app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
+        .await;
+    for (tab, headings) in [
+        (
+            "",
+            &[
+                "Can AI products find and quote you?",
+                "Needs attention",
+                "Your policy vs what bots get",
+                "Recently resolved",
+                "Look closer",
+            ][..],
+        ),
+        ("/bots", &[">AI bots<", ">Fetch check<"][..]),
+        (
+            "/pages",
+            &[">Content in raw HTML<", ">Important pages<", ">AI answers<"][..],
+        ),
+        ("/robots", &[">robots.txt</h2>", "Content-Signal lines"][..]),
+        (
+            "/files",
+            &[
+                ">llms.txt<",
+                ">Content Signals and Markdown<",
+                ">Declared preferences<",
+            ][..],
+        ),
+        (
+            "/visits",
+            &[
+                "Coming soon",
+                "Real bot visits, from your server logs",
+                "Planned sources",
+            ][..],
+        ),
+    ] {
+        let body = tab_body(&app, &site, &cookie, tab).await;
+        for h in headings {
+            assert!(body.contains(h), "{tab}: missing {h:?}");
+        }
+        // One tab is current, and every tab is linked.
+        let bar = &body[body.find(r#"<nav class="aia-tabbar""#).unwrap()..];
+        let bar = &bar[..bar.find("</nav>").unwrap()];
+        assert_eq!(bar.matches(r#"aria-current="page""#).count(), 1, "{tab}");
+        for t in TABS {
+            assert!(
+                body.contains(&format!(r#"href="/s/{}/ai-access{t}""#, site.id)),
+                "{tab} links {t}"
+            );
+        }
+    }
+    // The tab bar counts the bots and the key pages; the visits tab is not live yet.
+    let body = tab_body(&app, &site, &cookie, "/robots").await;
+    let total = registry().bots.len();
+    assert!(body.contains(&format!(r#"Bots<span class="n">{total}</span>"#)));
+    assert!(body.contains(r#"Key pages<span class="n">3</span>"#));
+    assert!(body.contains(r#"Bot visits<span class="n">soon</span>"#));
+    // The robots.txt tab names the group each bot follows.
+    assert!(body.contains("Fetched · HTTP 200"));
+    assert!(body.contains("Disallowed · line 6 · Disallow: /"));
+    // The visits tab shows no data, made up or real.
+    let visits = tab_body(&app, &site, &cookie, "/visits").await;
+    assert!(visits.contains("Nothing here is data yet."));
+
+    // Another account's site is not found on any tab.
+    let (_, other) = app.login("bo@example.com").await;
+    for t in TABS {
+        let path = format!("/s/{}/ai-access{t}", site.id);
+        assert_eq!(
+            app.get(&path, Some(&other)).await.status,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -122,12 +216,17 @@ async fn a_failing_robots_txt_replaces_the_bots_table_with_a_callout() {
     let (app, site, cookie) = setup().await;
     app.finished_crawl_with_robots(&site, pages(), (503, ""), Vec::new())
         .await;
-    let body = app
-        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
-        .await
-        .body;
+    let overview = tab_body(&app, &site, &cookie, "").await;
+    assert!(
+        overview.contains(r#"<div class="aia-alert" role="alert">"#),
+        "the Overview leads with the failing robots.txt"
+    );
+    let bots = tab_body(&app, &site, &cookie, "/bots").await;
+    assert!(bots.contains(r#"<div class="aia-callout" role="note">"#));
+    let body = ai_access_body(&app, &site, &cookie).await;
     assert!(body.contains("robots.txt answered HTTP 503"), "{body}");
     assert!(body.contains("GET /robots.txt → HTTP 503"));
+    assert!(body.contains("Failing · HTTP 503"));
     assert!(!body.contains("aia-bots-table"));
     // A failing robots.txt is not a choice: there is nothing to mark as intended.
     assert!(!body.contains("Mark intended"));
@@ -386,10 +485,13 @@ async fn mark_intended_turns_the_finding_into_a_choice() {
         .unwrap()
         .unwrap();
     assert_eq!(incident.resolution.as_deref(), Some("intent"));
-    // The page now lists it as resolved, and the bot row shows the override.
+    // The Overview now lists it as resolved, ChatGPT is blocked as the policy says, and the
+    // bot row on the Bots tab shows the override.
     assert!(res.body.contains("No AI access issues"), "{}", res.body);
     assert!(res.body.contains(">intended<"));
-    assert!(res.body.contains(">override<"));
+    assert!(res.body.contains("Blocked · per your policy"));
+    let bots = tab_body(&app, &site, &cookie, "/bots").await;
+    assert!(bots.contains(">override<"));
 
     // Twice is a conflict, not a second change.
     let res = app
@@ -782,10 +884,7 @@ async fn robots_txt_content_is_escaped_everywhere_it_shows() {
         .await;
     app.finished_crawl_with_robots(&site, pages(), (200, robots), Vec::new())
         .await;
-    let body = app
-        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
-        .await
-        .body;
+    let body = ai_access_body(&app, &site, &cookie).await;
     assert!(!body.contains("<script>alert(1)"), "{body}");
     assert!(!body.contains("<svg/onload"), "{body}");
     assert!(
@@ -809,10 +908,7 @@ async fn the_bots_table_opens_on_what_needs_attention() {
     let (app, site, cookie) = setup().await;
     app.finished_crawl_with_robots(&site, pages(), (200, OPEN), Vec::new())
         .await;
-    let body = app
-        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
-        .await
-        .body;
+    let body = tab_body(&app, &site, &cookie, "/bots").await;
     // Nothing conflicts: every bot shows, and "Needs attention" can't be picked.
     let total = registry().bots.len();
     assert!(
@@ -827,10 +923,7 @@ async fn the_bots_table_opens_on_what_needs_attention() {
 
     app.finished_crawl_with_robots(&site, pages(), (200, BLOCK_OAI), Vec::new())
         .await;
-    let body = app
-        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
-        .await
-        .body;
+    let body = tab_body(&app, &site, &cookie, "/bots").await;
     assert!(
         body.contains(
             r#"id="aia-f-attn" value="attention" aria-controls="aia-bots-table" checked>"#
@@ -976,8 +1069,9 @@ async fn mark_intended_on_restricted_answers_accepts_the_directive() {
             .unwrap()
             .is_empty()
     );
-    // The matrix still shows it.
-    assert!(res.body.contains("nosnippet ×3"), "{}", res.body);
+    // The matrix on the Key pages tab still shows it.
+    let pages_tab = tab_body(&app, &site, &cookie, "/pages").await;
+    assert!(pages_tab.contains("nosnippet ×3"), "{pages_tab}");
 
     // The intent form shows it ticked, and unticking it brings the issue back.
     let form = app
@@ -1027,10 +1121,7 @@ async fn a_bot_that_follows_another_bots_group_says_so() {
         .await;
     app.finished_crawl_with_robots(&site, pages(), (200, robots), Vec::new())
         .await;
-    let body = app
-        .get(&format!("/s/{}/ai-access", site.id), Some(&cookie))
-        .await
-        .body;
+    let body = ai_access_body(&app, &site, &cookie).await;
     // The bots table: Applebot reads Googlebot's group.
     assert!(
         body.contains("Allowed · follows Googlebot&#39;s rules (line 2)"),
@@ -1141,11 +1232,38 @@ fn waf(token: &str, page: usize) -> Option<(Verdict, ProbeFetch)> {
     }
 }
 
+/// Every tab of the AI access screen, one after the other: the Overview first, then the Bots,
+/// Key pages, robots.txt, Agent files & signals and Bot visits tabs.
 async fn ai_access_body(app: &TestApp, site: &Site, cookie: &str) -> String {
-    let res = app
-        .get(&format!("/s/{}/ai-access", site.id), Some(cookie))
-        .await;
-    assert_eq!(res.status, StatusCode::OK);
+    let mut out = String::new();
+    for tab in TABS {
+        out.push_str(&tab_body(app, site, cookie, tab).await);
+    }
+    out
+}
+
+/// The section of `body` whose heading has the id `id`, up to its end.
+fn section_of<'a>(body: &'a str, id: &str) -> &'a str {
+    let from = body
+        .find(&format!(r#"id="{id}""#))
+        .unwrap_or_else(|| panic!("no {id} in {body}"));
+    let to = from + body[from..].find("</section>").expect("the section's end");
+    &body[from..to]
+}
+
+/// The tabs' paths under `/s/{site}/ai-access`, the Overview first.
+const TABS: [&str; 6] = ["", "/bots", "/pages", "/robots", "/files", "/visits"];
+
+/// One tab of the AI access screen (`""` for the Overview, else `/bots` and so on).
+async fn tab_body(app: &TestApp, site: &Site, cookie: &str, tab: &str) -> String {
+    let path = format!("/s/{}/ai-access{tab}", site.id);
+    let res = app.get(&path, Some(cookie)).await;
+    assert_eq!(res.status, StatusCode::OK, "{path}");
+    assert!(
+        res.body
+            .contains(&format!(r#"href="{path}" aria-current="page""#)),
+        "{path} is the current tab"
+    );
     res.body
 }
 
@@ -1156,12 +1274,13 @@ async fn the_fetch_check_section_shows_each_probed_bot() {
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
 
-    // Between "Open issues" and "AI bots", badged as synthetic.
-    let issues = body.find(r#"id="aia-issues""#).expect("open issues");
-    let check = body.find(r#"id="aia-fetch""#).expect("fetch check");
-    let bots = body.find(r#"id="aia-bots""#).expect("bots");
-    assert!(issues < check && check < bots, "section order");
-    let section = &body[check..bots];
+    // On the Bots tab, after the bots table, badged as synthetic.
+    let tab = tab_body(&app, &site, &cookie, "/bots").await;
+    assert!(
+        tab.find(r#"id="aia-bots""#).unwrap() < tab.find(r#"id="aia-fetch""#).unwrap(),
+        "section order"
+    );
+    let section = section_of(&body, "aia-fetch");
     for needle in [
         ">Fetch check</h2>",
         r#"<span class="badge aia-synthetic">Synthetic</span>"#,
@@ -1188,7 +1307,7 @@ async fn the_fetch_check_section_shows_each_probed_bot() {
     assert!(section.contains("0/2"), "{section}");
 
     // The incident it opened: synthetic, grade B, a line per bot from the probe evidence.
-    let incident = &body[issues..check];
+    let incident = section_of(&body, "aia-issues");
     for needle in [
         "Cloudflare challenge served to OAI-SearchBot and PerplexityBot on 3 pages (synthetic check)",
         r#"<span class="badge aia-synthetic">Synthetic</span>"#,
@@ -1224,8 +1343,7 @@ async fn bots_robots_txt_keeps_out_are_not_probed_and_unwanted_ones_are_expected
     app.finished_crawl_with_probes(&site, pages(), (200, BLOCK_OAI), &|r| probes_with(r, &waf))
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
-    let check = body.find(r#"id="aia-fetch""#).expect("fetch check");
-    let section = &body[check..body.find(r#"id="aia-bots""#).unwrap()];
+    let section = section_of(&body, "aia-fetch");
     assert!(section.contains("Not probed: robots.txt"), "{section}");
     assert!(
         section.contains("Expected: you don&#39;t ask for this bot, so it isn&#39;t reported"),
@@ -1300,7 +1418,8 @@ async fn the_probe_switch_is_saved_with_the_intent() {
     let res = app.post_hx(&path, "probes=off", Some(&cookie)).await;
     assert_eq!(res.status, StatusCode::OK);
     assert!(!geo::get_ai_probes(app.pool(), site.id).await.unwrap());
-    assert!(res.body.contains("Fetch checks are off for this site"));
+    let bots = tab_body(&app, &site, &cookie, "/bots").await;
+    assert!(bots.contains("Fetch checks are off for this site"));
     let form = app.get(&path, Some(&cookie)).await.body;
     assert!(
         !form.contains(r#"name="probes" value="on" checked"#),
@@ -1512,14 +1631,13 @@ async fn the_content_card_lists_each_important_page_with_its_verdict() {
     app.finished_crawl_with_robots(&site, pages, (200, OPEN), Vec::new())
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
-    let from = body.find(r#"id="aia-content""#).expect("content card");
-    let to = body.find(r#"id="aia-llms""#).expect("llms card");
+    // First on the Key pages tab.
+    let tab = tab_body(&app, &site, &cookie, "/pages").await;
     assert!(
-        body.find(r#"id="aia-fetch""#).unwrap() < from
-            && to < body.find(r#"id="aia-bots""#).unwrap(),
+        tab.find(r#"id="aia-content""#).unwrap() < tab.find(r#"id="aia-answers""#).unwrap(),
         "section order"
     );
-    let card = &body[from..to];
+    let card = section_of(&body, "aia-content");
     for needle in [
         "Content in raw HTML",
         "as AI crawlers that don't run JavaScript see it",
@@ -1542,7 +1660,7 @@ async fn the_content_card_lists_each_important_page_with_its_verdict() {
         "only shell rows: {card}"
     );
     // The shell page is an incident, graded A-, with its page as evidence.
-    let issues = &body[body.find(r#"id="aia-issues""#).unwrap()..from];
+    let issues = section_of(&body, "aia-issues");
     for needle in [
         "empty app shell",
         "Evidence grade A-",
@@ -1594,9 +1712,7 @@ async fn an_llms_txt_robots_txt_disallows_says_so() {
     .await
     .expect("skip");
     let body = ai_access_body(&app, &site, &cookie).await;
-    let from = body.find(r#"id="aia-llms""#).expect("llms card");
-    let to = body.find(r#"id="aia-bots""#).unwrap();
-    let card = &body[from..to];
+    let card = section_of(&body, "aia-llms");
     assert!(
         card.contains("robots.txt disallows /llms.txt (or where it redirects) for CodoSEObot"),
         "{card}"
@@ -1617,9 +1733,7 @@ async fn a_missing_llms_txt_is_a_neutral_line_without_warning_styles() {
         app.finished_crawl_with_llms(&site, pages(), (200, OPEN), fetch, false)
             .await;
         let body = ai_access_body(&app, &site, &cookie).await;
-        let from = body.find(r#"id="aia-llms""#).expect("llms card");
-        let to = body.find(r#"id="aia-bots""#).unwrap();
-        let card = &body[from..to];
+        let card = section_of(&body, "aia-llms");
         assert!(card.contains("Informational · not scored"), "{card}");
         assert!(
             card.contains("No llms.txt — optional, nothing to fix"),
@@ -1640,8 +1754,7 @@ async fn an_available_llms_txt_shows_its_checks_and_links() {
     app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(200, file), false)
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
-    let from = body.find(r#"id="aia-llms""#).unwrap();
-    let card = &body[from..body.find(r#"id="aia-bots""#).unwrap()];
+    let card = section_of(&body, "aia-llms");
     for needle in [
         "Informational · not scored",
         ">Available</span>",
@@ -1660,8 +1773,7 @@ async fn an_adopted_llms_txt_that_fails_is_an_incident_graded_a() {
     app.finished_crawl_with_llms(&site, pages(), (200, OPEN), llms_fetch(503, ""), true)
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
-    let from = body.find(r#"id="aia-issues""#).unwrap();
-    let issues = &body[from..body.find(r#"id="aia-fetch""#).unwrap()];
+    let issues = section_of(&body, "aia-issues");
     for needle in [
         "llms.txt returns HTTP 503",
         "GET /llms.txt → HTTP 503",
@@ -1671,8 +1783,7 @@ async fn an_adopted_llms_txt_that_fails_is_an_incident_graded_a() {
     ] {
         assert!(issues.contains(needle), "missing {needle:?} in {issues}");
     }
-    let card =
-        &body[body.find(r#"id="aia-llms""#).unwrap()..body.find(r#"id="aia-bots""#).unwrap()];
+    let card = section_of(&body, "aia-llms");
     assert!(
         card.contains(">Unavailable</span>") && card.contains("HTTP 503"),
         "{card}"
@@ -1696,9 +1807,7 @@ async fn a_huge_llms_txt_h1_is_clipped_on_the_card() {
     .await
     .expect("old detail");
     let page = ai_access_body(&app, &site, &cookie).await;
-    let from = page.find(r#"id="aia-llms""#).expect("llms card");
-    let to = page.find(r#"id="aia-bots""#).unwrap();
-    let card = &page[from..to];
+    let card = section_of(&page, "aia-llms");
     assert!(card.contains("Starts with an H1"), "{card}");
     // Backtick spans in details are code, as in incident summaries.
     assert!(
@@ -1741,8 +1850,7 @@ async fn llms_txt_text_is_escaped_everywhere_it_shows() {
     app.finished_crawl_with_llms(&site, pages(), (200, OPEN), fetch, false)
         .await;
     let page = ai_access_body(&app, &site, &cookie).await;
-    let card =
-        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    let card = section_of(&page, "aia-llms");
     for raw in ["<script>alert(", "<img src=x", "\"Quoted\"", "\"><script>"] {
         assert!(!page.contains(raw), "unescaped {raw:?} in {card}");
     }
@@ -1766,16 +1874,14 @@ async fn an_unavailable_llms_txt_is_warning_styled_only_when_adopted_and_names_t
     app.finished_crawl_with_llms(&site, pages(), (200, OPEN), no_answer(), true)
         .await;
     let page = ai_access_body(&app, &site, &cookie).await;
-    let card =
-        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    let card = section_of(&page, "aia-llms");
     assert!(
         card.contains(r#"<span class="badge t-warn">Unavailable</span>"#),
         "{card}"
     );
     assert!(card.contains("<dt>Adopted</dt><dd>Yes</dd>"), "{card}");
     assert!(card.contains("No answer (request timed out)"), "{card}");
-    let issues =
-        &page[page.find(r#"id="aia-issues""#).unwrap()..page.find(r#"id="aia-fetch""#).unwrap()];
+    let issues = section_of(&page, "aia-issues");
     assert!(
         issues.contains("GET /llms.txt → no answer (request timed out)"),
         "{issues}"
@@ -1785,8 +1891,7 @@ async fn an_unavailable_llms_txt_is_warning_styled_only_when_adopted_and_names_t
     app.finished_crawl_with_llms(&site, pages(), (200, OPEN), no_answer(), false)
         .await;
     let page = ai_access_body(&app, &site, &cookie).await;
-    let card =
-        &page[page.find(r#"id="aia-llms""#).unwrap()..page.find(r#"id="aia-bots""#).unwrap()];
+    let card = section_of(&page, "aia-llms");
     assert!(
         card.contains(r#"<span class="badge t-muted">Unavailable</span>"#),
         "{card}"
@@ -1808,8 +1913,7 @@ async fn a_content_incident_lists_its_pages_once_with_a_count_of_the_rest() {
     app.finished_crawl_with_robots(&site, pages, (200, OPEN), Vec::new())
         .await;
     let body = ai_access_body(&app, &site, &cookie).await;
-    let issues =
-        &body[body.find(r#"id="aia-issues""#).unwrap()..body.find(r#"id="aia-content""#).unwrap()];
+    let issues = section_of(&body, "aia-issues");
     assert!(
         issues.contains("8 important pages are empty app shells"),
         "{issues}"

@@ -1,0 +1,23 @@
+{#- The Bot visits tab of the AI access screen: a placeholder until server logs can be read. No
+    data, real or made up. -#}
+<div class="cols aia-cols aia-visits">
+  <section class="card card-pad aia-visits-main" aria-labelledby="aia-visits">
+    <div class="aia-visits-head"><span class="badge aia-soon">Coming soon</span><h2 class="card-title" id="aia-visits">Real bot visits, from your server logs</h2></div>
+    <p class="aia-visits-text">The other tabs show what bots are allowed to do and what our fetch check saw. Logs show what they actually did. Nothing here is data yet.</p>
+    <div class="aia-visits-frame" aria-hidden="true">Requests per day · by bot, purpose or company</div>
+    <div class="aia-visits-grid">
+      <div><b>Last seen per bot</b>Hits, errors and the last visit for each AI bot we track.</div>
+      <div><b>Verified or claimed</b>Each visit checked against the bot's published IP ranges and reverse DNS.</div>
+      <div><b>Rule breakers</b>Visits to paths your robots.txt disallows for that bot, with the line.</div>
+      <div><b>What they got</b>Status codes served to each bot: 2xx, 3xx, 403, 429, 5xx.</div>
+    </div>
+  </section>
+  <section class="card card-pad aia-visits-side" aria-labelledby="aia-visits-src">
+    <h2 class="card-title" id="aia-visits-src">Planned sources</h2>
+    <ul>
+      <li>Cloudflare Logpush or a log upload</li>
+      <li>Vercel or Netlify log drain</li>
+      <li>nginx or Apache access log, via the CLI</li>
+    </ul>
+  </section>
+</div>

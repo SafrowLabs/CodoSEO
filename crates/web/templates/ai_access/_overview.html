@@ -1,0 +1,106 @@
+{#- The Overview tab of the AI access screen. Included by ai_access/index.html with `v: Overview`
+    and `base`. -#}
+{%- import "partials/mascot.html" as m -%}
+{%- import "partials/operator_logo.html" as op -%}
+{% if let Some(c) = v.robots_callout %}
+<div class="aia-alert" role="alert"><svg class="icon"><use href="#i-alert"/></svg><div><b>{{ c.title }}</b><p>{{ c.text }}</p></div></div>
+{% endif %}
+
+<div class="tiles aia-kpis">
+  {% for k in v.kpis %}
+  <div class="tile">
+    <div class="tile-label">{{ k.label }}</div>
+    <div class="tile-value">{{ k.value }}{% if !k.of.is_empty() %}<span class="aia-of">{{ k.of }}</span>{% endif %}</div>
+    <div class="aia-tile-sub{% if !k.d1_class.is_empty() %} {{ k.d1_class }}{% endif %}">{{ k.d1 }}</div>
+    {% if !k.d2.is_empty() %}<div class="aia-tile-sub">{{ k.d2 }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<section class="card aia-section aia-products" aria-labelledby="aia-prod">
+  <div class="card-head">
+    <h2 class="card-title" id="aia-prod">Can AI products find and quote you?</h2>
+    <span class="aia-prod-aside">{{ v.products_aside }}</span>
+    <span class="aia-source">From robots.txt, fetch checks and page markup · not live traffic</span>
+  </div>
+  <div class="aia-prods">
+    {% for p in v.products %}
+    <a class="aia-prod {{ p.tone }}" href="{{ base }}/ai-access/bots">
+      <span class="aia-prod-head">{% call op::tile(p.operator, "md") %}{% endcall %}<span class="aia-prod-name"><b>{{ p.name }}</b><span class="aia-sub mono">{{ p.bots }}</span></span></span>
+      <span class="aia-verdict {{ p.class }}"><span class="aia-tone-dot" aria-hidden="true"></span>{{ p.verdict }}</span>
+      <span class="aia-prod-why">{{ p.why }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="cols aia-cols">
+  <section class="aia-attn" aria-labelledby="aia-issues">
+    <div class="aia-section-head"><h2 id="aia-issues">Needs attention</h2><span class="chip" title="Accepted and snoozed issues aren't counted">{{ v.attention }}</span></div>
+    {% if v.incidents.is_empty() %}
+    <div class="card">
+      <div class="empty aia-clear">
+        {% call m::eyes(v.clear.2, "mascot-empty") %}{% endcall %}
+        <h2>{{ v.clear.0 }}</h2>
+        <p>{{ v.clear.1 }}</p>
+      </div>
+    </div>
+    {% else %}
+    <div class="stack aia-issues">
+      {% for i in v.incidents %}{% include "ai_access/_incident.html" %}{% endfor %}
+    </div>
+    {% endif %}
+    {% if !v.accepted.is_empty() %}
+    <details class="aia-accepted">
+      <summary><svg class="icon chev"><use href="#i-chev"/></svg>Accepted ({{ v.accepted.len() }})<span class="aia-accepted-note">Muted: not counted, no alerts. A crawl that no longer finds one still closes it.</span></summary>
+      <div class="stack aia-issues">
+        {% for i in v.accepted %}{% include "ai_access/_incident.html" %}{% endfor %}
+      </div>
+    </details>
+    {% endif %}
+    <p class="aia-attn-foot"><span>{{ v.issue_counts }}</span><span class="grow"></span><span>{{ v.set_aside }}</span></p>
+  </section>
+  <div class="stack">
+    <section class="card" aria-labelledby="aia-policy">
+      <div class="card-head"><h2 class="card-title" id="aia-policy">Your policy vs what bots get</h2><a class="card-aside" href="{{ base }}/ai-access/intent">Edit in Site policy</a></div>
+      <div class="rows">
+        {% for p in v.policy %}
+        <div class="aia-pol {{ p.tone }}">
+          <span class="aia-pol-label"><span class="aia-tone-dot" aria-hidden="true"></span>{{ p.label }}</span>
+          <span class="badge {{ p.stance_class }}">{{ p.stance }}</span>
+          <span class="aia-pol-actual">{{ p.actual }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="aia-pol-note">Blocking training bots doesn't remove you from AI search: search and assistant bots are separate user agents.</p>
+    </section>
+    <section class="card" aria-labelledby="aia-resolved">
+      <div class="card-head"><h2 class="card-title" id="aia-resolved">Recently resolved</h2><span class="card-aside">last 10</span></div>
+      {% if v.resolved.is_empty() %}
+      <div class="empty-sm aia-pad">Nothing resolved yet. Fixed issues and choices you mark as intended show up here.</div>
+      {% else %}
+      <div class="rows">
+        {% for r in v.resolved %}
+        <div class="aia-res">
+          <span class="aia-res-title">{{ r.title }}</span>
+          <span class="aia-res-meta"><span class="faint" title="{{ r.when_full }}">{{ r.when }}</span><span class="badge {{ r.resolution_class }}" title="{{ r.resolution_tip }}">{{ r.resolution }}</span></span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<section class="card aia-section" aria-labelledby="aia-look">
+  <div class="card-head"><h2 class="card-title" id="aia-look">Look closer</h2><span class="card-aside">Every bot, page and file behind these verdicts</span></div>
+  <div class="aia-look">
+    {% for l in v.look %}
+    <a class="aia-look-card" href="{{ l.href }}">
+      <span class="aia-look-head"><b>{{ l.label }}</b>{% if !l.count.is_empty() %}<span class="aia-look-n">{{ l.count }}</span>{% endif %}</span>
+      <span class="aia-look-status {{ l.status_class }}">{{ l.status }}</span>
+      <span class="aia-look-what">{{ l.what }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>

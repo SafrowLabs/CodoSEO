@@ -54,12 +54,20 @@ use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{Screen, Shell};
 use crate::render::{Hx, ToastKind, html, toast};
+use crate::routes::ai_overview::{
+    self, GeoInput, Kpi, LookCard, LookInput, PolicyRow, ProductCard, RobotsView, Tab, TabLink,
+};
 use crate::routes::audit::site_id;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/s/{site}/ai-access", get(page))
+        .route("/s/{site}/ai-access/bots", get(bots_page))
+        .route("/s/{site}/ai-access/pages", get(pages_page))
+        .route("/s/{site}/ai-access/robots", get(robots_page))
+        .route("/s/{site}/ai-access/files", get(files_page))
+        .route("/s/{site}/ai-access/visits", get(visits_page))
         .route(
             "/s/{site}/ai-access/intent",
             get(intent_page).post(save_intent),
@@ -147,7 +155,7 @@ pub(crate) fn stance_label(s: Stance) -> &'static str {
     }
 }
 
-fn stance_class(s: Stance) -> &'static str {
+pub(crate) fn stance_class(s: Stance) -> &'static str {
     match s {
         Stance::Allow => "aia-allow",
         Stance::Block => "aia-block",
@@ -177,7 +185,7 @@ fn severity_view(s: Severity) -> (&'static str, &'static str) {
     }
 }
 
-fn directive_label(d: DirectiveSlug) -> &'static str {
+pub(crate) fn directive_label(d: DirectiveSlug) -> &'static str {
     match d {
         DirectiveSlug::Noindex => "noindex",
         DirectiveSlug::Nosnippet => "nosnippet",
@@ -188,7 +196,7 @@ fn directive_label(d: DirectiveSlug) -> &'static str {
     }
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
+pub(crate) fn plural(n: usize, one: &str, many: &str) -> String {
     format!(
         "{} {}",
         fmt::thousands(n as i64),
@@ -197,7 +205,7 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 /// `A`, `A and B`, `A, B and C`, and past three `A, B, C and 2 more`.
-fn names(items: &[String]) -> String {
+pub(crate) fn names(items: &[String]) -> String {
     match items {
         [] => String::new(),
         [one] => one.clone(),
@@ -266,6 +274,9 @@ fn host_label(url: &str) -> String {
 pub struct AiAccessPage {
     pub shell: Shell,
     pub base: String,
+    /// The tab shown: `overview`, `bots`, `pages`, `robots`, `files` or `visits`.
+    pub tab: &'static str,
+    pub tabs: Vec<TabLink>,
     /// Set until the site has a report.
     pub empty: Option<EmptyState>,
     pub view: Option<Overview>,
@@ -284,9 +295,25 @@ pub struct Overview {
     pub checked_full: String,
     /// `crawl #12`
     pub crawl_label: String,
+    /// `crawl #12 · 27 bots, 20 key pages · 6 bots fetched on 3 pages`, after "Checked 2h ago".
+    pub meta: String,
     /// Set when the report comes from a crawl that failed (only robots.txt was read).
     pub failed: Option<String>,
-    pub tiles: Vec<Tile>,
+    pub kpis: Vec<Kpi>,
+    /// One card per AI product (answer engine).
+    pub products: Vec<ProductCard>,
+    /// `8 of 10 can find you`
+    pub products_aside: String,
+    /// Your policy per purpose against what bots get.
+    pub policy: Vec<PolicyRow>,
+    /// The "Look closer" links to the other tabs.
+    pub look: Vec<LookCard>,
+    /// The robots.txt tab.
+    pub robots: RobotsView,
+    /// `2 critical · 1 warning · 3 notices`, under the open issues.
+    pub issue_counts: String,
+    /// `Accepted 1 · Snoozed 0`
+    pub set_aside: String,
     pub incidents: Vec<IncidentView>,
     /// Open issues that still ask for attention: neither accepted nor snoozed.
     pub attention: usize,
@@ -314,17 +341,6 @@ pub struct Overview {
     pub declared: Vec<DeclaredItem>,
     pub important: Vec<ImportantRow>,
     pub resolved: Vec<ResolvedRow>,
-}
-
-pub struct Tile {
-    pub label: &'static str,
-    pub value: String,
-    /// `/10`, or empty.
-    pub of: String,
-    pub sub: String,
-    /// Text colour class for the value, or empty.
-    pub class: &'static str,
-    pub sub_class: &'static str,
 }
 
 pub struct Callout {
@@ -629,19 +645,71 @@ pub struct ResolvedRow {
     pub resolution_tip: &'static str,
 }
 
+async fn tab_page(
+    state: AppState,
+    user: CurrentUser,
+    site: String,
+    tab: Tab,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    Ok(render_page(&state, &user, &site, tab)
+        .await?
+        .into_response())
+}
+
 async fn page(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
-    let site = load_site(&state, &user, site_id(&site)?).await?;
-    Ok(render_page(&state, &user, &site).await?.into_response())
+    tab_page(state, user, site, Tab::Overview).await
+}
+
+async fn bots_page(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    tab_page(state, user, site, Tab::Bots).await
+}
+
+async fn pages_page(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    tab_page(state, user, site, Tab::Pages).await
+}
+
+async fn robots_page(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    tab_page(state, user, site, Tab::Robots).await
+}
+
+async fn files_page(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    tab_page(state, user, site, Tab::Files).await
+}
+
+async fn visits_page(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    tab_page(state, user, site, Tab::Visits).await
 }
 
 async fn render_page(
     state: &AppState,
     user: &CurrentUser,
     site: &Site,
+    tab: Tab,
 ) -> Result<Html<String>, AppError> {
     let shell = Shell::load(state, user, Some(site), Screen::AiAccess).await?;
     let base = format!("/s/{}", site.id);
@@ -650,6 +718,8 @@ async fn render_page(
         let can_run = crawls::active(pool, site.id).await?.is_none();
         return html(&AiAccessPage {
             shell,
+            tabs: ai_overview::tab_links(&base, None, tab),
+            tab: tab.key(),
             base,
             empty: Some(EmptyState {
                 text: if can_run {
@@ -666,6 +736,10 @@ async fn render_page(
     let open = geo::open_incidents(pool, site.id).await?;
     let resolved = geo::recent_resolved(pool, site.id, RESOLVED_SHOWN).await?;
     let crawl = crawls::get(pool, site.id, latest.crawl_id).await?;
+    let previous = match &crawl {
+        Some(c) if c.finished_at.is_some() => crawls::previous_done(pool, site.id, c.id).await?,
+        _ => None,
+    };
 
     // When each stored report was written, to tell a first check from an intent change.
     let reported = geo::report_times(pool, site.id).await?;
@@ -687,25 +761,117 @@ async fn render_page(
     // Counted as the sidebar counts them (`geo::open_counts`): accepted and snoozed ones are the
     // owner's decision already.
     let asking: Vec<&Incident> = open.iter().filter(|i| asks_attention(i, now)).collect();
-    let critical = asking
+    let by_severity = |s: Severity| asking.iter().filter(|i| i.severity == s).count();
+    let issue_counts = {
+        let parts: Vec<String> = [
+            (Severity::Critical, "critical", "critical"),
+            (Severity::Warning, "warning", "warnings"),
+            (Severity::Notice, "notice", "notices"),
+        ]
+        .into_iter()
+        .filter_map(|(s, one, many)| {
+            let n = by_severity(s);
+            (n > 0).then(|| plural(n, one, many))
+        })
+        .collect();
+        if parts.is_empty() {
+            "Nothing open".to_owned()
+        } else {
+            parts.join(" · ")
+        }
+    };
+    let snoozed_n = open
         .iter()
-        .filter(|i| i.severity == Severity::Critical)
+        .filter(|i| i.accepted_at.is_none() && i.snoozed_until.is_some_and(|t| t > now))
         .count();
 
     let accepted_n = accepted.len();
     let bot_groups = bot_groups(report, &intent);
     let probes_on = geo::get_ai_probes(pool, site.id).await?;
+    let fetch = fetch_check(
+        site,
+        &base,
+        report,
+        &intent,
+        probes_on,
+        state.config.probe_urls_for(user.account.plan) > 0,
+    );
+    let bot_attention = bot_groups
+        .iter()
+        .flat_map(|g| &g.rows)
+        .filter(|r| r.attention)
+        .count();
+    let fetch_attention = fetch
+        .rows
+        .iter()
+        .filter(|r| matches!(r.result_class, "t-err" | "t-warn"))
+        .count();
+    let (products, verdicts) = ai_overview::product_cards(report, &intent);
+    let summary = crawl.as_ref().and_then(|c| c.summary());
+    let geo_in = GeoInput {
+        score: crawl.as_ref().and_then(|c| c.geo_score),
+        breakdown: summary.as_ref().and_then(|s| s.geo.as_ref()),
+        previous: previous.as_ref().map(|p| (p.number, p.geo_score)),
+    };
+    let kpis = ai_overview::kpis(report, &intent, &products, &verdicts, &geo_in);
+    let finds = verdicts.iter().filter(|v| v.finds()).count();
+    let fixes = verdicts.iter().filter(|v| v.problem()).count();
+    let look = ai_overview::look_cards(
+        &base,
+        report,
+        &LookInput {
+            bot_attention: bot_attention + fetch_attention,
+            shells: report.content.as_ref().map(|c| c.shells().count()),
+            files_missing: ai_overview::files_missing(report),
+        },
+    );
+    let crawl_label = crawl
+        .as_ref()
+        .map(|c| format!("crawl #{}", c.number))
+        .unwrap_or_else(|| "latest crawl".to_owned());
+    let mut meta = format!(
+        "{} AI bots, {}",
+        registry().bots.len(),
+        plural(report.important.len(), "key page", "key pages")
+    );
+    if let Some(p) = &report.probes {
+        meta.push_str(&format!(
+            " · {} fetched on {}",
+            plural(p.bots.len(), "bot", "bots"),
+            plural(p.urls.len(), "page", "pages")
+        ));
+    }
     let view = Overview {
         checked: fmt::ago(latest.created_at),
         checked_full: fmt::datetime(latest.created_at),
-        crawl_label: crawl
-            .as_ref()
-            .map(|c| format!("crawl #{}", c.number))
-            .unwrap_or_else(|| "latest crawl".to_owned()),
+        crawl_label,
+        meta,
         failed: (latest.crawl_status != "done").then(|| {
             "The latest crawl couldn't read any pages, so only robots.txt was checked. The rest is from what that crawl could see.".to_owned()
         }),
-        tiles: tiles(report, &intent, asking.len(), critical),
+        kpis,
+        products_aside: if report.has_verdicts() {
+            match fixes {
+                0 => format!("{finds} of {} can find you", products.len()),
+                n => format!(
+                    "{finds} of {} can find you · {} a fix",
+                    products.len(),
+                    if n == 1 {
+                        "1 needs".to_owned()
+                    } else {
+                        format!("{n} need")
+                    }
+                ),
+            }
+        } else {
+            "robots.txt not readable".to_owned()
+        },
+        products,
+        policy: ai_overview::policy_rows(report, &intent),
+        look,
+        robots: ai_overview::robots_view(&site.start_url, report),
+        issue_counts,
+        set_aside: format!("Accepted {accepted_n} · Snoozed {snoozed_n}"),
         attention: asking.len(),
         incidents,
         accepted,
@@ -731,24 +897,13 @@ async fn render_page(
                 "ok",
             )
         },
-        fetch: fetch_check(
-            site,
-            &base,
-            report,
-            &intent,
-            probes_on,
-            state.config.probe_urls_for(user.account.plan) > 0,
-        ),
+        fetch,
         content: content_card(site, &base, report),
         llms: llms_card(report.llms_txt.as_ref(), report.llms_txt_skipped),
         ready: ready_card(report, &intent),
         robots_callout: robots_callout(report),
         robots_aside: robots_aside(report),
-        bot_attention: bot_groups
-            .iter()
-            .flat_map(|g| &g.rows)
-            .filter(|r| r.attention)
-            .count(),
+        bot_attention,
         bot_total: registry().bots.len(),
         bot_groups,
         engines: engine_rows(report, &intent),
@@ -762,138 +917,12 @@ async fn render_page(
     };
     html(&AiAccessPage {
         shell,
+        tabs: ai_overview::tab_links(&base, Some(report), tab),
+        tab: tab.key(),
         base,
         empty: None,
         view: Some(view),
     })
-}
-
-fn tiles(report: &AccessReport, intent: &Intent, open: usize, critical: usize) -> Vec<Tile> {
-    let of = |bots: &[&Bot]| format!("/{}", bots.len());
-    let in_purpose = |p: Purpose| -> Vec<&'static Bot> {
-        registry().bots.iter().filter(|b| b.purpose == p).collect()
-    };
-    let mut out = vec![Tile {
-        label: "Open issues",
-        value: fmt::thousands(open as i64),
-        of: String::new(),
-        sub: match (open, critical) {
-            (0, _) => "nothing to fix".to_owned(),
-            (_, 0) => "none critical".to_owned(),
-            (_, c) => format!("{c} critical"),
-        },
-        class: if critical > 0 { "c-err" } else { "" },
-        sub_class: if critical > 0 { "c-err" } else { "" },
-    }];
-
-    let search = in_purpose(Purpose::Search);
-    let training = in_purpose(Purpose::Training);
-    if report.has_verdicts() {
-        let blocked: Vec<String> = search
-            .iter()
-            .filter(|b| report.bot(&b.token).is_some_and(|a| !a.blocked.is_empty()))
-            .map(|b| b.token.clone())
-            .collect();
-        let wanted = intent.purpose_stance(Purpose::Search) == Stance::Allow;
-        out.push(Tile {
-            label: "AI search bots allowed",
-            value: fmt::thousands((search.len() - blocked.len()) as i64),
-            of: of(&search),
-            sub: if blocked.is_empty() {
-                "on every important page".to_owned()
-            } else {
-                format!("blocked: {}", names(&blocked))
-            },
-            class: if !blocked.is_empty() && wanted {
-                "c-warn"
-            } else {
-                ""
-            },
-            sub_class: "",
-        });
-        let stopped = training
-            .iter()
-            .filter(|b| report.bot(&b.token).and_then(|a| a.home_allowed) == Some(false))
-            .count();
-        let stance = intent.purpose_stance(Purpose::Training);
-        out.push(Tile {
-            label: "Training bots blocked",
-            value: fmt::thousands(stopped as i64),
-            of: of(&training),
-            sub: format!("your intent: {}", stance_label(stance)),
-            class: if stance == Stance::Block && stopped < training.len() {
-                "c-warn"
-            } else {
-                ""
-            },
-            sub_class: "",
-        });
-    } else {
-        let why = match report.robots.availability {
-            RobotsAvailability::Unknown => "robots.txt not checked",
-            _ => "robots.txt not readable",
-        };
-        for (label, bots) in [
-            ("AI search bots allowed", &search),
-            ("Training bots blocked", &training),
-        ] {
-            out.push(Tile {
-                label,
-                value: "—".to_owned(),
-                of: of(bots),
-                sub: why.to_owned(),
-                class: "c-ghost",
-                sub_class: "",
-            });
-        }
-    }
-
-    let google = report.engine(codoseo_geo::eligibility::EngineId::Google);
-    let html_pages = google.map_or(0, |e| usize::from(e.html_pages));
-    let affected = google.map_or(0, |e| e.affected());
-    let mut excluded = 0;
-    let mut limited = 0;
-    for g in google.map(|e| e.groups.as_slice()).unwrap_or_default() {
-        if g.robots_blocked || g.effect == Effect::Excluded {
-            excluded += g.urls.len();
-        } else if g.effect == Effect::Limited {
-            limited += g.urls.len();
-        }
-    }
-    out.push(Tile {
-        label: "Quotable in Google AI",
-        value: if html_pages == 0 {
-            "—".to_owned()
-        } else {
-            fmt::thousands(html_pages.saturating_sub(affected) as i64)
-        },
-        of: format!("/{html_pages}"),
-        sub: if html_pages == 0 {
-            "no HTML pages checked".to_owned()
-        } else if affected == 0 {
-            "every important page".to_owned()
-        } else {
-            let mut parts = Vec::new();
-            if excluded > 0 {
-                parts.push(format!("{excluded} excluded"));
-            }
-            if limited > 0 {
-                parts.push(format!("{limited} limited"));
-            }
-            parts.join(" · ")
-        },
-        class: if excluded > 0 {
-            "c-err"
-        } else if limited > 0 {
-            "c-warn"
-        } else if html_pages == 0 {
-            "c-ghost"
-        } else {
-            ""
-        },
-        sub_class: "",
-    });
-    out
 }
 
 /// What robots.txt answered, beside the bots table's filter (which carries the bot count).
@@ -3240,7 +3269,7 @@ async fn respond(
     if !hx.request {
         return Ok(Redirect::to(&to).into_response());
     }
-    let page = render_page(state, user, site).await?;
+    let page = render_page(state, user, site, Tab::Overview).await?;
     let url = HeaderValue::from_str(&to).map_err(AppError::internal)?;
     Ok((
         [

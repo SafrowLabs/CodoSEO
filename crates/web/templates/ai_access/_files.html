@@ -1,0 +1,60 @@
+{#- The Agent files & signals tab of the AI access screen. Included by ai_access/index.html with
+    `v: Overview` and `base`. -#}
+  <section class="card aia-section aia-llms" aria-labelledby="aia-llms">
+    <div class="card-head">
+      <h2 class="card-title" id="aia-llms">llms.txt</h2>
+      <span class="chip">Informational · not scored</span>
+      <span class="card-aside"><a href="{{ v.llms.spec }}" target="_blank" rel="noopener noreferrer">llmstxt.org</a></span>
+    </div>
+    {% if let Some((title, text)) = v.llms.none %}
+    <div class="aia-none aia-llms-none"><b>{{ title }}</b><p>{{ text }}</p></div>
+    {% else %}
+    <dl class="aia-llms-facts">
+      <div><dt>State</dt><dd><span class="badge {{ v.llms.state_class }}">{{ v.llms.state }}</span></dd></div>
+      <div><dt>Adopted</dt><dd>{{ v.llms.adopted }}</dd></div>
+      <div><dt>Fetch</dt><dd>{{ v.llms.fetched }}</dd></div>
+      {% if let Some(l) = v.llms.links %}<div><dt>Links</dt><dd>{{ l }}</dd></div>{% endif %}
+    </dl>
+    {% if !v.llms.checks.is_empty() %}
+    <div class="rows aia-llms-checks">
+      {% for c in v.llms.checks %}
+      <div class="aia-llms-check"><span class="{% if c.ok %}c-ok{% else %}c-warn{% endif %}"><span aria-hidden="true">{% if c.ok %}✓{% else %}✗{% endif %}</span><span class="sr-only">{% if c.ok %}Passes:{% else %}Does not pass:{% endif %}</span></span><b>{{ c.label }}</b><span class="aia-ev-detail">{% for s in c.detail %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</span></div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if !v.llms.failing.is_empty() %}
+    <div class="aia-urls aia-llms-failing"><span class="aia-urls-label">Failing links</span>{% for u in v.llms.failing %}<span class="mono aia-path">{{ u }}</span>{% endfor %}</div>
+    {% endif %}
+    {% endif %}
+  </section>
+
+  <section class="card aia-section aia-ready" aria-labelledby="aia-ready">
+    <div class="card-head">
+      <h2 class="card-title" id="aia-ready">Content Signals and Markdown</h2>
+      <span class="chip">Advisory · Notice</span>
+      <span class="card-aside"><a href="{{ v.ready.signals_spec }}" target="_blank" rel="noopener noreferrer">contentsignals.org</a> · <a href="{{ v.ready.markdown_doc }}" target="_blank" rel="noopener noreferrer">Markdown for Agents</a></span>
+    </div>
+    <div class="rows aia-llms-checks">
+      {% for r in v.ready.rows %}
+      <div class="aia-llms-check">{% match r.ok %}{% when Some(true) %}<span class="c-ok"><span aria-hidden="true">✓</span><span class="sr-only">Passes:</span></span>{% when Some(false) %}<span class="c-warn"><span aria-hidden="true">✗</span><span class="sr-only">Does not pass:</span></span>{% when None %}<span class="t-muted"><span aria-hidden="true">–</span><span class="sr-only">Not checked:</span></span>{% endmatch %}<b>{{ r.label }}</b><span class="aia-ev-detail">{% for s in r.detail %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}{% for n in r.notes %}<br>{{ n }}{% endfor %}</span></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card aia-section" aria-labelledby="aia-declared">
+    <div class="card-head"><h2 class="card-title" id="aia-declared">Declared preferences</h2><span class="card-aside">{{ v.declared.len() }}</span></div>
+    <p class="aia-declared-note"><svg class="icon"><use href="#i-alert"/></svg>Declared preference — not enforced by major engines</p>
+    {% if v.declared.is_empty() %}
+    <div class="aia-none"><b>None declared</b><p>We look for Content-Signal and Content-Usage in robots.txt, the same headers and TDM meta tags on the home page, and /.well-known/tdmrep.json.</p></div>
+    {% else %}
+    <div class="rows">
+      {% for d in v.declared %}
+      <div class="aia-decl">
+        <div class="aia-decl-head"><b>{{ d.name }}</b><span>{{ d.place }}</span></div>
+        {% if !d.pairs.is_empty() %}<div class="aia-chips">{% for p in d.pairs %}<span class="aia-kv{% if !p.class.is_empty() %} {{ p.class }}{% endif %}"{% if !p.tip.is_empty() %} title="{{ p.tip }}"{% endif %}>{{ p.text }}</span>{% endfor %}</div>{% endif %}
+        {% if let Some(n) = d.note %}<p class="hint">{{ n }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
