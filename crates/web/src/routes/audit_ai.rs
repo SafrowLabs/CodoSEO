@@ -385,6 +385,7 @@ mod tests {
             robots: RobotsInfo {
                 status: Some(200),
                 availability: RobotsAvailability::Ok,
+                file: None,
             },
             important,
             bots: registry()

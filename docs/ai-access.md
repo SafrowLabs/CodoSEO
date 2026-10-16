@@ -11,9 +11,9 @@ The screen at `/s/{site}/ai-access` has six tabs, each its own address, so a tab
 | Tab | Address | What it shows |
 |---|---|---|
 | **Overview** | `/ai-access` | Score tiles, a verdict per AI product, what needs attention, your policy against what bots get, recently resolved issues |
-| **Bots** | `/ai-access/bots` | The AI bots table (opens on the bots that need attention) and the synthetic **Fetch check** |
+| **Bots** | `/ai-access/bots` | Every bot in one list (your policy, robots.txt, what a fetch as the bot got, the status) with a side panel that explains one bot, and what the synthetic **Fetch check** ran |
 | **Key pages** | `/ai-access/pages` | **Content in raw HTML**, the important pages one by one, and the **AI answers** table (eligible, limited, excluded per engine) |
-| **robots.txt** | `/ai-access/robots` | What robots.txt answered, the group each bot follows and its rule for the home page, and any `Content-Signal` lines |
+| **robots.txt** | `/ai-access/robots` | The file as the latest crawl fetched it, line by line, a tester ("can this bot fetch this path?"), and the groups of the file |
 | **Agent files & signals** | `/ai-access/files` | **llms.txt**, **Content Signals and Markdown**, and the other **Declared preferences** |
 | **Bot visits** | `/ai-access/visits` | Coming soon: real bot visits from your server logs. It shows no data until then |
 
@@ -37,7 +37,15 @@ The header carries **Export issues** (CSV) and **JSON**, and **Site policy**, wh
 - **Recently resolved**: the last ten.
 - **Look closer**: a card per other tab with a one-line status.
 
-When robots.txt fails, the Overview opens on that, and the Bots tab shows a callout instead of the table.
+When robots.txt fails, the Overview opens on that, and the Bots tab shows a callout instead of the list.
+
+**The Bots tab.** A toolbar picks what the list shows: **Needs attention** (the default when anything does), **All bots** or **Training only**, grouped **By purpose** or **By company**, and a search by token, company or product. Each choice is a link (`?show=attention|all|training`, `?group=purpose|company`, `?q=`), so a view can be shared and works without JavaScript; with it, the search filters as you type. Each row has the bot, your policy (with an `override` tag when set for that bot), what robots.txt says for the home page and on which line of which group, what a fetch as the bot got ("Blocked · 403 / Cloudflare challenge on 3 of 3 pages", "Same page as CodoSEObot", or why it wasn't fetched), and a status: **OK**, **Blocked** or **Partly blocked** (robots.txt keeps out a bot you allow), **Firewall blocks** or **Treated differently** (the fetch check, for a bot you allow), **Not blocked** (a bot you block still gets in), **Blocked, as wanted**, and muted **Blocked** / **Allowed (no preference)**. Rows that need attention have a red edge, and each group header says how many do.
+
+Picking a row (`?bot=TOKEN`; with htmx only the panel is fetched) opens the bot's panel: **1 · Allowed by robots.txt?** with the reason and the lines of the group it obeys, the deciding line highlighted; **2 · Reachable when fetched as the bot?** with the home page as CodoSEObot and as the bot got it (status, size, title, challenge signal) and the synthetic caveat; the key pages it may and may not fetch; **Who it is** (the user-agent substring, whether its operator says it obeys robots.txt, how to verify it, the registry's source and review date); **Open the issue** when an open incident names it, and **Set a policy for this bot**. The panel opens on the first bot that needs attention. Below 760 px it goes under the list, or above it once a bot is picked.
+
+**The robots.txt tab.** The file is shown as fetched, with line numbers: comments muted, each group's first line saying how many registry bots read it, the tested bot's groups tinted and its deciding line highlighted. The header has the status, the URL, the size, when it was checked and when it last changed. **Test a bot against this file** takes a bot (a chip for the likeliest ones, a list of every registry bot, or any product token in `?bot=`) and a path, and says whether the bot can fetch it, which group applies and which line decides, with the same matcher the reports use. It is `GET /s/{site}/ai-access/robots/test?bot=&path=`: an htmx fragment, or the whole tab without JavaScript; a path that doesn't start with `/`, is longer than 1,024 characters or holds spaces, and a malformed token, are a 400 that says why. **Groups in this file** sums each group up (its agents, its lines, its rules and how many bots read it), whether any has a `Crawl-delay`, the `Content-Signal` lines and the sitemaps.
+
+The report keeps the robots.txt body when it answered 2xx (`robots.file` in the stored JSON: `body`, cut at Google's 500 KiB and marked `truncated` past it, `bytes`, `sha256`, and `since`: the crawl since which the file has had this hash, `changed: true` when that crawl changed it). When a report is stored, `since` is carried from the newest earlier report with a body while the hash is the same, so a failing robots.txt in between doesn't reset it. Reports stored before this have no body: the tab says the text appears after the next crawl, and the Bots panel shows its verdicts without the excerpt.
 
 ## What is checked
 
@@ -53,7 +61,7 @@ When robots.txt fails, the Overview opens on that, and the Bots tab shows a call
 
 robots.txt can let a bot in while the CDN or firewall in front of the site turns it away: Cloudflare AI Crawl Control, DataDome, Akamai and the like decide by user agent before the request ever reaches your server. So after each monitored crawl CodoSEO fetches a few important pages with the user agents of the AI search and user-triggered bots, and compares each answer with what its own crawler gets for the same page at the same moment.
 
-It is a **synthetic** check: the requests come from CodoSEO's address, not from the bots. The AI access screen shows the latest check, bot by bot, in the **Fetch check** section of its **Bots** tab. Every result says it is synthetic: the badge on that section, "(synthetic check)" at the end of each finding title, `synthetic: true` in the JSON, and a banner in the CLI.
+It is a **synthetic** check: the requests come from CodoSEO's address, not from the bots. The AI access screen shows the latest check on its **Bots** tab: each bot's result in the list and its panel, and what was sent, on which pages, in the **Fetch check** section under the list. Every result says it is synthetic: the badge on that section, "(synthetic check)" at the end of each finding title, `synthetic: true` in the JSON, and a banner in the CLI.
 
 <table>
   <tr>

@@ -22,7 +22,8 @@ use crate::markdown::{self, MarkdownState};
 use crate::probe::ProbeReport;
 use crate::registry::registry;
 use crate::report::{
-    AccessReport, EngineGroup, RobotsInfo, agent_rules, bot_access, path_and_query, slug_from_str,
+    AccessReport, EngineGroup, RobotsBody, RobotsInfo, agent_rules, bot_access, path_and_query,
+    slug_from_str,
 };
 use crate::robots::{RobotsAvailability, RobotsTxt, availability};
 
@@ -191,9 +192,16 @@ pub fn overlay(
             RobotsAvailability::Missing => Some(RobotsTxt::parse(b"")),
             _ => None,
         };
+        let mut body = (avail == RobotsAvailability::Ok).then(|| RobotsBody::new(&file.body));
+        if let (Some(b), Some(was)) = (body.as_mut(), stored.robots.file.as_ref())
+            && b.sha256 == was.sha256
+        {
+            b.since = was.since;
+        }
         now.robots = RobotsInfo {
             status: Some(file.status),
             availability: avail,
+            file: body,
         };
         // The Content-Signal lines come with the file; a failing one keeps what the crawl read.
         if let Some(robots) = &parsed {

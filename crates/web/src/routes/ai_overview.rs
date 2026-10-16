@@ -10,7 +10,7 @@ use codoseo_geo::eligibility::{Effect, Engine, engines};
 use codoseo_geo::llms::LlmsState;
 use codoseo_geo::probe::{SkipReason, Verdict};
 use codoseo_geo::report::AccessReport;
-use codoseo_geo::robots::{GroupMatch, RobotsAvailability};
+use codoseo_geo::robots::RobotsAvailability;
 use codoseo_geo::score::{GeoScore, Status, Tier};
 use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
 
@@ -1101,27 +1101,8 @@ pub fn files_missing(report: &AccessReport) -> usize {
 
 // ---- the robots.txt tab ----------------------------------------------------------------------
 
-pub struct RobotsView {
-    pub url: String,
-    pub status: String,
-    pub status_class: &'static str,
-    pub explain: &'static str,
-    pub rows: Vec<RobotsBotRow>,
-    /// `Named group`, … and how many bots each.
-    pub groups: Vec<(String, usize)>,
-    /// `line 3 · all bots · search=yes, ai-train=no`
-    pub signals: Vec<String>,
-}
-
-pub struct RobotsBotRow {
-    pub token: String,
-    pub operator: String,
-    pub group: String,
-    pub home: String,
-    pub home_class: &'static str,
-}
-
-fn robots_url(start_url: &str) -> String {
+/// The site's `/robots.txt` URL.
+pub fn robots_url(start_url: &str) -> String {
     match url::Url::parse(start_url) {
         Ok(mut u) => {
             u.set_path("/robots.txt");
@@ -1130,110 +1111,6 @@ fn robots_url(start_url: &str) -> String {
             u.to_string()
         }
         Err(_) => format!("{}/robots.txt", start_url.trim_end_matches('/')),
-    }
-}
-
-pub fn robots_view(start_url: &str, report: &AccessReport) -> RobotsView {
-    let (status, status_class) = robots_status(report);
-    let explain = match report.robots.availability {
-        RobotsAvailability::Ok => {
-            "Each bot follows the most specific group that names it, else the User-agent: * group. The home page column is that group's rule for /."
-        }
-        RobotsAvailability::Missing => {
-            "There is no robots.txt, so every bot that follows it may crawl every page."
-        }
-        RobotsAvailability::Unavailable => {
-            "While robots.txt fails, bots that follow it treat the whole site as off limits. Make /robots.txt answer 200, or 404 if you have none."
-        }
-        RobotsAvailability::Unknown => {
-            "The latest crawl didn't fetch robots.txt. It is read again on the next crawl."
-        }
-    };
-    let mut rows: Vec<(u8, RobotsBotRow)> = Vec::new();
-    if report.has_verdicts() {
-        for b in &registry().bots {
-            let a = report.bot(&b.token);
-            let (rank, group) = match a.map(|a| a.group) {
-                Some(GroupMatch::Named) => (0, "Its own group".to_owned()),
-                Some(GroupMatch::Fallback) => (
-                    1,
-                    registry()
-                        .robots_fallback(&b.token)
-                        .map_or("Another bot's group".to_owned(), |f| format!("{f}'s group")),
-                ),
-                Some(GroupMatch::Wildcard) => (2, "User-agent: *".to_owned()),
-                Some(GroupMatch::None) | None => (3, "No group".to_owned()),
-            };
-            let (home, home_class) = match a.and_then(|a| a.home_allowed) {
-                Some(allowed) => {
-                    let word = if allowed { "Allowed" } else { "Disallowed" };
-                    let text = match a.and_then(|a| a.home_rule.as_ref()) {
-                        Some(r) => format!(
-                            "{word} · line {} · {}: {}",
-                            r.line,
-                            if r.allow { "Allow" } else { "Disallow" },
-                            r.pattern
-                        ),
-                        None => word.to_owned(),
-                    };
-                    (text, if allowed { "" } else { "c-err" })
-                }
-                None => ("—".to_owned(), "c-ghost"),
-            };
-            rows.push((
-                rank,
-                RobotsBotRow {
-                    token: b.token.clone(),
-                    operator: b.operator.clone(),
-                    group,
-                    home,
-                    home_class,
-                },
-            ));
-        }
-    }
-    rows.sort_by_key(|(rank, _)| *rank);
-    let mut groups: Vec<(String, usize)> = Vec::new();
-    for (_, r) in &rows {
-        let label = if r.group.ends_with("'s group") {
-            "Another bot's group".to_owned()
-        } else {
-            r.group.clone()
-        };
-        match groups.iter_mut().find(|(l, _)| *l == label) {
-            Some(g) => g.1 += 1,
-            None => groups.push((label, 1)),
-        }
-    }
-    RobotsView {
-        url: robots_url(start_url),
-        status,
-        status_class,
-        explain,
-        rows: rows.into_iter().map(|(_, r)| r).collect(),
-        groups,
-        signals: report
-            .declared
-            .content_signals
-            .iter()
-            .map(|s| {
-                let pairs: Vec<String> = s
-                    .pairs
-                    .iter()
-                    .map(|p| format!("{}={}", p.key, p.value))
-                    .collect();
-                format!(
-                    "line {} · {} · {}",
-                    s.line,
-                    if s.agents.is_empty() || s.agents.iter().any(|a| a == "*") {
-                        "all bots".to_owned()
-                    } else {
-                        s.agents.join(", ")
-                    },
-                    pairs.join(", ")
-                )
-            })
-            .collect(),
     }
 }
 
@@ -1248,7 +1125,7 @@ mod tests {
         BlockedUrl, BotAccess, EngineAccess, EngineGroup, ImportantUrl, Reason, RobotsInfo,
         SiteCounts,
     };
-    use codoseo_geo::robots::MatchedRule;
+    use codoseo_geo::robots::{GroupMatch, MatchedRule};
 
     /// Three key pages; `blocked` lists, per token, the page indexes robots.txt blocks.
     fn report(blocked: &[(&str, &[u16])]) -> AccessReport {
@@ -1272,6 +1149,7 @@ mod tests {
             robots: RobotsInfo {
                 status: Some(200),
                 availability: RobotsAvailability::Ok,
+                file: None,
             },
             important,
             bots: registry()
@@ -1583,6 +1461,7 @@ mod tests {
         r.robots = RobotsInfo {
             status: Some(503),
             availability: RobotsAvailability::Unavailable,
+            file: None,
         };
         let v = product_verdict(&r, &Intent::default(), engine(EngineId::Google));
         assert_eq!(v.reach, Reach::Blocked);

@@ -128,6 +128,31 @@ struct Group {
     /// one contiguous run.
     rules: Range<usize>,
     delay: Option<String>,
+    /// The 1-based line of its first `User-agent`, and of the last line that belongs to it
+    /// (a field line read while it was the newest group; comments, blank lines and `Sitemap`
+    /// lines after it don't extend it).
+    first_line: u32,
+    last_line: u32,
+}
+
+/// One group of the file as written: who it names and where it sits, for showing the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupOutline {
+    /// Product tokens as [`product_token`] reads them (`*` for the wildcard).
+    pub agents: Vec<String>,
+    /// 1-based lines of its first `User-agent` and of its last field line.
+    pub first_line: u32,
+    pub last_line: u32,
+    /// Its `Allow` and `Disallow` rules, in file order.
+    pub rules: Vec<MatchedRule>,
+    /// It has a `Crawl-delay` line.
+    pub crawl_delay: bool,
+}
+
+impl GroupOutline {
+    pub fn is_wildcard(&self) -> bool {
+        self.agents.iter().any(|a| a == "*")
+    }
 }
 
 /// One `key=value` pair of a declared preference.
@@ -244,6 +269,8 @@ pub enum GroupMatch {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentRules {
     group: GroupMatch,
+    /// Indexes of the chosen groups (as in [`RobotsTxt::outline`]), in file order.
+    groups: Vec<u32>,
     /// Indexes into `RobotsTxt::rules`, in file order, at most [`MAX_RULES`].
     rules: Vec<u32>,
     delay: Option<f64>,
@@ -259,6 +286,11 @@ impl AgentRules {
     /// and finite only.
     pub fn crawl_delay(&self) -> Option<f64> {
         self.delay
+    }
+
+    /// The chosen groups, as indexes into [`RobotsTxt::outline`], in file order.
+    pub fn groups(&self) -> &[u32] {
+        &self.groups
     }
 }
 
@@ -317,11 +349,14 @@ impl RobotsTxt {
                             agents: Vec::new(),
                             rules: rules.len()..rules.len(),
                             delay: None,
+                            first_line: number,
+                            last_line: number,
                         });
                     }
                     reading_agents = true;
                     if let Some(group) = groups.last_mut() {
                         group.agents.push(product_token(value));
+                        group.last_line = number;
                     }
                 }
                 "sitemap" => sitemaps.push(value.to_owned()),
@@ -360,6 +395,7 @@ impl RobotsTxt {
                     let Some(group) = groups.last_mut() else {
                         continue;
                     };
+                    group.last_line = number;
                     match key {
                         "allow" | "disallow" if !value.is_empty() => {
                             if let Some(rule) = Rule::new(value, key == "allow", number) {
@@ -389,11 +425,12 @@ impl RobotsTxt {
     /// group names it (Applebot follows Googlebot); its groups come before the `*` ones.
     /// Resolve once per token and keep the result: this walks every group.
     pub fn resolve(&self, token: &str, fallback: Option<&str>) -> AgentRules {
-        let named = |token: &str| -> Vec<&Group> {
+        let named = |token: &str| -> Vec<(usize, &Group)> {
             let token = product_token(token);
             self.groups
                 .iter()
-                .filter(|g| g.agents.contains(&token))
+                .enumerate()
+                .filter(|(_, g)| g.agents.contains(&token))
                 .collect()
         };
         let mut chosen = named(token);
@@ -408,7 +445,8 @@ impl RobotsTxt {
             chosen = self
                 .groups
                 .iter()
-                .filter(|g| g.agents.iter().any(|a| a == "*"))
+                .enumerate()
+                .filter(|(_, g)| g.agents.iter().any(|a| a == "*"))
                 .collect();
             group = if chosen.is_empty() {
                 GroupMatch::None
@@ -418,17 +456,18 @@ impl RobotsTxt {
         }
         let rules = chosen
             .iter()
-            .flat_map(|g| g.rules.clone())
+            .flat_map(|(_, g)| g.rules.clone())
             .take(MAX_RULES)
             .map(|i| i as u32)
             .collect();
         let delay = chosen
             .iter()
-            .find_map(|g| g.delay.as_deref())
+            .find_map(|(_, g)| g.delay.as_deref())
             .and_then(|d| d.trim().parse::<f64>().ok())
             .filter(|secs| secs.is_finite() && *secs > 0.0);
         AgentRules {
             group,
+            groups: chosen.iter().map(|(i, _)| *i as u32).collect(),
             rules,
             delay,
         }
@@ -487,6 +526,27 @@ impl RobotsTxt {
 
     pub fn sitemaps(&self) -> &[String] {
         &self.sitemaps
+    }
+
+    /// Every group of the file, in file order, with its lines and rules (patterns as written).
+    pub fn outline(&self) -> Vec<GroupOutline> {
+        self.groups
+            .iter()
+            .map(|g| GroupOutline {
+                agents: g.agents.clone(),
+                first_line: g.first_line,
+                last_line: g.last_line,
+                rules: self.rules[g.rules.clone()]
+                    .iter()
+                    .map(|r| MatchedRule {
+                        line: r.line,
+                        allow: r.allow,
+                        pattern: r.pattern.clone(),
+                    })
+                    .collect(),
+                crawl_delay: g.delay.is_some(),
+            })
+            .collect()
     }
 
     pub fn content_signals(&self) -> &[ContentSignal] {

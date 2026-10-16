@@ -9,10 +9,10 @@ use codoseo_geo::eligibility::{DirectiveSlug, Effect, EngineId};
 use codoseo_geo::findings::{Finding, FindingKind, findings};
 use codoseo_geo::registry::registry;
 use codoseo_geo::report::{
-    AccessReport, MAX_IMPORTANT, REPORT_VERSION, Reason, build_report, important_urls,
-    slug_from_str, slug_str,
+    AccessReport, MAX_IMPORTANT, REPORT_VERSION, Reason, RobotsBody, RobotsSince, build_report,
+    important_urls, robots_since, slug_from_str, slug_str,
 };
-use codoseo_geo::robots::{GroupMatch, RobotsAvailability};
+use codoseo_geo::robots::{GroupMatch, MAX_ROBOTS_BYTES, RobotsAvailability};
 use codoseo_geo::{Intent, assess_with_defaults};
 use common::*;
 
@@ -331,8 +331,14 @@ fn a_hostile_robots_file_gives_a_bounded_report() {
     assert!(body.len() >= 500 * 1024, "{} bytes", body.len());
     let out = with_robots(site(70, |p| p), 200, &body);
     let r = sixty_urls(&out);
-    let size = serde_json::to_vec(&r).expect("json").len();
-    println!("hostile report: {size} bytes");
+    // The file's own text is kept, capped at what Google reads; the rest of the report stays
+    // small whatever the file holds.
+    let file = r.robots.file.as_ref().expect("the body is kept");
+    assert!(file.body.len() <= MAX_ROBOTS_BYTES && file.truncated);
+    let mut rest = r.clone();
+    rest.robots.file = None;
+    let size = serde_json::to_vec(&rest).expect("json").len();
+    println!("hostile report: {size} bytes besides the file");
     assert!(size < 150_000, "{size} bytes");
     assert!(r.rules.len() <= 128);
     assert!(
@@ -517,4 +523,79 @@ fn the_audit_section_carries_one_remedy_per_finding_for_a_local_run() {
         "User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n",
     ));
     assert_eq!(clean["remedies"], serde_json::json!([]));
+}
+
+#[test]
+fn a_readable_robots_txt_is_kept_with_its_hash() {
+    let body = "User-agent: *\nDisallow: /a/\n";
+    let r = report_for(&with_robots(site(2, |p| p), 200, body));
+    let file = r.robots.file.as_ref().expect("the body is kept");
+    assert_eq!(file.body, body);
+    assert_eq!(file.bytes, body.len() as u32);
+    assert!(!file.truncated);
+    assert_eq!(file.sha256.len(), 64);
+    assert!(file.sha256.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_eq!(file.since, None, "set when the report is stored");
+    // Old reports have no body and still read.
+    let mut json = serde_json::to_value(&r).unwrap();
+    json["robots"].as_object_mut().unwrap().remove("file");
+    let old: AccessReport = serde_json::from_value(json).unwrap();
+    assert_eq!(old.robots.file, None);
+    // A missing or failing file keeps nothing.
+    for status in [404, 503] {
+        let r = report_for(&with_robots(site(2, |p| p), status, body));
+        assert_eq!(r.robots.file, None, "{status}");
+    }
+}
+
+#[test]
+fn a_robots_body_past_googles_limit_is_cut_and_marked() {
+    let long = format!("User-agent: *\n{}", "Disallow: /é\n".repeat(60_000));
+    assert!(long.len() > MAX_ROBOTS_BYTES);
+    let file = RobotsBody::new(&long);
+    assert!(file.truncated);
+    assert!(file.body.len() <= MAX_ROBOTS_BYTES);
+    assert!(long.starts_with(&file.body));
+    assert_eq!(file.bytes, long.len() as u32);
+}
+
+#[test]
+fn the_last_change_is_carried_while_the_hash_holds() {
+    let first = uuid::Uuid::from_u128(1);
+    let later = uuid::Uuid::from_u128(2);
+    let a = RobotsBody::new("User-agent: *\nAllow: /\n");
+    let b = RobotsBody::new("User-agent: *\nDisallow: /\n");
+    // The first body stored: seen first now, not a change.
+    let since = robots_since(None, &a.sha256, first);
+    assert_eq!(
+        since,
+        RobotsSince {
+            crawl_id: first,
+            changed: false
+        }
+    );
+    let stored = RobotsBody {
+        since: Some(since),
+        ..a.clone()
+    };
+    // The same file later: still since the first crawl.
+    assert_eq!(robots_since(Some(&stored), &a.sha256, later), since);
+    // Another file: changed in this crawl.
+    let moved = robots_since(Some(&stored), &b.sha256, later);
+    assert_eq!(
+        moved,
+        RobotsSince {
+            crawl_id: later,
+            changed: true
+        }
+    );
+    // A changed one stays changed while it holds.
+    let changed = RobotsBody {
+        since: Some(moved),
+        ..b.clone()
+    };
+    assert_eq!(
+        robots_since(Some(&changed), &b.sha256, uuid::Uuid::from_u128(3)),
+        moved
+    );
 }

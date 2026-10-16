@@ -1126,10 +1126,7 @@ body.solo { overflow: auto; }
 .aia-look-what { font-size: 12px; line-height: 1.45; color: var(--muted); }
 
 /* The robots.txt and Bot visits tabs. */
-.aia-robots-status { font-size: 12.5px; font-weight: 600; }
 .aia-robots-url { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.aia-robots-rule { font-size: 12px; }
-.aia-robots-table td:nth-child(2) { white-space: nowrap; }
 .aia-soon { background: color-mix(in oklab, var(--blue) 16%, var(--surface)); color: color-mix(in oklab, var(--blue) 55%, var(--ink)); }
 .aia-visits { margin-top: 0; }
 .aia-visits-main { display: grid; gap: 12px; }
@@ -1259,21 +1256,7 @@ body.solo { overflow: auto; }
 .aia-group-meta { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; color: var(--muted-2); }
 .aia-dot { color: var(--ghost); }
 .aia-group-flag { color: var(--orange); font-weight: 500; }
-.aia-group-none { display: none; align-items: center; gap: 6px; color: var(--faint-2); }
 
-/* The bots table's filter: two radios styled as the app's tabs. "Needs attention" keeps the
-   rows that conflict with the intent and every group's header (with its counts); without
-   :has() support every row stays. */
-.aia-filter { border: 0; margin: 0 0 0 6px; padding: 0; min-width: 0; }
-.aia-filter .tab { cursor: pointer; }
-.aia-filter input:checked + .tab { background: var(--surface-sunk); color: var(--ink); font-weight: 500; }
-.aia-filter input:checked + .tab .n { color: var(--muted-2); }
-.aia-filter input:focus-visible + .tab { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
-.aia-filter input:disabled + .tab { cursor: default; color: var(--faint); background: transparent; }
-.aia-botcard:has(#aia-f-attn:checked) .aia-bots-table tr.is-ok { display: none; }
-.aia-botcard:has(#aia-f-attn:checked) .aia-group-none { display: inline-flex; }
-.aia-botcard:has(#aia-f-attn:checked) tbody.is-clear .aia-group th,
-.aia-botcard:has(#aia-f-attn:checked) tr.is-attn-last > * { border-bottom: 0; }
 .aia-bot-cell { font-weight: 400; min-width: 200px; }
 .aia-token { font: 500 12.5px var(--mono); color: var(--ink); }
 .aia-bot-cell .tag { margin-left: 6px; vertical-align: 1px; }
@@ -1305,7 +1288,6 @@ body.solo { overflow: auto; }
 @media (prefers-reduced-motion: reduce) {
   .aia-row, .aia-status.is-changed .badge, .aia-status.is-changed > span, .aia-issue.is-changed, .aia-issue.is-changed .aia-progress, .aia-progress .icon { animation: none; }
 }
-.aia-bots-table td:nth-child(3), .aia-bots-table td:nth-child(5) { white-space: nowrap; }
 .aia-inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .aia-chips { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; }
 .aia-lines { display: grid; gap: 2px; font-size: 12.5px; color: var(--muted); }
@@ -1319,19 +1301,107 @@ body.solo { overflow: auto; }
 .aia-fetch-stop { color: var(--warn); }
 .aia-fetch-empty { display: grid; gap: 0; justify-items: start; }
 .aia-fetch-empty .btn { margin-top: 12px; }
-.aia-probe-table .aia-bot-cell { min-width: 190px; }
-.aia-probe-table td:nth-child(2) { white-space: nowrap; }
-.aia-probe-detail { min-width: 220px; }
-.aia-probe-detail .aia-lines { color: var(--muted-2); }
-.aia-probe-title { color: var(--ink-2); overflow-wrap: anywhere; }
-.aia-probe-extra { font-size: 11.5px; color: var(--muted-2); overflow-wrap: anywhere; }
-.aia-skipped { border-top: 1px solid var(--line-soft); }
-.aia-skipped > summary { display: flex; align-items: center; gap: 8px; padding: 10px 18px; font-size: 13px; color: var(--ink-2); }
-.aia-skipped[open] > summary { border-bottom: 1px solid var(--line-faint); border-radius: 0; }
-.aia-skipped > summary:hover { border-radius: 0 0 var(--r-lg) var(--r-lg); }
-.aia-skip-groups { display: grid; gap: 10px; padding: 12px 18px 14px; }
-.aia-skip { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 6px 14px; align-items: baseline; font-size: 12.5px; }
-.aia-skip-label { color: var(--muted-2); }
+
+/* The Bots tab: a toolbar of links (show, group by, search), the bots list and the selected bot's
+   panel beside it. The list scrolls sideways inside its card; at 760px and below the panel goes
+   under the list, or above it once a bot was picked. */
+.aia-bots-bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin: 14px 0 12px; }
+.aia-toggle { display: inline-flex; flex-wrap: wrap; padding: 3px; gap: 2px; border-radius: 9px; background: var(--surface-sunk); border: 1px solid var(--line-soft); }
+.aia-toggle a { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border-radius: 7px; color: var(--muted); font-size: 12.5px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.aia-toggle a:hover { color: var(--ink); }
+.aia-toggle a[aria-current="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+.aia-toggle a:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.aia-toggle .n { font: 11px var(--mono); color: var(--faint); }
+.aia-bots-search { display: flex; gap: 6px; align-items: center; min-width: 0; flex: 0 1 260px; }
+.aia-bots-search .input { width: 100%; min-width: 0; }
+.aia-bots-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 360px); gap: 16px; align-items: start; }
+.aia-bots-layout > .card { margin-top: 0; min-width: 0; }
+.aia-bots-table { min-width: 640px; }
+.aia-bots-table .aia-bot-cell { min-width: 170px; }
+.aia-bots-table th, .aia-bots-table td { padding-left: 10px; padding-right: 10px; }
+.aia-bots-table .aia-group th { font-weight: 400; }
+.aia-bots-table .aia-group-name { font-weight: 600; }
+.aia-bots-table .aia-group-flag { float: right; font-size: 12px; font-weight: 500; }
+.aia-bots-table .aia-group-flag.c-ok { color: var(--ok); }
+.aia-bots-table .aia-group-flag.c-err { color: var(--err); }
+.aia-brow.is-attn > :first-child { box-shadow: inset 3px 0 0 var(--err); }
+.aia-brow.is-sel > * { background: var(--accent-soft); }
+.aia-bot-link { display: block; color: inherit; text-decoration: none; }
+.aia-bot-link:hover .aia-token { text-decoration: underline; }
+.aia-bot-link:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; border-radius: 4px; }
+.aia-cell-head { display: block; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.aia-bots-table td .aia-sub { font-size: 11.5px; max-width: 200px; }
+.aia-bots-table .aia-status { white-space: nowrap; }
+.aia-bots-nomatch[hidden], .aia-bots-table tr[hidden], .aia-bots-table tbody[hidden] { display: none !important; }
+.aia-panel { position: sticky; top: 16px; margin: 0; padding: 18px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.aia-panel-head { display: flex; gap: 12px; align-items: flex-start; }
+.aia-panel-id { flex: 1; min-width: 0; }
+.aia-panel-token { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.aia-panel-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.op-logo-lg { width: 40px; height: 40px; border-radius: 10px; }
+.op-logo-lg img { width: 22px; height: 22px; }
+.op-logo-lg b { font-size: 12px; }
+.aia-panel-sec { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.aia-sec { font-size: 11px; font-weight: 600; color: var(--faint-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.aia-verdict { font-size: 13.5px; font-weight: 600; }
+.aia-why { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.aia-why.c-muted { color: var(--muted-2); }
+.aia-more { font-size: 12px; }
+.aia-compare { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 12.5px; }
+.aia-compare-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.aia-compare-row > span { min-width: 0; overflow-wrap: anywhere; }
+.aia-compare-head > span { font-size: 11px; font-weight: 600; color: var(--faint-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.aia-compare-head > span:first-child { text-transform: none; letter-spacing: 0; }
+.aia-compare-k { color: var(--muted); }
+.aia-facts { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 12.5px; }
+.aia-facts dt { color: var(--muted); }
+.aia-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.aia-panel-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+@media (max-width: 760px) {
+  .aia-bots-layout { grid-template-columns: minmax(0, 1fr); }
+  .aia-bots-layout.has-pick .aia-panel { order: -1; }
+  .aia-panel { position: static; }
+  .aia-bots-search { flex-basis: 100%; }
+  .aia-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .aia-facts dd + dt { margin-top: 6px; }
+}
+
+/* robots.txt, line by line: the Bots panel's excerpt and the robots.txt tab's viewer. The tested
+   bot's groups are tinted and the deciding line is highlighted. */
+.aia-rfile { padding: 6px 0; font: 12.5px/24px var(--mono); font-feature-settings: "zero"; color: var(--ink-2); }
+.aia-rfile:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+.aia-rfile-sm { padding: 4px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.aia-rl { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; padding: 0 12px; }
+.aia-rl .ln { color: var(--faint); text-align: right; user-select: none; }
+.aia-rl .tx { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.aia-rl .nt { font: 11px/24px var(--font); color: var(--muted-2); white-space: nowrap; }
+.aia-rl.is-comment .tx { color: var(--faint); }
+.aia-rl.is-in { background: var(--surface-sunk); }
+.aia-rl.is-hit { background: var(--warn-bg); font-weight: 600; }
+.aia-rl.is-hit .nt { color: var(--warn); font-weight: 600; }
+.aia-rl.is-gap { border-top: 1px dashed var(--line); }
+
+/* The robots.txt tab: the file beside the tester and the groups. */
+.aia-robots-tab { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); gap: 16px; align-items: start; }
+.aia-robots-tab > .card, .aia-robots-side > .card { margin-top: 0; min-width: 0; }
+.aia-robots-tab { margin-top: 20px; }
+.aia-robots-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.aia-robots-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted-2); }
+.aia-robots-head .aia-robots-url { min-width: 0; }
+.aia-robots-trunc { padding: 8px 18px; font-size: 12.5px; color: var(--warn); }
+.aia-tester-body, .aia-rgroups-body { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.aia-rgroups-body p { overflow-wrap: anywhere; }
+.aia-rgroups-body .aia-sec { margin-top: 4px; }
+.aia-tchip { text-decoration: none; }
+.aia-tchip:hover { color: var(--ink); }
+.aia-tchip.is-on { background: var(--ink); color: var(--surface); }
+.aia-tester-form { display: grid; gap: 8px; }
+.aia-tester-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted-2); }
+.aia-tester-form .select, .aia-tester-form .input { width: 100%; min-width: 0; }
+.aia-tester-form .btn { justify-self: start; }
+.aia-tresult { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); overflow-wrap: anywhere; }
+.aia-tresult:empty { display: none; }
+@media (max-width: 900px) { .aia-robots-tab { grid-template-columns: minmax(0, 1fr); } }
 .aia-probes .card-title .badge { margin-left: 6px; vertical-align: 1px; }
 .aia-dir-title { display: block; font-size: 13px; font-weight: 500; color: var(--ink); }
 
@@ -1495,8 +1565,12 @@ body.solo { overflow: auto; }
   .aia-actions .grow { display: none; }
   .aia-actions .btn-ghost { border-color: var(--line); background: var(--surface); }
   .aia-rule { white-space: normal; overflow-wrap: anywhere; }
-  .aia-bots-head .aia-filter { order: 3; flex-basis: 100%; margin: 8px 0 0 -2px; }
   .aia-wide-only { display: none; }
+  .aia-bots-table { min-width: 0; }
+  .aia-brow.is-attn { box-shadow: inset 3px 0 0 var(--err); }
+  .aia-brow.is-attn > :first-child { box-shadow: none; }
+  .aia-bots-table td .aia-sub { max-width: none; white-space: normal; }
+  .aia-bots-table .aia-group-flag { float: none; display: block; margin-top: 2px; }
   .aia-narrow-only { display: inline; }
   /* Tables become compact rows: the first cell is the row's title (with the status on its
      right), the other cells follow inline, each with its short label. */
@@ -1517,8 +1591,6 @@ body.solo { overflow: auto; }
   .aia-table .aia-group th, .aia-table tbody + tbody .aia-group th { padding: 0; background: transparent; border: 0; }
   .aia-table tbody:first-of-type tr.aia-group { border-top: 0; }
   .aia-group-meta { display: flex; flex-wrap: wrap; margin-top: 4px; }
-  .aia-botcard:has(#aia-f-attn:checked) tbody.is-clear tr.aia-group,
-  .aia-botcard:has(#aia-f-attn:checked) tr.is-attn-last { border-bottom: 0; }
   .aia-table td .aia-lines { display: inline-grid; justify-items: start; vertical-align: top; }
   .aia-ev-engines { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
   .aia-ev-engines .aia-ev-detail { grid-column: 1 / -1; margin-bottom: 4px; }
@@ -1539,13 +1611,6 @@ body.solo { overflow: auto; }
   .aia-llms-check .aia-ev-detail { grid-column: 2; }
   .aia-llms-failing { padding: 10px 16px 12px; }
   .aia-content-table td.c { text-align: left; }
-  .aia-skipped > summary { padding: 10px 16px; }
-  .aia-skip-groups { padding: 12px 16px 14px; }
-  .aia-skip { grid-template-columns: minmax(0, 1fr); }
-  .aia-probe-detail, .aia-probe-table .aia-bot-cell { min-width: 0; }
-  /* Results are often too long to sit beside the bot: each starts the row's second line. */
-  .aia-table.aia-probe-table .aia-bot-cell { flex-basis: 100%; }
-  .aia-probe-table .aia-status { margin-left: 0; }
 }
 
 /* ── Site audit ────────────────────────────────────── */

@@ -1575,6 +1575,16 @@ pub(crate) async fn apply_geo(
         .collect();
 
     let mut report = serde_json::to_value(&input.report).expect("a report always serializes");
+    // "Last changed" for robots.txt: carried from the newest earlier body while the hash holds.
+    if let Some(file) = &input.report.robots.file {
+        let previous = earlier
+            .iter()
+            .filter_map(|(_, r)| r.as_ref())
+            .find_map(|r| r.robots.file.as_ref());
+        let since = codoseo_geo::report::robots_since(previous, &file.sha256, crawl_id);
+        report["robots"]["file"]["since"] =
+            serde_json::to_value(since).expect("a crawl id always serializes");
+    }
     strip_nul(&mut report);
     sqlx::query(
         "INSERT INTO ai_reports (crawl_id, site_id, report) VALUES ($1, $2, $3) \

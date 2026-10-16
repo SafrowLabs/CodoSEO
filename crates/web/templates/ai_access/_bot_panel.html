@@ -1,0 +1,60 @@
+{#- One bot's side panel on the Bots tab, with `p: BotPanel` and `base`. Included by
+    ai_access/_bots.html and, alone, by ai_access/bot_panel_fragment.html (the htmx swap when a
+    row is picked). -#}
+{%- import "partials/operator_logo.html" as op -%}
+<aside class="card aia-panel" id="aia-panel" aria-label="Selected bot: {{ p.token }}" data-bot="{{ p.token }}">
+  <div class="aia-panel-head">
+    {% call op::tile(p.operator, "lg") %}{% endcall %}
+    <div class="aia-panel-id">
+      <div class="aia-token aia-panel-token">{{ p.token }}</div>
+      <div class="aia-sub">{{ p.operator }} · {{ p.product }}</div>
+      <div class="aia-panel-tags"><span class="badge t-muted">{{ p.purpose }}</span><span class="badge {{ p.stance_class }}">Policy: {{ p.stance }}</span>{% if p.status != "—" %}<span class="badge {{ p.status_class }}">{{ p.status }}</span>{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="aia-panel-sec">
+    <h3 class="aia-sec">1 · Allowed by robots.txt?</h3>
+    <b class="aia-verdict {{ p.robots_class }}">{{ p.robots_head }}</b>
+    <p class="aia-why">{{ p.robots_why }}</p>
+    {% if !p.excerpt.is_empty() %}
+    <div class="aia-rfile aia-rfile-sm">
+      {% for l in p.excerpt %}<div class="aia-rl{% if l.mark.is_some() %} is-hit{% else if l.comment %} is-comment{% endif %}{% if l.gap %} is-gap{% endif %}"><span class="ln">{{ l.n }}</span><span class="tx">{{ l.text }}</span><span class="nt">{% if let Some(m) = l.mark %}{{ m }}{% endif %}</span></div>{% endfor %}
+    </div>
+    {% endif %}
+    {% if let Some(n) = p.excerpt_note %}<p class="aia-why c-muted">{{ n }}</p>{% endif %}
+    <a class="aia-more" href="{{ p.robots_href }}">{% if let Some(m) = p.excerpt_more %}{{ m }} · {% endif %}Open in the robots.txt tab</a>
+  </div>
+
+  <div class="aia-panel-sec">
+    <h3 class="aia-sec">2 · Reachable when fetched as {{ p.token }}?</h3>
+    <b class="aia-verdict {{ p.fetch_class }}">{{ p.fetch_head }}</b>
+    <p class="aia-why">{{ p.fetch_why }}</p>
+    {% if let Some(c) = p.compare %}
+    <div class="aia-compare" role="table" aria-label="{{ c.page }} as CodoSEObot and as {{ p.token }} got it">
+      <div class="aia-compare-row aia-compare-head" role="row"><span role="columnheader" class="mono">{{ c.page }}</span><span role="columnheader">As CodoSEObot</span><span role="columnheader">As the bot</span></div>
+      {% for r in c.rows %}<div class="aia-compare-row" role="row"><span role="rowheader" class="aia-compare-k">{{ r.label }}</span><span role="cell" class="mono">{{ r.baseline }}</span><span role="cell" class="mono{% if r.differs %} c-err{% endif %}">{{ r.bot }}</span></div>{% endfor %}
+    </div>
+    <p class="aia-why c-muted">Synthetic: both requests came from CodoSEO's servers, so the real bot may be treated differently.</p>
+    {% endif %}
+  </div>
+
+  <div class="aia-panel-sec">
+    <h3 class="aia-sec">Key pages</h3>
+    <p class="aia-why">{{ p.pages_line }}</p>
+  </div>
+
+  <div class="aia-panel-sec">
+    <h3 class="aia-sec">Who it is</h3>
+    <dl class="aia-facts">
+      <dt>User-agent has</dt><dd class="mono">{{ p.ua }}</dd>
+      <dt>Obeys robots.txt</dt><dd class="{{ p.honours_class }}">{{ p.honours }}</dd>
+      <dt>Verify by</dt><dd>{% for (t, h) in p.verify %}{% if !loop.first %}<br>{% endif %}{% if let Some(h) = h %}<a href="{{ h }}" rel="noopener" target="_blank">{{ t }}</a>{% else %}{{ t }}{% endif %}{% endfor %}</dd>
+      <dt>Source</dt><dd><a href="{{ p.source_url }}" rel="noopener" target="_blank">{{ p.source_host }}</a> · reviewed {{ p.reviewed }}</dd>
+    </dl>
+  </div>
+
+  <div class="aia-panel-actions">
+    {% if let Some(h) = p.issue_href %}<a class="btn btn-sm btn-primary" href="{{ h }}">Open the issue</a>{% endif %}
+    <a class="btn btn-sm" href="{{ p.policy_href }}"><svg class="icon"><use href="#i-settings"/></svg>Set a policy for this bot</a>
+  </div>
+</aside>
