@@ -1106,7 +1106,7 @@ fn panel(input: &BotsInput, a: &Assessed) -> BotPanel {
         source_url: bot.source_url.clone(),
         reviewed: reviewed(&bot.last_reviewed),
         issue_href,
-        policy_href: format!("{}/ai-access/intent#bot-{}", input.base, token),
+        policy_href: format!("{}/policy?tab=ai#bot-{}", input.base, token),
     }
 }
 

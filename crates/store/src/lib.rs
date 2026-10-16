@@ -20,6 +20,7 @@ pub mod geo;
 pub mod hash;
 pub mod jobs;
 pub mod plans;
+pub mod policy;
 pub mod pool;
 pub mod quick;
 pub mod reports;

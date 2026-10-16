@@ -55,6 +55,7 @@ fn audit() -> Audit {
         },
         snapshot: Snapshot::from_output(&out),
         ai_access: None,
+        policy: None,
     }
 }
 

@@ -2,8 +2,10 @@
 //!
 //! The screen reads what the worker stored: the latest access report (one per crawl), the
 //! incidents its findings keep open, and the owner's intent, which decides whether a blocked bot
-//! is a problem or a choice. `/ai-access/intent` edits the intent; "Mark intended" on an incident
-//! changes it just enough for that finding to become a choice. Both re-evaluate the latest report
+//! is a problem or a choice. The intent is the AI part of the site policy, edited on the policy
+//! screen (`/s/{site}/policy?tab=ai`; `/ai-access/intent` redirects there, and its old form posts
+//! still save); "Mark intended" on an incident changes it just enough for that finding to become
+//! a choice. Both save through `store::policy::save`, which re-evaluates the latest report
 //! quietly: the owner made the change, so nobody is alerted.
 //!
 //! Each open incident's card carries its repair: the remedy ([`codoseo_geo::remedy`]) with three
@@ -34,13 +36,15 @@ use codoseo_geo::probe::{
     FetchErrorKind, InconclusiveReason, MAX_PROBE_BODY, ProbeFetch, ProbeStop,
 };
 use codoseo_geo::remedy::{Remedy, agent_prompt, copy_fix, developer_task};
-use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str, slug_str};
+use codoseo_geo::report::{AccessReport, Declared, Reason, slug_from_str};
 use codoseo_geo::robots::{GroupMatch, MatchedRule, Pair, RobotsAvailability};
-use codoseo_geo::{Bot, Honours, Intent, Purpose, Stance, registry};
+use codoseo_geo::{Honours, Intent, Purpose, Stance, registry};
+use codoseo_policy::SitePolicy;
 use codoseo_store::crawls;
 use codoseo_store::geo::{
-    self, Incident, IncidentActionError, IntentError, Recheck, RecheckFailure, RecheckStatus,
+    self, Incident, IncidentActionError, Recheck, RecheckFailure, RecheckStatus,
 };
+use codoseo_store::policy::{self, Actor, SaveError, Via};
 use codoseo_store::sites::Site;
 use time::OffsetDateTime;
 use url::Url;
@@ -72,7 +76,7 @@ pub fn routes() -> Router<AppState> {
         .route("/s/{site}/ai-access/visits", get(visits_page))
         .route(
             "/s/{site}/ai-access/intent",
-            get(intent_page).post(save_intent),
+            get(intent_moved).post(save_intent),
         )
         .route("/s/{site}/ai-access/intent/reset", post(reset_intent))
         .route(
@@ -101,7 +105,7 @@ const RESOLVED_SHOWN: i64 = 10;
 const URLS_SHOWN: usize = 5;
 
 /// Purposes in the order the screens list them.
-const PURPOSES: [Purpose; 5] = [
+pub(crate) const PURPOSES: [Purpose; 5] = [
     Purpose::Search,
     Purpose::UserFetch,
     Purpose::Agent,
@@ -121,7 +125,7 @@ pub(crate) fn purpose_label(p: Purpose) -> &'static str {
     }
 }
 
-fn purpose_slug(p: Purpose) -> &'static str {
+pub(crate) fn purpose_slug(p: Purpose) -> &'static str {
     match p {
         Purpose::Search => "search",
         Purpose::UserFetch => "user_fetch",
@@ -131,22 +135,8 @@ fn purpose_slug(p: Purpose) -> &'static str {
     }
 }
 
-fn purpose_from_slug(s: &str) -> Option<Purpose> {
+pub(crate) fn purpose_from_slug(s: &str) -> Option<Purpose> {
     PURPOSES.into_iter().find(|p| purpose_slug(*p) == s)
-}
-
-fn purpose_blurb(p: Purpose) -> &'static str {
-    match p {
-        Purpose::Search => "Crawlers that index your pages for AI search answers and citations.",
-        Purpose::UserFetch => {
-            "Fetch one page when someone asks an assistant about it or pastes your link."
-        }
-        Purpose::Agent => "Browse and act on your site for a person: compare, book, buy.",
-        Purpose::Training => {
-            "Collect pages to train AI models. Blocking them doesn't affect search."
-        }
-        Purpose::Ads => "Check landing pages for AI ad products.",
-    }
 }
 
 pub(crate) fn stance_label(s: Stance) -> &'static str {
@@ -165,7 +155,7 @@ pub(crate) fn stance_class(s: Stance) -> &'static str {
     }
 }
 
-fn stance_slug(s: Stance) -> &'static str {
+pub(crate) fn stance_slug(s: Stance) -> &'static str {
     match s {
         Stance::Allow => "allow",
         Stance::Block => "block",
@@ -173,7 +163,7 @@ fn stance_slug(s: Stance) -> &'static str {
     }
 }
 
-fn stance_from_slug(s: &str) -> Option<Stance> {
+pub(crate) fn stance_from_slug(s: &str) -> Option<Stance> {
     [Stance::Allow, Stance::Block, Stance::Any]
         .into_iter()
         .find(|x| stance_slug(*x) == s)
@@ -2458,29 +2448,10 @@ fn resolved_row(i: &Incident) -> ResolvedRow {
 
 // ---- the intent form -------------------------------------------------------------------------
 
-#[derive(Template)]
-#[template(path = "ai_access/intent.html")]
-pub struct IntentPage {
-    pub shell: Shell,
-    pub base: String,
-    pub cards: Vec<PurposeCard>,
-    /// "Page directives you use on purpose".
-    pub directives: Vec<DirectivePick>,
-    /// The saved intent differs from the defaults.
-    pub custom: bool,
-    /// Synthetic fetch checks run after the site's crawls.
-    pub probes: bool,
-    /// How many pages they fetch on the account's plan: `up to 3 pages`.
-    pub probe_pages: String,
-    /// False when `CODOSEO_PROBE_URLS=0` turns the checks off for the whole install: the switch
-    /// is then shown disabled and the form does not send it.
-    pub probes_installed: bool,
-}
-
 /// The page directives the intent form offers to accept, each with what it does (as
 /// `codoseo_geo::eligibility` reads the engines' documentation). `noindex` is not offered: the
 /// SEO checks report it.
-const ACCEPTABLE: [(DirectiveSlug, &str); 5] = [
+pub(crate) const ACCEPTABLE: [(DirectiveSlug, &str); 5] = [
     (
         DirectiveSlug::Nosnippet,
         "Keeps pages out of Google's AI Overviews and AI Mode; Bing and Apple quote less of them.",
@@ -2503,155 +2474,30 @@ const ACCEPTABLE: [(DirectiveSlug, &str); 5] = [
     ),
 ];
 
-/// One checkbox of "Page directives you use on purpose" (form field `d`).
-pub struct DirectivePick {
-    pub id: String,
-    /// The stored slug: `max_snippet`.
-    pub value: &'static str,
-    /// As written in markup: `max-snippet`.
-    pub label: &'static str,
-    pub note: &'static str,
-    pub checked: bool,
-}
-
-fn directive_picks(intent: &Intent) -> Vec<DirectivePick> {
-    ACCEPTABLE
-        .iter()
-        .map(|&(d, note)| DirectivePick {
-            id: format!("d-{}", slug_str(d)),
-            value: slug_str(d),
-            label: directive_label(d),
-            note,
-            checked: intent.accepted_directives.contains(&d),
-        })
-        .collect()
-}
-
-pub struct Choice {
-    pub id: String,
-    pub value: &'static str,
-    pub label: &'static str,
-    pub checked: bool,
-}
-
-pub struct SelectOpt {
-    pub value: &'static str,
-    pub label: &'static str,
-    pub selected: bool,
-}
-
-pub struct BotPick {
-    pub token: String,
-    pub operator: String,
-    pub product: String,
-    /// The form field: `b.{token}`.
-    pub name: String,
-    pub id: String,
-    pub control: bool,
-    /// The bot has an override (anything but "Inherit").
-    pub overridden: bool,
-    pub options: Vec<SelectOpt>,
-}
-
-pub struct PurposeCard {
-    pub slug: &'static str,
-    pub label: &'static str,
-    pub blurb: &'static str,
-    /// `Default: Allow`
-    pub default_label: &'static str,
-    pub choices: Vec<Choice>,
-    pub bots: Vec<BotPick>,
-    /// Bots of this purpose with an override.
-    pub overrides: usize,
-}
-
-fn intent_cards(intent: &Intent) -> Vec<PurposeCard> {
-    PURPOSES
-        .iter()
-        .map(|&p| {
-            let slug = purpose_slug(p);
-            let current = intent.purpose_stance(p);
-            let bots: Vec<&Bot> = registry().bots.iter().filter(|b| b.purpose == p).collect();
-            let picks: Vec<BotPick> = bots
-                .iter()
-                .map(|b| {
-                    let over = intent.bot_override(&b.token);
-                    let opt = |value, label, selected| SelectOpt {
-                        value,
-                        label,
-                        selected,
-                    };
-                    BotPick {
-                        token: b.token.clone(),
-                        operator: b.operator.clone(),
-                        product: b.product.clone(),
-                        name: format!("b.{}", b.token),
-                        id: format!("bot-{}", b.token),
-                        control: !b.crawls,
-                        overridden: over.is_some(),
-                        options: vec![
-                            opt("inherit", "Inherit", over.is_none()),
-                            opt("allow", "Allow", over == Some(Stance::Allow)),
-                            opt("block", "Block", over == Some(Stance::Block)),
-                            opt("any", "No preference", over == Some(Stance::Any)),
-                        ],
-                    }
-                })
-                .collect();
-            PurposeCard {
-                slug,
-                label: purpose_label(p),
-                blurb: purpose_blurb(p),
-                default_label: match Intent::default_stance(p) {
-                    Stance::Allow => "Default: Allow",
-                    Stance::Block => "Default: Block",
-                    Stance::Any => "Default: No preference",
-                },
-                choices: [Stance::Allow, Stance::Block, Stance::Any]
-                    .into_iter()
-                    .map(|s| Choice {
-                        id: format!("p-{slug}-{}", stance_slug(s)),
-                        value: stance_slug(s),
-                        label: stance_label(s),
-                        checked: s == current,
-                    })
-                    .collect(),
-                overrides: bots
-                    .iter()
-                    .filter(|b| intent.bot_override(&b.token).is_some())
-                    .count(),
-                bots: picks,
-            }
-        })
-        .collect()
-}
-
-async fn intent_page(
+/// The intent form became the AI tab of the site policy.
+async fn intent_moved(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
-    let site = load_site(&state, &user, site_id(&site)?).await?;
-    let shell = Shell::load(&state, &user, Some(&site), Screen::AiAccess).await?;
-    let intent = geo::get_intent(&state.pool, site.id).await?;
-    Ok(html(&IntentPage {
-        shell,
-        base: format!("/s/{}", site.id),
-        cards: intent_cards(&intent),
-        directives: directive_picks(&intent),
-        custom: intent != Intent::default(),
-        probes: geo::get_ai_probes(&state.pool, site.id).await?,
-        probe_pages: probe_pages(state.config.probe_urls_for(user.account.plan)),
-        probes_installed: state.config.probe_urls_for(user.account.plan) > 0,
-    })?
-    .into_response())
+    let id = load_site(&state, &user, site_id(&site)?).await?.id;
+    let to =
+        HeaderValue::from_str(&format!("/s/{id}/policy?tab=ai")).map_err(AppError::internal)?;
+    Ok((
+        StatusCode::MOVED_PERMANENTLY,
+        [(axum::http::header::LOCATION, to)],
+    )
+        .into_response())
 }
 
 /// The intent the form describes. Purposes left at their default and bots left on "Inherit"
 /// are not stored, so a later change of default reaches them. Overrides for tokens the registry
 /// no longer lists (the form can't show them) are kept as they were. The accepted page
 /// directives are the ticked `d` boxes.
-fn intent_from_form(current: &Intent, fields: &[(String, String)]) -> Result<Intent, String> {
+pub(crate) fn intent_from_form(
+    current: &Intent,
+    fields: &[(String, String)],
+) -> Result<Intent, String> {
     let mut intent = Intent::default();
     for (token, stance) in &current.bots {
         if registry().bot(token).is_none() {
@@ -2695,7 +2541,7 @@ fn intent_from_form(current: &Intent, fields: &[(String, String)]) -> Result<Int
 
 /// The fetch check switch: the form sends a hidden `probes=off` and, when ticked, `probes=on`
 /// after it, so the last value wins. `None` when the form has no such field (it is left as is).
-fn probes_from_form(fields: &[(String, String)]) -> Result<Option<bool>, String> {
+pub(crate) fn probes_from_form(fields: &[(String, String)]) -> Result<Option<bool>, String> {
     match fields.iter().rev().find(|(k, _)| k == "probes") {
         None => Ok(None),
         Some((_, v)) if v == "on" => Ok(Some(true)),
@@ -2705,7 +2551,7 @@ fn probes_from_form(fields: &[(String, String)]) -> Result<Option<bool>, String>
 }
 
 /// The intent form's "up to N pages", from the pages a crawl probes.
-fn probe_pages(pages: u8) -> String {
+pub(crate) fn probe_pages(pages: u8) -> String {
     match pages {
         1 => "the home page".to_owned(),
         n => format!("up to {n} pages"),
@@ -2720,12 +2566,13 @@ async fn save_intent(
     Form(fields): Form<Vec<(String, String)>>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    let current = geo::get_intent(&state.pool, site.id).await?;
-    let intent = intent_from_form(&current, &fields).map_err(AppError::BadRequest)?;
+    let mut policy = policy::get(&state.pool, site.id).await?;
+    policy.ai.intent =
+        intent_from_form(&policy.ai.intent, &fields).map_err(AppError::BadRequest)?;
     if let Some(on) = probes_from_form(&fields).map_err(AppError::BadRequest)? {
-        geo::set_ai_probes(&state.pool, site.id, on).await?;
+        policy.ai.probes = on;
     }
-    let outcome = apply_intent(&state, &site, &intent).await?;
+    let outcome = save_policy(&state, &site, &policy, Actor::web(user.id())).await?;
     respond(
         &state,
         &user,
@@ -2744,7 +2591,7 @@ async fn reset_intent(
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    let outcome = apply_intent(&state, &site, &Intent::default()).await?;
+    let outcome = apply_intent(&state, &user, &site, &Intent::default(), Via::Web).await?;
     respond(
         &state,
         &user,
@@ -2790,7 +2637,14 @@ async fn mark_intended(
         })
     })?;
     let current = geo::get_intent(&state.pool, site.id).await?;
-    let outcome = apply_intent(&state, &site, &with_change(current, &change)).await?;
+    let outcome = apply_intent(
+        &state,
+        &user,
+        &site,
+        &with_change(current, &change),
+        Via::MarkIntended,
+    )
+    .await?;
     if back.back.as_deref() == Some("audit") {
         let to = format!("/s/{}/audit", site.id);
         if !hx.request {
@@ -2948,21 +2802,39 @@ async fn unsnooze(
     respond(&state, &user, &site, hx, "Snooze ended", "hx-replace-url").await
 }
 
-/// Saves the intent and re-evaluates the latest report quietly. Returns what happened to the
-/// open issues, as the toast says it.
-async fn apply_intent(state: &AppState, site: &Site, intent: &Intent) -> Result<String, AppError> {
-    geo::set_intent(&state.pool, site.id, intent)
-        .await
-        .map_err(|e| match e {
-            IntentError::Invalid(m) => AppError::BadRequest(m),
-            IntentError::Db(e) => e.into(),
-        })?;
-    let has_report = geo::has_report(&state.pool, site.id).await?;
-    let (opened, resolved) = geo::reevaluate_quietly(&state.pool, site.id).await?;
-    Ok(outcome(has_report, opened, resolved))
+/// Saves the intent as the AI part of the site's policy, which re-evaluates the latest report
+/// quietly. Returns what happened to the open issues, as the toast says it.
+async fn apply_intent(
+    state: &AppState,
+    user: &CurrentUser,
+    site: &Site,
+    intent: &Intent,
+    via: Via,
+) -> Result<String, AppError> {
+    let mut policy = policy::get(&state.pool, site.id).await?;
+    policy.ai.intent = intent.clone();
+    save_policy(state, site, &policy, Actor::new(via, user.id())).await
 }
 
-fn outcome(has_report: bool, opened: usize, resolved: usize) -> String {
+/// Saves the site's policy ([`policy::save`]): a refused one is a 400 with its reasons.
+/// Returns what happened to the open issues, as the toast says it.
+pub(crate) async fn save_policy(
+    state: &AppState,
+    site: &Site,
+    policy: &SitePolicy,
+    actor: Actor,
+) -> Result<String, AppError> {
+    let saved = policy::save(&state.pool, site.id, policy, &actor)
+        .await
+        .map_err(|e| match e {
+            SaveError::Invalid(_) => AppError::BadRequest(e.to_string()),
+            SaveError::NotFound => AppError::NotFound,
+            SaveError::Db(e) => e.into(),
+        })?;
+    Ok(outcome(saved.had_report, saved.opened, saved.resolved))
+}
+
+pub(crate) fn outcome(has_report: bool, opened: usize, resolved: usize) -> String {
     let issues = |n: usize| plural(n, "issue", "issues");
     match (has_report, resolved, opened) {
         (false, ..) => "it applies from the next crawl".to_owned(),
@@ -3101,33 +2973,6 @@ mod tests {
                 "{bad}"
             );
         }
-    }
-
-    #[test]
-    fn the_directive_card_offers_every_directive_but_noindex() {
-        let intent = Intent {
-            accepted_directives: [DirectiveSlug::DataNosnippet].into(),
-            ..Intent::default()
-        };
-        let picks = directive_picks(&intent);
-        let labels: Vec<&str> = picks.iter().map(|p| p.label).collect();
-        assert_eq!(
-            labels,
-            [
-                "nosnippet",
-                "max-snippet",
-                "noarchive",
-                "nocache",
-                "data-nosnippet"
-            ]
-        );
-        let checked: Vec<&str> = picks
-            .iter()
-            .filter(|p| p.checked)
-            .map(|p| p.value)
-            .collect();
-        assert_eq!(checked, ["data_nosnippet"]);
-        assert!(picks.iter().all(|p| !p.note.is_empty()));
     }
 
     fn bot(token: &str, home_blocked: bool, blocked: u32) -> BotEvidence {

@@ -1,4 +1,4 @@
-//! The 11 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
+//! The 12 local MCP tools, as a thin layer over [`Backend`]. `audit_site` waits up to
 //! `wait_timeout` (50 s in production, shorter in tests) before reporting "still
 //! running" with an `audit_id` the caller polls with `get_audit`.
 
@@ -79,6 +79,12 @@ struct ProbeAiFetchRequest {
     /// Only these bot tokens, e.g. ["OAI-SearchBot", "PerplexityBot"] (default: every probeable
     /// AI search and user-triggered bot).
     bots: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetPolicyRequest {
+    /// The policy file to read (default: codoseo.toml in the server's working directory).
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -302,6 +308,39 @@ impl<B: Backend + 'static> CodoseoMcp<B> {
         to_json(&report)
     }
 
+    #[tool(
+        description = "Read a site policy file (codoseo.toml): how the site is meant to work for \
+            search engines and AI bots. Returns `policy` (the [policy] table with every default \
+            filled in: `ai` holds the stance per purpose (search, user_fetch, agent, training, \
+            ads: allow, block or any), per-bot exceptions, the page directives accepted on \
+            purpose and the fetch check switch; `seo` holds the SEO rules), the file's `hash`, \
+            and `warnings` for keys it doesn't know (ignored). An invalid file fails with one \
+            line per problem. `codoseo crawl` judges AI access under this file when it is in the \
+            working directory, and `codoseo policy init` writes one."
+    )]
+    async fn get_policy(
+        &self,
+        Parameters(GetPolicyRequest { path }): Parameters<GetPolicyRequest>,
+    ) -> Result<String, String> {
+        let path = std::path::PathBuf::from(
+            path.filter(|p| !p.trim().is_empty())
+                .unwrap_or_else(|| codoseo_policy::DEFAULT_FILE.to_owned()),
+        );
+        if !path.exists() {
+            return Err(format!(
+                "no policy file at {}: `codoseo policy init` writes one",
+                path.display()
+            ));
+        }
+        let f = codoseo_policy::load_file(&path)?;
+        to_json(&json!({
+            "path": f.path.display().to_string(),
+            "hash": f.hash,
+            "policy": f.policy,
+            "warnings": f.warnings,
+        }))
+    }
+
     #[tool(description = "Compare two finished audits of the same site and list what changed.")]
     async fn compare_audits(
         &self,
@@ -370,7 +409,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_has_all_11_tools_with_descriptions() {
+    async fn tools_list_has_all_12_tools_with_descriptions() {
         let backend = LocalBackend::new(AuditCache::new(tempfile::tempdir().unwrap().keep()));
         let client = serve(CodoseoMcp::new(backend)).await;
         let tools = client.peer().list_tools(None).await.unwrap();
@@ -387,10 +426,11 @@ mod tests {
             "compare_audits",
             "probe_ai_fetch",
             "check_llms_txt",
+            "get_policy",
         ] {
             assert!(names.contains(&expected), "missing tool {expected}");
         }
-        assert_eq!(tools.tools.len(), 11);
+        assert_eq!(tools.tools.len(), 12);
         for t in &tools.tools {
             assert!(
                 t.description.as_deref().is_some_and(|d| !d.is_empty()),
@@ -398,6 +438,56 @@ mod tests {
                 t.name
             );
         }
+    }
+
+    #[tokio::test]
+    async fn get_policy_reads_a_file_and_says_what_is_wrong() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("codoseo.toml");
+        std::fs::write(
+            &good,
+            "[policy]\n[policy.ai]\npurposes = { training = \"block\" }\nsoon = 1\n",
+        )
+        .unwrap();
+        let bad = dir.path().join("bad.toml");
+        std::fs::write(&bad, "[policy]\nversion = 9\n").unwrap();
+
+        let backend = LocalBackend::new(AuditCache::new(dir.path().join("cache")));
+        let client = serve(CodoseoMcp::new(backend)).await;
+        let call = |path: String| {
+            CallToolRequestParams::new("get_policy").with_arguments(args(json!({ "path": path })))
+        };
+        let res = client
+            .peer()
+            .call_tool(call(good.display().to_string()))
+            .await
+            .unwrap();
+        assert_ne!(res.is_error, Some(true));
+        let v: Value = serde_json::from_str(&text_of(&res)).unwrap();
+        assert_eq!(v["policy"]["ai"]["purposes"]["training"], "block");
+        assert_eq!(v["policy"]["ai"]["probes"], true);
+        assert_eq!(v["warnings"], json!(["policy.ai.soon"]));
+        assert!(v["hash"].as_str().unwrap().starts_with("sha256:"));
+
+        let res = client
+            .peer()
+            .call_tool(call(bad.display().to_string()))
+            .await
+            .unwrap();
+        assert_eq!(res.is_error, Some(true));
+        assert!(
+            text_of(&res).contains("version 9 is not supported"),
+            "{}",
+            text_of(&res)
+        );
+
+        let res = client
+            .peer()
+            .call_tool(call(dir.path().join("none.toml").display().to_string()))
+            .await
+            .unwrap();
+        assert_eq!(res.is_error, Some(true));
+        assert!(text_of(&res).contains("codoseo policy init"));
     }
 
     #[tokio::test]

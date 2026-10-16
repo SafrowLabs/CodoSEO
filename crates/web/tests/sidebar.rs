@@ -46,10 +46,17 @@ async fn site_audit_leads_and_the_reports_group_is_gone() {
     assert!(!nav.contains("Schedule"));
 
     let base = format!("/s/{}", site.id);
-    let order: Vec<usize> = ["audit", "explorer", "ai-access", "changes", "crawls"]
-        .iter()
-        .map(|p| at(nav, &format!("href=\"{base}/{p}\"")))
-        .collect();
+    let order: Vec<usize> = [
+        "audit",
+        "explorer",
+        "ai-access",
+        "changes",
+        "crawls",
+        "policy",
+    ]
+    .iter()
+    .map(|p| at(nav, &format!("href=\"{base}/{p}\"")))
+    .collect();
     assert!(order.is_sorted(), "THIS SITE is out of order: {order:?}");
     assert!(at(nav, "THIS SITE") < at(nav, "WORKSPACE"));
     assert!(nav.contains(&format!(

@@ -30,7 +30,6 @@ use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::plan::PlanLimits;
 use codoseo_geo::Intent;
-use codoseo_geo::eligibility::DirectiveSlug;
 use codoseo_geo::findings::{
     Evidence, Finding, FindingKind, evaluated_kinds, findings, hold_unjudged_content,
     hold_unjudged_probes, judged_by,
@@ -57,10 +56,6 @@ const KEEP_REPORTS: usize = 2;
 const ALL_KINDS: [FindingKind; 9] = FindingKind::ALL;
 /// Longest `before_value`/`after_value` a change row gets, in characters.
 const MAX_CHANGE_TEXT: usize = 300;
-/// Most per-bot overrides an intent may hold.
-const MAX_BOT_OVERRIDES: usize = 200;
-/// Longest bot token an intent may hold.
-const MAX_TOKEN_LEN: usize = 100;
 
 /// Everything the store needs from one crawl's AI access evaluation: its report. The findings
 /// are drawn from it when it is recorded, under the intent the site has then.
@@ -354,71 +349,60 @@ pub enum IntentError {
     Db(#[from] sqlx::Error),
 }
 
-/// The site's intent. A stored value that no longer parses reads as the defaults.
+/// The site's intent: the AI part of its policy ([`crate::policy::get`]). A stored value that no
+/// longer parses reads as the defaults.
 pub async fn get_intent(pool: &PgPool, site_id: Uuid) -> Result<Intent, sqlx::Error> {
-    let value: Option<Value> = sqlx::query_scalar("SELECT ai_intent FROM sites WHERE id = $1")
-        .bind(site_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(value
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default())
+    Ok(crate::policy::get(pool, site_id).await?.ai.intent)
 }
 
 /// Checks an intent before it is stored: sane sizes, bot names that are names, and no accepted
-/// `noindex` (it never opens an AI answers incident: it is the SEO checks' business).
+/// `noindex` (it never opens an AI answers incident: it is the SEO checks' business). The rules
+/// are the policy's ([`codoseo_policy::validate_ai`]).
 pub fn validate_intent(intent: &Intent) -> Result<(), String> {
-    if intent.bots.len() > MAX_BOT_OVERRIDES {
-        return Err(format!("At most {MAX_BOT_OVERRIDES} bots can be set."));
-    }
-    for token in intent.bots.keys() {
-        let t = token.trim();
-        if t.is_empty() || t.len() > MAX_TOKEN_LEN || t.chars().any(char::is_control) {
-            return Err(format!("\"{token}\" is not a bot name."));
-        }
-    }
-    if intent.accepted_directives.contains(&DirectiveSlug::Noindex) {
-        return Err("noindex can't be accepted here: the SEO checks report it.".to_owned());
-    }
-    Ok(())
+    let ai = codoseo_policy::AiRules {
+        intent: intent.clone(),
+        probes: true,
+    };
+    codoseo_policy::validate_ai(&ai).map_err(|e| {
+        e.into_iter()
+            .map(|e| e.message)
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
 }
 
-/// Saves the site's intent after validating it and round-tripping it through [`Intent`], so
-/// what is stored is exactly what [`get_intent`] reads back. Does not touch the incidents: call
-/// [`reevaluate_quietly`] afterwards.
+/// Sets the intent of the site's policy (and its mirror) after validating it, without a history
+/// row or a re-evaluation: call [`reevaluate_quietly`] afterwards. The screens and the API save
+/// through [`crate::policy::save`], which does all of it.
 pub async fn set_intent(pool: &PgPool, site_id: Uuid, intent: &Intent) -> Result<(), IntentError> {
     validate_intent(intent).map_err(IntentError::Invalid)?;
-    let value = serde_json::to_value(intent).map_err(|e| IntentError::Invalid(e.to_string()))?;
-    let normalised: Intent =
-        serde_json::from_value(value.clone()).map_err(|e| IntentError::Invalid(e.to_string()))?;
-    debug_assert_eq!(&normalised, intent);
-    sqlx::query("UPDATE sites SET ai_intent = $2 WHERE id = $1")
-        .bind(site_id)
-        .bind(value)
-        .execute(pool)
-        .await?;
+    let mut tx = pool.begin().await?;
+    let mut policy = crate::policy::lock(&mut tx, site_id)
+        .await?
+        .unwrap_or_default();
+    policy.ai.intent = intent.clone();
+    crate::policy::write(&mut tx, site_id, &policy).await?;
+    tx.commit().await?;
     Ok(())
 }
 
-/// Whether synthetic agent fetch probes run after the site's monitored crawls (on unless the
-/// owner switched them off). A site that is gone reads as the default.
+/// Whether synthetic agent fetch probes run after the site's monitored crawls (the policy's
+/// `ai.probes`, on unless the owner switched them off). A site that is gone reads as the default.
 pub async fn get_ai_probes(pool: &PgPool, site_id: Uuid) -> Result<bool, sqlx::Error> {
-    let on: Option<bool> = sqlx::query_scalar("SELECT ai_probes FROM sites WHERE id = $1")
-        .bind(site_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(on.unwrap_or(true))
+    Ok(crate::policy::get(pool, site_id).await?.ai.probes)
 }
 
-/// Switches the site's synthetic agent fetch probes on or off. Stored reports and incidents are
-/// left alone: a crawl without probes does not judge `fetch_blocked`, so an open one stays open
-/// until a crawl probes again or the owner's intent makes it moot.
+/// Switches the site's synthetic agent fetch probes on or off (in its policy and the mirror),
+/// without a history row. Stored reports and incidents are left alone: a crawl without probes
+/// does not judge `fetch_blocked`, so an open one stays open until a crawl probes again or the
+/// owner's intent makes it moot.
 pub async fn set_ai_probes(pool: &PgPool, site_id: Uuid, on: bool) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE sites SET ai_probes = $2 WHERE id = $1")
-        .bind(site_id)
-        .bind(on)
-        .execute(pool)
-        .await?;
+    let mut tx = pool.begin().await?;
+    if let Some(mut policy) = crate::policy::lock(&mut tx, site_id).await? {
+        policy.ai.probes = on;
+        crate::policy::write(&mut tx, site_id, &policy).await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -1362,9 +1346,20 @@ pub async fn reevaluate_quietly(
     site_id: Uuid,
 ) -> Result<(usize, usize), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    let intent = lock_site(&mut tx, site_id).await?;
-    let reports = stored_reports(&mut tx, site_id, None).await?;
-    let open = lock_open(&mut tx, site_id).await?;
+    let counts = reevaluate_in(&mut tx, site_id).await?;
+    tx.commit().await?;
+    Ok(counts)
+}
+
+/// [`reevaluate_quietly`] in the caller's transaction: a policy save runs it after writing the
+/// policy, before it commits.
+pub(crate) async fn reevaluate_in(
+    tx: &mut Transaction<'_, Postgres>,
+    site_id: Uuid,
+) -> Result<(usize, usize), sqlx::Error> {
+    let intent = lock_site(tx, site_id).await?;
+    let reports = stored_reports(tx, site_id, None).await?;
+    let open = lock_open(tx, site_id).await?;
     let (mut opened, mut resolved) = (0, 0);
     let mut judged: HashSet<FindingKind> = HashSet::new();
     for (crawl_id, report) in &reports {
@@ -1386,7 +1381,7 @@ pub async fn reevaluate_quietly(
         )
         .bind(site_id)
         .bind(crawl_id)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?
         .into_iter()
         .collect();
@@ -1411,7 +1406,7 @@ pub async fn reevaluate_quietly(
             .filter(|t| matches!(t, Transition::Resolved { .. }))
             .count();
         write_transitions(
-            &mut tx,
+            tx,
             site_id,
             *crawl_id,
             &transitions,
@@ -1428,8 +1423,7 @@ pub async fn reevaluate_quietly(
         )
         .await?;
     }
-    rescore_latest(&mut tx, site_id, &intent, &reports).await?;
-    tx.commit().await?;
+    rescore_latest(tx, site_id, &intent, &reports).await?;
     Ok((opened, resolved))
 }
 
@@ -1665,20 +1659,15 @@ pub(crate) async fn apply_geo(
     Ok(changes)
 }
 
-/// Locks the site row and reads its intent. `FOR NO KEY UPDATE` conflicts with an intent save's
-/// `UPDATE` and with the other AI access writers, but not with rows that merely reference the
-/// site, so crawls can still be queued meanwhile.
+/// Locks the site row and reads the intent of its policy ([`crate::policy::lock`]). A site that
+/// is gone reads as the defaults.
 async fn lock_site(
     tx: &mut Transaction<'_, Postgres>,
     site_id: Uuid,
 ) -> Result<Intent, sqlx::Error> {
-    let value: Option<Value> =
-        sqlx::query_scalar("SELECT ai_intent FROM sites WHERE id = $1 FOR NO KEY UPDATE")
-            .bind(site_id)
-            .fetch_optional(&mut **tx)
-            .await?;
-    Ok(value
-        .and_then(|v| serde_json::from_value(v).ok())
+    Ok(crate::policy::lock(tx, site_id)
+        .await?
+        .map(|p| p.ai.intent)
         .unwrap_or_default())
 }
 

@@ -23,6 +23,7 @@ codoseo-diff.workspace = true
 codoseo-geo.workspace = true
 codoseo-mcp.workspace = true
 codoseo-notify.workspace = true
+codoseo-policy.workspace = true
 codoseo-store.workspace = true
 codoseo-web.workspace = true
 tokio.workspace = true

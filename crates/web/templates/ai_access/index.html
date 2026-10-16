@@ -13,7 +13,7 @@
       <a class="btn btn-sm" href="{{ base }}/ai-access/incidents.csv" hx-boost="false" download title="Open issues and those resolved in the last 90 days, as CSV"><svg class="icon"><use href="#i-download"/></svg>Export issues</a>
       <a class="btn btn-sm" href="{{ base }}/ai-access/incidents.json" hx-boost="false" download title="Open issues and those resolved in the last 90 days">JSON</a>
       {% endif %}
-      <a class="btn btn-sm" href="{{ base }}/ai-access/intent"><svg class="icon"><use href="#i-settings"/></svg>Site policy</a>
+      <a class="btn btn-sm" href="{{ base }}/policy?tab=ai"><svg class="icon"><use href="#i-settings"/></svg>Site policy</a>
     </div>
   </div>
   <p class="page-sub">Can AI assistants and search engines reach, read and quote your site?</p>
@@ -32,7 +32,7 @@
       <p>{{ e.text }}</p>
       <div class="aia-empty-actions">
         {% if e.can_run %}<button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>{% endif %}
-        <a class="btn" href="{{ base }}/ai-access/intent"><svg class="icon"><use href="#i-settings"/></svg>Set your intent</a>
+        <a class="btn" href="{{ base }}/policy?tab=ai"><svg class="icon"><use href="#i-settings"/></svg>Set your intent</a>
       </div>
     </div>
   </div>

@@ -823,3 +823,20 @@ mod tests {
         assert!(clipped.starts_with("éé"));
     }
 }
+
+/// A site's policy, as `get_policy` and `GET /api/v1/sites/{site}/policy` return it: the policy
+/// (`codoseo_policy::SitePolicy`, the same keys as a `codoseo.toml`'s `[policy]` table), the
+/// latest crawl measured against it, and when it last changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyInfo {
+    pub site_id: Uuid,
+    pub policy: codoseo_policy::SitePolicy,
+    /// The rules against the latest crawl's AI access report. Only the AI rules are evaluated
+    /// so far; without a report every rule is `not_checked`.
+    pub report: codoseo_policy::PolicyReport,
+    /// The crawl the report compares with; none before the first.
+    pub crawl_id: Option<Uuid>,
+    /// When the policy last changed; none while it never has.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub updated_at: Option<OffsetDateTime>,
+}

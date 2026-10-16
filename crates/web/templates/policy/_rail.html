@@ -1,0 +1,35 @@
+<aside class="pol-rail" id="pol-rail" aria-label="Your rules compared with the site">
+  <section class="card card-pad pol-vs" aria-labelledby="h-vs">
+    <h2 class="card-title" id="h-vs">{{ rail.title }}</h2>
+    <div class="pol-kpis">
+      <div class="pol-kpi"><b>{{ rail.met }}</b><span>rules met</span></div>
+      <div class="pol-kpi"><b class="{% if rail.seo_gaps > 0 %}c-err{% endif %}">{{ rail.seo_gaps }}</b><span>SEO gaps</span></div>
+      <div class="pol-kpi"><b class="{% if rail.ai_gaps > 0 %}c-err{% endif %}">{{ rail.ai_gaps }}</b><span>AI gaps</span></div>
+    </div>
+    {% if rail.gaps.is_empty() %}
+    <p class="pol-desc">{% if rail.has_report %}No gaps: the latest crawl does what your rules say.{% else %}Nothing to compare with yet: the first crawl fills this in.{% endif %}</p>
+    {% else %}
+    <ul class="pol-gaps">
+      {% for g in rail.gaps %}<li class="pol-gap"><span class="pol-dot {{ g.dot }}" aria-hidden="true"></span><span class="pol-gap-text">{{ g.text }}</span><span class="pol-tag {{ g.tag_class }}">{{ g.kind }}</span></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  {% if let Some(r) = rail.robots %}
+  <section class="card pol-robots" aria-labelledby="h-robots">
+    <div class="card-head">
+      <h2 class="card-title" id="h-robots">robots.txt that matches</h2>
+      <span class="card-aside"><span class="c-ok">+{{ r.added }}</span> <span class="c-err">−{{ r.removed }}</span> vs your file</span>
+    </div>
+    <div class="pol-rl-wrap mono" role="region" aria-label="Suggested robots.txt, with changes marked" tabindex="0">
+      {% for l in r.lines %}<div class="pol-rl {{ l.class }}"><span aria-hidden="true">{{ l.sign }}</span><span>{{ l.text }}</span></div>{% endfor %}
+      {% if r.more > 0 %}<div class="pol-rl"><span></span><span class="faint">… {{ r.more }} more lines</span></div>{% endif %}
+    </div>
+    <div class="pol-robots-foot">
+      <span class="pol-save-note">{{ r.against }} A suggestion to paste or hand to your developer; a CDN-managed robots.txt may override it. Suggested signal: <code>{{ r.content_signal }}</code></span>
+      <button class="btn btn-sm" type="button" data-copy="{{ r.prompt }}"><svg class="icon"><use href="#i-copy"/></svg>Copy as prompt</button>
+      <button class="btn btn-sm btn-primary" type="button" data-copy="{{ r.file }}"><svg class="icon"><use href="#i-copy"/></svg>Copy file</button>
+    </div>
+  </section>
+  {% endif %}
+</aside>

@@ -241,6 +241,29 @@ impl<B: CloudBackend> CloudMcp<B> {
     }
 
     #[tool(
+        description = "A site's policy: how the owner means the site to work for search \
+            engines and AI bots, with the same keys as a codoseo.toml [policy] table. `ai` holds \
+            the stance per purpose (search, user_fetch, agent, training, ads: allow, block or \
+            any), per-bot exceptions by robots.txt token, the page directives accepted on \
+            purpose and whether fetch checks run; `seo` holds SEO rules (kept, evaluated from a \
+            later release). `report` measures the latest crawl against the rules: per rule a \
+            status (met, gaps, partly, not_checked, limited_effect) and text, and the `gaps`; \
+            `updated_at` says when the policy last changed. Change it in the app's Site policy \
+            screen or with PUT /api/v1/sites/{site}/policy.",
+        input_schema = schema::<SiteArgs>(),
+        annotations(title = "Site policy", read_only_hint = true, idempotent_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    async fn get_policy(
+        &self,
+        arguments: JsonObject,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<String, String> {
+        let who = self.keyed(&parts)?;
+        let SiteArgs { site_id } = self.args(who, arguments).await?;
+        to_json(&self.backend.policy(who, &site_id).await?)
+    }
+
+    #[tool(
         description = "Queue a new crawl of a site now, like the Run crawl button: it counts \
             against your plan's manual crawls (a Free account gets one a week) and only one \
             crawl runs per site at a time. Returns right away with the queued crawl; follow it \

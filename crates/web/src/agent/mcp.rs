@@ -8,8 +8,8 @@ use std::convert::Infallible;
 
 use codoseo_mcp::cloud::types::{
     AiAccessInfo, AiFixInfo, AiIncidentInfo, AiRecheckQueued, AuditIssueUrls, ChangesPage,
-    CrawlQueued, IssueUrlsPage, MonitoringRequested, PageInfo, QuickAuditState, SiteHealth,
-    SiteInfo,
+    CrawlQueued, IssueUrlsPage, MonitoringRequested, PageInfo, PolicyInfo, QuickAuditState,
+    SiteHealth, SiteInfo,
 };
 use codoseo_mcp::cloud::{AnonBackend, CloudBackend};
 
@@ -113,6 +113,10 @@ impl CloudBackend for AgentBackend {
 
     async fn run_crawl(&self, who: &ApiCaller, site_id: &str) -> Result<CrawlQueued, String> {
         outcome(self.service().run_crawl(who, site_id).await)
+    }
+
+    async fn policy(&self, who: &ApiCaller, site_id: &str) -> Result<PolicyInfo, String> {
+        outcome(self.service().policy(who, site_id).await)
     }
 
     async fn incident_fix(

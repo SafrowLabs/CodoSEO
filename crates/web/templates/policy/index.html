@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{%- import "partials/operator_logo.html" as op -%}
+{% block main %}
+<div class="page pol">
+  <header class="pol-head">
+    <div class="pol-head-text">
+      <div class="pol-domain">{{ domain }}</div>
+      <h1>Site policy</h1>
+      <p class="page-sub">Tell us how this site is meant to work for search engines and AI. Every crawl compares the site with these rules; a gap becomes an issue, and anything you say is on purpose stops being flagged. We never change your site or robots.txt.</p>
+    </div>
+    <div class="pol-actions">
+      <a class="btn" href="{{ base }}/policy/history"><svg class="icon"><use href="#i-calendar"/></svg>History</a>
+      <a class="btn" href="{{ base }}/policy/export" hx-boost="false" download><svg class="icon"><use href="#i-download"/></svg>Export</a>
+      <button class="btn" type="submit" form="policy-reset"{% if !custom %} disabled title="Already the defaults"{% endif %}>Reset to defaults</button>
+      {% if tab == "ai" %}<button class="btn btn-primary" type="submit" form="policy-form"><svg class="icon"><use href="#i-check"/></svg>Save policy</button>{% endif %}
+    </div>
+  </header>
+
+  {% if !import_errors.is_empty() %}
+  <div class="pol-errors" role="alert">
+    <b>The file was not imported:</b>
+    <ul>{% for e in import_errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div class="pol-bar">
+    <nav class="aia-tabbar pol-tabs" aria-label="Policy sections">
+      <a class="aia-tab" href="{{ base }}/policy?tab=seo"{% if tab == "seo" %} aria-current="page"{% endif %}>SEO rules<span class="n" id="tab-seo-gaps">{% if seo_rules > 0 %}{{ seo_rules }} kept{% else %}next release{% endif %}</span></a>
+      <a class="aia-tab" href="{{ base }}/policy?tab=ai"{% if tab == "ai" %} aria-current="page"{% endif %}>AI rules<span class="n" id="tab-ai-gaps">{{ ai_gaps }} {% if ai_gaps == 1 %}gap{% else %}gaps{% endif %}</span></a>
+    </nav>
+    <span class="grow"></span>
+    <span class="pol-compared">{{ compared }}</span>
+  </div>
+
+  <div class="pol-grid">
+    <div class="pol-main">
+      {% if tab == "seo" %}
+      <section class="card card-pad pol-soon" aria-labelledby="h-seo-soon">
+        <h2 class="card-title" id="h-seo-soon">SEO rules arrive in the next release</h2>
+        <p class="pol-desc">Your policy file can already hold them: <code>codoseo.toml</code> keeps every key below, imports and exports them, and the checks start comparing the site with them in the next release.</p>
+        <ul class="pol-soon-list">
+          <li><b>Preferred address</b> · the one host and trailing-slash form every page should use; other forms 301 to it.</li>
+          <li><b>What search engines should index</b> · path rules (<code>/checkout/*</code> keep out), first match wins.</li>
+          <li><b>URL parameters that don't change the page</b> · <code>utm_*</code>, <code>gclid</code>, sort orders; pagination kept apart.</li>
+          <li><b>Pages that must always work</b> · 200 and indexable on every crawl, alerting at once when one fails.</li>
+          <li><b>Check thresholds</b> · title and description length, thin pages, slow pages, redirect hops.</li>
+          <li><b>Exceptions</b> · checks that don't apply to part of the site, left out of the health score.</li>
+        </ul>
+        {% if seo_rules > 0 %}<p class="pol-desc">This site's policy holds {{ seo_rules }} SEO {% if seo_rules == 1 %}rule{% else %}rules{% endif %} from an import. They are kept and will be checked from the next release.</p>{% endif %}
+        <p class="pol-desc"><a href="{{ base }}/policy?tab=ai">Set the AI rules now</a> · <a href="{{ base }}/policy/export" hx-boost="false" download>export the file</a></p>
+      </section>
+      {% else %}
+      <form id="policy-form" class="pol-form" method="post" action="{{ base }}/policy">
+        <div class="stack" hx-post="{{ base }}/policy/preview?tab=ai" hx-trigger="change" hx-include="#policy-form" hx-target="#pol-rail" hx-swap="outerHTML" hx-sync="this:replace">
+          {% for p in purposes %}
+          <section class="card pol-purpose" aria-labelledby="h-{{ p.slug }}">
+            <div class="aia-purpose-main">
+              <div class="aia-purpose-text">
+                <h2 class="card-title" id="h-{{ p.slug }}">{{ p.label }}</h2>
+                <p>{{ p.what }}</p>
+              </div>
+              <fieldset class="aia-seg">
+                <legend class="sr-only">{{ p.label }}</legend>
+                {% for o in p.choices %}<input type="radio" id="{{ o.id }}" name="p.{{ p.slug }}" value="{{ o.value }}"{% if o.checked %} checked{% endif %}><label for="{{ o.id }}" data-stance="{{ o.value }}">{{ o.label }}</label>{% endfor %}
+              </fieldset>
+            </div>
+            <div class="pol-cmp {{ p.cmp.class }}" id="{{ p.cmp.id }}" aria-live="polite"><b>{{ p.cmp.head }}</b><span>{{ p.cmp.text }}</span></div>
+            <details class="aia-overrides"{% if p.open %} open{% endif %}>
+              <summary><svg class="icon chev"><use href="#i-chev"/></svg>{{ p.bot_line }}</summary>
+              <div class="aia-picks">
+                {% for b in p.bots %}
+                <div class="aia-pick aia-row pol-pick{% if b.overridden %} is-set{% endif %}" id="{{ b.id }}">
+                  <label for="sel-{{ b.id }}" class="aia-op">{% call op::tile(b.operator, "sm") %}{% endcall %}<span class="aia-op-text"><span class="aia-token">{{ b.token }}</span>{% if b.control %}<span class="tag">control token</span>{% endif %}{% if b.overridden %}<span class="tag is-set">exception</span>{% endif %}<span class="aia-sub">{{ b.operator }} · {{ b.product }}{% if !b.now.is_empty() %} · <span class="{{ b.now_class }}">{{ b.now }}</span>{% endif %}</span></span></label>
+                  <select class="select" id="sel-{{ b.id }}" name="{{ b.name }}" aria-label="Policy for {{ b.token }}">{% for o in b.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+          </section>
+          {% endfor %}
+
+          <section class="card pol-limits" aria-labelledby="h-limits">
+            <div class="aia-purpose-main">
+              <div class="aia-purpose-text">
+                <h2 class="card-title" id="h-limits">Answer limits you use on purpose</h2>
+                <p>Page markup can limit what AI answers show. Ticked limits aren’t flagged. <code>noindex</code> on a key page is always flagged: the SEO checks report it.</p>
+              </div>
+            </div>
+            <fieldset class="aia-dirs">
+              <legend class="sr-only">Answer limits you use on purpose</legend>
+              {% for l in limits %}
+              <label class="aia-dir" for="{{ l.id }}">
+                <input class="check" type="checkbox" id="{{ l.id }}" name="d" value="{{ l.value }}"{% if l.checked %} checked{% endif %}>
+                <span class="aia-dir-text"><code class="aia-token">{{ l.label }}</code><span class="aia-sub">{{ l.what }}</span></span>
+                <span class="pol-found {{ l.found_class }}" id="{{ l.found_id }}">{{ l.found }}</span>
+              </label>
+              {% endfor %}
+            </fieldset>
+          </section>
+
+          <section class="card pol-probes" id="probes" aria-labelledby="h-probes">
+            <div class="aia-purpose-main">
+              <div class="aia-purpose-text">
+                <h2 class="card-title" id="h-probes">Fetch checks <span class="badge aia-synthetic">Synthetic</span></h2>
+                <p>After each crawl we request {{ probe_pages }} as each search and user bot we can imitate, to catch firewalls and CDNs that block them, from CodoSEO’s servers. Bots robots.txt keeps out are never sent.</p>
+              </div>
+              {% if probes_installed %}
+              <input type="hidden" name="probes" value="off">
+              <label class="pol-switch" for="probes-on"><input class="check" type="checkbox" id="probes-on" name="probes" value="on"{% if probes %} checked{% endif %}>Run fetch checks</label>
+              {% else %}
+              <span class="pol-save-note">Fetch checks are turned off on this install (<code>CODOSEO_PROBE_URLS=0</code>).</span>
+              <label class="pol-switch" for="probes-on"><input class="check" type="checkbox" id="probes-on" value="on"{% if probes %} checked{% endif %} disabled>Run fetch checks</label>
+              {% endif %}
+            </div>
+          </section>
+        </div>
+
+        <div class="aia-savebar pol-savebar">
+          <button class="btn btn-primary" type="submit"><svg class="icon"><use href="#i-check"/></svg>Save policy</button>
+          <span class="pol-save-note">Saving re-checks the latest crawl at once; what it opens or resolves sends no alerts. Every change is kept in <a href="{{ base }}/policy/history">History</a>.</span>
+        </div>
+      </form>
+      {% endif %}
+
+      <details class="card pol-import">
+        <summary><svg class="icon"><use href="#i-plus"/></svg>Import a codoseo.toml</summary>
+        <form method="post" action="{{ base }}/policy/import" enctype="multipart/form-data" hx-encoding="multipart/form-data" class="pol-import-form">
+          <input type="file" name="file" accept=".toml,text/plain,application/toml" aria-label="Policy file" required>
+          <button class="btn" type="submit">Import</button>
+          <span class="pol-save-note">Replaces the whole policy, SEO and AI rules. <code>codoseo policy init</code> writes a starting file.</span>
+        </form>
+      </details>
+    </div>
+
+    {% include "policy/_rail.html" %}
+  </div>
+  <form id="policy-reset" method="post" action="{{ base }}/policy/reset?tab={{ tab }}" hx-confirm="Reset the {% if tab == "seo" %}SEO{% else %}AI{% endif %} rules to the defaults?"></form>
+</div>
+{% endblock %}

@@ -287,9 +287,9 @@
         { label: "Site audit", href: `${base}/audit`, keys: "G A", icon: "i-audit" },
         { label: "URL explorer", href: `${base}/explorer`, keys: "G E", icon: "i-explorer" },
         { label: "AI access", href: `${base}/ai-access`, keys: "G I", icon: "i-ai" },
-        { label: "AI access intent", href: `${base}/ai-access/intent`, icon: "i-settings" },
         { label: "Changes", href: `${base}/changes`, keys: "G C", icon: "i-changes" },
         { label: "Crawl history", href: `${base}/crawls`, keys: "G H", icon: "i-crawls" },
+        { label: "Site policy", href: `${base}/policy`, keys: "G P", icon: "i-policy" },
         { label: "Run crawl", run: () => $("#run-crawl") && $("#run-crawl").click(), icon: "i-play" },
         { label: "Export CSV", href: `${base}/export.csv`, download: true, icon: "i-download" },
       );
@@ -394,7 +394,7 @@
     el = document.createElement("div");
     el.id = "keyhint";
     el.className = "keyhint";
-    el.innerHTML = "<kbd>G</kbd> then <kbd>E</kbd> explorer · <kbd>A</kbd> audit · <kbd>C</kbd> changes · <kbd>I</kbd> AI access · <kbd>H</kbd> crawls";
+    el.innerHTML = "<kbd>G</kbd> then <kbd>E</kbd> explorer · <kbd>A</kbd> audit · <kbd>C</kbd> changes · <kbd>I</kbd> AI access · <kbd>H</kbd> crawls · <kbd>P</kbd> policy";
     document.body.appendChild(el);
   }
   const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -421,7 +421,7 @@
       pendingG = false;
       keyHint(false);
       const base = siteBase();
-      const map = { e: "explorer", a: "audit", c: "changes", i: "ai-access", h: "crawls" };
+      const map = { e: "explorer", a: "audit", c: "changes", i: "ai-access", h: "crawls", p: "policy" };
       const k = e.key.toLowerCase();
       if (map[k] && base) { e.preventDefault(); go(`${base}/${map[k]}`); }
       else if (k === "s") { e.preventDefault(); go("/account"); }

@@ -112,6 +112,7 @@ impl Backend for LocalBackend {
                         report,
                         snapshot: Snapshot::from_output_owned(out),
                         ai_access: Some(ai_access),
+                        policy: None,
                     };
                     match cache.save(&task_id, &audit) {
                         Ok(()) => (AuditStatus::Done, Some(build_summary(&task_id, &audit))),

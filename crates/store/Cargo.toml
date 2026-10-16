@@ -12,6 +12,7 @@ homepage.workspace = true
 codoseo-core.workspace = true
 codoseo-geo.workspace = true
 codoseo-notify.workspace = true
+codoseo-policy.workspace = true
 sqlx.workspace = true
 time.workspace = true
 uuid.workspace = true

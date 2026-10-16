@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
         .route("/sites/{site}/page", get(page))
         .route("/sites/{site}/changes", get(changes))
         .route("/sites/{site}/ai-access", get(ai_access))
+        .route("/sites/{site}/policy", get(get_policy).put(put_policy))
         .route("/sites/{site}/ai-access/incidents", get(incident_export))
         .route(
             "/sites/{site}/ai-access/incidents/{id}/fix",
@@ -237,6 +238,67 @@ async fn ai_access(
     respond(
         StatusCode::OK,
         AgentService::new(&state).ai_access(&caller, &site).await,
+    )
+}
+
+/// `Accept: application/toml` asks for the policy as a `codoseo.toml` file.
+fn wants_toml(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("application/toml"))
+}
+
+async fn get_policy(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let reply = AgentService::new(&state).policy(&caller, &site).await;
+    if wants_toml(&headers) {
+        respond_with(StatusCode::OK, reply, |status, info| {
+            (
+                status,
+                [(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/toml; charset=utf-8"),
+                )],
+                info.policy.to_toml(),
+            )
+                .into_response()
+        })
+    } else {
+        respond(StatusCode::OK, reply)
+    }
+}
+
+/// Replaces the site's policy: a `codoseo.toml` (`Content-Type: application/toml`, unknown keys
+/// ignored) or the JSON `get_policy` returns under `policy`.
+async fn put_policy(
+    State(state): State<AppState>,
+    caller: ApiCaller,
+    Path(site): Path<String>,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Response {
+    let toml = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("toml"));
+    let policy = match std::str::from_utf8(&body) {
+        Err(_) => Err("The body is not UTF-8 text.".to_owned()),
+        Ok(text) if toml => codoseo_policy::parse_file(text)
+            .map(|f| f.policy)
+            .map_err(|e| codoseo_policy::error_lines(&e)),
+        Ok(text) => serde_json::from_str::<codoseo_policy::SitePolicy>(text)
+            .map_err(|e| format!("The body is not a policy: {e}")),
+    };
+    respond(
+        StatusCode::OK,
+        AgentService::new(&state)
+            .set_policy(&caller, &site, policy)
+            .await,
     )
 }
 

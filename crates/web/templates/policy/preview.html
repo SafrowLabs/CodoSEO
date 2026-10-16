@@ -1,0 +1,4 @@
+{% include "policy/_rail.html" %}
+{% for c in cmps %}<div class="pol-cmp {{ c.class }}" id="{{ c.id }}" aria-live="polite" hx-swap-oob="true"><b>{{ c.head }}</b><span>{{ c.text }}</span></div>
+{% endfor %}{% for l in limits %}<span class="pol-found {{ l.found_class }}" id="{{ l.found_id }}" hx-swap-oob="true">{{ l.found }}</span>
+{% endfor %}<span class="n" id="tab-ai-gaps" hx-swap-oob="true">{{ ai_gaps }} {% if ai_gaps == 1 %}gap{% else %}gaps{% endif %}</span>

@@ -23,6 +23,7 @@ pub mod landing;
 pub mod legal;
 pub mod mcp;
 pub mod monitoring;
+pub mod policy;
 pub mod quick;
 pub mod rankorg;
 pub mod search;
@@ -51,6 +52,7 @@ pub fn router() -> Router<AppState> {
         .merge(audit::routes())
         .merge(changes::routes())
         .merge(ai_access::routes())
+        .merge(policy::routes())
         .merge(ai_bots::routes())
         .merge(export::routes())
         .merge(search::routes())

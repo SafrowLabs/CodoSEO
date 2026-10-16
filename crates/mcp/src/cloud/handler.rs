@@ -35,7 +35,7 @@ use serde::de::DeserializeOwned;
 use super::anon::AnonBackend;
 use super::types::{
     AiAccessInfo, AiFixInfo, AiIncidentInfo, AiRecheckQueued, ChangesPage, CrawlQueued,
-    IssueUrlsPage, PageInfo, SiteHealth, SiteInfo,
+    IssueUrlsPage, PageInfo, PolicyInfo, SiteHealth, SiteInfo,
 };
 
 /// Who is calling, as the HTTP layer resolved it for one request. The web crate inserts one into
@@ -108,6 +108,12 @@ pub trait CloudBackend: Send + Sync + 'static {
         who: &Self::Keyed,
         site_id: &str,
     ) -> impl Future<Output = Result<CrawlQueued, String>> + Send;
+
+    fn policy(
+        &self,
+        who: &Self::Keyed,
+        site_id: &str,
+    ) -> impl Future<Output = Result<PolicyInfo, String>> + Send;
 
     fn incident_fix(
         &self,

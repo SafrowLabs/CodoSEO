@@ -111,6 +111,7 @@ mod tests {
                 sitemap: Default::default(),
             },
             ai_access: None,
+            policy: None,
         }
     }
 
