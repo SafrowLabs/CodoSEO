@@ -840,6 +840,7 @@ dependencies = [
  "codoseo-geo",
  "codoseo-notify",
  "codoseo-policy",
+ "flate2",
  "futures-util",
  "proptest",
  "serde",

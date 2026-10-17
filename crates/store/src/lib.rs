@@ -17,6 +17,7 @@ pub mod explorer;
 pub mod export;
 pub mod finalize;
 pub mod geo;
+pub mod graph;
 pub mod hash;
 pub mod jobs;
 pub mod plans;

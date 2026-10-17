@@ -4,6 +4,7 @@ pub mod audit;
 pub mod change;
 pub mod check;
 pub mod crawl;
+pub mod graph;
 pub mod output;
 pub mod page;
 pub mod plan;

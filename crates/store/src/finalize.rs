@@ -1,5 +1,6 @@
 //! Writing a finished crawl in one transaction: pages and inlinks via `COPY` (batched, so
-//! memory stays flat on a large crawl), one `site_files` row, `changes`, the crawl's own
+//! memory stays flat on a large crawl), the whole link graph as one `crawl_graphs` row (see
+//! [`crate::graph`]), one `site_files` row, `changes`, the crawl's own
 //! `done`/summary update, the 2-crawl retention cleanup, the AI access report and its incidents
 //! (see [`crate::geo`]) with the GEO and Overall scores, the alert planning job and the public crawl totals ([`crate::stats`]). A
 //! failure partway rolls the whole transaction back, so a crawl never ends up half-written.
@@ -19,6 +20,7 @@ use uuid::Uuid;
 use crate::dbenum::enum_slug;
 use crate::events::{self, EventKind};
 use crate::geo::{self, GeoInput};
+use crate::graph;
 use crate::hash;
 use crate::stats;
 
@@ -66,6 +68,7 @@ pub async fn finalize_with_policy(
 
     copy_pages(&mut tx, crawl_id, site_id, &out.pages).await?;
     copy_inlinks(&mut tx, crawl_id, out, report).await?;
+    graph::write(&mut tx, crawl_id, out).await?;
     insert_site_files(&mut tx, crawl_id, site_id, out).await?;
     insert_changes(&mut tx, crawl_id, site_id, changes).await?;
     // The AI access report and what it opens or resolves, in the same transaction, so a crawl
@@ -115,7 +118,7 @@ pub async fn finalize_with_policy(
     }
 
     // Keep only the latest 2 `done` crawls' per-URL data (spec section 6).
-    for table in ["pages", "inlinks", "site_files"] {
+    for table in ["pages", "inlinks", "site_files", "crawl_graphs"] {
         let sql = format!(
             "DELETE FROM {table} WHERE crawl_id IN (\
                SELECT id FROM crawls WHERE site_id = $1 AND status = 'done' \
