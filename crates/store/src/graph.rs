@@ -418,6 +418,7 @@ mod tests {
             },
             robots: None,
             sitemap: SitemapSummary::default(),
+            sitemap_files: Vec::new(),
             stop: StopReason::Completed,
             duration_ms: 0,
             signals: SiteSignals::default(),
