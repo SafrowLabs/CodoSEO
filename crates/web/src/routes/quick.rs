@@ -7,17 +7,16 @@
 //! same domain within 24 hours. Only `quick` crawls are ever served here.
 
 use askama::Template;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
-use codoseo_checks::def;
-use codoseo_core::check::{CheckId, Severity};
+use codoseo_core::output::LiveRow;
 use codoseo_core::output::StopReason;
 use codoseo_core::plan::PlanLimits;
 use codoseo_store::accounts::Account;
-use codoseo_store::crawls::{Crawl, CrawlStatus};
+use codoseo_store::crawls::{self, Crawl, CrawlStatus, LiveFilter};
 use codoseo_store::events::{self, EventKind};
 use codoseo_store::quick::{
     self, Audit, ClaimOutcome, LimitWindow, Limits, Source, StartOutcome, StartRequest, UnlockSlot,
@@ -33,8 +32,7 @@ use crate::auth::magic::{self, AuditLink, LinkOutcome};
 use crate::auth::{email, session};
 use crate::config::{Mode, UmamiConfig};
 use crate::error::AppError;
-use crate::fmt;
-use crate::live::LiveCrawl;
+use crate::free_audit::{self, FreeInput, FreeView, Limit};
 use crate::render::{Hx, html, hx_redirect};
 use crate::state::AppState;
 use crate::turnstile::{self, Verdict};
@@ -45,15 +43,13 @@ const CLAIM_TTL_SECS: i64 = 7 * 24 * 3600;
 /// A visitor can audit several sites before unlocking one, so the cookie holds the claim tokens
 /// of their last few audits, joined with `.` (tokens are URL-safe base64, which has no dot).
 const MAX_CLAIM_TOKENS: usize = 5;
-/// How many issues the preview shows; the rest are counted and locked.
-const PREVIEW_ISSUES: usize = 5;
-
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/audit", post(start))
         .route("/audit/{id}", get(report))
         .route("/audit/{id}/live", get(live))
         .route("/audit/{id}/unlock", post(unlock))
+        .route("/audit/{id}/icon", get(icon))
 }
 
 /// The no-signup audit, landing page, bot page and robots.txt exist on the cloud only.
@@ -227,31 +223,6 @@ async fn load(state: &AppState, raw_id: &str) -> Result<Audit, AppError> {
     quick::get(&state.pool, id).await?.ok_or(AppError::NotFound)
 }
 
-/// A line of the preview's issue list.
-pub struct IssueLine {
-    pub severity: &'static str,
-    pub label: &'static str,
-    pub title: &'static str,
-    /// `12 pages · 4.8%`
-    pub detail: String,
-}
-
-pub struct DoneView {
-    pub score: i16,
-    /// `c-ok`, `c-warn` or `c-err`.
-    pub tone: &'static str,
-    pub checks_chip: String,
-    /// `1,284 pages crawled`
-    pub pages_crawled: String,
-    pub stop_chip: Option<String>,
-    pub issues: Vec<IssueLine>,
-    /// `3 more issues`, when there are more than the preview shows.
-    pub locked: Option<String>,
-    pub all_clear: bool,
-    /// The counted link to RankOrg.
-    pub rankorg: String,
-}
-
 /// A report that can't show a score, and why.
 pub struct Notice {
     pub title: &'static str,
@@ -260,6 +231,10 @@ pub struct Notice {
 
 /// What `#audit-main` shows.
 pub struct MainView {
+    /// The domain's first letter, for the tile by the title when the site has no icon.
+    pub initial: String,
+    /// The site's own icon, served by us, when the audit found one.
+    pub icon: Option<String>,
     pub id: Uuid,
     pub domain: String,
     /// The page the audit started from, when it isn't the site's homepage: reports are shared
@@ -270,11 +245,10 @@ pub struct MainView {
     /// Waiting vs running, for the headline.
     pub running: bool,
     pub pages_done: u32,
-    /// The counters and newest pages, while it runs.
-    pub panel: Option<LiveCrawl>,
     /// `You're #3 in line.`, while waiting behind other audits.
     pub line: Option<String>,
-    pub done: Option<DoneView>,
+    /// The audit as it runs, and once it is done.
+    pub free: Option<FreeView>,
     pub notice: Option<Notice>,
 }
 
@@ -284,15 +258,21 @@ pub struct UnlockCard {
     pub email: String,
     pub error: Option<String>,
     pub sent: bool,
+    /// What the card says about the free limit, for how far the audit got.
+    pub limit: Limit,
+    /// Sent along with a poll that ends the audit, to update the card in place.
+    pub oob: bool,
 }
 
 impl UnlockCard {
-    pub fn new(id: Uuid) -> UnlockCard {
+    pub fn new(crawl: &Crawl) -> UnlockCard {
         UnlockCard {
-            id,
+            id: crawl.id,
             email: String::new(),
             error: None,
             sent: false,
+            limit: free_audit::limit(crawl),
+            oob: false,
         }
     }
 }
@@ -306,7 +286,7 @@ pub struct ReportPage {
 }
 
 #[derive(Template)]
-#[template(path = "quick/main.html")]
+#[template(path = "quick/live.html")]
 pub struct MainPartial {
     pub main: MainView,
     pub unlock: UnlockCard,
@@ -326,52 +306,68 @@ fn line_text(position: Option<i64>) -> Option<String> {
     }
 }
 
-/// `seen` is the newest page the poller already shows (see [`LiveCrawl`]).
-async fn main_view(
-    state: &AppState,
-    audit: &Audit,
-    seen: Option<u32>,
-) -> Result<MainView, AppError> {
-    let mut view = build_main(audit, seen);
+async fn main_view(state: &AppState, audit: &Audit) -> Result<MainView, AppError> {
+    let crawl = &audit.crawl;
+    let rows = if crawl.status == CrawlStatus::Running {
+        crawls::newest_live_rows(
+            &state.pool,
+            crawl.id,
+            LiveFilter::All,
+            free_audit::ROWS_SHOWN,
+        )
+        .await?
+    } else {
+        Vec::new()
+    };
+    let mut view = build_main(audit, &rows);
+    view.icon = codoseo_store::sites::icon_version(&state.pool, audit.site_id)
+        .await?
+        .map(|v| format!("/audit/{}/icon?v={v}", crawl.id));
     if view.polling && !view.running {
-        view.line = line_text(quick::queue_position(&state.pool, audit.crawl.id).await?);
+        view.line = line_text(quick::queue_position(&state.pool, crawl.id).await?);
     }
     Ok(view)
 }
 
-fn build_main(audit: &Audit, seen: Option<u32>) -> MainView {
+fn build_main(audit: &Audit, rows: &[LiveRow]) -> MainView {
     let crawl = &audit.crawl;
     let mut view = MainView {
+        initial: audit
+            .domain
+            .trim_start_matches("www.")
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_uppercase().to_string())
+            .unwrap_or_default(),
+        icon: None,
         id: crawl.id,
         domain: audit.domain.clone(),
         start_url: start_page(&audit.start_url, &audit.domain),
         polling: false,
         running: false,
         pages_done: 0,
-        panel: None,
         line: None,
-        done: None,
+        free: None,
         notice: None,
+    };
+    let free = || {
+        FreeView::build(FreeInput {
+            crawl,
+            rows,
+            now: OffsetDateTime::now_utc(),
+        })
     };
     match crawl.status {
         CrawlStatus::Queued | CrawlStatus::Running => {
             view.polling = true;
             view.running = crawl.status == CrawlStatus::Running;
             view.pages_done = crawl.progress().map_or(0, |p| p.pages_done);
-            view.panel = LiveCrawl::for_crawl(crawl, seen, OffsetDateTime::now_utc());
+            view.free = Some(free());
         }
         CrawlStatus::Failed | CrawlStatus::Done => {
             view.notice = no_report_notice(crawl);
-            if view.notice.is_none()
-                && let (Some(summary), Some(score)) = (crawl.summary(), crawl.health_score)
-            {
-                view.done = Some(done_view(
-                    crawl.id,
-                    score,
-                    crawl.checks_passed.unwrap_or(0),
-                    crawl.checks_total.unwrap_or(0),
-                    &summary,
-                ));
+            if view.notice.is_none() && crawl.summary().is_some() && crawl.health_score.is_some() {
+                view.free = Some(free());
             }
         }
     }
@@ -441,73 +437,6 @@ fn failure_notice(reason: Option<&str>) -> Notice {
     }
 }
 
-fn done_view(
-    crawl_id: Uuid,
-    score: i16,
-    passed: i16,
-    total: i16,
-    summary: &codoseo_store::crawls::StoredSummary,
-) -> DoneView {
-    let mut failing: Vec<(CheckId, u32)> = summary
-        .counts
-        .iter()
-        .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n)))
-        .collect();
-    failing.sort_by_key(|&(id, n)| (def(id).severity, std::cmp::Reverse(n), id));
-    let pages = u64::from(summary.report_summary.pages).max(1);
-    let issues = failing
-        .iter()
-        .take(PREVIEW_ISSUES)
-        .map(|&(id, n)| {
-            let d = def(id);
-            let (severity, label) = match d.severity {
-                Severity::Critical => ("critical", "Critical"),
-                Severity::Warning => ("warning", "Warning"),
-                Severity::Notice => ("notice", "Notice"),
-            };
-            IssueLine {
-                severity,
-                label,
-                title: d.title,
-                detail: format!(
-                    "{} · {}",
-                    fmt::pages(n),
-                    fmt::percent(i64::from(n), pages as i64)
-                ),
-            }
-        })
-        .collect();
-    let more = failing.len().saturating_sub(PREVIEW_ISSUES);
-    let limits = PlanLimits::quick_audit();
-    let stop_chip = match &summary.stop_reason {
-        StopReason::PageLimit => Some(format!(
-            "Stopped at {} pages",
-            fmt::thousands(limits.max_pages.unwrap_or(100))
-        )),
-        StopReason::TimeLimit => Some(format!(
-            "Stopped at the {} minute limit",
-            limits.max_duration.map_or(2, |d| d.as_secs() / 60)
-        )),
-        _ => None,
-    };
-    DoneView {
-        score,
-        tone: match score {
-            s if s >= 90 => "c-ok",
-            s if s >= 70 => "c-warn",
-            _ => "c-err",
-        },
-        checks_chip: format!("{passed} of {total} checks passed"),
-        pages_crawled: format!("{} crawled", fmt::pages(summary.report_summary.pages)),
-        stop_chip,
-        issues,
-        locked: (more > 0)
-            .then(|| format!("{more} more issue{}", if more == 1 { "" } else { "s" })),
-        all_clear: failing.is_empty(),
-        rankorg: format!("/go/rankorg?src=audit&audit={crawl_id}"),
-    }
-}
-
 /// Headers the public report always carries: it is for one visitor, not for search engines.
 fn report_headers() -> [(HeaderName, &'static str); 2] {
     [
@@ -522,29 +451,31 @@ async fn report(
 ) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
     let page = ReportPage {
-        main: main_view(&state, &audit, None).await?,
-        unlock: UnlockCard::new(audit.crawl.id),
+        main: main_view(&state, &audit).await?,
+        unlock: UnlockCard::new(&audit.crawl),
         umami: state.config.umami.clone(),
     };
     Ok((report_headers(), html(&page)?).into_response())
 }
 
-#[derive(Deserialize)]
-struct LiveQuery {
-    /// The newest page the report shows.
-    seen: Option<u32>,
+/// The audited site's icon, as the audit's crawl found it.
+async fn icon(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let audit = load(&state, &id).await?;
+    let (content_type, bytes) = codoseo_store::sites::icon(&state.pool, audit.site_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(crate::render::icon_response(content_type, bytes))
 }
 
-async fn live(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(q): Query<LiveQuery>,
-) -> Result<Response, AppError> {
+async fn live(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
-    let part = MainPartial {
-        main: main_view(&state, &audit, q.seen).await?,
-        unlock: UnlockCard::new(audit.crawl.id),
+    let main = main_view(&state, &audit).await?;
+    // The poll that ends the audit updates the sign-in card too.
+    let unlock = UnlockCard {
+        oob: !main.polling,
+        ..UnlockCard::new(&audit.crawl)
     };
+    let part = MainPartial { main, unlock };
     Ok((report_headers(), html(&part)?).into_response())
 }
 
@@ -560,7 +491,7 @@ async fn unlock(
     Form(form): Form<UnlockForm>,
 ) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
-    let mut card = UnlockCard::new(audit.crawl.id);
+    let mut card = UnlockCard::new(&audit.crawl);
     card.email = form.email.trim().to_owned();
 
     let mut status = StatusCode::OK;
@@ -622,7 +553,7 @@ async fn unlock(
         return Ok((status, html(&UnlockPartial { unlock: card })?).into_response());
     }
     let page = ReportPage {
-        main: main_view(&state, &audit, None).await?,
+        main: main_view(&state, &audit).await?,
         unlock: card,
         umami: state.config.umami.clone(),
     };

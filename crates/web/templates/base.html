@@ -44,7 +44,7 @@
     <details class="switcher" id="switcher">
       <summary class="site-pill" aria-label="Switch site">
         {% if let Some(site) = shell.current %}
-          <span class="avatar">{{ site.initial }}</span>
+          {% if let Some(icon) = site.icon %}<img class="avatar site-icon" src="{{ icon }}" alt="" width="22" height="22">{% else %}<span class="avatar">{{ site.initial }}</span>{% endif %}
           <span class="meta"><span class="name" style="display:block">{{ site.domain }}</span><span class="sub">{{ site.urls_label }}</span></span>
         {% else %}
           <span class="avatar" style="background:var(--line);color:var(--ink-2)"><svg class="icon" style="width:14px;height:14px"><use href="#i-globe"/></svg></span>
@@ -72,7 +72,7 @@
             <a class="nav-item{% if it.active %} is-active{% endif %}{% if it.soon %} soon{% endif %}" href="{{ it.href }}" data-tip="{{ it.label }}{% if !it.keys.is_empty() %} · {{ it.keys }}{% endif %}"{% if it.active %} aria-current="page"{% endif %}>
               <svg class="icon"><use href="#{{ it.icon }}"/></svg>
               <span class="label">{{ it.label }}</span>
-              {% if it.soon %}<span class="tag">soon</span>{% else %}<span class="count{% if it.alert %} alert{% endif %}">{{ it.count }}</span>{% endif %}
+              {% if it.soon %}<span class="tag">soon</span>{% else %}<span class="count{% if it.alert %} alert{% endif %}{% if it.live %} live{% endif %}">{% if it.live %}<i class="la-dot is-sm" aria-hidden="true"></i>{% endif %}{{ it.count }}</span>{% endif %}
             </a>
           {% endfor %}
         </div>

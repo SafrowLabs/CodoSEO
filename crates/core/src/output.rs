@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::check::IssueBits;
+use crate::check::{CheckId, IssueBits};
 use crate::crawl::{RobotsFile, SitemapSummary};
 use crate::page::{FetchFailure, Indexability, PageRecord};
 
@@ -135,6 +135,32 @@ pub struct LiveProgress {
     /// need the whole crawl only count once it is over. `None` before the first page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seo_estimate: Option<u8>,
+    /// Running totals over every page checked so far.
+    #[serde(default)]
+    pub tally: LiveTally,
+}
+
+/// Running totals over every checked page of a running crawl, for the live views' cards,
+/// filters and issue list, so they need not read every page.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveTally {
+    /// Each page check failing somewhere, with the pages it fails on, in check order.
+    #[serde(default)]
+    pub checks: Vec<(CheckId, u32)>,
+    /// Pages failing at least one page check.
+    #[serde(default)]
+    pub with_issues: u32,
+    /// Pages at least one answer engine can't use.
+    #[serde(default)]
+    pub ai_blocked: u32,
+    /// Pages the answer engines were judged on (robots.txt gave verdicts).
+    #[serde(default)]
+    pub ai_judged: u32,
+    /// Response times of the pages that answered, summed, and how many answered.
+    #[serde(default)]
+    pub response_ms_total: u64,
+    #[serde(default)]
+    pub answered: u32,
 }
 
 impl LiveProgress {
@@ -162,6 +188,7 @@ impl LiveProgress {
             phase: LivePhase::Pages,
             files: LiveFiles::default(),
             seo_estimate: None,
+            tally: LiveTally::default(),
         }
     }
 }
@@ -179,6 +206,9 @@ pub enum LivePhase {
     /// Fetching and checking pages.
     #[default]
     Pages,
+    /// Fetching key pages as the AI bots do, to see whether the site treats them like a
+    /// visitor. Only for monitored crawls with the probes on.
+    Bots,
     /// The pages are in: the checks that need the whole crawl, the AI access report and the
     /// final scores.
     Scoring,
@@ -225,6 +255,24 @@ pub struct LiveRow {
     /// How many answer engines were judged; 0 when robots.txt gave no verdicts.
     #[serde(default)]
     pub ai_of: u8,
+    /// The page fetched as each probed AI bot, once that is done; empty for the pages that are
+    /// not probed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<LiveProbe>,
+}
+
+/// A page fetched as one AI bot, compared with our own fetch of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveProbe {
+    /// The bot's robots.txt token.
+    pub token: String,
+    /// `same` when the site treated the bot like us; the finding's cause (`blocked_403`,
+    /// `challenge_cloudflare`, ...) when it treated it worse; `skipped_robots` when robots.txt
+    /// keeps the bot out, so it was not requested; `inconclusive` otherwise.
+    pub outcome: String,
+    /// The status the bot got; `None` when it was not requested or got no response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
 }
 
 /// A page counted by [`LiveProgress::errors`].
@@ -325,6 +373,18 @@ pub struct SiteSignals {
     /// off, robots.txt disallows the home page, the crawl stopped early, and in older crawls).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub markdown: Option<MarkdownProbe>,
+    /// The site's icon, for showing the site in the app. Not part of any report: it is stored
+    /// on its own and never serialized with the signals.
+    #[serde(skip)]
+    pub icon: Option<SiteIcon>,
+}
+
+/// A site's icon as fetched: a small raster image whose type was read from its own bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SiteIcon {
+    /// `image/png`, `image/x-icon`, `image/gif`, `image/jpeg` or `image/webp`.
+    pub content_type: &'static str,
+    pub bytes: Vec<u8>,
 }
 
 /// One answer of a Markdown request.
@@ -428,6 +488,7 @@ mod tests {
                 llms_txt: None,
             },
             seo_estimate: Some(84),
+            tally: LiveTally::default(),
         };
         let json = serde_json::to_value(&live).unwrap();
         assert_eq!(json["phase"], "llms_txt");

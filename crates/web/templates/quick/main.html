@@ -1,49 +1,111 @@
 {%- import "partials/mascot.html" as m -%}
-<section id="audit-main" class="q-main"{% if main.polling %} hx-get="/audit/{{ main.id }}/live{% if let Some(p) = main.panel %}?seen={{ p.newest }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML" data-quiet{% endif %} aria-live="polite">
-{% if main.polling %}
-  <div class="q-wait" role="status">
-    {% if main.running %}{% call m::eyes("crawling", "", "quick-eyes") %}{% endcall %}{% else %}{% call m::eyes("rest", "", "quick-eyes") %}{% endcall %}{% endif %}
-    {% if main.running %}
-      <div><b class="shimmer">Crawling {{ main.domain }}</b><p class="muted"><span class="q-count">{{ main.pages_done }}</span> pages checked so far. This takes about a minute.</p></div>
-    {% else %}
-      <div><b class="shimmer">Waiting for a crawler</b><p class="muted">{% if let Some(line) = main.line %}{{ line }} {% endif %}Your audit starts in a moment. This page updates by itself.</p></div>
-    {% endif %}
-  </div>
-  {% if let Some(p) = main.panel %}{{ p|safe }}{% endif %}
-{% else if let Some(done) = main.done %}
-  <div class="q-score">
-    <div class="ring" style="--p: {{ done.score }}"><b class="{{ done.tone }}">{{ done.score }}</b></div>
-    <div>
-      <h2>Health score {{ done.score }} out of 100</h2>
-      <p class="muted">{{ done.checks_chip }} · {{ done.pages_crawled }}</p>
-      {% if let Some(chip) = done.stop_chip %}<p class="chip" style="margin-top:8px;display:inline-block">{{ chip }}. A full crawl covers up to 500 pages.</p>{% endif %}
-    </div>
-  </div>
-
-  {% if done.all_clear %}
-    <p class="q-clear">No issues found in these pages. Nice work. Monitoring tells you the day that changes.</p>
-  {% else %}
-    <h3 class="q-h">Top issues</h3>
-    <ul class="q-issues">
-      {% for i in done.issues %}
-      <li class="issue-row {{ i.severity }}">
-        <span class="q-sev {{ i.severity }}">{{ i.label }}</span>
-        <span class="t">{{ i.title }}</span>
-        <span class="n mono">{{ i.detail }}</span>
-      </li>
-      {% endfor %}
-      {% if let Some(lock) = done.locked %}
-      <li class="issue-lock"><svg class="icon" style="width:14px;height:14px"><use href="#i-lock"/></svg> {{ lock }} in the full report</li>
+<section id="audit-main" class="q-main"{% if main.polling %} hx-get="/audit/{{ main.id }}/live" hx-trigger="every 2s" hx-swap="outerHTML" data-quiet{% endif %}>
+  <div class="q-head">
+    <p class="l-eyebrow">{% if main.polling %}<i class="la-dot" aria-hidden="true"></i>Free audit · live{% else %}Free audit{% endif %}</p>
+    <div class="q-title-row">
+      <span class="q-fav" aria-hidden="true">{% if let Some(i) = main.icon %}<img src="{{ i }}" alt="" width="40" height="40">{% else %}{{ main.initial }}{% endif %}</span>
+      <h1 class="q-title">{{ main.domain }}</h1>
+      {% if let Some(v) = main.free %}
+      {% if v.running && main.running %}<span class="la-signal" role="status" aria-live="polite"><i class="la-dot" aria-hidden="true"></i><span class="la-signal-text">{{ v.signal }}</span><b class="num">{{ v.count }}</b><span class="la-bar" aria-hidden="true"><span style="width:{{ v.bar }}%"></span></span><span class="mono">{{ v.elapsed }}</span></span>{% endif %}
+      {% if !v.running %}<span class="la-signal is-done" role="status"><i class="sdot is-ok" aria-hidden="true"></i><span><b>Audit finished</b> · {{ v.done_line }}</span></span>{% endif %}
       {% endif %}
-    </ul>
-  {% endif %}
-  <p class="q-rankorg"><a href="{{ done.rankorg }}" target="_blank" rel="noopener">Take this site to RankOrg ↗</a> <span class="muted">We pass along your domain and its top pages.</span></p>
-  {% include "quick/unlock.html" %}
-{% else if let Some(n) = main.notice %}
+    </div>
+    {% if let Some(start) = main.start_url %}<p class="muted q-start">Started from {{ start }}</p>{% endif %}
+    {% if let Some(v) = main.free %}<p class="q-lede">{{ v.lede }}</p>{% endif %}
+  </div>
+{% if let Some(n) = main.notice %}
   <div class="q-notice" role="alert">
     <h2>{{ n.title }}</h2>
     <p>{{ n.message }}</p>
     <p><a class="btn btn-primary" href="/">Audit another site</a> <a class="btn btn-ghost" href="/bot">About CodoSEObot</a></p>
   </div>
+{% else if let Some(v) = main.free %}
+  <section class="card la-phases" aria-label="Audit steps">
+    {% for p in v.steps %}<div class="la-ph {{ p.class }}"><span class="la-ph-ic" aria-hidden="true">{{ p.icon }}</span><span class="la-ph-txt"><span class="la-ph-t">{{ p.title }}</span><span class="la-ph-d">{{ p.detail }}</span></span></div>{% endfor %}
+  </section>
+
+  {% if main.polling && !main.running %}
+  <section class="card q-queue" role="status">
+    {% call m::eyes("rest", "", "quick-eyes") %}{% endcall %}
+    <b>{% if let Some(line) = main.line %}{{ line }}{% else %}Waiting for a crawler{% endif %}</b>
+    <p class="muted">Your audit starts in a moment. You can leave: this link keeps working for 7 days.</p>
+  </section>
+  {% else %}
+  <section class="q-scores" aria-label="Scores">
+    <div class="card q-overall">
+      <div>
+        <div class="q-overall-l">Overall score</div>
+        <div class="q-overall-v {{ v.overall_tone }}">{{ v.overall }}</div>
+        <div class="q-overall-tags"><span class="atag t-ai">GEO {{ v.geo }}</span><span class="atag t-seo">SEO {{ v.seo }}</span></div>
+      </div>
+      <ul class="q-facts">{% for f in v.geo_facts %}<li><i class="sdot {{ f.0 }}" aria-hidden="true"></i>{{ f.1 }}</li>{% endfor %}</ul>
+    </div>
+    {% for c in v.cards %}
+    <div class="card sc">
+      <span class="sc-label">{% if let Some(t) = c.tag %}<span class="atag {{ t.0 }}">{{ t.1 }}</span>{% endif %}<span>{{ c.label }}</span>{% if v.running %}<i class="la-dot is-sm" aria-hidden="true"></i>{% endif %}</span>
+      <span class="sc-val"><b>{{ c.value }}</b>{% if !c.unit.is_empty() %}<small>{{ c.unit }}</small>{% endif %}</span>
+      <span class="la-tags">{% for t in c.tags %}<span class="ck {{ t.0 }}">{{ t.1 }}</span>{% endfor %}</span>
+    </div>
+    {% endfor %}
+  </section>
+  <p class="la-note">{{ v.score_note }}{% if let Some(chip) = v.stop_chip %} {{ chip }}.{% endif %}</p>
+
+  <div class="la-grid">
+    {% if v.running %}
+    <section class="card la-stream" aria-label="Files and pages as they are checked">
+      <div class="la-stream-head">
+        <div>
+          <h2>Every page, as it's checked</h2>
+          <p class="muted au-small">Each page gets three tags: Indexable, AI can reach and Content.</p>
+        </div>
+        <span class="muted au-small num">{{ v.counter }}</span>
+      </div>
+      {% if v.rows.is_empty() %}<p class="la-empty muted">The first pages show up here in a moment.</p>{% endif %}
+      {% for r in v.rows %}
+      <div class="la-row q-row">
+        <span><span class="la-pill {{ r.pill }}">{{ r.status }}</span></span>
+        <span class="la-main">
+          <span class="la-line"><span class="mono la-path" title="{{ r.url }}">{{ r.path }}</span>{% if !r.ms.is_empty() %}<span class="la-ms">{{ r.ms }}</span>{% endif %}</span>
+          <span class="la-tags">{% for t in r.tags %}<span class="ck {{ t.class }}">{{ t.icon }}<b>{{ t.name }}</b> {{ t.detail }}</span>{% endfor %}</span>
+        </span>
+        <span class="la-imp {{ r.impact_class }}">{{ r.impact }}</span>
+      </div>
+      {% endfor %}
+    </section>
+    <aside class="la-rail">
+      <section class="card card-pad" aria-label="Issues so far">
+        <h2>Issues so far</h2>
+        <p class="muted au-small">Ranked by the points a fix gives back.</p>
+        {% if v.issues.is_empty() %}<p class="la-empty muted">Nothing yet.</p>{% endif %}
+        <ul class="la-list">{% for i in v.issues %}<li><i class="sdot {{ i.dot }}" aria-hidden="true"></i><span class="grow">{{ i.name }} <span class="muted">· {{ i.count }}</span></span><span class="atag t-seo">SEO</span><b class="up num">{{ i.points }}</b></li>{% endfor %}</ul>
+      </section>
+    </aside>
+    {% else %}
+    <section class="card la-stream q-fixes" aria-label="Fix these first">
+      <div class="la-stream-head">
+        <div>
+          <h2>Fix these first</h2>
+          <p class="muted au-small">{% if v.all_clear %}Nothing to fix on these pages.{% else %}AI fixes first, then search.{% if v.hidden_fixes > 0 %} {{ v.fixes.len() }} shown free, {{ v.hidden_fixes }} more in the full report.{% endif %}{% endif %}</p>
+        </div>
+      </div>
+      {% for f in v.fixes %}
+      <div class="q-fix">
+        <i class="sdot {{ f.dot }}" aria-hidden="true"></i>
+        <div class="grow"><div class="q-fix-t"><b>{{ f.title }}</b><span class="atag {{ f.track_class }}">{{ f.track }}</span></div><div class="muted au-small">{{ f.evidence }}</div></div>
+        <b class="up num">{{ f.points }}</b>
+      </div>
+      {% endfor %}
+      {% if v.hidden_fixes > 0 %}
+      <div class="q-locked" aria-hidden="true">
+        <div class="q-fix"><i class="sdot is-warning"></i><div class="grow"><div class="q-fix-t"><b>A fix kept for the full report</b></div><div class="muted au-small">On several pages.</div></div><b class="num">+0.0</b></div>
+        <div class="q-fix"><i class="sdot is-notice"></i><div class="grow"><div class="q-fix-t"><b>Another fix for the full report</b></div><div class="muted au-small">On a few pages.</div></div><b class="num">+0.0</b></div>
+      </div>
+      <div class="la-foot"><span>The rest is hidden until you sign in. That keeps anonymous use small and stops people crawling sites that aren't theirs. <a class="au-link" href="#unlock-card">Sign in free</a></span></div>
+      {% endif %}
+    </section>
+    {% endif %}
+  </div>
+  {% if !v.running %}<p class="q-rankorg"><a href="{{ v.rankorg }}" target="_blank" rel="noopener">Take this site to RankOrg ↗</a> <span class="muted">We pass along your domain and its top pages.</span></p>{% endif %}
+  {% endif %}
 {% endif %}
 </section>

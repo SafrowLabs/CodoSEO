@@ -226,7 +226,7 @@ pub fn diff_checks(previous: Option<&StoredSummary>, current: Option<&StoredSumm
 }
 
 /// The Recommended GEO checks that read SEO checks' counts: the SEO rows stand for them.
-fn reads_seo(c: GeoCheck) -> bool {
+pub(crate) fn reads_seo(c: GeoCheck) -> bool {
     matches!(
         c,
         GeoCheck::JsonldInvalid

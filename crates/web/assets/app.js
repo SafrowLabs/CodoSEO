@@ -266,6 +266,18 @@
       d.shouldSwap = false;
     }
   });
+  // ── Live audit: a poll replaces the list, so the rows the reader opened stay open ──
+  let openRows = null;
+  document.addEventListener("htmx:beforeSwap", (e) => {
+    if (e.detail.target && e.detail.target.id === "live-audit") {
+      openRows = new Set($$("#live-audit details[open][data-live-row]").map((d) => d.dataset.liveRow));
+    }
+  });
+  document.addEventListener("htmx:afterSwap", () => {
+    if (!openRows) return;
+    $$("#live-audit details[data-live-row]").forEach((d) => { if (openRows.has(d.dataset.liveRow)) d.open = true; });
+    openRows = null;
+  });
   document.body.addEventListener("crawlFinished", refresh);
   document.body.addEventListener("crawlQueued", () => {
     const card = $("#crawler");

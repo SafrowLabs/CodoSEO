@@ -1,6 +1,6 @@
 {% extends "solo_base.html" %}
 {%- import "partials/mascot.html" as m -%}
-{% block title %}Audit of {{ main.domain }} — CodoSEO{% endblock %}
+{% block title %}Audit of {{ main.domain }} · CodoSEO{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
 {% include "partials/analytics.html" %}
@@ -10,13 +10,13 @@
 {% block body %}
 <header class="l-top l-wrap">
   <a class="brand brand-solo" href="/" aria-label="CodoSEO home">{% call m::eyes() %}{% endcall %}{% call m::wordmark() %}{% endcall %}</a>
-  <nav class="l-nav"><a class="btn btn-sm" href="/">Audit another site</a></nav>
+  <nav class="l-nav"><a class="btn btn-sm btn-ghost" href="/#pricing">Pricing</a><a class="btn btn-sm" href="/login">Sign in</a></nav>
 </header>
-<main class="l-wrap q-page">
-  <p class="l-eyebrow">Site audit</p>
-  <h1 class="q-title">{{ main.domain }}</h1>
-  {% if let Some(start) = main.start_url %}<p class="muted q-start">Started from {{ start }}</p>{% endif %}
+<main class="l-wrap q-page la">
   {% include "quick/main.html" %}
+  {% if main.free.is_some() %}{% include "quick/unlock.html" %}
+  <p class="q-foot muted">Without signing in: up to 100 pages in 2 minutes, AI access read from robots.txt and each page. Signed in (free): up to 500 pages, and the home page fetched as each AI bot.</p>
+  {% endif %}
 </main>
 {% include "partials/legal_foot.html" %}
 {% endblock %}

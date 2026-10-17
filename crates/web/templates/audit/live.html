@@ -1,7 +1,7 @@
 {%- import "partials/mascot.html" as m -%}
 {% if banner %}
 {% if active %}
-<div id="audit-live" class="chip-outline" role="status" style="display:inline-flex;align-items:center;gap:8px;margin-bottom:12px" hx-get="{{ base }}/audit/live?view=banner" hx-trigger="every 2s, crawlQueued from:body" hx-target="this" hx-swap="outerHTML" data-quiet><i class="dot {{ state }}"></i><span class="shimmer">{{ line }}</span></div>
+<div id="audit-live" class="chip-outline" role="status" style="display:inline-flex;align-items:center;gap:8px;margin-bottom:12px" hx-get="{{ base }}/audit/live?view=banner" hx-trigger="every 2s, crawlQueued from:body" hx-target="this" hx-swap="outerHTML" data-quiet><i class="dot {{ state }}"></i><span class="shimmer">{{ line }}</span>{% if state == "running" %}<a class="au-link" href="{{ base }}/audit/watch">Watch live →</a>{% endif %}</div>
 {% else %}
 <div id="audit-live" hidden hx-get="{{ base }}/audit/live?view=banner" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" data-quiet></div>
 {% endif %}

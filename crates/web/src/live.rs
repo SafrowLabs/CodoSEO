@@ -196,6 +196,7 @@ mod tests {
             phase: LivePhase::Pages,
             files: LiveFiles::default(),
             seo_estimate: None,
+            tally: Default::default(),
         }
     }
 

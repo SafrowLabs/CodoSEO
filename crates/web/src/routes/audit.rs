@@ -15,15 +15,17 @@ use std::collections::HashMap;
 use askama::Template;
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use codoseo_checks::{CHECKS, Category, Scope, def};
 use codoseo_core::check::{CheckId, Severity};
+use codoseo_core::crawl::CrawlLimits;
 use codoseo_core::output::StopReason;
+use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_core::report::CrawlSummary;
 use codoseo_geo::Intent;
 use codoseo_geo::report::AccessReport;
-use codoseo_store::crawls::{self, Crawl, CrawlStatus, StoredSummary};
+use codoseo_store::crawls::{self, Crawl, CrawlStatus, LiveFilter, StoredSummary};
 use codoseo_store::explorer;
 use codoseo_store::geo::{self, Incident};
 use codoseo_store::reports::{self, ChangeCounts, ResponseBuckets};
@@ -37,6 +39,7 @@ use crate::error::AppError;
 use crate::fmt;
 use crate::layout::{Screen, Shell};
 use crate::live::LiveCrawl;
+use crate::live_audit::{self, LiveAudit, LiveInput};
 use crate::render::{Hx, html};
 use crate::routes::audit_ai::{BotsTable, bots_table};
 use crate::routes::audit_fix::{AiFixInput, FixInput, FixList, fix_list, known_counts};
@@ -47,7 +50,26 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/s/{site}/audit", get(page))
         .route("/s/{site}/audit/live", get(live))
+        .route("/s/{site}/audit/watch", get(watch))
+        .route("/s/{site}/icon", get(icon))
 }
+
+/// The site's icon, as its newest crawl found it.
+async fn icon(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    let (content_type, bytes) = sites::icon(&state.pool, site.id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(crate::render::icon_response(content_type, bytes))
+}
+
+/// How long after a crawl finished the live view still shows it, with its final scores, before
+/// it hands over to the results.
+const WATCH_AFTER_DONE: time::Duration = time::Duration::minutes(2);
 
 /// The site ID from the path; anything that isn't a UUID is a 404, like a missing site.
 pub fn site_id(raw: &str) -> Result<Uuid, AppError> {
@@ -77,6 +99,8 @@ pub struct AuditBody {
     pub done: Option<DoneAudit>,
     /// The first crawl's progress (no `done`), or the running-crawl banner slot (with `done`).
     pub live: Option<AuditLive>,
+    /// The live audit, which takes the whole body: the first crawl, or `/audit/watch`.
+    pub watch: Option<LiveAudit>,
     /// Why the latest crawl failed, when nothing has finished yet.
     pub failure: Option<String>,
     /// The public demo: sample data and no actions (no Run crawl, export or links into a site).
@@ -282,7 +306,7 @@ async fn page(
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    let body = load_body(&state, &site).await?;
+    let body = load_body(&state, &site, user.account.plan).await?;
     if hx.partial() {
         return Ok(html(&body)?.into_response());
     }
@@ -297,7 +321,7 @@ pub(crate) async fn render_page(
     user: &CurrentUser,
     site: &Site,
 ) -> Result<Html<String>, AppError> {
-    let body = load_body(state, site).await?;
+    let body = load_body(state, site, user.account.plan).await?;
     let shell = Shell::load(state, user, Some(site), Screen::Audit).await?;
     html(&AuditPage { shell, body })
 }
@@ -322,7 +346,90 @@ async fn live(
     Ok(html(&AuditLive::new(&site, banner, active.as_ref(), q.seen))?.into_response())
 }
 
-async fn load_body(state: &AppState, site: &Site) -> Result<AuditBody, AppError> {
+#[derive(Deserialize)]
+struct WatchQuery {
+    /// The row filter: `all`, `issues`, `ai` or `errors`.
+    f: Option<String>,
+}
+
+/// The live audit on its own screen, for a crawl over a finished audit; polled every 2 s while
+/// the crawl runs. With nothing running or just finished, the results.
+async fn watch(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path(site): Path<String>,
+    Query(q): Query<WatchQuery>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    let filter = live_audit::filter_from(q.f.as_deref());
+    let Some(view) = live_view(&state, &site, user.account.plan, filter).await? else {
+        return Ok(Redirect::to(&format!("/s/{}/audit", site.id)).into_response());
+    };
+    if hx.partial() {
+        return Ok(html(&view)?.into_response());
+    }
+    let body = AuditBody {
+        base: format!("/s/{}", site.id),
+        domain: site.domain.clone(),
+        done: None,
+        live: None,
+        watch: Some(view),
+        failure: None,
+        demo: false,
+    };
+    let shell = Shell::load(&state, &user, Some(&site), Screen::Audit).await?;
+    Ok(html(&AuditPage { shell, body })?.into_response())
+}
+
+/// The live audit of the site's running crawl, or of the one that finished in the last
+/// [`WATCH_AFTER_DONE`]; `None` otherwise.
+async fn live_view(
+    state: &AppState,
+    site: &Site,
+    plan: Plan,
+    filter: LiveFilter,
+) -> Result<Option<LiveAudit>, AppError> {
+    let pool = &state.pool;
+    let now = OffsetDateTime::now_utc();
+    let crawl = match crawls::active(pool, site.id).await? {
+        Some(c) => c,
+        None => match crawls::history(pool, site.id, 1).await?.into_iter().next() {
+            Some(c)
+                if c.status == CrawlStatus::Done
+                    && c.finished_at.is_some_and(|f| now - f < WATCH_AFTER_DONE) =>
+            {
+                c
+            }
+            _ => return Ok(None),
+        },
+    };
+    let rows = crawls::newest_live_rows(pool, crawl.id, filter, live_audit::ROWS_SHOWN).await?;
+    let previous = if crawl.status == CrawlStatus::Done {
+        crawls::previous_done(pool, site.id, crawl.id).await?
+    } else {
+        crawls::latest_done(pool, site.id).await?
+    };
+    let max_pages = PlanLimits::for_plan(plan)
+        .max_pages
+        .unwrap_or(CrawlLimits::default().max_pages);
+    let icon = sites::icon_version(pool, site.id)
+        .await?
+        .map(|v| format!("/s/{}/icon?v={v}", site.id));
+    Ok(Some(LiveAudit::build(LiveInput {
+        base: format!("/s/{}", site.id),
+        domain: site.domain.clone(),
+        icon,
+        crawl: &crawl,
+        rows: &rows,
+        filter,
+        previous: previous.as_ref(),
+        max_pages,
+        now,
+    })))
+}
+
+async fn load_body(state: &AppState, site: &Site, plan: Plan) -> Result<AuditBody, AppError> {
     let pool = &state.pool;
     let latest = crawls::latest_done(pool, site.id).await?;
     let active = crawls::active(pool, site.id).await?;
@@ -332,6 +439,7 @@ async fn load_body(state: &AppState, site: &Site) -> Result<AuditBody, AppError>
         domain: site.domain.clone(),
         done: None,
         live: None,
+        watch: None,
         failure: None,
         demo: false,
     };
@@ -344,7 +452,7 @@ async fn load_body(state: &AppState, site: &Site) -> Result<AuditBody, AppError>
             body.live = Some(AuditLive::new(site, true, active.as_ref(), None));
         }
         None if active.is_some() => {
-            body.live = Some(AuditLive::new(site, false, active.as_ref(), None));
+            body.watch = live_view(state, site, plan, LiveFilter::All).await?;
         }
         None => {
             body.failure = newest

@@ -4,7 +4,7 @@
 
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
-use codoseo_core::output::{LiveRow, SiteFault, StopReason, robots_failure};
+use codoseo_core::output::{LiveProbe, LiveRow, SiteFault, StopReason, robots_failure};
 use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::snapshot::Snapshot;
 use serde::{Deserialize, Serialize};
@@ -137,17 +137,22 @@ impl CrawlQueue {
     /// old worker, since the `WHERE status = 'running'` guard then matches nothing.
     ///
     /// Takes a plain `Progress` or a `LiveProgress` with the newest pages; both are stored
-    /// as the same flat JSON.
-    pub async fn heartbeat(&self, id: Uuid, progress: &impl Serialize) -> Result<(), sqlx::Error> {
+    /// as the same flat JSON. False when the crawl is no longer running (requeued, or stopped
+    /// by its owner), so the worker can drop it.
+    pub async fn heartbeat(
+        &self,
+        id: Uuid,
+        progress: &impl Serialize,
+    ) -> Result<bool, sqlx::Error> {
         let progress = serde_json::to_value(progress).expect("progress always serializes");
-        sqlx::query(
+        let done = sqlx::query(
             "UPDATE crawls SET heartbeat_at = now(), progress = $2 WHERE id = $1 AND status = 'running'",
         )
         .bind(id)
         .bind(progress)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(done.rows_affected() > 0)
     }
 
     /// Adds pages to a still-`running` crawl's live rows. A row already there (a late write
@@ -170,6 +175,27 @@ impl CrawlQueue {
         Ok(())
     }
 
+    /// Sets the AI bot fetches on a still-`running` crawl's live row for `url`.
+    pub async fn set_live_probes(
+        &self,
+        id: Uuid,
+        url: &str,
+        probes: &[LiveProbe],
+    ) -> Result<(), sqlx::Error> {
+        let probes = serde_json::to_value(probes).expect("live probes always serialize");
+        sqlx::query(
+            "UPDATE crawl_live_rows l SET row = jsonb_set(l.row, '{probes}', $3) \
+             FROM crawls c WHERE c.id = l.crawl_id AND c.status = 'running' \
+               AND l.crawl_id = $1 AND l.row->>'url' = $2",
+        )
+        .bind(id)
+        .bind(url)
+        .bind(probes)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Drops a crawl's live rows, so a crawl claimed again after a dead worker starts over.
     pub async fn clear_live_rows(&self, id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM crawl_live_rows WHERE crawl_id = $1")
@@ -181,12 +207,15 @@ impl CrawlQueue {
 
     /// A liveness heartbeat: like [`CrawlQueue::heartbeat`] but it keeps the stored progress, so
     /// a crawl stuck on one slow page, or past its pages in the probes, doesn't read as zero.
-    pub async fn touch(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE crawls SET heartbeat_at = now() WHERE id = $1 AND status = 'running'")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+    /// False, like [`CrawlQueue::heartbeat`], when the crawl is no longer running.
+    pub async fn touch(&self, id: Uuid) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(
+            "UPDATE crawls SET heartbeat_at = now() WHERE id = $1 AND status = 'running'",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
     }
 
     /// Moves `running` crawls whose heartbeat is older than `older_than` back to `queued` (the

@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
-use codoseo_core::output::{BLOCKED_REASON_PREFIX, StopReason, UNREACHABLE_REASON_PREFIX};
+use codoseo_core::output::{
+    BLOCKED_REASON_PREFIX, LivePhase, LiveProbe, StopReason, UNREACHABLE_REASON_PREFIX,
+};
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_crawler::crawl::{Live, crawl_watched};
 use codoseo_diff::{diff, key_pages};
@@ -24,12 +26,16 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use url::Url;
 
-use crate::worker::live::{LiveTracker, LiveWrite};
+use crate::worker::live::{LiveTracker, LiveWrite, live_probes};
 use crate::worker::probes::{self, ProbeSettings};
 use crate::worker::site_policy::{self, SitePolicyRun};
 
 /// How often a crawl's progress callback is allowed to write a heartbeat.
 const HEARTBEAT_THROTTLE: Duration = Duration::from_secs(2);
+/// Why a crawl was dropped: it stopped running under the worker, as when its owner started
+/// another. The row already says what happened, so nothing more is written.
+const STOPPED: &str = "the crawl was stopped while it ran";
+
 /// A liveness heartbeat is forced at least this often, even if progress is silent.
 const LIVENESS_INTERVAL: Duration = Duration::from_secs(15);
 /// How long `worker_loop` waits for an in-flight crawl to finish on shutdown before abandoning
@@ -359,8 +365,9 @@ async fn run_one_crawl(
         // The cloud refuses private and internal addresses; self-hosted behaves like the CLI.
         address_policy: policy,
         user_agent: USER_AGENT.to_owned(),
-        // A no-signup audit keeps no AI access report, so it asks for nothing beyond pages.
-        site_signals: claimed.trigger != CrawlTrigger::Quick,
+        // Every crawl reads the site files AI products read (llms.txt, the Markdown version,
+        // tdmrep): the no-signup audit has a GEO score too.
+        site_signals: true,
         // Must-work and starred pages are fetched even when no link leads there.
         extra_seeds,
     };
@@ -372,13 +379,19 @@ async fn run_one_crawl(
         .await
         .map_err(|e| format!("could not reset the live rows: {e}"))?;
     let live = Arc::new(LiveTracker::new(site_policy.policy.thresholds()));
+    // Set when a heartbeat finds the crawl no longer running: its owner stopped it to start
+    // another, so the work is dropped instead of crawling the site twice.
+    let stopped = CancellationToken::new();
     // One writer, so the writes land in the order they were taken.
-    let (live_tx, mut live_rx) = tokio::sync::mpsc::unbounded_channel::<LiveWrite>();
+    let (live_tx, mut live_rx) = tokio::sync::mpsc::unbounded_channel::<LiveMsg>();
     let live_writer = tokio::spawn({
         let crawl_queue = crawl_queue.clone();
+        let stopped = stopped.clone();
         async move {
-            while let Some(write) = live_rx.recv().await {
-                let _ = write_live(&crawl_queue, crawl_id, &write).await;
+            while let Some(msg) = live_rx.recv().await {
+                if let Ok(false) = write_live(&crawl_queue, crawl_id, msg).await {
+                    stopped.cancel();
+                }
             }
         }
     });
@@ -398,7 +411,7 @@ async fn run_one_crawl(
             // The checked pages ride along on the same throttled write, for the live views: no
             // extra writes. A new stage goes out straight away.
             if let Some(write) = live.take(due) {
-                let _ = live_tx.send(write);
+                let _ = live_tx.send(LiveMsg::Write(write));
             }
         }
     };
@@ -410,28 +423,48 @@ async fn run_one_crawl(
     let liveness_interval = settings.liveness_interval;
     let liveness = AbortOnDrop({
         let crawl_queue = crawl_queue.clone();
+        let stopped = stopped.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(liveness_interval).await;
-                if crawl_queue.touch(crawl_id).await.is_err() {
-                    return;
+                match crawl_queue.touch(crawl_id).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        stopped.cancel();
+                        return;
+                    }
+                    Err(_) => return,
                 }
             }
         })
     });
 
-    let crawl_result = crawl_watched(cfg, on_live).await;
+    let crawl_result = tokio::select! {
+        r = crawl_watched(cfg, on_live) => r,
+        () = stopped.cancelled() => {
+            live_writer.abort();
+            return Err(STOPPED.to_owned());
+        }
+    };
+    // The synthetic probes: a few important pages fetched as the AI bots, after a monitored crawl
+    // only (never a quick audit or a failed crawl), unless the owner switched them off.
+    let probe_urls = settings.probes.probe_urls(plan, &limits);
+    let will_probe = claimed.trigger != CrawlTrigger::Quick
+        && probe_urls > 0
+        && crawl_result.as_ref().is_ok_and(|o| !o.pages.is_empty())
+        && probes_enabled(pool, claimed.site_id).await;
     if let Ok(out) = &crawl_result {
         metrics::pages_crawled(out.pages.len() as u64);
-        // The last pages, and the step to scoring, before the slower work that follows.
-        live.scoring();
+        // The last pages, and the next step, before the slower work that follows.
+        live.set_phase(if will_probe {
+            LivePhase::Bots
+        } else {
+            LivePhase::Scoring
+        });
         if let Some(write) = live.take(true) {
-            let _ = live_tx.send(write);
+            let _ = live_tx.send(LiveMsg::Write(write));
         }
     }
-    // Every write is out before the slower work that follows.
-    drop(live_tx);
-    let _ = live_writer.await;
 
     let mut out = crawl_result.map_err(|e| format!("could not start crawl: {e}"))?;
 
@@ -457,9 +490,10 @@ async fn run_one_crawl(
         .previous_snapshot(claimed.site_id)
         .await
         .map_err(|e| format!("could not load previous snapshot: {e}"))?;
-    // A no-signup audit has no site owner to tell: the AI access state starts with the first
-    // full crawl. The findings are drawn in `finalize`, under the intent the site has then.
-    let with_geo = claimed.trigger != CrawlTrigger::Quick;
+    // A no-signup audit has no site owner to tell: it gets a GEO score, but its AI access state
+    // starts with the first full crawl. The findings are drawn in `finalize`, under the intent
+    // the site has then.
+    let quick = claimed.trigger == CrawlTrigger::Quick;
     // The pages the user starred: key pages for the diff, important pages for AI access. Loaded
     // once, and only when either needs them.
     let starred = &site_policy.starred;
@@ -475,13 +509,19 @@ async fn run_one_crawl(
         None => Vec::new(),
     };
     changes.extend(must_work);
-    let mut geo = with_geo.then(|| {
+    let mut geo = {
         let important = important_urls(&out.pages, &out.origin, starred);
-        GeoInput::new(build_report(&out, &important))
-    });
+        let report = build_report(&out, &important);
+        Some(if quick {
+            GeoInput::score_only(report)
+        } else {
+            GeoInput::new(report)
+        })
+    };
     // llms.txt adoption outlives a crawl that did not fetch the file: it follows the newest
     // stored report that did, not merely the latest report.
     if let Some(input) = geo.as_mut()
+        && !quick
         && let Some(now) = input.report.llms_txt.as_mut()
     {
         let prev = geo::latest_llms_txt(pool, claimed.site_id)
@@ -489,23 +529,34 @@ async fn run_one_crawl(
             .map_err(|e| format!("could not load the previous llms.txt report: {e}"))?;
         now.adopted = codoseo_geo::llms::carry_adoption(prev.as_ref(), now);
     }
-    // The synthetic probes: a few important pages fetched as the AI bots, after a monitored crawl
-    // only (never a quick audit or a failed crawl), unless the owner switched them off.
-    let probe_urls = settings.probes.probe_urls(plan, &limits);
     if let Some(input) = geo.as_mut()
-        && probe_urls > 0
-        && probes_enabled(pool, claimed.site_id).await
+        && will_probe
     {
-        input.report.probes = probes::probe(
+        // Each page's results go to its live row as soon as every bot has its verdict there.
+        let tx = live_tx.clone();
+        let run = probes::probe(
             &input.report,
             &out,
             probe_urls,
             &limits,
             &settings.probes,
             policy,
-        )
-        .await;
+            move |url, probed| {
+                let _ = tx.send(LiveMsg::Probes(url.to_string(), live_probes(probed)));
+            },
+        );
+        input.report.probes = tokio::select! {
+            p = run => p,
+            () = stopped.cancelled() => return Err(STOPPED.to_owned()),
+        };
+        live.set_phase(LivePhase::Scoring);
+        if let Some(write) = live.take(true) {
+            let _ = live_tx.send(LiveMsg::Write(write));
+        }
     }
+    // Every live write is out before finalize, which ends the crawl.
+    drop(live_tx);
+    let _ = live_writer.await;
     drop(liveness);
 
     // What the policy screen and the API show for this crawl, kept in `summary.policy`.
@@ -530,14 +581,30 @@ async fn run_one_crawl(
     Ok(())
 }
 
-/// Writes the live rows first, so a view that sees the new progress finds its pages.
+/// What the live writer writes, in the order it is sent.
+enum LiveMsg {
+    Write(LiveWrite),
+    /// A page's AI bot fetches, by URL.
+    Probes(String, Vec<LiveProbe>),
+}
+
+/// Writes one message. A write's rows go first, so a view that sees the new progress finds its
+/// pages. False when the crawl is no longer running.
 async fn write_live(
     crawl_queue: &CrawlQueue,
     crawl_id: uuid::Uuid,
-    write: &LiveWrite,
-) -> Result<(), sqlx::Error> {
-    crawl_queue.add_live_rows(crawl_id, &write.rows).await?;
-    crawl_queue.heartbeat(crawl_id, &write.progress).await
+    msg: LiveMsg,
+) -> Result<bool, sqlx::Error> {
+    match msg {
+        LiveMsg::Write(write) => {
+            crawl_queue.add_live_rows(crawl_id, &write.rows).await?;
+            crawl_queue.heartbeat(crawl_id, &write.progress).await
+        }
+        LiveMsg::Probes(url, probes) => {
+            crawl_queue.set_live_probes(crawl_id, &url, &probes).await?;
+            Ok(true)
+        }
+    }
 }
 
 /// Whether the site's owner left the synthetic probes on. A database error skips them: they are

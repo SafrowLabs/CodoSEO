@@ -76,6 +76,8 @@ pub struct SiteView {
     pub id: Uuid,
     pub domain: String,
     pub initial: String,
+    /// The site's own icon, served by us, when its newest crawl found one.
+    pub icon: Option<String>,
     /// `/s/{id}`
     pub base: String,
     /// `1,284 urls` or `not crawled yet`
@@ -90,6 +92,8 @@ pub struct NavItem {
     pub count: String,
     /// The count is drawn in red (critical issues, critical changes).
     pub alert: bool,
+    /// A crawl is running: the count reads "Live" with a pulsing dot.
+    pub live: bool,
     pub active: bool,
     /// Keyboard shortcut shown in the tooltip, e.g. `G E`.
     pub keys: &'static str,
@@ -181,10 +185,14 @@ impl Shell {
             let ai_issues = codoseo_store::geo::open_counts(pool, cur.id).await?;
             let summary = latest.as_ref().and_then(Crawl::summary);
             let base = format!("/s/{}", cur.id);
+            let icon = codoseo_store::sites::icon_version(pool, cur.id)
+                .await?
+                .map(|v| format!("/s/{}/icon?v={v}", cur.id));
             current_view = Some(SiteView {
                 id: cur.id,
                 domain: cur.domain.clone(),
                 initial: initial(&cur.domain),
+                icon,
                 base: base.clone(),
                 urls_label: match &summary {
                     Some(s) => {
@@ -205,6 +213,9 @@ impl Shell {
                 summary.as_ref(),
                 changes,
                 ai_issues,
+                active
+                    .as_ref()
+                    .is_some_and(|c| c.status == codoseo_store::crawls::CrawlStatus::Running),
             ));
             crawler = Some(crawler_view(
                 &base,
@@ -355,10 +366,27 @@ fn workspace_item(
         href: href.to_owned(),
         count: String::new(),
         alert: false,
+        live: false,
         active,
         keys,
         soon: false,
         icon,
+    }
+}
+
+impl NavItem {
+    /// While a crawl runs, Site audit says so instead of its count.
+    fn crawling(self, crawling: bool) -> NavItem {
+        if crawling {
+            NavItem {
+                count: "Live".to_owned(),
+                alert: false,
+                live: true,
+                ..self
+            }
+        } else {
+            self
+        }
     }
 }
 
@@ -416,6 +444,7 @@ fn site_group(
     summary: Option<&codoseo_store::crawls::StoredSummary>,
     (changes, critical_change): (i64, bool),
     (ai_open, ai_critical): (i64, i64),
+    crawling: bool,
 ) -> NavGroup {
     let critical_checks = summary.map_or(0, |s| {
         s.counts
@@ -431,6 +460,7 @@ fn site_group(
         href,
         count,
         alert,
+        live: false,
         active,
         keys,
         soon: false,
@@ -451,7 +481,8 @@ fn site_group(
                 screen == Screen::Audit,
                 "G A",
                 "i-audit",
-            ),
+            )
+            .crawling(crawling),
             item(
                 "URL explorer",
                 format!("{base}/explorer"),

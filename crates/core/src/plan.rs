@@ -147,8 +147,8 @@ impl PlanLimits {
             probe_urls: 0,
             probe_budget: Duration::ZERO,
             probe_max_requests: 0,
-            // No site signals, so no llms.txt.
-            llms_link_checks: 0,
+            // A few of llms.txt's links, for its GEO check.
+            llms_link_checks: 5,
             ai_rechecks_per_day: Some(0),
             // A no-signup audit is judged under the default policy, which lists none.
             max_must_work: Some(0),
