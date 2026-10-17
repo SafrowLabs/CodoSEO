@@ -1,8 +1,11 @@
 //! Per-page facts read off a crawl's link graph: each page's place in the crawl tree and how
 //! much of the site's internal link weight reaches it.
 
+use std::collections::HashMap;
+
 use crate::output::LinkGraph;
 use crate::page::PageRecord;
+use crate::url::url_hash;
 
 /// PageRank's damping factor: the chance a visitor follows a link rather than starting over.
 const DAMPING: f64 = 0.85;
@@ -31,7 +34,8 @@ pub fn facts(pages: &[PageRecord], links: &LinkGraph) -> GraphFacts {
 }
 
 /// Mirrors the BFS crawler's first discovery, so a parent always sits at `depth - 1`, as
-/// stored in `pages.depth`.
+/// stored in `pages.depth`. A redirect's target is recorded at the redirect's own depth and no
+/// link points at it, so it takes the parent of the redirect that led to it.
 fn parents(pages: &[PageRecord], links: &LinkGraph) -> Vec<Option<u32>> {
     let mut parent = vec![None; pages.len()];
     for e in &links.edges {
@@ -47,6 +51,33 @@ fn parents(pages: &[PageRecord], links: &LinkGraph) -> Vec<Option<u32>> {
             && fd == d - 1
         {
             *slot = Some(e.from);
+        }
+    }
+    let redirected_from: HashMap<u64, usize> = pages
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| Some((url_hash(p.redirect_target.as_ref()?), i)))
+        .collect();
+    // A few rounds, for a target whose redirect is itself the target of another one.
+    for _ in 0..4 {
+        let mut changed = false;
+        for (i, p) in pages.iter().enumerate() {
+            if parent[i].is_some() || !p.depth.is_some_and(|d| d > 0) {
+                continue;
+            }
+            let Some(&r) = redirected_from.get(&url_hash(&p.url)) else {
+                continue;
+            };
+            if r != i
+                && pages[r].depth == p.depth
+                && let Some(rp) = parent[r]
+            {
+                parent[i] = Some(rp);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
         }
     }
     parent
@@ -173,6 +204,23 @@ mod tests {
         ]);
         let f = facts(&pages, &links);
         assert_eq!(f.parent, vec![None, Some(0), Some(0), Some(2), None]);
+    }
+
+    #[test]
+    fn a_redirect_target_takes_the_parent_of_its_redirect() {
+        // Page 1 links to page 2, which redirects to page 3; the crawler records page 3 at
+        // page 2's depth with no link pointing at it.
+        let mut pages = [
+            page(0, Some(0)),
+            page(1, Some(1)),
+            page(2, Some(2)),
+            page(3, Some(2)),
+        ];
+        pages[2].status = 301;
+        pages[2].redirect_target = Some(pages[3].url.clone());
+        let links = graph(&[(0, 1, false), (1, 2, false)]);
+        let f = facts(&pages, &links);
+        assert_eq!(f.parent, vec![None, Some(0), Some(1), Some(1)]);
     }
 
     #[test]
