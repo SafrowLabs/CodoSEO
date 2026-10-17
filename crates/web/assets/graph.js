@@ -97,6 +97,8 @@
   const plural = (n, one, many = one + "s") => `${fmt(n)} ${n === 1 ? one : many}`;
   const clicks = (d) => (d === 0 ? "Start" : plural(d, "click"));
   const DEEP = 4;
+  // The smallest scale a tree zooms to by itself: card text stays readable.
+  const READABLE = 0.85;
   const STATUS = { ok: "Indexable", noindex: "Noindex", redirect: "Redirect", broken: "Broken" };
 
   // A page's short name: the last part of its path, in words.
@@ -326,9 +328,13 @@
   // contents, link(d) -> classes and width for the line into d, overlay(t, layout) after any
   // move. Children past `limit` fold into a "+ N more" card.
   function cardTree(stage, cfg) {
+    // The cards pan and zoom inside a view that starts right of `cfg.gutter`, kept for labels.
+    const view = h("div", { class: "gv-view" });
+    view.style.left = (cfg.gutter || 0) + "px";
     const layer = h("div", { class: "gv-layer" });
     const svg = d3.select(layer).append("svg").attr("class", "gv-links").attr("aria-hidden", "true");
-    stage.append(layer);
+    view.append(layer);
+    stage.append(view);
     const cards = new Map();
     const limits = new Map();
     let t = d3.zoomIdentity, layout = null, first = true;
@@ -340,9 +346,9 @@
         layer.style.transform = `translate(${t.x}px, ${t.y}px) scale(${t.k})`;
         cfg.overlay && layout && cfg.overlay(t, layout);
       });
-    const sel = d3.select(stage).call(zoom).on("dblclick.zoom", null);
+    const sel = d3.select(view).call(zoom).on("dblclick.zoom", null);
     // A plain wheel or two-finger swipe pans; pinch (or ctrl + wheel) zooms.
-    stage.addEventListener("wheel", (e) => {
+    view.addEventListener("wheel", (e) => {
       if (e.ctrlKey) return;
       e.preventDefault();
       zoom.translateBy(sel, -e.deltaX / t.k, -e.deltaY / t.k);
@@ -444,11 +450,11 @@
       return [d3.min(xs), d3.min(ys), d3.max(xs), d3.max(ys)];
     }
     // Fits the tree, zooming out no further than `min` so cards stay readable; what doesn't fit
-    // then starts at the root.
-    function fit(ms = 600, min = 0.55) {
+    // then starts at the root. Only the Fit button goes below that.
+    function fit(ms = 600, min = READABLE) {
       if (!layout) return;
       const [x0, y0, x1, y1] = bounds();
-      const W = stage.clientWidth, H = stage.clientHeight, pad = cfg.pad || [32, 32, 32, 32];
+      const W = view.clientWidth, H = view.clientHeight, pad = cfg.pad || [32, 32, 32, 32];
       const k = Math.max(min, Math.min(1, (W - pad[1] - pad[3]) / (x1 - x0), (H - pad[0] - pad[2]) / (y1 - y0)));
       const w = (x1 - x0) * k, hh = (y1 - y0) * k;
       const [rx, ry] = at(layout.root), [rw, rh] = cfg.size(layout.root);
@@ -459,11 +465,12 @@
       (ms && !reduced() ? sel.transition().duration(ms) : sel).call(zoom.transform, to);
     }
     // Brings the node into view with the way down to it from the tree's root, when that fits at a
-    // readable size; else the node alone.
-    function center(n, ms = 600) {
+    // readable size; else the node alone. `opening` keeps scale 1 with the root at the top and
+    // only slides sideways to the path when it fits across.
+    function center(n, ms = 600, opening = false) {
       const d = layout && layout.find((d) => d.data === n);
       if (!d) return;
-      const W = stage.clientWidth, H = stage.clientHeight;
+      const W = view.clientWidth, H = view.clientHeight;
       const box = (ds) => {
         const xs = [], ys = [];
         for (const e of ds) {
@@ -476,9 +483,12 @@
       const fits = ([x0, y0, x1, y1]) => Math.min(1, (W - 80) / (x1 - x0), (H - 80) / (y1 - y0));
       let b = box(d.ancestors());
       let k = fits(b), path = true;
-      if (k < 0.5) {
+      if (opening) {
+        if (b[2] - b[0] > W - 80) return;
+        k = 1;
+      } else if (k < READABLE) {
         b = box([d]);
-        k = Math.min(1, Math.max(t.k, 0.7));
+        k = Math.min(1, Math.max(t.k, READABLE));
         path = false;
       }
       // A top-down path reads from the top of the stage.
@@ -492,7 +502,7 @@
       if (!d) return false;
       const [x, y] = at(d);
       const sx = t.x + x * t.k, sy = t.y + y * t.k;
-      return sx > 0 && sy > 0 && sx < stage.clientWidth - 60 && sy < stage.clientHeight - 40;
+      return sx > 0 && sy > 0 && sx < view.clientWidth - 60 && sy < view.clientHeight - 40;
     }
     return { draw, fit, center, visible, limits, limitOf, get layout() { return layout; } };
   }
@@ -539,9 +549,10 @@
     const strip = el.querySelector('[data-role="unlinked"]');
     const ctl = (k) => el.querySelector(`[data-ctl="${k}"]`);
     const base = el.dataset.base;
-    const CW = 132, CH = 84, RH = 64, ROW = 132, LIMIT = 10;
+    const CW = 140, CH = 84, RH = 64, ROW = 132, LIMIT = 10, GUTTER = 104;
     const bands = h("div", { class: "gv-bands", "aria-hidden": "true" });
     const labels = h("div", { class: "gv-blabels", "aria-hidden": "true" });
+    labels.style.width = GUTTER + "px";
     const crumb = h("div", { class: "gv-float gv-crumb", hidden: true });
     stage.append(bands, labels, crumb);
 
@@ -572,7 +583,8 @@
       orient: "down",
       gap: [CW + 10, ROW],
       limit: LIMIT,
-      pad: [28, 24, 28, 120],
+      gutter: GUTTER,
+      pad: [28, 24, 28, 24],
       size: (d) => (d.data === site.root ? [150, RH] : [CW, d.data.more || !d.data.kids || !d.data.kids.length ? CH - 12 : CH]),
       kids: kidsOf,
       card: (n, d, card) => {
@@ -687,8 +699,9 @@
     selected = start || null;
     drawStrip(false);
     redraw();
-    tree.fit(0);
-    if (selected && !selected.orphan && !tree.visible(selected)) tree.center(selected, 0);
+    // Opens at full size, home centred at the top.
+    tree.fit(0, 1);
+    if (selected && !selected.orphan && !tree.visible(selected)) tree.center(selected, 0, true);
     showPanel();
 
     wireSearch(el, site.nodes.map((n) => n.url), (v) => findPage(site, v), (n) => select(n));

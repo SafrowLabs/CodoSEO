@@ -2161,8 +2161,9 @@ details.la-row[open] { background: var(--surface-2); }
 
 .gv-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
 .gv-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.gv-stage { position: relative; height: var(--gv-h); overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); touch-action: none; cursor: grab; user-select: none; }
-.gv-stage:active { cursor: grabbing; }
+.gv-stage { position: relative; height: var(--gv-h); overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); user-select: none; }
+.gv-view { position: absolute; top: 0; right: 0; bottom: 0; overflow: hidden; z-index: 1; touch-action: none; cursor: grab; }
+.gv-view:active { cursor: grabbing; }
 .gv-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); font-size: 13.5px; }
 .gv.is-empty .gv-panel, .gv.is-empty .gv-tools, .gv.is-empty .gv-legend, .gv.is-empty .gv-float, .gv.is-empty canvas { display: none; }
 .gv.is-empty .gv-body { grid-template-columns: minmax(0, 1fr); }
@@ -2205,14 +2206,15 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-knob { position: absolute; left: 50%; bottom: -10px; width: 20px; height: 20px; margin-left: -10px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 13px; line-height: 1; }
 .gv-card.is-sel .gv-knob { border-color: var(--ink); color: var(--ink); }
 .gv-more { justify-content: center; border-style: dashed; background: var(--surface-2); box-shadow: none; }
-.gv-more b { font-weight: 600; font-size: 13px; }
-.gv-more span { font-size: 11.5px; color: var(--muted); }
+.gv-more { gap: 2px; }
+.gv-more b { font-weight: 600; font-size: 14px; }
+.gv-more span { font-size: 12.5px; color: var(--muted); }
 /* The crawl tree's rows: one band per click, labelled at the left edge. */
 .gv-bands { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
 .gv-band { position: absolute; left: 0; right: 0; }
 .gv-band:nth-child(even) { background: var(--surface-2); }
-.gv-blabels { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
-.gv-blabel { position: absolute; left: 8px; display: flex; flex-direction: column; gap: 1px; padding: 5px 9px; border-radius: var(--r); background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(4px); }
+.gv-blabels { position: absolute; left: 0; top: 0; bottom: 0; z-index: 2; border-right: 1px solid var(--line-soft); pointer-events: none; overflow: hidden; }
+.gv-blabel { position: absolute; left: 14px; right: 8px; display: flex; flex-direction: column; gap: 1px; }
 .gv-blabel b { font-size: 13px; font-weight: 600; }
 .gv-blabel span { font-size: 12px; color: var(--muted); }
 .gv-blabel span:empty { display: none; }
