@@ -545,6 +545,7 @@ impl TestApp {
             },
             robots,
             sitemap: SitemapSummary::default(),
+            sitemap_files: Vec::new(),
             stop,
             duration_ms: 95_000,
             signals: SiteSignals {

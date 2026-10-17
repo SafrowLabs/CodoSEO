@@ -10,6 +10,8 @@ use codoseo_core::crawl::SitemapSummary;
 use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::report::{CrawlReport, CrawlSummary};
+use codoseo_core::sitemap::{LastmodStats, SitemapFile, SitemapKind};
+use codoseo_core::url::url_hash;
 use sqlx::Row;
 use support::TestDb;
 use url::Url;
@@ -18,6 +20,7 @@ use uuid::Uuid;
 use codoseo_store::crawl_queue::CrawlQueue;
 use codoseo_store::finalize::finalize;
 use codoseo_store::graph;
+use codoseo_store::sitemaps::load_tree;
 
 async fn make_site(pool: &sqlx::PgPool, domain: &str) -> Uuid {
     sqlx::query("INSERT INTO sites (domain, start_url) VALUES ($1, $2) RETURNING id")
@@ -96,6 +99,7 @@ fn empty_output(pages: Vec<PageRecord>, stop: StopReason) -> CrawlOutput {
         links: LinkGraph::default(),
         robots: None,
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop,
         duration_ms: 500,
         signals: SiteSignals::default(),
@@ -204,6 +208,109 @@ async fn finalize_round_trips_the_stop_reason_for_previous_snapshot() {
         snapshot.stop,
         StopReason::Blocked("site blocked our crawler".to_string())
     );
+}
+
+#[tokio::test]
+async fn finalize_writes_the_sitemap_tree_and_load_tree_reads_it() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "sitemaps.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "sitemaps.example").await;
+
+    // page1 is linked, page2 only in the sitemap, page3 a 404.
+    let mut pages = vec![sample_page(1), sample_page(2), sample_page(3)];
+    pages[1].depth = None;
+    pages[2].status = 404;
+    pages[2].indexability = Indexability::ClientError;
+    for p in &mut pages {
+        p.url_hash = url_hash(&p.url);
+    }
+    let sitemap_file =
+        |path: &str, kind: SitemapKind, parent: Option<u32>, urls: &[&str]| SitemapFile {
+            url: Url::parse(&format!("https://example.com{path}")).unwrap(),
+            kind: Some(kind),
+            parent,
+            failed: false,
+            listed: urls.len() as u32,
+            lastmod: LastmodStats {
+                with: 1,
+                distinct: 1,
+                min: Some("2026-01-02".to_owned()),
+                max: Some("2026-01-02".to_owned()),
+                future: 0,
+            },
+            urls: urls
+                .iter()
+                .map(|p| format!("https://example.com{p}"))
+                .collect(),
+        };
+    let mut out = empty_output(pages, StopReason::Completed);
+    out.sitemap_files = vec![
+        sitemap_file("/sitemap.xml", SitemapKind::Index, None, &[]),
+        sitemap_file(
+            "/pages.xml",
+            SitemapKind::UrlSet,
+            Some(0),
+            &["/page1", "/page2", "/page3", "/page4"],
+        ),
+    ];
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+        None,
+    )
+    .await
+    .expect("finalize");
+
+    let tree = load_tree(&db.pool, crawl_id)
+        .await
+        .expect("query")
+        .expect("a tree");
+    assert_eq!(tree.files.len(), 2);
+    let pages = &tree.files[1];
+    assert_eq!(pages.url, "https://example.com/pages.xml");
+    assert_eq!(
+        (pages.kind, pages.parent),
+        (Some(SitemapKind::UrlSet), Some(0))
+    );
+    assert_eq!(pages.listed, 4);
+    assert_eq!(pages.lastmod.min.as_deref(), Some("2026-01-02"));
+    let b = &pages.buckets;
+    assert_eq!(
+        (b.ok, b.orphan, b.broken, b.not_crawled),
+        (1, 1, 1, 1),
+        "{b:?}"
+    );
+    assert_eq!(pages.samples.orphan, ["https://example.com/page2"]);
+    assert_eq!(pages.samples.not_crawled, ["https://example.com/page4"]);
+    assert_eq!(tree.files[0].buckets, pages.buckets);
+
+    // The stored JSON has the documented shape.
+    let raw: serde_json::Value =
+        sqlx::query_scalar("SELECT sitemap_tree FROM site_files WHERE crawl_id = $1")
+            .bind(crawl_id)
+            .fetch_one(&db.pool)
+            .await
+            .expect("raw tree");
+    assert_eq!(raw["files"][0]["kind"], "index");
+    assert_eq!(raw["files"][1]["buckets"]["broken"], 1);
+    assert_eq!(raw["files"][1]["lastmod"]["with"], 1);
+
+    // No row, or a row from before the tree was kept: no tree.
+    assert_eq!(
+        load_tree(&db.pool, Uuid::new_v4()).await.expect("query"),
+        None
+    );
+    sqlx::query("UPDATE site_files SET sitemap_tree = NULL WHERE crawl_id = $1")
+        .bind(crawl_id)
+        .execute(&db.pool)
+        .await
+        .expect("clear tree");
+    assert_eq!(load_tree(&db.pool, crawl_id).await.expect("query"), None);
 }
 
 #[tokio::test]

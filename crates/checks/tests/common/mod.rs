@@ -103,6 +103,7 @@ pub fn out(pages: Vec<PageRecord>, edges: &[(u32, u32)]) -> CrawlOutput {
             complete: true,
             ..SitemapSummary::default()
         },
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 1_000,
         signals: SiteSignals::default(),

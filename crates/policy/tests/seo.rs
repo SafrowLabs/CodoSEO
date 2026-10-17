@@ -583,6 +583,7 @@ fn crawl(pages: Vec<PageRecord>) -> (CrawlOutput, CrawlReport) {
         links: LinkGraph::default(),
         robots: None,
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 1,
         signals: SiteSignals::default(),

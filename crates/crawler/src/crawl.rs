@@ -14,6 +14,7 @@ use codoseo_core::output::{
     CrawlOutput, Edge, LinkGraph, LiveFiles, LivePhase, Progress, SiteSignals, StopReason,
 };
 use codoseo_core::page::PageRecord;
+use codoseo_core::sitemap::SitemapFile;
 use codoseo_core::url::{normalize, url_hash};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -125,6 +126,7 @@ pub async fn crawl_shared(
             links: LinkGraph::default(),
             robots: None,
             sitemap: SitemapSummary::default(),
+            sitemap_files: Vec::new(),
             stop: StopReason::TimeLimit,
             duration_ms: elapsed_ms(started),
             signals: SiteSignals::default(),
@@ -137,6 +139,7 @@ pub async fn crawl_shared(
         robots,
         sitemap_urls,
         sitemap,
+        sitemap_files,
         mut signals,
         stop,
         mut files,
@@ -212,7 +215,7 @@ pub async fn crawl_shared(
         };
         check_links(llms, &run.pages, check).await;
     }
-    Ok(run.finish(origin, robots, sitemap, signals))
+    Ok(run.finish(origin, robots, sitemap, sitemap_files, signals))
 }
 
 /// Fetches `cfg.start_url` once, without reading robots.txt, and returns the record of
@@ -589,6 +592,7 @@ impl Run {
         origin: Url,
         robots: Option<RobotsFile>,
         sitemap: SitemapSummary,
+        sitemap_files: Vec<SitemapFile>,
         signals: SiteSignals,
     ) -> CrawlOutput {
         let stop = match self.stop {
@@ -625,6 +629,7 @@ impl Run {
             links: LinkGraph { edges, anchors },
             robots,
             sitemap,
+            sitemap_files,
             stop,
             duration_ms: elapsed_ms(self.started),
             signals,

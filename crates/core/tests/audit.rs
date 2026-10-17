@@ -17,6 +17,7 @@ fn output() -> CrawlOutput {
         links: LinkGraph::default(),
         robots: None,
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 1500,
         signals: SiteSignals::default(),

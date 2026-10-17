@@ -9,6 +9,7 @@ pub mod output;
 pub mod page;
 pub mod plan;
 pub mod report;
+pub mod sitemap;
 pub mod snapshot;
 pub mod url;
 

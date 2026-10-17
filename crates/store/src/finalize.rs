@@ -11,6 +11,7 @@ use codoseo_core::change::Change;
 use codoseo_core::output::CrawlOutput;
 use codoseo_core::page::{AiMeta, Indexability, PageRecord};
 use codoseo_core::report::CrawlReport;
+use codoseo_core::sitemap::SitemapTree;
 use codoseo_policy::PolicyReport;
 use serde::Serialize;
 use serde_json::json;
@@ -245,9 +246,11 @@ async fn insert_site_files(
         ),
         None => (None, None, None),
     };
+    // The sitemaps as a tree, each file's URLs classified against the pages (see `sitemaps`).
+    let tree = SitemapTree::build(&out.sitemap_files, &out.pages);
     sqlx::query(
         "INSERT INTO site_files (crawl_id, site_id, robots_status, robots_body, robots_hash, \
-         sitemap_url_count, sitemap_hash) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+         sitemap_url_count, sitemap_hash, sitemap_tree) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(crawl_id)
     .bind(site_id)
@@ -256,6 +259,7 @@ async fn insert_site_files(
     .bind(robots_hash)
     .bind(out.sitemap.url_count as i32)
     .bind(hash::to_db(out.sitemap.hash))
+    .bind(sqlx::types::Json(&tree))
     .execute(&mut **tx)
     .await?;
     Ok(())
