@@ -21,7 +21,7 @@
 //! an [`LlmsTxtReport`]. Whether a site has adopted llms.txt carries over from the previous
 //! report ([`carry_adoption`]): only a site that served one before can lose it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use codoseo_core::output::LlmsTxtFetch;
 use codoseo_core::url::normalize;
@@ -50,6 +50,10 @@ pub const MAX_TITLE: usize = 200;
 pub const MAX_DETAIL: usize = 400;
 /// Failing link URLs a report keeps.
 const MAX_FAILING_URLS: usize = 10;
+/// Links an [`LlmsTree`] keeps, across all its sections.
+pub const MAX_TREE_LINKS: usize = 500;
+/// Sections an [`LlmsTree`] keeps.
+pub const MAX_TREE_SECTIONS: usize = 100;
 
 /// One Markdown link `[name](url)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,6 +451,65 @@ pub struct LlmsTxtReport {
     pub checks: Vec<LlmsCheck>,
     #[serde(default)]
     pub link_summary: LinkSummary,
+    /// The file's outline with each link's status, for the site graph. `None` unless `state` is
+    /// `Available` (and in older reports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<LlmsTree>,
+}
+
+/// An llms.txt as an outline: its H1, summary and H2 sections with their file-list links.
+/// Capped at [`MAX_TREE_SECTIONS`] sections and [`MAX_TREE_LINKS`] links.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmsTree {
+    /// The H1, at most [`MAX_TITLE`] characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The `>` summary, at most [`MAX_DETAIL`] characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// Size of the whole response.
+    #[serde(default)]
+    pub bytes: u64,
+    /// Characters of the body read.
+    #[serde(default)]
+    pub chars: u32,
+    #[serde(default)]
+    pub sections: Vec<LlmsTreeSection>,
+    /// File-list links left out past the caps, theirs and those of sections left out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub more_links: u32,
+    /// Sections left out past [`MAX_TREE_SECTIONS`].
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub more_sections: u32,
+}
+
+/// One H2 section of an [`LlmsTree`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmsTreeSection {
+    /// At most [`MAX_TITLE`] characters.
+    pub title: String,
+    /// The `## Optional` section: links agents may skip.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+    #[serde(default)]
+    pub links: Vec<LlmsTreeLink>,
+}
+
+/// One file-list link of an [`LlmsTree`], with what checking it gave.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmsTreeLink {
+    /// At most [`MAX_TITLE`] characters.
+    pub name: String,
+    /// As written in the file, capped like every stored URL.
+    pub url: String,
+    /// The status the link check got; 0 when it got no response; `None` when the link was not
+    /// checked (past the check limit, on another origin, not http(s)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl LlmsTxtReport {
@@ -562,6 +625,7 @@ pub fn assess(fetch: &LlmsTxtFetch, prev_adopted: bool) -> LlmsTxtReport {
         optional_section: false,
         checks: Vec::new(),
         link_summary: LinkSummary::default(),
+        tree: None,
     };
     if state != LlmsState::Available {
         return report;
@@ -575,7 +639,72 @@ pub fn assess(fetch: &LlmsTxtFetch, prev_adopted: bool) -> LlmsTxtReport {
     for c in &mut report.checks {
         c.detail = clip(&c.detail, MAX_DETAIL);
     }
+    report.tree = Some(tree(fetch, &doc));
     report
+}
+
+/// The outline of `doc` with each link's status from `fetch.links`, matched the way the crawler
+/// checked them: resolved against the file's final URL and normalized. Without a final URL
+/// (older fetches) links are matched as written.
+pub fn tree(fetch: &LlmsTxtFetch, doc: &LlmsDoc) -> LlmsTree {
+    let base = fetch
+        .final_url
+        .as_deref()
+        .and_then(|u| url::Url::parse(u).ok());
+    let statuses: HashMap<&str, u16> = fetch
+        .links
+        .iter()
+        .map(|l| (l.url.as_str(), l.status.unwrap_or(0)))
+        .collect();
+    let status_of = |href: &str| -> Option<u16> {
+        match &base {
+            Some(base) => {
+                let url = normalize(base, href)?;
+                statuses.get(url.as_str()).copied()
+            }
+            None => statuses.get(href).copied(),
+        }
+    };
+    let mut out = LlmsTree {
+        title: doc.title.as_deref().map(|t| clip(t, MAX_TITLE)),
+        summary: doc.summary.as_deref().map(|s| clip(s, MAX_DETAIL)),
+        bytes: fetch.bytes,
+        chars: u32::try_from(doc.chars).unwrap_or(u32::MAX),
+        ..LlmsTree::default()
+    };
+    let mut kept = 0usize;
+    for (i, section) in doc.sections.iter().enumerate() {
+        if i >= MAX_TREE_SECTIONS {
+            out.more_sections = out.more_sections.saturating_add(1);
+            out.more_links = out.more_links.saturating_add(count(section.links.len()));
+            continue;
+        }
+        let room = MAX_TREE_LINKS - kept;
+        let links: Vec<LlmsTreeLink> = section
+            .links
+            .iter()
+            .take(room)
+            .map(|l| LlmsTreeLink {
+                name: clip(&l.name, MAX_TITLE),
+                url: crate::probe::cap_url(&l.url),
+                status: status_of(&l.url),
+            })
+            .collect();
+        kept += links.len();
+        out.more_links = out
+            .more_links
+            .saturating_add(count(section.links.len() - links.len()));
+        out.sections.push(LlmsTreeSection {
+            title: clip(&section.title, MAX_TITLE),
+            optional: section.title.eq_ignore_ascii_case("optional"),
+            links,
+        });
+    }
+    out
+}
+
+fn count(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 /// `text` cut to `max` characters, the last one an ellipsis when it was longer.
