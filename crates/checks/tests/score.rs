@@ -100,3 +100,19 @@ proptest! {
         prop_assert!(s <= 100);
     }
 }
+
+#[test]
+fn a_page_gives_back_its_share_or_the_whole_cost_of_a_check_only_it_fails() {
+    use codoseo_checks::page_points;
+    use codoseo_core::check::IssueBits;
+    let mut page = IssueBits::default();
+    page.set_check(CheckId::TitleMissing);
+    // Only this page fails it: the whole warning cost of 5 x (0.25 + 0.75 / 4).
+    let alone = [(CheckId::TitleMissing, 1)];
+    assert!((page_points(&alone, 4, page) - 5.0 * (0.25 + 0.75 / 4.0)).abs() < 1e-9);
+    // Two pages fail it: fixing this one gives back one page's share.
+    let shared = [(CheckId::TitleMissing, 2)];
+    assert!((page_points(&shared, 4, page) - 5.0 * 0.75 / 4.0).abs() < 1e-9);
+    // A clean page costs nothing.
+    assert_eq!(page_points(&shared, 4, IssueBits::default()), 0.0);
+}

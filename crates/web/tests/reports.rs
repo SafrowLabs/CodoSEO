@@ -287,18 +287,17 @@ async fn audit_shows_first_crawl_progress() {
     .await
     .unwrap();
 
-    // Queued: skeleton KPIs and a polling live line.
+    // Queued: the live audit, waiting for a crawler and polling itself.
     let body = app
         .get(&format!("/s/{}/audit", site.id), Some(&cookie))
         .await
         .body;
-    assert!(body.contains("skel"), "{body}");
+    assert!(body.contains("Waiting for a free crawler"), "{body}");
     assert!(
-        body.contains(&format!(r#"hx-get="/s/{}/audit/live""#, site.id)),
+        body.contains(&format!(r#"hx-get="/s/{}/audit/watch?f=all""#, site.id)),
         "{body}"
     );
     assert!(body.contains("data-quiet"), "{body}");
-    assert!(body.contains("queued"), "{body}");
 
     // Running with progress: the live fragment shows the counters and the newest pages,
     // newest first, and asks for what is new since the newest one on the next poll.
@@ -929,4 +928,105 @@ async fn report_queries() {
         .await
         .unwrap();
     assert_eq!(capped.len(), 3);
+}
+
+#[tokio::test]
+async fn the_live_audit_lists_checked_pages_with_their_tags_and_hands_over_when_done() {
+    let (app, _, cookie, site) = setup().await;
+    let crawl_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO crawls (site_id, domain, trigger, priority, status, started_at, worker_id, progress) \
+         VALUES ($1, $2, 'first', 1, 'running', now(), 'w', $3) RETURNING id",
+    )
+    .bind(site.id)
+    .bind(DOMAIN)
+    .bind(serde_json::json!({
+        "pages_done": 2, "queued": 8, "failures": 0, "depth": 1, "elapsed_ms": 9_000,
+        "errors": 1, "phase": "pages",
+        "files": {"robots": 200, "sitemap_urls": 40, "llms_txt": 404},
+        "seo_estimate": 91,
+        "tally": {"checks": [["title_missing", 1]], "with_issues": 1, "ai_blocked": 0,
+                  "ai_judged": 1, "response_ms_total": 240, "answered": 2},
+    }))
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    for (n, status, path, issues) in [(1, 200, "/", 1u64 << 12), (2, 404, "/gone", 0)] {
+        let row = serde_json::json!({
+            "n": n, "url": format!("https://{DOMAIN}{path}"), "status": status,
+            "response_ms": 120, "indexability": if status == 200 { "indexable" } else { "client_error" },
+            "issues": issues, "ai_blocked": 0, "ai_of": 10,
+        });
+        sqlx::query("INSERT INTO crawl_live_rows (crawl_id, n, row) VALUES ($1, $2, $3)")
+            .bind(crawl_id)
+            .bind(n)
+            .bind(row)
+            .execute(app.pool())
+            .await
+            .unwrap();
+    }
+
+    let watch = format!("/s/{}/audit/watch", site.id);
+    let res = app.get(&watch, Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(res.body.contains("<html"), "a full page on its own screen");
+    for part in [
+        "Checking pages",
+        "2 / 40",
+        "40 URLs",
+        "/robots.txt",
+        "AI rules read",
+        ">/gone<",
+        "Indexable</b> · 404",
+        "AI can reach</b> · 10/10",
+        "Issues so far",
+        "91",
+    ] {
+        assert!(res.body.contains(part), "{part}: {}", res.body);
+    }
+    let fragment = app.get_hx(&watch, Some(&cookie)).await.body;
+    assert!(
+        !fragment.contains('—'),
+        "no em dash in the live audit: {fragment}"
+    );
+
+    // A filter keeps itself on the next poll, and lists only the matching pages.
+    let res = app
+        .get_hx(&format!("{watch}?f=errors"), Some(&cookie))
+        .await;
+    assert!(!res.body.contains("<html"));
+    assert!(
+        res.body.contains(&format!(r#"hx-get="{watch}?f=errors""#)),
+        "{}",
+        res.body
+    );
+    assert!(
+        res.body.contains(">/gone<") && !res.body.contains(">/<"),
+        "{}",
+        res.body
+    );
+
+    // Done: final scores, then the results in its place.
+    app.finalize_crawl(
+        crawl_id,
+        fixture_pages(),
+        Vec::new(),
+        codoseo_core::output::StopReason::Completed,
+    )
+    .await;
+    let res = app.get_hx(&watch, Some(&cookie)).await;
+    assert!(res.body.contains("Scores final"), "{}", res.body);
+    assert!(
+        !res.body.contains("every 2s"),
+        "a finished crawl stops polling"
+    );
+    assert!(res.body.contains(r##"hx-target="#audit-body""##));
+
+    // Long after, the screen is just the results.
+    sqlx::query("UPDATE crawls SET finished_at = now() - interval '1 hour' WHERE id = $1")
+        .bind(crawl_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let res = app.get(&watch, Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
 }

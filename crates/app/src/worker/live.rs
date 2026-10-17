@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use codoseo_checks::{Thresholds, health_score, page_issues_with};
 use codoseo_core::check::CheckId;
 use codoseo_core::output::{
-    LiveFiles, LivePhase, LiveProbe, LiveProgress, LiveRow, Progress, RECENT_PAGES, RecentPage,
+    LiveFiles, LivePhase, LiveProbe, LiveProgress, LiveRow, LiveTally, Progress, RECENT_PAGES,
+    RecentPage,
 };
 use codoseo_core::page::{Indexability, PageRecord};
 use codoseo_crawler::crawl::Live;
@@ -34,6 +35,10 @@ pub struct LiveTracker {
 #[derive(Default)]
 struct State {
     rows: Vec<LiveRow>,
+    /// Pages failing each check bit, over `rows`.
+    affected: Vec<u32>,
+    errors: u32,
+    tally: LiveTally,
     /// `rows[..written]` went out with an earlier write.
     written: usize,
     /// The robots.txt the AI verdicts are read from, parsed once from the first page's view.
@@ -77,6 +82,7 @@ impl LiveTracker {
         let from = st.rows.len();
         for (i, page) in live.pages.iter().enumerate().skip(from) {
             let row = self.row(i, page, st.robots.as_ref().and_then(Option::as_ref));
+            st.count(&row);
             st.rows.push(row);
         }
     }
@@ -97,9 +103,18 @@ impl LiveTracker {
         let rows = st.rows[st.written..].to_vec();
         st.written = st.rows.len();
         st.written_phase = Some(st.phase);
+        let checks: Vec<(CheckId, u32)> = CheckId::ALL
+            .into_iter()
+            .filter_map(|id| {
+                let n = st.affected.get(usize::from(id.bit())).copied().unwrap_or(0);
+                (n > 0).then_some((id, n))
+            })
+            .collect();
+        let seo_estimate =
+            (!st.rows.is_empty()).then(|| health_score(&checks, st.rows.len() as u32));
         let live = LiveProgress {
             progress,
-            errors: st.rows.iter().filter(|r| is_error(r)).count() as u32,
+            errors: st.errors,
             recent: st
                 .rows
                 .iter()
@@ -109,7 +124,11 @@ impl LiveTracker {
                 .collect(),
             phase: st.phase,
             files: st.files,
-            seo_estimate: seo_estimate(&st.rows),
+            seo_estimate,
+            tally: LiveTally {
+                checks,
+                ..st.tally.clone()
+            },
         };
         Some(LiveWrite {
             progress: live,
@@ -130,6 +149,35 @@ impl LiveTracker {
             ai_blocked,
             ai_of,
             probes: Vec::new(),
+        }
+    }
+}
+
+impl State {
+    /// Adds a checked page to the running totals.
+    fn count(&mut self, r: &LiveRow) {
+        if self.affected.is_empty() {
+            self.affected = vec![0; 64];
+        }
+        for bit in r.issues.iter() {
+            self.affected[usize::from(bit)] += 1;
+        }
+        if is_error(r) {
+            self.errors += 1;
+        }
+        let t = &mut self.tally;
+        if r.issues.iter().next().is_some() {
+            t.with_issues += 1;
+        }
+        if r.ai_of > 0 {
+            t.ai_judged += 1;
+            if r.ai_blocked != 0 {
+                t.ai_blocked += 1;
+            }
+        }
+        if r.status > 0 {
+            t.answered += 1;
+            t.response_ms_total += u64::from(r.response_ms);
         }
     }
 }
@@ -200,25 +248,6 @@ fn recent(r: &LiveRow) -> RecentPage {
         error: r.error,
         robots: r.indexability == Indexability::BlockedByRobots,
     }
-}
-
-/// The SEO score of the rows so far, from their page checks alone.
-fn seo_estimate(rows: &[LiveRow]) -> Option<u8> {
-    if rows.is_empty() {
-        return None;
-    }
-    let mut affected = [0u32; 64];
-    for r in rows {
-        for bit in r.issues.iter() {
-            affected[usize::from(bit)] += 1;
-        }
-    }
-    let counts: Vec<(CheckId, u32)> = CheckId::ALL
-        .into_iter()
-        .map(|id| (id, affected[usize::from(id.bit())]))
-        .filter(|&(_, n)| n > 0)
-        .collect();
-    Some(health_score(&counts, rows.len() as u32))
 }
 
 #[cfg(test)]
@@ -306,6 +335,24 @@ mod tests {
         // A bare page fails page checks (no title, no H1...), so the estimate is below 100.
         assert!(w.rows[0].issues.iter().next().is_some());
         assert!(w.progress.seo_estimate.unwrap() < 100);
+        // The totals cover every page: both fail page checks, one answered with an error.
+        let tally = &w.progress.tally;
+        assert_eq!(
+            (
+                tally.with_issues,
+                tally.answered,
+                tally.ai_judged,
+                tally.ai_blocked
+            ),
+            (2, 2, 2, 0)
+        );
+        assert_eq!(tally.response_ms_total, 240);
+        assert!(
+            tally
+                .checks
+                .iter()
+                .any(|&(id, n)| id == CheckId::TitleMissing && n == 1)
+        );
         // Written rows don't go out again.
         pages.push(page("/a", 200));
         t.observe(&view(&pages, Some(&file), LivePhase::Pages));

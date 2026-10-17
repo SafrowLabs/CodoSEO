@@ -1,6 +1,6 @@
 //! The 0-100 health score, and what fixing one check would give back.
 
-use codoseo_core::check::{CheckId, Severity};
+use codoseo_core::check::{CheckId, IssueBits, Severity};
 
 use crate::registry::{Scope, def};
 
@@ -56,4 +56,24 @@ pub fn points_regained(counts: &[(CheckId, u32)], pages: u32) -> Vec<(CheckId, f
             (id, raw_score(&rest, pages) - now)
         })
         .collect()
+}
+
+/// The score points one page's failures cost, among `counts` over `pages`: the unrounded score
+/// with the page's checks passing minus the score as it is. A check only that page fails gives
+/// back its whole cost, the quarter-cap floor included; one failing elsewhere too gives back the
+/// page's share.
+pub fn page_points(counts: &[(CheckId, u32)], pages: u32, page: IssueBits) -> f64 {
+    let now = raw_score(counts, pages);
+    let without: Vec<(CheckId, u32)> = counts
+        .iter()
+        .filter_map(|&(id, n)| {
+            let n = if page.has_check(id) {
+                n.saturating_sub(1)
+            } else {
+                n
+            };
+            (n > 0).then_some((id, n))
+        })
+        .collect();
+    raw_score(&without, pages) - now
 }

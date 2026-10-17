@@ -246,6 +246,7 @@ pub fn demo(now: OffsetDateTime) -> Result<DemoPage, AppError> {
             domain: DEMO_DOMAIN.to_owned(),
             done: Some(done),
             live: None,
+            watch: None,
             failure: None,
             demo: true,
         },

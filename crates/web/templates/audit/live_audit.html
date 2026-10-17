@@ -1,0 +1,102 @@
+<div id="live-audit" class="la" role="region" aria-label="Live audit"{% if running %} hx-get="{{ poll }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML" data-quiet{% endif %}>
+  <div class="page-head au-head">
+    <div class="au-title">
+      <span class="au-domain">{{ domain }}</span>
+      <div class="au-title-row">
+        <h1>Site audit</h1>
+        {% if running %}<span class="la-badge"><i class="la-dot" aria-hidden="true"></i>Live · crawl #{{ number }}</span>{% else %}<span class="la-badge is-done">Crawl #{{ number }} finished</span>{% endif %}
+      </div>
+      <div class="au-meta">{{ meta }}</div>
+    </div>
+    <span class="grow"></span>
+    {% if running %}
+    <span class="la-signal" role="status" aria-live="polite"><i class="la-dot" aria-hidden="true"></i><span class="la-signal-text">{{ signal }}</span><b class="num">{{ count }}</b><span class="la-bar" aria-hidden="true"><span style="width:{{ bar }}%"></span></span><span class="mono">{{ elapsed }}</span></span>
+    {% else %}
+    <span class="la-signal is-done" role="status"><i class="sdot is-ok" aria-hidden="true"></i><span><b>Scores final</b> · {{ done_line }} · opening results…</span></span>
+    <a class="btn btn-primary" href="{{ base }}/audit">Open full results</a>
+    <div hidden hx-get="{{ base }}/audit" hx-trigger="load delay:3s" hx-target="#audit-body" hx-select="#audit-body" hx-swap="outerHTML" hx-push-url="{{ base }}/audit"></div>
+    {% endif %}
+  </div>
+
+  <section class="card la-phases" aria-label="Crawl steps">
+    {% for p in phases %}<div class="la-ph {{ p.class }}"><span class="la-ph-ic" aria-hidden="true">{{ p.icon }}</span><span class="la-ph-txt"><span class="la-ph-t">{{ p.title }}</span><span class="la-ph-d">{{ p.detail }}</span></span></div>{% endfor %}
+  </section>
+
+  <section class="sc-row" aria-label="{% if running %}Live scores{% else %}Scores{% endif %}">
+    {% for k in kpis %}
+    <div class="card sc sc-{{ k.key }}">
+      <span class="sc-label">{% if let Some(t) = k.tag %}<span class="atag {{ t.0 }}">{{ t.1 }}</span>{% endif %}<span>{{ k.label }}</span>{% if k.live %}<i class="la-dot is-sm" aria-hidden="true"></i>{% endif %}</span>
+      <span class="sc-val"><b>{{ k.value }}</b>{% if !k.unit.is_empty() %}<small>{{ k.unit }}</small>{% endif %}</span>
+      <span class="sc-line">{% if !k.change.is_empty() %}<span class="{{ k.change_class }}">{{ k.change }}</span>{% endif %}{% if !k.detail.is_empty() %}<span>{{ k.detail }}</span>{% endif %}</span>
+    </div>
+    {% endfor %}
+  </section>
+  <p class="la-note">{{ score_note }}</p>
+
+  <div class="la-grid">
+    <section class="card la-stream" aria-label="Files and pages as they are checked">
+      <div class="la-stream-head">
+        <div>
+          <h2>Every file and page, as it's checked</h2>
+          <p class="muted au-small">Each page gets three tags: Indexable, AI can reach and Content. Open one to see every check.</p>
+        </div>
+        <div class="la-filters" role="group" aria-label="Filter pages">
+          {% for f in filters %}<a class="la-chip{% if f.on %} is-on{% endif %}" href="{{ f.href }}" hx-get="{{ f.href }}" hx-target="#live-audit" hx-swap="outerHTML" hx-push-url="false"{% if f.on %} aria-current="true"{% endif %}>{{ f.label }} <b>{{ f.count }}</b></a>{% endfor %}
+        </div>
+      </div>
+      <div class="la-row la-row-head" aria-hidden="true"><span class="la-col-n">#</span><span>Status</span><span>File or page · checks</span><span class="la-imp">Score effect</span></div>
+      {% for f in files %}
+      <div class="la-row is-file">
+        <span class="la-col-n mono faint">file</span>
+        <span><span class="la-pill {{ f.pill }}">{{ f.status }}</span></span>
+        <span class="la-main"><span class="mono la-path">/{{ f.name }}</span><span class="la-tags"><span class="ck {{ f.tag_class }}">{{ f.tag }}</span></span></span>
+        <span class="la-imp imp-none">site file</span>
+      </div>
+      {% endfor %}
+      {% if rows.is_empty() && files.is_empty() %}
+      <p class="la-empty muted">{% if running %}The first pages show up here in a moment.{% else %}No pages match this filter.{% endif %}</p>
+      {% endif %}
+      {% for r in rows %}
+      <details class="la-row" data-live-row="{{ r.n }}">
+        <summary>
+          <span class="la-col-n mono faint">{{ r.n }}</span>
+          <span><span class="la-pill {{ r.pill }}">{{ r.status }}</span></span>
+          <span class="la-main">
+            <span class="la-line"><span class="mono la-path" title="{{ r.url }}">{{ r.path }}</span>{% if !r.ms.is_empty() %}<span class="la-ms">{{ r.ms }}</span>{% endif %}</span>
+            <span class="la-tags">{% for t in r.tags %}<span class="ck {{ t.class }}">{{ t.icon }}<b>{{ t.name }}</b> {{ t.detail }}</span>{% endfor %}</span>
+          </span>
+          <span class="la-imp {{ r.impact_class }}">{{ r.impact }}</span>
+        </summary>
+        <div class="la-det">
+          {% for g in r.groups %}
+          <div class="la-box">
+            <div class="la-box-h"><i class="sdot {{ g.dot }}" aria-hidden="true"></i>{{ g.name }}</div>
+            <ul>{% for it in g.items %}<li><i class="sdot {{ it.0 }}" aria-hidden="true"></i>{{ it.1 }}</li>{% endfor %}</ul>
+            {% if !g.bots.is_empty() %}<div class="la-bots" aria-label="Fetched as each AI bot">{% for b in g.bots %}<span class="ck {{ b.0 }}">{{ b.1 }}</span>{% endfor %}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
+      <div class="la-foot"><span>{{ foot }}</span>{% if !running %}<a class="au-link" href="{{ base }}/explorer">Open in URL explorer →</a>{% endif %}</div>
+    </section>
+
+    <aside class="la-rail">
+      <section class="card card-pad" aria-label="Issues so far">
+        <h2>{% if running %}Issues so far{% else %}Issues found{% endif %}</h2>
+        <p class="muted au-small">Ranked by the points a fix gives back.</p>
+        {% if issues.is_empty() %}<p class="la-empty muted">Nothing yet. Issues appear as pages are checked.</p>{% endif %}
+        <ul class="la-list">
+          {% for i in issues %}<li><i class="sdot {{ i.dot }}" aria-hidden="true"></i><span class="grow">{{ i.name }} <span class="muted">· {{ i.count }}</span></span><span class="atag t-seo">SEO</span><b class="up num">{{ i.points }}</b></li>{% endfor %}
+        </ul>
+      </section>
+      <section class="card card-pad" aria-label="Checked at the end">
+        <h2>Checked at the end</h2>
+        <p class="muted au-small">These need every page first.</p>
+        <ul class="la-list">
+          {% for e in end_checks %}<li><i class="sdot {{ e.dot }}" aria-hidden="true"></i><span class="grow">{{ e.name }}</span><span class="muted au-small">{{ e.result }}</span></li>{% endfor %}
+        </ul>
+      </section>
+    </aside>
+  </div>
+</div>

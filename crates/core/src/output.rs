@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::check::IssueBits;
+use crate::check::{CheckId, IssueBits};
 use crate::crawl::{RobotsFile, SitemapSummary};
 use crate::page::{FetchFailure, Indexability, PageRecord};
 
@@ -135,6 +135,32 @@ pub struct LiveProgress {
     /// need the whole crawl only count once it is over. `None` before the first page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seo_estimate: Option<u8>,
+    /// Running totals over every page checked so far.
+    #[serde(default)]
+    pub tally: LiveTally,
+}
+
+/// Running totals over every checked page of a running crawl, for the live views' cards,
+/// filters and issue list, so they need not read every page.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveTally {
+    /// Each page check failing somewhere, with the pages it fails on, in check order.
+    #[serde(default)]
+    pub checks: Vec<(CheckId, u32)>,
+    /// Pages failing at least one page check.
+    #[serde(default)]
+    pub with_issues: u32,
+    /// Pages at least one answer engine can't use.
+    #[serde(default)]
+    pub ai_blocked: u32,
+    /// Pages the answer engines were judged on (robots.txt gave verdicts).
+    #[serde(default)]
+    pub ai_judged: u32,
+    /// Response times of the pages that answered, summed, and how many answered.
+    #[serde(default)]
+    pub response_ms_total: u64,
+    #[serde(default)]
+    pub answered: u32,
 }
 
 impl LiveProgress {
@@ -162,6 +188,7 @@ impl LiveProgress {
             phase: LivePhase::Pages,
             files: LiveFiles::default(),
             seo_estimate: None,
+            tally: LiveTally::default(),
         }
     }
 }
@@ -449,6 +476,7 @@ mod tests {
                 llms_txt: None,
             },
             seo_estimate: Some(84),
+            tally: LiveTally::default(),
         };
         let json = serde_json::to_value(&live).unwrap();
         assert_eq!(json["phase"], "llms_txt");
