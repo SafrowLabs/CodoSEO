@@ -1621,3 +1621,32 @@ async fn every_kind_of_ai_finding_together_leaves_the_stored_health_score_alone(
     assert!(score(a).await.is_some());
     assert_eq!(score(a).await, score(b).await);
 }
+
+#[tokio::test]
+async fn the_ai_bot_fetches_land_on_the_live_rows_of_the_pages_they_probed() {
+    let db = TestDb::new().await;
+    let (site, waf, _seen) = waf_site().await;
+    let token = codoseo_geo::probe::candidates().0[0].token.clone();
+    let ua = codoseo_geo::probe::candidates().0[0].user_agent.clone();
+    waf.lock().unwrap().blocked = vec![Box::leak(ua.into_boxed_str())];
+    let site_id = seed_owned_site(&db, site.url("/").as_str(), "pro").await;
+
+    let crawl = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let rows = codoseo_store::crawls::live_rows(&db.pool, crawl, 0, 100)
+        .await
+        .unwrap();
+    let home = rows
+        .iter()
+        .find(|r| r.url == site.url("/").to_string())
+        .unwrap();
+    assert!(!home.probes.is_empty(), "the home page is always probed");
+    let blocked = home.probes.iter().find(|p| p.token == token).unwrap();
+    assert_eq!(blocked.outcome, "blocked_403");
+    assert_eq!(blocked.status, Some(403));
+    assert!(
+        home.probes
+            .iter()
+            .filter(|p| p.token != token)
+            .all(|p| p.outcome == "same")
+    );
+}

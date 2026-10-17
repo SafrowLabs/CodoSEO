@@ -669,6 +669,7 @@ fn live_row(n: u32) -> LiveRow {
         issues: IssueBits::default(),
         ai_blocked: 0b10,
         ai_of: 10,
+        probes: Vec::new(),
     }
 }
 

@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
-use codoseo_core::output::{BLOCKED_REASON_PREFIX, StopReason, UNREACHABLE_REASON_PREFIX};
+use codoseo_core::output::{
+    BLOCKED_REASON_PREFIX, LivePhase, LiveProbe, StopReason, UNREACHABLE_REASON_PREFIX,
+};
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_crawler::crawl::{Live, crawl_watched};
 use codoseo_diff::{diff, key_pages};
@@ -24,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use url::Url;
 
-use crate::worker::live::{LiveTracker, LiveWrite};
+use crate::worker::live::{LiveTracker, LiveWrite, live_probes};
 use crate::worker::probes::{self, ProbeSettings};
 use crate::worker::site_policy::{self, SitePolicyRun};
 
@@ -373,12 +375,12 @@ async fn run_one_crawl(
         .map_err(|e| format!("could not reset the live rows: {e}"))?;
     let live = Arc::new(LiveTracker::new(site_policy.policy.thresholds()));
     // One writer, so the writes land in the order they were taken.
-    let (live_tx, mut live_rx) = tokio::sync::mpsc::unbounded_channel::<LiveWrite>();
+    let (live_tx, mut live_rx) = tokio::sync::mpsc::unbounded_channel::<LiveMsg>();
     let live_writer = tokio::spawn({
         let crawl_queue = crawl_queue.clone();
         async move {
-            while let Some(write) = live_rx.recv().await {
-                let _ = write_live(&crawl_queue, crawl_id, &write).await;
+            while let Some(msg) = live_rx.recv().await {
+                let _ = write_live(&crawl_queue, crawl_id, msg).await;
             }
         }
     });
@@ -398,7 +400,7 @@ async fn run_one_crawl(
             // The checked pages ride along on the same throttled write, for the live views: no
             // extra writes. A new stage goes out straight away.
             if let Some(write) = live.take(due) {
-                let _ = live_tx.send(write);
+                let _ = live_tx.send(LiveMsg::Write(write));
             }
         }
     };
@@ -421,17 +423,25 @@ async fn run_one_crawl(
     });
 
     let crawl_result = crawl_watched(cfg, on_live).await;
+    // The synthetic probes: a few important pages fetched as the AI bots, after a monitored crawl
+    // only (never a quick audit or a failed crawl), unless the owner switched them off.
+    let probe_urls = settings.probes.probe_urls(plan, &limits);
+    let will_probe = claimed.trigger != CrawlTrigger::Quick
+        && probe_urls > 0
+        && crawl_result.as_ref().is_ok_and(|o| !o.pages.is_empty())
+        && probes_enabled(pool, claimed.site_id).await;
     if let Ok(out) = &crawl_result {
         metrics::pages_crawled(out.pages.len() as u64);
-        // The last pages, and the step to scoring, before the slower work that follows.
-        live.scoring();
+        // The last pages, and the next step, before the slower work that follows.
+        live.set_phase(if will_probe {
+            LivePhase::Bots
+        } else {
+            LivePhase::Scoring
+        });
         if let Some(write) = live.take(true) {
-            let _ = live_tx.send(write);
+            let _ = live_tx.send(LiveMsg::Write(write));
         }
     }
-    // Every write is out before the slower work that follows.
-    drop(live_tx);
-    let _ = live_writer.await;
 
     let mut out = crawl_result.map_err(|e| format!("could not start crawl: {e}"))?;
 
@@ -489,13 +499,11 @@ async fn run_one_crawl(
             .map_err(|e| format!("could not load the previous llms.txt report: {e}"))?;
         now.adopted = codoseo_geo::llms::carry_adoption(prev.as_ref(), now);
     }
-    // The synthetic probes: a few important pages fetched as the AI bots, after a monitored crawl
-    // only (never a quick audit or a failed crawl), unless the owner switched them off.
-    let probe_urls = settings.probes.probe_urls(plan, &limits);
     if let Some(input) = geo.as_mut()
-        && probe_urls > 0
-        && probes_enabled(pool, claimed.site_id).await
+        && will_probe
     {
+        // Each page's results go to its live row as soon as every bot has its verdict there.
+        let tx = live_tx.clone();
         input.report.probes = probes::probe(
             &input.report,
             &out,
@@ -503,9 +511,19 @@ async fn run_one_crawl(
             &limits,
             &settings.probes,
             policy,
+            move |url, probed| {
+                let _ = tx.send(LiveMsg::Probes(url.to_string(), live_probes(probed)));
+            },
         )
         .await;
+        live.set_phase(LivePhase::Scoring);
+        if let Some(write) = live.take(true) {
+            let _ = live_tx.send(LiveMsg::Write(write));
+        }
     }
+    // Every live write is out before finalize, which ends the crawl.
+    drop(live_tx);
+    let _ = live_writer.await;
     drop(liveness);
 
     // What the policy screen and the API show for this crawl, kept in `summary.policy`.
@@ -530,14 +548,27 @@ async fn run_one_crawl(
     Ok(())
 }
 
-/// Writes the live rows first, so a view that sees the new progress finds its pages.
+/// What the live writer writes, in the order it is sent.
+enum LiveMsg {
+    Write(LiveWrite),
+    /// A page's AI bot fetches, by URL.
+    Probes(String, Vec<LiveProbe>),
+}
+
+/// Writes one message. A write's rows go first, so a view that sees the new progress finds its
+/// pages.
 async fn write_live(
     crawl_queue: &CrawlQueue,
     crawl_id: uuid::Uuid,
-    write: &LiveWrite,
+    msg: LiveMsg,
 ) -> Result<(), sqlx::Error> {
-    crawl_queue.add_live_rows(crawl_id, &write.rows).await?;
-    crawl_queue.heartbeat(crawl_id, &write.progress).await
+    match msg {
+        LiveMsg::Write(write) => {
+            crawl_queue.add_live_rows(crawl_id, &write.rows).await?;
+            crawl_queue.heartbeat(crawl_id, &write.progress).await
+        }
+        LiveMsg::Probes(url, probes) => crawl_queue.set_live_probes(crawl_id, &url, &probes).await,
+    }
 }
 
 /// Whether the site's owner left the synthetic probes on. A database error skips them: they are

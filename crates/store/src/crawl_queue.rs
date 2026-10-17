@@ -4,7 +4,7 @@
 
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
-use codoseo_core::output::{LiveRow, SiteFault, StopReason, robots_failure};
+use codoseo_core::output::{LiveProbe, LiveRow, SiteFault, StopReason, robots_failure};
 use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::snapshot::Snapshot;
 use serde::{Deserialize, Serialize};
@@ -165,6 +165,27 @@ impl CrawlQueue {
         )
         .bind(id)
         .bind(rows)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Sets the AI bot fetches on a still-`running` crawl's live row for `url`.
+    pub async fn set_live_probes(
+        &self,
+        id: Uuid,
+        url: &str,
+        probes: &[LiveProbe],
+    ) -> Result<(), sqlx::Error> {
+        let probes = serde_json::to_value(probes).expect("live probes always serialize");
+        sqlx::query(
+            "UPDATE crawl_live_rows l SET row = jsonb_set(l.row, '{probes}', $3) \
+             FROM crawls c WHERE c.id = l.crawl_id AND c.status = 'running' \
+               AND l.crawl_id = $1 AND l.row->>'url' = $2",
+        )
+        .bind(id)
+        .bind(url)
+        .bind(probes)
         .execute(&self.pool)
         .await?;
         Ok(())

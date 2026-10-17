@@ -179,6 +179,9 @@ pub enum LivePhase {
     /// Fetching and checking pages.
     #[default]
     Pages,
+    /// Fetching key pages as the AI bots do, to see whether the site treats them like a
+    /// visitor. Only for monitored crawls with the probes on.
+    Bots,
     /// The pages are in: the checks that need the whole crawl, the AI access report and the
     /// final scores.
     Scoring,
@@ -225,6 +228,24 @@ pub struct LiveRow {
     /// How many answer engines were judged; 0 when robots.txt gave no verdicts.
     #[serde(default)]
     pub ai_of: u8,
+    /// The page fetched as each probed AI bot, once that is done; empty for the pages that are
+    /// not probed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<LiveProbe>,
+}
+
+/// A page fetched as one AI bot, compared with our own fetch of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveProbe {
+    /// The bot's robots.txt token.
+    pub token: String,
+    /// `same` when the site treated the bot like us; the finding's cause (`blocked_403`,
+    /// `challenge_cloudflare`, ...) when it treated it worse; `skipped_robots` when robots.txt
+    /// keeps the bot out, so it was not requested; `inconclusive` otherwise.
+    pub outcome: String,
+    /// The status the bot got; `None` when it was not requested or got no response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
 }
 
 /// A page counted by [`LiveProgress::errors`].

@@ -11,11 +11,12 @@ use std::sync::Mutex;
 use codoseo_checks::{Thresholds, health_score, page_issues_with};
 use codoseo_core::check::CheckId;
 use codoseo_core::output::{
-    LiveFiles, LivePhase, LiveProgress, LiveRow, Progress, RECENT_PAGES, RecentPage,
+    LiveFiles, LivePhase, LiveProbe, LiveProgress, LiveRow, Progress, RECENT_PAGES, RecentPage,
 };
 use codoseo_core::page::{Indexability, PageRecord};
 use codoseo_crawler::crawl::Live;
 use codoseo_geo::eligibility::{Effect, engines, record_effect};
+use codoseo_geo::probe::{ProbedUrl, Verdict};
 use codoseo_geo::report::agent_rules;
 use codoseo_geo::robots::{AgentRules, RobotsTxt};
 
@@ -80,9 +81,9 @@ impl LiveTracker {
         }
     }
 
-    /// The pages are in: what is left is the scoring.
-    pub fn scoring(&self) {
-        self.state.lock().expect("live state lock").phase = LivePhase::Scoring;
+    /// The pages are in: the crawl moves on to `phase`.
+    pub fn set_phase(&self, phase: LivePhase) {
+        self.state.lock().expect("live state lock").phase = phase;
     }
 
     /// What a heartbeat should write, or `None` when nothing is due: `due` is the throttle's
@@ -128,6 +129,7 @@ impl LiveTracker {
             issues: page_issues_with(page, &self.thresholds),
             ai_blocked,
             ai_of,
+            probes: Vec::new(),
         }
     }
 }
@@ -156,6 +158,24 @@ impl AiRobots {
         }
         (bits, engines().len() as u8)
     }
+}
+
+/// A probed page's results as its live row shows them, in the probe plan's bot order.
+pub fn live_probes(probed: &ProbedUrl) -> Vec<LiveProbe> {
+    probed
+        .results
+        .iter()
+        .map(|r| LiveProbe {
+            token: r.token.clone(),
+            outcome: match &r.verdict {
+                Verdict::Same => "same",
+                Verdict::SkippedRobots => "skipped_robots",
+                v => v.cause_slug().unwrap_or("inconclusive"),
+            }
+            .to_owned(),
+            status: r.fetch.as_ref().and_then(|f| f.status),
+        })
+        .collect()
 }
 
 fn path_and_query(page: &PageRecord) -> String {
@@ -331,7 +351,7 @@ mod tests {
         assert!(t.take(false).is_none());
         t.observe(&view(&[], None, LivePhase::Sitemap));
         assert_eq!(t.take(false).unwrap().progress.phase, LivePhase::Sitemap);
-        t.scoring();
+        t.set_phase(LivePhase::Scoring);
         let w = t.take(false).unwrap();
         assert_eq!(w.progress.phase, LivePhase::Scoring);
         assert_eq!(w.progress.seo_estimate, None);
