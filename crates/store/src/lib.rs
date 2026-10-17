@@ -28,6 +28,7 @@ pub mod reports;
 pub mod retention;
 pub mod schedule;
 pub mod search;
+pub mod site_graph;
 pub mod sitemaps;
 pub mod sites;
 pub mod stats;
