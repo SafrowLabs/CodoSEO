@@ -51,6 +51,20 @@ pub fn routes() -> Router<AppState> {
         .route("/s/{site}/audit", get(page))
         .route("/s/{site}/audit/live", get(live))
         .route("/s/{site}/audit/watch", get(watch))
+        .route("/s/{site}/icon", get(icon))
+}
+
+/// The site's icon, as its newest crawl found it.
+async fn icon(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    let (content_type, bytes) = sites::icon(&state.pool, site.id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(crate::render::icon_response(content_type, bytes))
 }
 
 /// How long after a crawl finished the live view still shows it, with its final scores, before
@@ -399,9 +413,13 @@ async fn live_view(
     let max_pages = PlanLimits::for_plan(plan)
         .max_pages
         .unwrap_or(CrawlLimits::default().max_pages);
+    let icon = sites::icon_version(pool, site.id)
+        .await?
+        .map(|v| format!("/s/{}/icon?v={v}", site.id));
     Ok(Some(LiveAudit::build(LiveInput {
         base: format!("/s/{}", site.id),
         domain: site.domain.clone(),
+        icon,
         crawl: &crawl,
         rows: &rows,
         filter,

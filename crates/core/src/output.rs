@@ -373,6 +373,18 @@ pub struct SiteSignals {
     /// off, robots.txt disallows the home page, the crawl stopped early, and in older crawls).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub markdown: Option<MarkdownProbe>,
+    /// The site's icon, for showing the site in the app. Not part of any report: it is stored
+    /// on its own and never serialized with the signals.
+    #[serde(skip)]
+    pub icon: Option<SiteIcon>,
+}
+
+/// A site's icon as fetched: a small raster image whose type was read from its own bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SiteIcon {
+    /// `image/png`, `image/x-icon`, `image/gif`, `image/jpeg` or `image/webp`.
+    pub content_type: &'static str,
+    pub bytes: Vec<u8>,
 }
 
 /// One answer of a Markdown request.

@@ -137,17 +137,22 @@ impl CrawlQueue {
     /// old worker, since the `WHERE status = 'running'` guard then matches nothing.
     ///
     /// Takes a plain `Progress` or a `LiveProgress` with the newest pages; both are stored
-    /// as the same flat JSON.
-    pub async fn heartbeat(&self, id: Uuid, progress: &impl Serialize) -> Result<(), sqlx::Error> {
+    /// as the same flat JSON. False when the crawl is no longer running (requeued, or stopped
+    /// by its owner), so the worker can drop it.
+    pub async fn heartbeat(
+        &self,
+        id: Uuid,
+        progress: &impl Serialize,
+    ) -> Result<bool, sqlx::Error> {
         let progress = serde_json::to_value(progress).expect("progress always serializes");
-        sqlx::query(
+        let done = sqlx::query(
             "UPDATE crawls SET heartbeat_at = now(), progress = $2 WHERE id = $1 AND status = 'running'",
         )
         .bind(id)
         .bind(progress)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(done.rows_affected() > 0)
     }
 
     /// Adds pages to a still-`running` crawl's live rows. A row already there (a late write
@@ -202,12 +207,15 @@ impl CrawlQueue {
 
     /// A liveness heartbeat: like [`CrawlQueue::heartbeat`] but it keeps the stored progress, so
     /// a crawl stuck on one slow page, or past its pages in the probes, doesn't read as zero.
-    pub async fn touch(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE crawls SET heartbeat_at = now() WHERE id = $1 AND status = 'running'")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+    /// False, like [`CrawlQueue::heartbeat`], when the crawl is no longer running.
+    pub async fn touch(&self, id: Uuid) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(
+            "UPDATE crawls SET heartbeat_at = now() WHERE id = $1 AND status = 'running'",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
     }
 
     /// Moves `running` crawls whose heartbeat is older than `older_than` back to `queued` (the

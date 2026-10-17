@@ -62,11 +62,25 @@ const MAX_CHANGE_TEXT: usize = 300;
 #[derive(Debug, Clone)]
 pub struct GeoInput {
     pub report: AccessReport,
+    /// Only the GEO score: no report is stored and nothing is opened or resolved. A no-signup
+    /// audit has no owner to tell, so its AI access state starts with the first full crawl.
+    pub score_only: bool,
 }
 
 impl GeoInput {
     pub fn new(report: AccessReport) -> GeoInput {
-        GeoInput { report }
+        GeoInput {
+            report,
+            score_only: false,
+        }
+    }
+
+    /// The GEO score of `report` alone (see [`GeoInput::score_only`]).
+    pub fn score_only(report: AccessReport) -> GeoInput {
+        GeoInput {
+            report,
+            score_only: true,
+        }
     }
 }
 

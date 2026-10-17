@@ -28,6 +28,8 @@ const ISSUES_SHOWN: usize = 8;
 pub struct LiveAudit {
     pub base: String,
     pub domain: String,
+    /// The site's own icon, served by us, when its newest crawl found one.
+    pub icon: Option<String>,
     pub number: i64,
     pub running: bool,
     /// The poll that refreshes the view, with the filter kept.
@@ -157,6 +159,7 @@ fn filter_slug(f: LiveFilter) -> &'static str {
 pub struct LiveInput<'a> {
     pub base: String,
     pub domain: String,
+    pub icon: Option<String>,
     /// The crawl shown: running, queued, or just finished.
     pub crawl: &'a Crawl,
     /// The newest rows matching `filter`, newest first.
@@ -219,6 +222,7 @@ impl LiveAudit {
         LiveAudit {
             base: i.base.clone(),
             domain: i.domain,
+            icon: i.icon,
             number: c.number,
             running,
             poll: format!("{}/audit/watch?f={}", i.base, filter_slug(i.filter)),
@@ -267,7 +271,7 @@ impl LiveAudit {
 
 /// How many pages the crawl will likely fetch: what it has and has queued, or the sitemap's
 /// count when that is more, never past the plan's cap.
-fn expected_pages(done: u32, queued: u32, sitemap: Option<u32>, max: u32) -> u32 {
+pub(crate) fn expected_pages(done: u32, queued: u32, sitemap: Option<u32>, max: u32) -> u32 {
     (done + queued).max(sitemap.unwrap_or(0)).min(max).max(done)
 }
 
@@ -282,7 +286,7 @@ fn elapsed(c: &Crawl, live: Option<&LiveProgress>, now: OffsetDateTime) -> u64 {
 }
 
 /// `2:04`, or `1:02:04` past an hour.
-fn clock(ms: u64) -> String {
+pub(crate) fn clock(ms: u64) -> String {
     let s = ms / 1000;
     if s >= 3600 {
         format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
@@ -314,7 +318,12 @@ fn done_line(c: &Crawl, previous: Option<&Crawl>, pages: u32, ms: u64) -> String
     line
 }
 
-fn phases(phase: Option<LivePhase>, files: LiveFiles, done: u32, total: u32) -> Vec<PhaseView> {
+pub(crate) fn phases(
+    phase: Option<LivePhase>,
+    files: LiveFiles,
+    done: u32,
+    total: u32,
+) -> Vec<PhaseView> {
     let at = |p: LivePhase| match phase {
         None => "is-done",
         Some(now) if now > p => "is-done",
@@ -646,7 +655,7 @@ fn is_indexing(id: CheckId) -> bool {
     )
 }
 
-fn severity_dot(s: Severity) -> &'static str {
+pub(crate) fn severity_dot(s: Severity) -> &'static str {
     match s {
         Severity::Critical => "is-critical",
         Severity::Warning => "is-warning",
@@ -654,7 +663,7 @@ fn severity_dot(s: Severity) -> &'static str {
     }
 }
 
-fn row_view(r: &LiveRow, counts: &[(CheckId, u32)], pages: u32) -> RowView {
+pub(crate) fn row_view(r: &LiveRow, counts: &[(CheckId, u32)], pages: u32) -> RowView {
     let ids: Vec<CheckId> = r.issues.iter().filter_map(CheckId::from_bit).collect();
     let (indexing, content): (Vec<CheckId>, Vec<CheckId>) =
         ids.iter().partition(|&&id| is_indexing(id));
@@ -926,7 +935,7 @@ fn outcome_words(outcome: &str, status: Option<u16>) -> String {
     }
 }
 
-fn issues(counts: &[(CheckId, u32)], pages: u32) -> Vec<IssueView> {
+pub(crate) fn issues(counts: &[(CheckId, u32)], pages: u32) -> Vec<IssueView> {
     let mut gains = points_regained(counts, pages.max(1));
     gains.sort_by(|a, b| b.1.total_cmp(&a.1));
     gains
@@ -1059,6 +1068,7 @@ mod tests {
         LiveAudit::build(LiveInput {
             base: "/s/x".to_owned(),
             domain: "shop.example.com".to_owned(),
+            icon: None,
             crawl: c,
             rows,
             filter: LiveFilter::All,

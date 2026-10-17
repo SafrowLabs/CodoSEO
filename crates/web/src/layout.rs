@@ -76,6 +76,8 @@ pub struct SiteView {
     pub id: Uuid,
     pub domain: String,
     pub initial: String,
+    /// The site's own icon, served by us, when its newest crawl found one.
+    pub icon: Option<String>,
     /// `/s/{id}`
     pub base: String,
     /// `1,284 urls` or `not crawled yet`
@@ -183,10 +185,14 @@ impl Shell {
             let ai_issues = codoseo_store::geo::open_counts(pool, cur.id).await?;
             let summary = latest.as_ref().and_then(Crawl::summary);
             let base = format!("/s/{}", cur.id);
+            let icon = codoseo_store::sites::icon_version(pool, cur.id)
+                .await?
+                .map(|v| format!("/s/{}/icon?v={v}", cur.id));
             current_view = Some(SiteView {
                 id: cur.id,
                 domain: cur.domain.clone(),
                 initial: initial(&cur.domain),
+                icon,
                 base: base.clone(),
                 urls_label: match &summary {
                     Some(s) => {

@@ -12,6 +12,7 @@ pub mod crawl_policy;
 pub mod crawl_stats;
 pub mod error;
 pub mod fmt;
+pub mod free_audit;
 pub mod health;
 pub mod layout;
 pub mod live;

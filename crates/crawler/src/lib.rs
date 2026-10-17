@@ -7,6 +7,7 @@ pub mod extract;
 pub mod fetch;
 pub mod frontier;
 pub mod guard;
+pub mod icon;
 pub mod llms;
 pub mod markdown;
 pub mod politeness;
