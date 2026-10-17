@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{%- import "partials/mascot.html" as m -%}
+{% block main %}
+<div class="page graph-page">
+  <nav class="graph-tabs" aria-label="Site graph views">
+    {% for t in tabs %}{% if let Some(g) = t.group %}{% if !loop.first %}<span class="graph-tabs-sep" aria-hidden="true"></span>{% endif %}<span class="graph-tabs-group">{{ g }}</span>{% endif %}<a class="graph-tab{% if t.active %} is-active{% endif %}" href="{{ t.href }}"{% if t.active %} aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor %}
+  </nav>
+{% if let Some(e) = empty %}
+  <div class="card">
+    <div class="empty">
+      {% call m::eyes("idle", "mascot-empty") %}{% endcall %}
+      <h2>No finished crawl yet</h2>
+      <p>{{ e.text }}</p>
+      {% if e.can_run %}<button class="btn btn-primary" hx-post="{{ base }}/crawls" hx-swap="none" hx-disabled-elt="this"><span class="play"></span>Run crawl</button>{% endif %}
+    </div>
+  </div>
+{% else %}
+{% block graph %}{% endblock %}
+{% endif %}
+</div>
+{% endblock %}

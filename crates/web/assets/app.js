@@ -510,6 +510,7 @@
       list.push(
         { label: "Site audit", href: `${base}/audit`, keys: "G A", icon: "i-audit" },
         { label: "URL explorer", href: `${base}/explorer`, keys: "G E", icon: "i-explorer" },
+        { label: "Site graph", href: `${base}/graph`, keys: "G G", icon: "i-graph" },
         { label: "AI access", href: `${base}/ai-access`, keys: "G I", icon: "i-ai" },
         { label: "Changes", href: `${base}/changes`, keys: "G C", icon: "i-changes" },
         { label: "Crawl history", href: `${base}/crawls`, keys: "G H", icon: "i-crawls" },
@@ -618,7 +619,7 @@
     el = document.createElement("div");
     el.id = "keyhint";
     el.className = "keyhint";
-    el.innerHTML = "<kbd>G</kbd> then <kbd>E</kbd> explorer · <kbd>A</kbd> audit · <kbd>C</kbd> changes · <kbd>I</kbd> AI access · <kbd>H</kbd> crawls · <kbd>P</kbd> policy";
+    el.innerHTML = "<kbd>G</kbd> then <kbd>E</kbd> explorer · <kbd>G</kbd> site graph · <kbd>A</kbd> audit · <kbd>C</kbd> changes · <kbd>I</kbd> AI access · <kbd>H</kbd> crawls · <kbd>P</kbd> policy";
     document.body.appendChild(el);
   }
   const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -645,7 +646,7 @@
       pendingG = false;
       keyHint(false);
       const base = siteBase();
-      const map = { e: "explorer", a: "audit", c: "changes", i: "ai-access", h: "crawls", p: "policy" };
+      const map = { e: "explorer", g: "graph", a: "audit", c: "changes", i: "ai-access", h: "crawls", p: "policy" };
       const k = e.key.toLowerCase();
       if (map[k] && base) { e.preventDefault(); go(`${base}/${map[k]}`); }
       else if (k === "s") { e.preventDefault(); go("/account"); }

@@ -25,6 +25,7 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Explorer,
+    Graph,
     Audit,
     Changes,
     AiAccess,
@@ -42,6 +43,7 @@ impl Screen {
     pub fn title(self) -> &'static str {
         match self {
             Screen::Explorer => "URL explorer",
+            Screen::Graph => "Site graph",
             Screen::Audit => "Site audit",
             Screen::Changes => "Changes",
             Screen::AiAccess => "AI access",
@@ -491,6 +493,15 @@ fn site_group(
                 screen == Screen::Explorer,
                 "G E",
                 "i-explorer",
+            ),
+            item(
+                "Site graph",
+                format!("{base}/graph"),
+                String::new(),
+                false,
+                screen == Screen::Graph,
+                "G G",
+                "i-graph",
             ),
             item(
                 "AI access",

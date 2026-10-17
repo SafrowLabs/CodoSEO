@@ -1,0 +1,71 @@
+{% extends "graph/frame.html" %}
+{% block graph %}
+{% if let Some(v) = view %}
+<div class="gv-head">
+  <h1>Links that lead nowhere, or the long way round</h1>
+  <p>Every broken page with the pages that still link to it, and every redirect hop between a link and where it ends up.</p>
+</div>
+<div class="tiles">
+  {% for t in v.tiles %}<div class="tile{{ t.class }}"><div class="tile-label">{{ t.label }}</div><div class="tile-value{% if !t.tone.is_empty() %} {{ t.tone }}{% endif %}">{{ t.value }}</div><div class="gv-tile-sub">{{ t.sub }}</div></div>{% endfor %}
+</div>
+<section class="card gv-card" aria-label="Broken pages">
+  <div class="gv-card-head">
+    <h2>Broken pages and who links to them</h2>
+    <span class="gv-sub">Fix the target once, or change each link</span>
+  </div>
+  {% if let Some(f) = v.fan %}
+  <div class="gv-scroll">
+    <div class="glk-fan" style="width:{{ f.width }}px;height:{{ f.height }}px">
+      <svg class="glk-fan-lines" width="{{ f.width }}" height="{{ f.height }}" viewBox="0 0 {{ f.width }} {{ f.height }}" aria-hidden="true">{% for d in f.paths %}<path d="{{ d }}"/>{% endfor %}<path class="glk-fan-fix-line{% if !f.fix.found %} is-none{% endif %}" d="{{ f.fix_path }}"/></svg>
+      {% for s in f.sources %}
+      <div class="glk-src{% if s.more %} is-more{% endif %}" style="top:{{ s.top }}px">{% if !s.more %}<span class="mono trunc" title="{{ s.path }}">{{ s.path }}</span>{% endif %}<span class="glk-anchor trunc">{{ s.anchor }}</span></div>
+      {% endfor %}
+      <a class="glk-target" href="{{ f.target.href }}" style="top:{{ f.target.top }}px">
+        <span class="glk-target-head"><b class="mono trunc" title="{{ f.target.path }}">{{ f.target.path }}</b><span class="badge {{ f.target.status_class }}">{{ f.target.status }}</span></span>
+        <span class="glk-target-note">{{ f.target.note }}</span>
+      </a>
+      <div class="glk-fix{% if !f.fix.found %} is-none{% endif %}" style="top:{{ f.fix.top }}px">
+        <b>{{ f.fix.title }}</b>
+        <span>{{ f.fix.lead }}{% if f.fix.found %}<span class="mono">{{ f.fix.path }}</span>{% endif %}{{ f.fix.rest }}</span>
+      </div>
+    </div>
+  </div>
+  {% if !v.broken.is_empty() %}
+  <div class="glk-rows">
+    {% for r in v.broken %}
+    <a class="glk-row" href="{{ r.href }}"><span class="mono trunc">{{ r.path }}</span><span class="badge {{ r.status_class }}">{{ r.status }}</span><span class="c-muted">{{ r.linked }}</span><span class="c-muted" aria-hidden="true">›</span></a>
+    {% endfor %}
+    {% if let Some(m) = v.broken_more %}<div class="load-more">{{ m }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty-sm">No broken pages in this crawl.</div>
+  {% endif %}
+</section>
+<section class="card gv-card" aria-label="Redirect chains">
+  <div class="gv-card-head">
+    <h2>Redirect chains</h2>
+    <span class="gv-sub">Each hop costs crawl time. Point links straight at the last page.</span>
+  </div>
+  {% if v.chains.is_empty() %}
+  <div class="empty-sm">No redirects in this crawl.</div>
+  {% else %}
+  <div class="glk-chains">
+    {% for c in v.chains %}
+    <div class="glk-chain{{ c.class }}">
+      <span class="glk-links">{{ c.links }}</span>
+      {% for h in c.hops %}
+      <svg class="glk-arrow" width="28" height="10" viewBox="0 0 28 10" aria-hidden="true"><path d="M1 5h25M22 1l4 4-4 4"/></svg>
+      <span class="glk-hop{{ h.class }}"><span class="mono trunc" title="{{ h.path }}">{{ h.path }}</span><span class="badge {{ h.badge_class }}">{{ h.badge }}</span></span>
+      {% endfor %}
+      <span class="grow"></span>
+      {% if c.flag.is_empty() %}<span class="c-muted glk-hops">{{ c.hop_count }}</span>{% else %}<span class="glk-flag">{{ c.flag }}</span><span class="c-muted glk-hops">{{ c.hop_count }}</span>{% endif %}
+      {% if let Some(h) = c.href %}<a class="btn btn-sm" href="{{ h }}">See {{ c.links }}</a>{% endif %}
+    </div>
+    {% endfor %}
+    {% if let Some(m) = v.chains_more %}<div class="load-more">{{ m }}</div>{% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

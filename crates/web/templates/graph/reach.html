@@ -1,0 +1,91 @@
+{% extends "graph/frame.html" %}
+{#- The AI reach tab: robots.txt and the CDN, each AI crawler and the answer engine it feeds, as
+    one flow beside what keeps engines out (routes/graph/reach.rs). -#}
+{% block graph %}
+<div class="gx">
+  <section class="gx-main" aria-labelledby="gr-title">
+    <div class="gx-head gx-head-row">
+      <div>
+        <h1 class="gx-title" id="gr-title">Which AI answers can read your site</h1>
+        <p class="gx-sub">Your rules on the left, each crawler in the middle, the answer engine it feeds on the right. We fetch as every bot, so CDN blocks show up too.</p>
+      </div>
+      {% if view.is_some() %}
+      <div class="gr-legend">
+        <span><i class="gr-key is-ok"></i>Allowed</span>
+        <span><i class="gr-key is-err"></i>Blocked, costs reach</span>
+        <span><i class="gr-key is-off"></i>Opted out of training</span>
+      </div>
+      {% endif %}
+    </div>
+{% if let Some(v) = view %}
+    <div class="card gx-canvas">
+      <svg class="gr-svg" viewBox="0 0 {{ v.svg.width }} {{ v.svg.height }}" role="img" aria-label="{{ v.svg.label }}">
+        <g class="gr-edges">
+          {% for e in v.svg.edges %}<path class="{{ e.class }}" d="{{ e.d }}"/>{% endfor %}
+        </g>
+        {% for g in v.svg.groups %}<text class="gr-group" x="330" y="{{ g.y }}">{{ g.text }}</text>{% endfor %}
+        {% for b in v.svg.bots %}
+        <g class="gr-bot {{ b.class }}"><title>{{ b.title }}</title>
+          <rect x="330" y="{{ b.y - 10 }}" width="236" height="20" rx="10"/>
+          <circle class="gr-bot-dot" cx="342" cy="{{ b.y }}" r="4"/>
+          <text class="gr-token" x="354" y="{{ b.y + 4 }}">{{ b.token }}</text>
+          {% if let Some(r) = b.reason %}<text class="gr-reason" x="556" y="{{ b.y + 4 }}">{{ r }}</text>{% endif %}
+        </g>
+        {% endfor %}
+        {% for e in v.svg.engines %}
+        <g class="gr-engine {{ e.class }}"><title>{{ e.name }}: {{ e.why }}</title>
+          <circle class="gr-ring" cx="786" cy="{{ e.y }}" r="16"/>
+          {% if let Some(src) = e.logo %}<image href="{{ src }}" x="777" y="{{ e.y - 9 }}" width="18" height="18"/>{% else %}<text class="gr-mono" x="786" y="{{ e.y + 4 }}">{{ e.monogram }}</text>{% endif %}
+          <text class="gr-engine-name" x="812" y="{{ e.y - 1 }}">{{ e.name }}</text>
+          <text class="gr-engine-state" x="812" y="{{ e.y + 15 }}">{{ e.label }}</text>
+        </g>
+        {% endfor %}
+        {% if let Some(t) = v.svg.training %}
+        <g class="gr-training">
+          <rect x="{{ t.x }}" y="{{ t.y }}" width="{{ t.w }}" height="36" rx="8"/>
+          <text class="gr-training-name" x="{{ t.x + 14 }}" y="{{ t.y + 23 }}">Model training</text>
+          <text class="gr-training-count" x="{{ t.x + t.w - 12 }}" y="{{ t.y + 23 }}">{{ t.count }}</text>
+        </g>
+        {% endif %}
+        <g class="gr-site"><title>{{ v.svg.site.cdn_note }}</title>
+          <rect x="{{ v.svg.site.x }}" y="{{ v.svg.site.y }}" width="{{ v.svg.site.w }}" height="{{ v.svg.site.h }}" rx="12"/>
+          <text class="gr-site-name" x="26" y="{{ v.svg.site.y + 28 }}">{{ v.svg.site.name }}</text>
+          <text class="gr-site-line" x="26" y="{{ v.svg.site.y + 50 }}">{{ v.svg.site.robots }}</text>
+          <text class="gr-site-line" x="26" y="{{ v.svg.site.y + 70 }}">{{ v.svg.site.cdn }}</text>
+        </g>
+      </svg>
+    </div>
+{% else %}
+    <div class="card card-pad gx-note"><b>No AI access report yet</b><p>Each crawl checks robots.txt for every known AI bot. The next crawl draws this flow.</p></div>
+{% endif %}
+  </section>
+{% if let Some(v) = view %}
+  <aside class="gx-side" aria-label="Reach summary">
+    <div class="gx-side-head">
+      <span class="gx-eyebrow">Answer engines</span>
+      <h2 class="gr-score">{{ v.reach }} <span>of {{ v.engines }} can read you</span></h2>
+      <div class="gr-bar" aria-hidden="true">{% for p in v.bar %}<span class="{{ p.class }}" style="flex: {{ p.n }}"></span>{% endfor %}</div>
+    </div>
+    {% for p in v.problems %}
+    <div class="gr-card {{ p.class }}">
+      <b>{{ p.title }}</b>
+      <p>{{ p.why }}</p>
+      <span class="gr-fix">{{ p.fix }}</span>
+      {% if !p.lines.is_empty() %}<pre class="gr-lines">{% for l in p.lines %}{{ l }}
+{% endfor %}</pre>{% endif %}
+    </div>
+    {% endfor %}
+    {% if let Some(o) = v.opted_out %}
+    <div class="gr-card is-note">
+      <b>{{ o.title }}</b>
+      <p>{{ o.text }}</p>
+    </div>
+    {% endif %}
+    <div class="gx-actions">
+      <a class="btn btn-primary" href="{{ v.access_href }}">Open AI access</a>
+      <a class="btn" href="{{ v.robots_href }}">View robots.txt</a>
+    </div>
+  </aside>
+{% endif %}
+</div>
+{% endblock %}

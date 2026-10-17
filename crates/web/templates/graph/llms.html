@@ -1,0 +1,110 @@
+{% extends "graph/frame.html" %}
+{#- The llms.txt tab: the file as a tree beside its format checks and a suggested edit
+    (routes/graph/llms.rs). -#}
+{% block graph %}
+{% if let Some(view) = view %}
+<div class="gx">
+  <section class="gx-main" aria-labelledby="gl-title">
+    <div class="gx-head">
+      <h1 class="gx-title" id="gl-title">The map you hand to AI agents</h1>
+      <p class="gx-sub">Your llms.txt as a tree: title, sections, then every link. Dashed branches are Optional, which agents may skip when context is tight.</p>
+    </div>
+{% match view %}
+{% when LlmsView::Tree(t) %}
+    <div class="card gx-canvas">
+      <svg class="gl-svg" viewBox="0 0 {{ t.svg.width }} {{ t.svg.height }}" role="img" aria-label="{{ t.svg.label }}">
+        <g class="gl-edges">
+          {% for e in t.svg.edges %}<path class="{{ e.class }}" d="{{ e.d }}"/>{% endfor %}
+        </g>
+        {% for s in t.svg.sections %}
+        <g class="gl-section{% if s.optional %} is-optional{% endif %}"><title>{{ s.full }}</title>
+          <rect x="{{ s.x }}" y="{{ s.y }}" width="{{ s.w }}" height="34" rx="8"/>
+          <text class="gl-mark" x="{{ s.x + 12 }}" y="{{ s.y + 22 }}">##</text>
+          <text class="gl-section-name" x="{{ s.x + 34 }}" y="{{ s.y + 22 }}">{{ s.title }}</text>
+          <text class="gl-count" x="{{ s.x + s.w - 10 }}" y="{{ s.y + 22 }}">{{ s.count }}</text>
+        </g>
+        {% endfor %}
+        {% for l in t.svg.links %}
+        <g class="gl-link {{ l.class }}{% if l.optional %} is-optional{% endif %}"><title>{{ l.full }}</title>
+          <circle class="gl-dot" cx="560" cy="{{ l.y }}" r="5.5"/>
+          <text class="gl-name" x="576" y="{{ l.y + 5 }}">{{ l.name }}</text>
+          <text class="gl-url" x="750" y="{{ l.y + 5 }}">{{ l.url }}</text>
+          {% if let Some(b) = l.badge %}<rect class="gl-badge" x="970" y="{{ l.y - 10 }}" width="{{ b.w }}" height="20" rx="10"/><text class="gl-badge-text" x="{{ 970 + b.w / 2 }}" y="{{ l.y + 4 }}">{{ b.text }}</text>{% endif %}
+        </g>
+        {% endfor %}
+        {% for m in t.svg.more %}<text class="gl-more" x="576" y="{{ m.y + 5 }}">{{ m.text }}</text>{% endfor %}
+        {% if let Some(m) = t.svg.missing %}
+        <g class="gl-missing">
+          <line class="gl-rule" x1="324" y1="{{ m.y }}" x2="1040" y2="{{ m.y }}"/>
+          <text class="gl-missing-title" x="324" y="{{ m.y + 26 }}">Not listed</text>
+          <text class="gl-missing-sub" x="324" y="{{ m.y + 44 }}">top pages by link score</text>
+          {% for r in m.rows %}
+          <g><title>{{ r.full }}</title>
+            <circle class="gl-dot" cx="560" cy="{{ r.y }}" r="5.5"/>
+            <text class="gl-name" x="576" y="{{ r.y + 5 }}">{{ r.name }}</text>
+            <text class="gl-url" x="750" y="{{ r.y + 5 }}">{{ r.url }}</text>
+            <text class="gl-score" x="970" y="{{ r.y + 5 }}">LS {{ r.score }}</text>
+          </g>
+          {% endfor %}
+        </g>
+        {% endif %}
+        <g class="gl-root">
+          <rect x="{{ t.svg.root.x }}" y="{{ t.svg.root.y }}" width="{{ t.svg.root.w }}" height="{{ t.svg.root.h }}" rx="12"/>
+          <text class="gl-mark" x="38" y="{{ t.svg.root.y + 32 }}">#</text>
+          <text class="gl-root-title" x="54" y="{{ t.svg.root.y + 32 }}">{{ t.svg.root.title }}</text>
+          {% for (y, line) in t.svg.root.summary %}<text class="gl-root-summary" x="38" y="{{ y }}">{{ line }}</text>{% endfor %}
+          <text class="gl-root-meta" x="38" y="{{ t.svg.root.y + t.svg.root.h - 16 }}">{{ t.svg.root.meta }}</text>
+        </g>
+      </svg>
+      <p class="gx-caption">{{ t.caption }}</p>
+    </div>
+{% when LlmsView::Missing with { why, starter } %}
+    <div class="card card-pad gx-note">
+      <b>No llms.txt yet</b>
+      <p>An llms.txt is a short Markdown file at your site's root that points AI agents to your most useful pages. It is optional. {{ why }}</p>
+    </div>
+{% when LlmsView::Unavailable with { why } %}
+    <div class="card card-pad gx-note"><b>llms.txt is unavailable</b><p>{{ why }}</p></div>
+{% when LlmsView::NoTree with { summary } %}
+    <div class="card card-pad gx-note"><b>{{ summary }}</b><p>Run a new crawl to see the file as a tree.</p></div>
+{% when LlmsView::NotChecked %}
+    <div class="card card-pad gx-note"><b>llms.txt not checked yet</b><p>The next crawl checks /llms.txt and draws it here.</p></div>
+{% endmatch %}
+  </section>
+{% match view %}
+{% when LlmsView::Tree(t) %}
+  <aside class="gx-side" aria-label="llms.txt checks">
+    <div class="gx-side-head">
+      <span class="gx-eyebrow">Format checks</span>
+      <h2 class="gx-side-title">{{ t.passed }} of {{ t.checks.len() }} pass</h2>
+    </div>
+    <ul class="gl-checks">
+      {% for c in t.checks %}<li title="{{ c.detail }}"><span>{{ c.label }}</span><b class="{% if c.ok %}c-ok{% else %}c-err{% endif %}">{{ c.verdict }}</b></li>{% endfor %}
+    </ul>
+    {% if !t.edit.is_empty() %}
+    <div class="gx-side-sec">
+      <span class="gx-eyebrow">Suggested edit</span>
+      <pre class="gl-edit">{% for l in t.edit %}<span class="{{ l.class }}">{{ l.text }}</span>{% endfor %}</pre>
+    </div>
+    {% endif %}
+    <div class="gx-actions">
+      {% if !t.edit.is_empty() %}<button type="button" class="btn btn-primary" data-copy="{{ t.edit_text }}"><svg class="icon"><use href="#i-copy"/></svg>Copy suggested edit</button>{% endif %}
+      <a class="btn" href="{{ t.file_url }}" target="_blank" rel="noopener noreferrer">View raw file</a>
+    </div>
+  </aside>
+{% when LlmsView::Missing with { why, starter } %}
+  <aside class="gx-side" aria-label="Starter llms.txt">
+    <div class="gx-side-head">
+      <span class="gx-eyebrow">Suggested starter file</span>
+      <h2 class="gx-side-title">From your top pages</h2>
+    </div>
+    <pre class="gl-edit">{{ starter }}</pre>
+    <div class="gx-actions">
+      <button type="button" class="btn btn-primary" data-copy="{{ starter }}"><svg class="icon"><use href="#i-copy"/></svg>Copy starter file</button>
+    </div>
+  </aside>
+{% else %}
+{% endmatch %}
+</div>
+{% endif %}
+{% endblock %}

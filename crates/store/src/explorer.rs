@@ -510,6 +510,65 @@ pub async fn inlinks(
     .await
 }
 
+/// What the site graph draws for one page of a crawl.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphPage {
+    pub url_hash: u64,
+    pub url: String,
+    pub title: Option<String>,
+    pub status: u16,
+    pub indexability: Indexability,
+    /// `None` for a page found only in a sitemap.
+    pub depth: Option<u32>,
+    pub inlinks: u32,
+    pub in_sitemap: bool,
+}
+
+#[derive(FromRow)]
+struct GraphPageDb {
+    url_hash: i64,
+    url: String,
+    title: Option<String>,
+    status: i16,
+    indexability: String,
+    depth: Option<i32>,
+    inlinks: i32,
+    in_sitemap: bool,
+}
+
+/// The crawl's pages for the site graph, in `id` order: every page, or only those with a URL
+/// hash in `only`.
+pub async fn graph_pages(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    only: Option<&[u64]>,
+) -> Result<Vec<GraphPage>, sqlx::Error> {
+    let only: Option<Vec<i64>> = only.map(|h| h.iter().map(|&h| hash::to_db(h)).collect());
+    let rows: Vec<GraphPageDb> = sqlx::query_as(
+        "SELECT url_hash, url, title, status, indexability::text AS indexability, depth, \
+                inlinks, in_sitemap \
+         FROM pages WHERE crawl_id = $1 AND ($2::bigint[] IS NULL OR url_hash = ANY($2)) \
+         ORDER BY id",
+    )
+    .bind(crawl_id)
+    .bind(only)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| GraphPage {
+            url_hash: hash::from_db(r.url_hash),
+            url: r.url,
+            title: r.title,
+            status: u16::try_from(r.status).unwrap_or(0),
+            indexability: indexability(&r.indexability),
+            depth: r.depth.map(unsigned),
+            inlinks: unsigned(r.inlinks),
+            in_sitemap: r.in_sitemap,
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

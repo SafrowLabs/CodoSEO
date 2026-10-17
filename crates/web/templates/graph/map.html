@@ -1,0 +1,55 @@
+{% extends "graph/frame.html" %}
+{% block graph %}
+<section class="gv gv-map" data-graph="map" data-src="{{ mount.src }}" data-page="{{ mount.page }}" data-base="{{ base }}">
+  <div class="gv-head">
+    <div class="gv-title">
+      <h1>The whole site at a glance</h1>
+      <p>Each bubble is a page, joined to the page the crawler found it from. Bigger bubbles carry more link score.</p>
+    </div>
+  </div>
+  <div class="gv-tools gv-bar" role="group" aria-label="Map controls">
+    <div class="gv-seg" role="group" aria-label="Map type">
+      <button type="button" data-ctl="mode" data-mode="crawl" aria-pressed="true">By links</button>
+      <button type="button" data-ctl="mode" data-mode="dir" aria-pressed="false">By folders</button>
+    </div>
+    <label class="gv-ctl">Colour
+      <select data-ctl="color">
+        <option value="status">Indexability</option>
+        <option value="depth">Click depth</option>
+        <option value="section">Section</option>
+      </select>
+    </label>
+    <label class="gv-ctl">Size
+      <select data-ctl="size">
+        <option value="score">Link score</option>
+        <option value="inlinks">Inlinks</option>
+        <option value="equal">Same size</option>
+      </select>
+    </label>
+    <label class="gv-ctl">Clicks
+      <input type="range" data-ctl="depth" min="1" max="8" value="8" step="1">
+      <output data-ctl="depth-out">All</output>
+    </label>
+    <span class="gv-spacer"></span>
+    <label class="gv-search"><svg class="icon"><use href="#i-search"/></svg><input type="search" data-ctl="q" list="gv-urls-map" placeholder="Find a URL" aria-label="Find a URL" autocomplete="off"><datalist id="gv-urls-map"></datalist></label>
+    <button type="button" class="btn" data-ctl="links" aria-pressed="false">Show all links</button>
+    <button type="button" class="btn btn-primary" data-ctl="fit">Fit</button>
+  </div>
+  <div class="gv-body">
+    <div class="gv-main">
+      <div class="gv-stage gv-stage-map" data-role="stage">
+        <canvas role="img" aria-label="Map of the crawled site. The panel shows the selected page."></canvas>
+        <div class="gv-float gv-stats" data-role="stats"></div>
+        <div class="gv-float gv-crumb" data-role="crumb" hidden><span>Focused on</span><b data-role="crumb-url"></b><button type="button" class="btn btn-sm" data-ctl="unfocus">Show whole site</button></div>
+        <div class="gv-float gv-maplegend" data-role="legend"></div>
+        <div class="gv-float gv-hint">Scroll to zoom · drag to pan or move a bubble · click to inspect · double-click to focus</div>
+        <div class="gv-tip" data-role="tip" hidden></div>
+        <p class="gv-msg">Loading the crawl…</p>
+      </div>
+    </div>
+    <aside class="gv-panel" data-role="panel" aria-live="polite" aria-label="Selected page"></aside>
+  </div>
+</section>
+<script src="{{ crate::assets::url("d3.min.js") }}"></script>
+<script src="{{ crate::assets::url("graph.js") }}"></script>
+{% endblock %}

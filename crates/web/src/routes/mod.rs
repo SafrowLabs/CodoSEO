@@ -19,6 +19,7 @@ pub mod crawls;
 pub mod demo;
 pub mod explorer;
 pub mod export;
+pub mod graph;
 pub mod landing;
 pub mod legal;
 pub mod mcp;
@@ -51,6 +52,7 @@ pub fn router() -> Router<AppState> {
         .merge(sites::routes())
         .merge(crawls::routes())
         .merge(explorer::routes())
+        .merge(graph::routes())
         .merge(audit::routes())
         .merge(changes::routes())
         .merge(ai_access::routes())

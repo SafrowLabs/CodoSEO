@@ -131,7 +131,8 @@ pub fn hex(hash: u64) -> String {
     format!("{hash:016x}")
 }
 
-fn parse_hex(s: &str) -> Option<u64> {
+/// The URL hash a [`hex`] string spells; `None` for anything but 16 hex digits.
+pub fn parse_hex(s: &str) -> Option<u64> {
     let s = s.trim();
     if s.len() != 16 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;

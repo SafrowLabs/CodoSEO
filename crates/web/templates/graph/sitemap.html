@@ -1,0 +1,84 @@
+{% extends "graph/frame.html" %}
+{% block graph %}
+{% if let Some(v) = view %}
+<div class="gv-head">
+  <h1>What your sitemap says vs what your site links</h1>
+  <p>Search engines read both. When they disagree, pages get missed or crawl time goes to URLs that should not be there.</p>
+</div>
+<section class="card gv-card" aria-label="Sitemap tree">
+  <div class="gv-card-head">
+    <h2>Sitemap tree</h2>
+    <div class="gv-legend">
+      <span><i class="gv-sw gv-ok"></i>Indexable, linked</span>
+      <span><i class="gv-sw gv-orphan"></i>Orphan</span>
+      <span><i class="gv-sw gv-noindex"></i>Noindex</span>
+      <span><i class="gv-sw gv-redirect"></i>Redirect</span>
+      <span><i class="gv-sw gv-broken"></i>Broken</span>
+      {% if v.any_not_crawled %}<span><i class="gv-sw gv-uncrawled"></i>Not crawled</span>{% endif %}
+    </div>
+  </div>
+  {% if let Some(note) = v.tree_note %}
+  <div class="empty-sm">{{ note }}</div>
+  {% else %}
+  {% for g in v.groups %}
+  <div class="gsm-group{% if g.root.is_none() %} is-loose{% endif %}">
+    {% if let Some(r) = g.root %}
+    <div class="gsm-root"><div class="gsm-index{% if r.failed %} is-failed{% endif %}" title="{{ r.url }}"><span class="mono">{{ r.name }}</span><span>{{ r.note }}</span></div></div>
+    <svg class="gsm-links" width="56" height="{{ g.height }}" viewBox="0 0 56 {{ g.height }}" aria-hidden="true">{% for d in g.paths %}<path d="{{ d }}"/>{% endfor %}</svg>
+    {% endif %}
+    <div class="gsm-rows">
+      {% for r in g.rows %}
+      <div class="gsm-row">
+        <span class="mono trunc" title="{{ r.url }}">{{ r.name }}</span>
+        <span class="gsm-count num">{{ r.count }}</span>
+        <div class="gsm-bar" style="width:{{ r.width }}%">{% for s in r.segs %}<span class="gv-{{ s.kind }}" style="flex:{{ s.n }}" title="{{ s.tip }}"></span>{% endfor %}</div>
+        <span class="gsm-note{{ r.note_class }}">{{ r.note }}</span>
+      </div>
+      {% endfor %}
+      {% if let Some(m) = g.more %}<div class="gsm-row gsm-more">{{ m }}</div>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
+</section>
+<div class="gv-pair">
+  <section class="card gv-card" aria-label="Sitemap vs crawl">
+    <div class="gv-card-head"><h2>Sitemap vs crawl</h2></div>
+    {% if let Some(n) = v.venn %}
+    <svg class="gsm-venn" viewBox="0 0 560 330" role="img" aria-label="{{ n.aria }}">
+      <circle class="gsm-venn-map" cx="215" cy="170" r="135"/>
+      <circle class="gsm-venn-crawl" cx="345" cy="170" r="140"/>
+      <text class="gsm-venn-title is-map" x="150" y="22">In sitemap · {{ n.in_sitemap }}</text>
+      <text class="gsm-venn-title is-crawl" x="420" y="22">Found by links · {{ n.linked }}</text>
+      <text class="gsm-venn-n is-map" x="140" y="155">{{ n.only_sitemap }}</text>
+      <text class="gsm-venn-k" x="140" y="179">only in sitemap</text>
+      <text class="gsm-venn-sub" x="140" y="197">not linked</text>
+      <text class="gsm-venn-n" x="280" y="145">{{ n.both }}</text>
+      <text class="gsm-venn-k" x="280" y="169">in both</text>
+      <text class="gsm-venn-sub{% if n.both_bad %} is-bad{% endif %}" x="280" y="195">{{ n.both_note }}</text>
+      <text class="gsm-venn-n is-crawl" x="420" y="155">{{ n.only_linked }}</text>
+      <text class="gsm-venn-k" x="420" y="179">only linked</text>
+      <text class="gsm-venn-sub" x="420" y="197">{{ n.linked_note }}</text>
+    </svg>
+    {% else %}
+    <div class="empty-sm">No crawled page was listed in a sitemap.</div>
+    {% endif %}
+  </section>
+  <section class="card gv-card" aria-label="What to fix">
+    <div class="gv-card-head"><h2>What to fix</h2></div>
+    {% if v.fixes.is_empty() %}
+    <div class="empty-sm">Your sitemap and your links agree. Nothing to fix.</div>
+    {% else %}
+    <div class="gsm-fixes">
+      {% for f in v.fixes %}
+      {% if let Some(h) = f.href %}<a class="gsm-fix" href="{{ h }}">{% else %}<div class="gsm-fix">{% endif %}
+        <span class="gsm-fix-n {{ f.tone }}">{{ f.n }}</span>
+        <span class="gsm-fix-text"><b>{{ f.title }}</b><span>{{ f.detail }}</span></span>
+        {% if f.href.is_some() %}<span class="gsm-fix-go" aria-hidden="true">›</span></a>{% else %}<span></span></div>{% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endif %}
+{% endblock %}
