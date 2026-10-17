@@ -46,6 +46,8 @@ pub struct Landing {
     pub pages_crawled: Option<String>,
     /// The hosted vs self-hosted cost comparison under the pricing cards.
     pub selfhost: SelfHostView,
+    /// The visitor is signed in: "Sign in" links become "Open app".
+    pub signed_in: bool,
 }
 
 pub struct CategoryView {
@@ -533,17 +535,20 @@ fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) 
         billing: state.config.billing.is_some(),
         pages_crawled: pages.map(fmt::thousands),
         selfhost: selfhost_view(),
+        signed_in: false,
     }
 }
 
-/// The landing page for a signed-out visitor.
-pub async fn page(state: &AppState) -> Result<Response, AppError> {
+/// The landing page; a signed-in visitor gets links into the app instead of sign-in ones.
+pub async fn page(state: &AppState, signed_in: bool) -> Result<Response, AppError> {
     let pages = state
         .crawl_stats
         .totals(&state.pool)
         .await
         .map(|t| t.pages_crawled);
-    Ok(html(&view(state, "", None, pages))?.into_response())
+    let mut landing = view(state, "", None, pages);
+    landing.signed_in = signed_in;
+    Ok(html(&landing)?.into_response())
 }
 
 /// `/stats/pages-crawled` (cloud only): the landing counter's live number, polled by `home.js`.

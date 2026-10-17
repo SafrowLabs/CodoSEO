@@ -1,3 +1,4 @@
+{%- import "partials/score_bars.html" as sb -%}
 <div id="live-audit" class="la" role="region" aria-label="Live audit"{% if running %} hx-get="{{ poll }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML" data-quiet{% endif %}>
   <div class="page-head au-head">
     <div class="au-title">
@@ -23,8 +24,9 @@
     {% for p in phases %}<div class="la-ph {{ p.class }}"><span class="la-ph-ic" aria-hidden="true">{{ p.icon }}</span><span class="la-ph-txt"><span class="la-ph-t">{{ p.title }}</span><span class="la-ph-d">{{ p.detail }}</span></span></div>{% endfor %}
   </section>
 
-  <section class="sc-row" aria-label="{% if running %}Live scores{% else %}Scores{% endif %}">
-    {% for k in kpis %}
+  <section class="sc-row has-bars" aria-label="{% if running %}Live scores{% else %}Scores{% endif %}">
+    {% call sb::bars(bars(), "Scores") %}{% endcall %}
+    {% for k in cards() %}
     <div class="card sc sc-{{ k.key }}">
       <span class="sc-label">{% if let Some(t) = k.tag %}<span class="atag {{ t.0 }}">{{ t.1 }}</span>{% endif %}<span>{{ k.label }}</span>{% if k.live %}<i class="la-dot is-sm" aria-hidden="true"></i>{% endif %}</span>
       <span class="sc-val"><b>{{ k.value }}</b>{% if !k.unit.is_empty() %}<small>{{ k.unit }}</small>{% endif %}</span>

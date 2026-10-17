@@ -44,6 +44,7 @@ use crate::render::{Hx, html};
 use crate::routes::audit_ai::{BotsTable, bots_table};
 use crate::routes::audit_fix::{AiFixInput, FixInput, FixList, fix_list, known_counts};
 use crate::routes::audit_trend::{PolicyPin, Trend, TrendPoint, trend};
+use crate::score_bars::ScoreBar;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -107,6 +108,47 @@ pub struct AuditBody {
     pub demo: bool,
 }
 
+impl DoneAudit {
+    /// The overall, SEO and GEO cards as bars.
+    pub fn bars(&self) -> Vec<ScoreBar> {
+        self.cards
+            .iter()
+            .filter(|c| is_score(c))
+            .map(|c| {
+                // The toned phrase (`▲ 3`) is the change; the rest reads as detail.
+                let (toned, plain): (Vec<&Part>, Vec<&Part>) =
+                    c.change.iter().partition(|p| !p.class.is_empty());
+                let detail: Vec<&str> = plain
+                    .iter()
+                    .chain(&c.detail.iter().collect::<Vec<_>>())
+                    .map(|p| p.text.as_str())
+                    .collect();
+                (c, toned, detail)
+            })
+            .map(|(c, toned, detail)| ScoreBar {
+                change_class: toned.first().map_or("", |p| p.class),
+                change: toned
+                    .iter()
+                    .map(|p| p.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                detail: detail.join(" · "),
+                help: c.help.then_some(if c.key == "geo" {
+                    "help-geo"
+                } else {
+                    "help-overall"
+                }),
+                ..ScoreBar::new(c.key, c.count.parse().ok())
+            })
+            .collect()
+    }
+
+    /// The cards beside the bars.
+    pub fn side_cards(&self) -> impl Iterator<Item = &ScoreCard> {
+        self.cards.iter().filter(|c| !is_score(c))
+    }
+}
+
 impl AuditBody {
     /// The empty and failed states reload themselves when a crawl is queued.
     pub fn reloads_on_queue(&self) -> bool {
@@ -129,6 +171,10 @@ const CARD_LABELS: [&str; 7] = [
     "Open issues",
 ];
 
+fn is_score(c: &ScoreCard) -> bool {
+    matches!(c.key, "overall" | "seo" | "geo")
+}
+
 pub struct DoneAudit {
     /// `page limit reached`, when the crawl stopped early.
     pub stop_chip: Option<&'static str>,
@@ -139,6 +185,7 @@ pub struct DoneAudit {
     pub number: i64,
     /// A newer crawl failed: the banner over these results.
     pub failed: Option<FailedBanner>,
+    /// Every score card; overall, SEO and GEO show as bars (`bars()`).
     pub cards: Vec<ScoreCard>,
     pub fixes: FixList,
     pub trend: Trend,

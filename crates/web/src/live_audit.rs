@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 
 use crate::fmt;
 use crate::routes::audit_ai::engine_short;
+use crate::score_bars::ScoreBar;
 
 /// Rows listed at most: the newest.
 pub const ROWS_SHOWN: i64 = 60;
@@ -173,6 +174,26 @@ pub struct LiveInput<'a> {
 }
 
 impl LiveAudit {
+    /// The overall, SEO and GEO numbers as bars.
+    pub fn bars(&self) -> Vec<ScoreBar> {
+        self.kpis
+            .iter()
+            .filter(|k| is_score(k.key))
+            .map(|k| ScoreBar {
+                change_class: k.change_class,
+                change: k.change.clone(),
+                detail: k.detail.clone(),
+                live: k.live,
+                ..ScoreBar::new(k.key, k.value.parse().ok())
+            })
+            .collect()
+    }
+
+    /// The cards next to the bars.
+    pub fn cards(&self) -> impl Iterator<Item = &Kpi> {
+        self.kpis.iter().filter(|k| !is_score(k.key))
+    }
+
     pub fn build(i: LiveInput<'_>) -> LiveAudit {
         let c = i.crawl;
         let live = c.live_progress();
@@ -419,6 +440,10 @@ fn score_change(
         (Some(_), Some(_), Some(p)) => ("", format!("same as #{}", p.number)),
         _ => ("", String::new()),
     }
+}
+
+fn is_score(key: &str) -> bool {
+    matches!(key, "overall" | "seo" | "geo")
 }
 
 fn kpis(

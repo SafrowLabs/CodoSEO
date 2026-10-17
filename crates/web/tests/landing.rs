@@ -65,3 +65,21 @@ async fn self_hosted_installs_have_no_landing_comparison() {
     let login = app.get("/login", None).await.body;
     assert!(!login.contains("self-host"), "{login}");
 }
+
+#[tokio::test]
+async fn a_signed_in_visitor_sees_the_landing_with_a_way_into_the_app() {
+    let app = TestApp::with_config(cloud_config()).await;
+    let (_, cookie) = app.login("ana@example.com").await;
+    let res = app.get("/", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(
+        res.body
+            .contains(r#"<a class="ghost" href="/app">Open app</a>"#)
+    );
+    assert!(!res.body.contains(r#"href="/login""#), "{}", res.body);
+
+    // The app's home moved to `/app`: no site yet, so onboarding.
+    let res = app.get("/app", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    assert_eq!(res.location(), Some("/sites"));
+}

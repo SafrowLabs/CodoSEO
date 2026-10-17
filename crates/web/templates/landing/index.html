@@ -62,7 +62,7 @@
         <svg class="i-system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/></svg>
       </button>
       <a class="ghost gh" href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
-      <a class="ghost" href="/login">Sign in</a>
+      {% if signed_in %}<a class="ghost" href="/app">Open app</a>{% else %}<a class="ghost" href="/login">Sign in</a>{% endif %}
       <a class="solid" href="#audit">Start free audit</a>
     </div>
   </div>
@@ -114,7 +114,7 @@
     <p>The same crawler and the same {{ checks }} checks power the web app, the CLI, the MCP server and the REST API. A finding means the same thing wherever you see it.</p>
   </div>
   <div class="ways mt">
-    <a class="way" href="/login">
+    <a class="way" href="{% if signed_in %}/app{% else %}/login{% endif %}">
       <span class="way-k">Web app</span>
       <h3>Monitor the sites you care about</h3>
       <p>Scheduled crawls, a URL explorer, change tracking and alerts. Use the hosted app or run it on your own servers.</p>
@@ -327,7 +327,7 @@ claude mcp add --transport http codoseo \
         <li>{{ f }}</li>
         {%- endfor %}
       </ul>
-      <a class="btn" href="/login" data-umami-event="signup-free">Create a free account <span class="ar" aria-hidden="true">→</span></a>
+      {% if signed_in %}<a class="btn" href="/app">Open app <span class="ar" aria-hidden="true">→</span></a>{% else %}<a class="btn" href="/login" data-umami-event="signup-free">Create a free account <span class="ar" aria-hidden="true">→</span></a>{% endif %}
     </div>
     <div class="price hl">
       <div class="ph"><h3>Lite</h3><span class="tag ship">Hosted</span></div>
@@ -521,7 +521,7 @@ docker run --rm ghcr.io/safrowlabs/codoseo crawl https://example.com</pre>
         <a href="#checks">SEO checks</a>
         <a href="#ai">AI agents</a>
         <a href="#pricing">Pricing</a>
-        <a href="/login">Sign in</a>
+        {% if signed_in %}<a href="/app">Open app</a>{% else %}<a href="/login">Sign in</a>{% endif %}
       </div>
       <div class="fcol">
         <p class="fh">Docs</p>

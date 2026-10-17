@@ -324,7 +324,7 @@ async fn next_cannot_leave_the_site() {
     let app = TestApp::new().await;
     let token = request_link(&app, "ana@example.com", "//evil.example/steal").await;
     let (_, _, location) = consume(&app, &token).await;
-    assert_eq!(location.as_deref(), Some("/"));
+    assert_eq!(location.as_deref(), Some("/app"));
 }
 
 /// A stand-in for GitHub's OAuth and API endpoints.
@@ -439,7 +439,7 @@ async fn github_routes_are_hidden_when_not_configured() {
 }
 
 /// Browsers strip tabs and newlines from a redirect address, so `/\t/evil.com` would become
-/// `//evil.com`. Any such `next` falls back to `/`.
+/// `//evil.com`. Any such `next` falls back to `/app`.
 #[tokio::test]
 async fn next_with_control_characters_cannot_leave_the_site() {
     let app = TestApp::new().await;
@@ -451,12 +451,12 @@ async fn next_with_control_characters_cannot_leave_the_site() {
     ] {
         let res = app.get(&format!("/login?next={next}"), Some(&cookie)).await;
         assert_eq!(res.status, StatusCode::SEE_OTHER, "{next}");
-        assert_eq!(res.location(), Some("/"), "{next}");
+        assert_eq!(res.location(), Some("/app"), "{next}");
     }
     let token = request_link(&app, "bo@example.com", "/\t/evil.example").await;
     let (status, _, location) = consume(&app, &token).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(location.as_deref(), Some("/"));
+    assert_eq!(location.as_deref(), Some("/app"));
 }
 
 /// An account written before `email_canonical` existed is found by its address and keyed,

@@ -1,5 +1,6 @@
 {%- import "partials/mascot.html" as m -%}
 {%- import "partials/operator_logo.html" as op -%}
+{%- import "partials/score_bars.html" as sb -%}
 <div id="audit-body" class="page au"{% if reloads_on_queue() %} hx-get="{{ base }}/audit" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
 {% if let Some(w) = watch %}
   {{ w|safe }}
@@ -33,9 +34,10 @@
   </div>
   {% endif %}
 
-  <section class="sc-row" aria-labelledby="sc-h">
+  <section class="sc-row has-bars" aria-labelledby="sc-h">
     <h2 id="sc-h" class="sr-only">Scores</h2>
-    {% for c in d.cards %}
+    {% call sb::bars(d.bars(), "Scores") %}{% endcall %}
+    {% for c in d.side_cards() %}
     {% if let Some(href) = c.href %}<a class="card sc sc-{{ c.key }} {{ c.tone }}" href="{{ href }}">{% else %}<div class="card sc sc-{{ c.key }} {{ c.tone }}">{% endif %}
       <span class="sc-label">{% if let Some(t) = c.tag %}<span class="atag {{ t.0 }}">{{ t.1 }}</span>{% endif %}<span>{{ c.label }}</span>{% if c.help %}<button type="button" class="q" popovertarget="help-{{ c.key }}" aria-label="How the {% if c.key == "overall" %}overall{% else %}GEO{% endif %} score works">?</button>{% endif %}</span>
       <span class="sc-val">{% if c.count.is_empty() %}<b>{{ c.value }}</b>{% else %}<b data-count="{{ c.count }}">{{ c.value }}</b>{% endif %}{% if !c.unit.is_empty() %}<small>{{ c.unit }}</small>{% endif %}</span>

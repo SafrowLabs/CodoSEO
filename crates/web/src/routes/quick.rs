@@ -509,7 +509,7 @@ async fn unlock(
             let outcome = magic::issue_link(
                 &state,
                 &address,
-                "/",
+                "/app",
                 Some(AuditLink {
                     crawl_id: audit.crawl.id,
                     domain: &audit.domain,
@@ -605,6 +605,6 @@ pub async fn attach_after_login(
     .await?;
     Ok(match site {
         Some(s) => format!("/s/{}/audit", s.id),
-        None => "/".to_owned(),
+        None => "/app".to_owned(),
     })
 }

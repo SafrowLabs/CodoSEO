@@ -141,7 +141,7 @@ async fn audit_renders_score_kpis_and_issues() {
     assert_eq!(res.status, StatusCode::OK);
     let body = &res.body;
     assert!(body.contains("<h1>Site audit</h1>"), "{body}");
-    // Seven score cards: the SEO score with its checks, indexable share and average response
+    // Score bars and cards: the SEO score with its checks, indexable share and average response
     // as count-ups; no GEO score without an AI access report, so Overall and GEO read "—".
     assert!(body.contains(&format!(r#"data-count="{score}""#)), "{body}");
     assert!(
@@ -153,10 +153,11 @@ async fn audit_renders_score_kpis_and_issues() {
     assert!(body.contains(r#"data-count="120""#), "{body}");
     assert!(body.contains("First crawl"), "{body}");
     assert_eq!(
-        body.matches("<b>—</b>").count(),
-        3,
-        "Overall, GEO, AI products: {body}"
+        body.matches(r#"<b class="sb-val">–</b>"#).count(),
+        2,
+        "Overall, GEO: {body}"
     );
+    assert_eq!(body.matches("<b>—</b>").count(), 1, "AI products: {body}");
     assert!(body.contains("Needs a GEO score"), "{body}");
     assert!(body.contains("No AI check yet"), "{body}");
     // The crawl's number, size, duration and rate, and the next scheduled crawl.
