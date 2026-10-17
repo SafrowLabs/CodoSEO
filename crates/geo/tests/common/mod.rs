@@ -93,6 +93,7 @@ pub fn crawl(pages: Vec<PageRecord>) -> CrawlOutput {
             hash: 7,
         }),
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 1,
         signals: SiteSignals::default(),

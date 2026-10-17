@@ -6,6 +6,7 @@ use url::Url;
 use crate::check::{CheckId, IssueBits};
 use crate::crawl::{RobotsFile, SitemapSummary};
 use crate::page::{FetchFailure, Indexability, PageRecord};
+use crate::sitemap::SitemapFile;
 
 /// One internal link between two crawled pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -449,6 +450,9 @@ pub struct CrawlOutput {
     pub links: LinkGraph,
     pub robots: Option<RobotsFile>,
     pub sitemap: SitemapSummary,
+    /// Every sitemap file discovery tried, in fetch order (see [`crate::sitemap`]).
+    #[serde(default)]
+    pub sitemap_files: Vec<SitemapFile>,
     pub stop: StopReason,
     pub duration_ms: u64,
     #[serde(default)]

@@ -627,6 +627,7 @@ pub async fn probe_page(
         links: LinkGraph::default(),
         robots: Some(file),
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 0,
         signals: SiteSignals::default(),

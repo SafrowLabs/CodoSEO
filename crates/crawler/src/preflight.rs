@@ -11,6 +11,7 @@ use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
 use codoseo_core::output::{
     LiveFiles, LivePhase, ROBOTS_FAILED_REASON, SiteSignals, StopReason, WellKnownFile,
 };
+use codoseo_core::sitemap::SitemapFile;
 use codoseo_core::url::normalize;
 use tokio::time::Instant;
 use url::Url;
@@ -53,6 +54,8 @@ pub struct Preflight {
     pub robots: Option<RobotsFile>,
     pub sitemap_urls: Vec<Url>,
     pub sitemap: SitemapSummary,
+    /// Every sitemap file discovery tried, with the URLs each listed.
+    pub sitemap_files: Vec<SitemapFile>,
     /// What the site declares about AI use outside robots.txt: the start page's headers.
     /// `tdmrep` is left to the crawl, which fetches it once the crawl delay applies.
     pub signals: SiteSignals,
@@ -93,6 +96,7 @@ pub(crate) async fn preflight(
             robots,
             sitemap_urls: Vec::new(),
             sitemap: SitemapSummary::default(),
+            sitemap_files: Vec::new(),
             signals: SiteSignals::default(),
             stop,
             files,
@@ -143,6 +147,7 @@ pub(crate) async fn preflight(
         robots,
         sitemap_urls: Vec::new(),
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         signals,
         stop,
         files,
@@ -161,6 +166,7 @@ pub(crate) async fn preflight(
         .await;
         pre.sitemap_urls = found.urls;
         pre.sitemap = found.summary;
+        pre.sitemap_files = found.files;
         pre.files.sitemap_urls = Some(pre.sitemap.url_count);
     }
     Ok(pre)

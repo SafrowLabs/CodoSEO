@@ -314,6 +314,7 @@ fn report(robots: &str) -> AccessReport {
             hash: 1,
         }),
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 1,
         signals: SiteSignals::default(),

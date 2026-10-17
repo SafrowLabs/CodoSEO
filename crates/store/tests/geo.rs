@@ -107,6 +107,7 @@ fn crawl_of(robots_status: u16, robots_body: &str, meta_robots: Option<&str>) ->
             hash: 9,
         }),
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 1,
         signals: SiteSignals::default(),

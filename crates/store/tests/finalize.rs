@@ -7,9 +7,11 @@ mod support;
 use codoseo_core::change::{Change, ChangeKind};
 use codoseo_core::check::{IssueBits, Severity};
 use codoseo_core::crawl::SitemapSummary;
-use codoseo_core::output::{CrawlOutput, LinkGraph, SiteSignals, StopReason};
+use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, SiteSignals, StopReason};
 use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::report::{CrawlReport, CrawlSummary};
+use codoseo_core::sitemap::{LastmodStats, SitemapFile, SitemapKind};
+use codoseo_core::url::url_hash;
 use sqlx::Row;
 use support::TestDb;
 use url::Url;
@@ -17,6 +19,8 @@ use uuid::Uuid;
 
 use codoseo_store::crawl_queue::CrawlQueue;
 use codoseo_store::finalize::finalize;
+use codoseo_store::graph;
+use codoseo_store::sitemaps::load_tree;
 
 async fn make_site(pool: &sqlx::PgPool, domain: &str) -> Uuid {
     sqlx::query("INSERT INTO sites (domain, start_url) VALUES ($1, $2) RETURNING id")
@@ -95,6 +99,7 @@ fn empty_output(pages: Vec<PageRecord>, stop: StopReason) -> CrawlOutput {
         links: LinkGraph::default(),
         robots: None,
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop,
         duration_ms: 500,
         signals: SiteSignals::default(),
@@ -203,6 +208,109 @@ async fn finalize_round_trips_the_stop_reason_for_previous_snapshot() {
         snapshot.stop,
         StopReason::Blocked("site blocked our crawler".to_string())
     );
+}
+
+#[tokio::test]
+async fn finalize_writes_the_sitemap_tree_and_load_tree_reads_it() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "sitemaps.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "sitemaps.example").await;
+
+    // page1 is linked, page2 only in the sitemap, page3 a 404.
+    let mut pages = vec![sample_page(1), sample_page(2), sample_page(3)];
+    pages[1].depth = None;
+    pages[2].status = 404;
+    pages[2].indexability = Indexability::ClientError;
+    for p in &mut pages {
+        p.url_hash = url_hash(&p.url);
+    }
+    let sitemap_file =
+        |path: &str, kind: SitemapKind, parent: Option<u32>, urls: &[&str]| SitemapFile {
+            url: Url::parse(&format!("https://example.com{path}")).unwrap(),
+            kind: Some(kind),
+            parent,
+            failed: false,
+            listed: urls.len() as u32,
+            lastmod: LastmodStats {
+                with: 1,
+                distinct: 1,
+                min: Some("2026-01-02".to_owned()),
+                max: Some("2026-01-02".to_owned()),
+                future: 0,
+            },
+            urls: urls
+                .iter()
+                .map(|p| format!("https://example.com{p}"))
+                .collect(),
+        };
+    let mut out = empty_output(pages, StopReason::Completed);
+    out.sitemap_files = vec![
+        sitemap_file("/sitemap.xml", SitemapKind::Index, None, &[]),
+        sitemap_file(
+            "/pages.xml",
+            SitemapKind::UrlSet,
+            Some(0),
+            &["/page1", "/page2", "/page3", "/page4"],
+        ),
+    ];
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+        None,
+    )
+    .await
+    .expect("finalize");
+
+    let tree = load_tree(&db.pool, crawl_id)
+        .await
+        .expect("query")
+        .expect("a tree");
+    assert_eq!(tree.files.len(), 2);
+    let pages = &tree.files[1];
+    assert_eq!(pages.url, "https://example.com/pages.xml");
+    assert_eq!(
+        (pages.kind, pages.parent),
+        (Some(SitemapKind::UrlSet), Some(0))
+    );
+    assert_eq!(pages.listed, 4);
+    assert_eq!(pages.lastmod.min.as_deref(), Some("2026-01-02"));
+    let b = &pages.buckets;
+    assert_eq!(
+        (b.ok, b.orphan, b.broken, b.not_crawled),
+        (1, 1, 1, 1),
+        "{b:?}"
+    );
+    assert_eq!(pages.samples.orphan, ["https://example.com/page2"]);
+    assert_eq!(pages.samples.not_crawled, ["https://example.com/page4"]);
+    assert_eq!(tree.files[0].buckets, pages.buckets);
+
+    // The stored JSON has the documented shape.
+    let raw: serde_json::Value =
+        sqlx::query_scalar("SELECT sitemap_tree FROM site_files WHERE crawl_id = $1")
+            .bind(crawl_id)
+            .fetch_one(&db.pool)
+            .await
+            .expect("raw tree");
+    assert_eq!(raw["files"][0]["kind"], "index");
+    assert_eq!(raw["files"][1]["buckets"]["broken"], 1);
+    assert_eq!(raw["files"][1]["lastmod"]["with"], 1);
+
+    // No row, or a row from before the tree was kept: no tree.
+    assert_eq!(
+        load_tree(&db.pool, Uuid::new_v4()).await.expect("query"),
+        None
+    );
+    sqlx::query("UPDATE site_files SET sitemap_tree = NULL WHERE crawl_id = $1")
+        .bind(crawl_id)
+        .execute(&db.pool)
+        .await
+        .expect("clear tree");
+    assert_eq!(load_tree(&db.pool, crawl_id).await.expect("query"), None);
 }
 
 #[tokio::test]
@@ -392,6 +500,13 @@ async fn finalize_keeps_only_the_latest_two_done_crawls_pages() {
         .execute(&db.pool)
         .await
         .expect("insert seeded page");
+        sqlx::query(
+            "INSERT INTO crawl_graphs (crawl_id, pages, edges, body) VALUES ($1, 0, 0, '')",
+        )
+        .bind(crawl_id)
+        .execute(&db.pool)
+        .await
+        .expect("insert seeded graph");
         old_crawl_ids.push(crawl_id);
     }
 
@@ -421,6 +536,104 @@ async fn finalize_keeps_only_the_latest_two_done_crawls_pages() {
     assert!(remaining.contains(&old_crawl_ids[2]));
     assert!(remaining.contains(&current_crawl_id));
     assert_eq!(remaining.len(), 2);
+
+    // Their graphs go with them.
+    let mut graphs: Vec<Uuid> = sqlx::query_scalar("SELECT crawl_id FROM crawl_graphs")
+        .fetch_all(&db.pool)
+        .await
+        .expect("remaining graphs");
+    graphs.sort();
+    let mut kept = vec![old_crawl_ids[2], current_crawl_id];
+    kept.sort();
+    assert_eq!(graphs, kept);
+}
+
+#[tokio::test]
+async fn finalize_keeps_the_whole_link_graph() {
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "graph.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "graph.example").await;
+
+    let mut pages: Vec<PageRecord> = (0..4).map(sample_page).collect();
+    pages[1].depth = Some(1);
+    pages[2].depth = Some(1);
+    pages[3].depth = Some(2);
+    let mut out = empty_output(pages, StopReason::Completed);
+    let edge = |from, to, anchor, nofollow| Edge {
+        from,
+        to,
+        anchor,
+        nofollow,
+    };
+    out.links = LinkGraph {
+        edges: vec![
+            edge(0, 1, 0, false),
+            edge(0, 2, 1, false),
+            edge(2, 3, 2, true),
+            edge(1, 3, 2, false),
+            edge(0, 1, 1, false),
+        ],
+        anchors: vec!["Shop".to_owned(), "Blog".to_owned(), "Post".to_owned()],
+    };
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+        None,
+    )
+    .await
+    .expect("finalize");
+
+    let (pages, edges): (i32, i32) =
+        sqlx::query_as("SELECT pages, edges FROM crawl_graphs WHERE crawl_id = $1")
+            .bind(crawl_id)
+            .fetch_one(&db.pool)
+            .await
+            .expect("graph row");
+    assert_eq!((pages, edges), (4, 4));
+
+    let g = graph::load(&db.pool, crawl_id)
+        .await
+        .expect("load")
+        .expect("a graph");
+    assert_eq!(
+        g.pages.iter().map(|p| p.url_hash).collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+    // Page 3 was first linked from page 2 (nofollow or not, it was found there).
+    assert_eq!(
+        g.pages.iter().map(|p| p.parent).collect::<Vec<_>>(),
+        vec![None, Some(0), Some(0), Some(2)]
+    );
+    assert!(g.pages.iter().all(|p| (1..=100).contains(&p.link_score)));
+    let links: Vec<_> = g
+        .edges
+        .iter()
+        .map(|e| (e.from, e.to, g.anchor(e), e.nofollow))
+        .collect();
+    assert_eq!(
+        links,
+        vec![
+            (0, 1, "Shop", false),
+            (0, 2, "Blog", false),
+            (2, 3, "Post", true),
+            (1, 3, "Post", false),
+        ]
+    );
+    assert_eq!(g.inlinks(3).map(|e| e.from).collect::<Vec<_>>(), vec![2, 1]);
+    assert_eq!(g.index_of(2), Some(2));
+
+    // A crawl without a row reads as none.
+    assert!(
+        graph::load(&db.pool, Uuid::new_v4())
+            .await
+            .expect("load")
+            .is_none()
+    );
 }
 
 #[tokio::test]

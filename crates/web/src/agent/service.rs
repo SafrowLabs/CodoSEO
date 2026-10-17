@@ -1193,6 +1193,8 @@ fn ai_llms_txt(r: &codoseo_geo::llms::LlmsTxtReport) -> AiLlmsTxtInfo {
     }
     report.error = report.error.map(|e| clip(&e, MAX_AI_TEXT));
     report.title = report.title.map(|t| clip(&t, codoseo_geo::llms::MAX_TITLE));
+    // The outline is for the site graph; agents get the checks and the link summary.
+    report.tree = None;
     AiLlmsTxtInfo {
         informational: true,
         report,

@@ -1,5 +1,6 @@
 //! Writing a finished crawl in one transaction: pages and inlinks via `COPY` (batched, so
-//! memory stays flat on a large crawl), one `site_files` row, `changes`, the crawl's own
+//! memory stays flat on a large crawl), the whole link graph as one `crawl_graphs` row (see
+//! [`crate::graph`]), one `site_files` row, `changes`, the crawl's own
 //! `done`/summary update, the 2-crawl retention cleanup, the AI access report and its incidents
 //! (see [`crate::geo`]) with the GEO and Overall scores, the alert planning job and the public crawl totals ([`crate::stats`]). A
 //! failure partway rolls the whole transaction back, so a crawl never ends up half-written.
@@ -10,6 +11,7 @@ use codoseo_core::change::Change;
 use codoseo_core::output::CrawlOutput;
 use codoseo_core::page::{AiMeta, Indexability, PageRecord};
 use codoseo_core::report::CrawlReport;
+use codoseo_core::sitemap::SitemapTree;
 use codoseo_policy::PolicyReport;
 use serde::Serialize;
 use serde_json::json;
@@ -19,6 +21,7 @@ use uuid::Uuid;
 use crate::dbenum::enum_slug;
 use crate::events::{self, EventKind};
 use crate::geo::{self, GeoInput};
+use crate::graph;
 use crate::hash;
 use crate::stats;
 
@@ -66,6 +69,7 @@ pub async fn finalize_with_policy(
 
     copy_pages(&mut tx, crawl_id, site_id, &out.pages).await?;
     copy_inlinks(&mut tx, crawl_id, out, report).await?;
+    graph::write(&mut tx, crawl_id, out).await?;
     insert_site_files(&mut tx, crawl_id, site_id, out).await?;
     insert_changes(&mut tx, crawl_id, site_id, changes).await?;
     // The AI access report and what it opens or resolves, in the same transaction, so a crawl
@@ -115,7 +119,7 @@ pub async fn finalize_with_policy(
     }
 
     // Keep only the latest 2 `done` crawls' per-URL data (spec section 6).
-    for table in ["pages", "inlinks", "site_files"] {
+    for table in ["pages", "inlinks", "site_files", "crawl_graphs"] {
         let sql = format!(
             "DELETE FROM {table} WHERE crawl_id IN (\
                SELECT id FROM crawls WHERE site_id = $1 AND status = 'done' \
@@ -242,9 +246,11 @@ async fn insert_site_files(
         ),
         None => (None, None, None),
     };
+    // The sitemaps as a tree, each file's URLs classified against the pages (see `sitemaps`).
+    let tree = SitemapTree::build(&out.sitemap_files, &out.pages);
     sqlx::query(
         "INSERT INTO site_files (crawl_id, site_id, robots_status, robots_body, robots_hash, \
-         sitemap_url_count, sitemap_hash) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+         sitemap_url_count, sitemap_hash, sitemap_tree) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(crawl_id)
     .bind(site_id)
@@ -253,6 +259,7 @@ async fn insert_site_files(
     .bind(robots_hash)
     .bind(out.sitemap.url_count as i32)
     .bind(hash::to_db(out.sitemap.hash))
+    .bind(sqlx::types::Json(&tree))
     .execute(&mut **tx)
     .await?;
     Ok(())

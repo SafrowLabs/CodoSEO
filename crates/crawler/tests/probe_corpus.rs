@@ -723,6 +723,7 @@ fn crawl_of(site: &TestSite, paths: &[&str], robots: &str) -> CrawlOutput {
             hash: 1,
         }),
         sitemap: SitemapSummary::default(),
+        sitemap_files: Vec::new(),
         stop: StopReason::Completed,
         duration_ms: 1,
         signals: SiteSignals::default(),

@@ -6,8 +6,10 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::io::{BufReader, Read};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use codoseo_core::crawl::SitemapSummary;
+use codoseo_core::sitemap::{LastmodStats, SitemapFile};
 use codoseo_core::url::{normalize, url_hash};
 use encoding_rs::{Decoder, UTF_8};
 use flate2::read::GzDecoder;
@@ -27,16 +29,14 @@ const MAX_DEPTH: u8 = 2;
 /// Fetch attempts per discovery, successful or not.
 pub const MAX_SITEMAP_FILES: usize = 100;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SitemapKind {
-    UrlSet,
-    Index,
-}
+pub use codoseo_core::sitemap::SitemapKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SitemapDoc {
     pub kind: SitemapKind,
     pub locs: Vec<String>,
+    /// The `<lastmod>` of its `<url>` entries, future ones counted against today (UTC).
+    pub lastmod: LastmodStats,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,22 +50,115 @@ pub enum SitemapError {
 pub struct SitemapDiscovery {
     pub urls: Vec<Url>,
     pub summary: SitemapSummary,
+    /// Every file fetched or tried, in fetch order, with the URLs each listed.
+    pub files: Vec<SitemapFile>,
 }
 
 pub fn parse_sitemap(bytes: &[u8]) -> Result<SitemapDoc, SitemapError> {
     let mut locs = Vec::new();
-    let kind = parse_stream(bytes, |_, loc| {
+    let mut lastmod = LastmodTally::new(today());
+    let kind = parse_stream(bytes, |kind, loc, modified| {
         locs.push(loc.to_owned());
+        if kind == SitemapKind::UrlSet {
+            lastmod.add(modified);
+        }
         true
     })?;
-    Ok(SitemapDoc { kind, locs })
+    Ok(SitemapDoc {
+        kind,
+        locs,
+        lastmod: lastmod.finish(),
+    })
 }
 
-/// Streams the `<loc>` values that sit directly under `<url>` or `<sitemap>` (so
-/// `<image:loc>` and friends are skipped) to `on_loc`, which returns false to stop.
+/// [`LastmodStats`] as a file's entries come in.
+struct LastmodTally {
+    today: String,
+    stats: LastmodStats,
+    dates: HashSet<String>,
+}
+
+impl LastmodTally {
+    fn new(today: String) -> Self {
+        LastmodTally {
+            today,
+            stats: LastmodStats::default(),
+            dates: HashSet::new(),
+        }
+    }
+
+    fn add(&mut self, lastmod: Option<&str>) {
+        let Some(date) = lastmod.and_then(date_of) else {
+            return;
+        };
+        let s = &mut self.stats;
+        s.with += 1;
+        if date > self.today.as_str() {
+            s.future += 1;
+        }
+        if s.min.as_deref().is_none_or(|m| date < m) {
+            s.min = Some(date.to_owned());
+        }
+        if s.max.as_deref().is_none_or(|m| date > m) {
+            s.max = Some(date.to_owned());
+        }
+        if !self.dates.contains(date) {
+            self.dates.insert(date.to_owned());
+        }
+    }
+
+    fn finish(mut self) -> LastmodStats {
+        self.stats.distinct = u32::try_from(self.dates.len()).unwrap_or(u32::MAX);
+        self.stats
+    }
+}
+
+/// The `YYYY-MM-DD` a W3C datetime starts with; `None` when it doesn't start with one.
+fn date_of(value: &str) -> Option<&str> {
+    let date = value.get(..10)?;
+    let ok = date.bytes().enumerate().all(|(i, b)| match i {
+        4 | 7 => b == b'-',
+        _ => b.is_ascii_digit(),
+    });
+    ok.then_some(date)
+}
+
+/// Today's UTC date as `YYYY-MM-DD`.
+fn today() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    civil_date(i64::try_from(secs / 86_400).unwrap_or(0))
+}
+
+/// The `YYYY-MM-DD` of a day counted from 1970-01-01 (Howard Hinnant's civil-from-days).
+fn civil_date(days: i64) -> String {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// Which child of an entry the parser is reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    None,
+    Loc,
+    Lastmod,
+}
+
+/// Streams the entries directly under the root (`<url>` or `<sitemap>`) to `on_entry`: the
+/// `<loc>` that sits directly under it (so `<image:loc>` and friends are skipped) and its
+/// `<lastmod>`, if any. `on_entry` returns false to stop.
 fn parse_stream(
     bytes: &[u8],
-    mut on_loc: impl FnMut(SitemapKind, &str) -> bool,
+    mut on_entry: impl FnMut(SitemapKind, &str, Option<&str>) -> bool,
 ) -> Result<SitemapKind, SitemapError> {
     let source: Box<dyn Read + '_> = if bytes.starts_with(&[0x1f, 0x8b]) {
         Box::new(GzDecoder::new(bytes).take(MAX_SITEMAP_BYTES as u64))
@@ -77,8 +170,12 @@ fn parse_stream(
     let mut kind = None;
     let mut depth = 0usize;
     let mut in_entry = false;
-    let mut in_loc = false;
+    let mut field = Field::None;
     let mut current = String::new();
+    // The entry being read: its `<loc>` and `<lastmod>` once each has closed.
+    let mut loc: Option<String> = None;
+    let mut lastmod: Option<String> = None;
+    let mut stopped = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -93,9 +190,17 @@ fn parse_stream(
                             _ => return Err(SitemapError::NotASitemap),
                         })
                     }
-                    2 => in_entry = matches!(local.as_ref(), "url" | "sitemap"),
-                    3 if in_entry && local.as_ref() == "loc" && e.name().prefix().is_none() => {
-                        in_loc = true;
+                    2 => {
+                        in_entry = matches!(local.as_ref(), "url" | "sitemap");
+                        loc = None;
+                        lastmod = None;
+                    }
+                    3 if in_entry && e.name().prefix().is_none() => {
+                        field = match local.as_ref() {
+                            "loc" => Field::Loc,
+                            "lastmod" => Field::Lastmod,
+                            _ => Field::None,
+                        };
                         current.clear();
                     }
                     _ => {}
@@ -108,9 +213,9 @@ fn parse_stream(
                     _ => Err(SitemapError::NotASitemap),
                 };
             }
-            Ok(Event::Text(t)) if in_loc => current.push_str(&t.xml10_content()),
-            Ok(Event::CData(c)) if in_loc => current.push_str(&c.xml10_content()),
-            Ok(Event::GeneralRef(r)) if in_loc => {
+            Ok(Event::Text(t)) if field != Field::None => current.push_str(&t.xml10_content()),
+            Ok(Event::CData(c)) if field != Field::None => current.push_str(&c.xml10_content()),
+            Ok(Event::GeneralRef(r)) if field != Field::None => {
                 let ch = match r.resolve_char_ref() {
                     Ok(Some(ch)) => Some(ch),
                     _ => match r.as_ref() {
@@ -125,13 +230,22 @@ fn parse_stream(
                 current.extend(ch);
             }
             Ok(Event::End(_)) => {
-                if in_loc {
-                    in_loc = false;
-                    let loc = current.trim();
-                    if !loc.is_empty()
-                        && let Some(k) = kind
-                        && !on_loc(k, loc)
+                if depth == 3 && field != Field::None {
+                    let value = current.trim();
+                    if !value.is_empty() {
+                        match field {
+                            Field::Loc => loc = Some(value.to_owned()),
+                            Field::Lastmod => lastmod = Some(value.to_owned()),
+                            Field::None => {}
+                        }
+                    }
+                    field = Field::None;
+                } else if depth == 2 && in_entry {
+                    in_entry = false;
+                    if let (Some(l), Some(k)) = (loc.take(), kind)
+                        && !on_entry(k, &l, lastmod.as_deref())
                     {
+                        stopped = true;
                         break;
                     }
                 }
@@ -144,6 +258,13 @@ fn parse_stream(
             Ok(_) => {}
         }
         buf.clear();
+    }
+    // Broken XML inside an entry still yields its `<loc>` when that had closed.
+    if !stopped
+        && in_entry
+        && let (Some(l), Some(k)) = (loc, kind)
+    {
+        on_entry(k, &l, lastmod.as_deref());
     }
     kind.ok_or(SitemapError::NotASitemap)
 }
@@ -199,6 +320,9 @@ impl<R: Read> Read for LossyUtf8<R> {
 /// Fetches the seed sitemaps, follows indexes up to depth 2, and returns up to
 /// `max_urls` unique page URLs. Stops at `deadline` with what it has. With a `limiter`,
 /// every sitemap fetch waits for a permit first.
+///
+/// Every file tried is kept as a [`SitemapFile`], with the URLs it listed; across all files at
+/// most twice `max_urls` of those are kept, so a file repeating one URL can't grow memory.
 pub async fn discover(
     fetcher: &Fetcher,
     limiter: Option<&Limiter>,
@@ -207,23 +331,28 @@ pub async fn discover(
     deadline: Instant,
 ) -> SitemapDiscovery {
     let max_urls = max_urls as usize;
+    let max_members = max_urls.saturating_mul(2);
     let mut known: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(Url, u8)> = VecDeque::new();
+    // Each sitemap with its depth and the index into `sitemap_files` of the index listing it.
+    let mut queue: VecDeque<(Url, u8, Option<u32>)> = VecDeque::new();
     for seed in seeds {
         if known.insert(seed.as_str().to_owned()) {
-            queue.push_back((seed.clone(), 0));
+            queue.push_back((seed.clone(), 0, None));
         }
     }
     let mut seen: HashSet<u64> = HashSet::new();
     let mut urls: Vec<Url> = Vec::new();
     let mut files: Vec<Url> = Vec::new();
+    let mut sitemap_files: Vec<SitemapFile> = Vec::new();
+    let mut members = 0usize;
+    let today = today();
     let mut attempts = 0usize;
     let mut failed = 0u32;
     let mut truncated = false;
     let mut dropped = false;
     let mut stopped = false;
 
-    while let Some((sitemap_url, depth)) = queue.pop_front() {
+    while let Some((sitemap_url, depth, parent)) = queue.pop_front() {
         if truncated {
             break;
         }
@@ -244,51 +373,79 @@ pub async fn discover(
                 stopped = true;
                 break;
             }
-            Ok(Err(_)) => {
-                failed += 1;
-                continue;
-            }
-            Ok(Ok(res)) => res,
+            Ok(res) => res,
         };
-        let Some(body) = res.body.filter(|_| (200..300).contains(&res.status)) else {
+        let index = u32::try_from(sitemap_files.len()).unwrap_or(u32::MAX);
+        sitemap_files.push(SitemapFile {
+            url: sitemap_url.clone(),
+            kind: None,
+            parent,
+            failed: true,
+            listed: 0,
+            lastmod: LastmodStats::default(),
+            urls: Vec::new(),
+        });
+        let Some(body) = res
+            .ok()
+            .and_then(|res| res.body.filter(|_| (200..300).contains(&res.status)))
+        else {
             failed += 1;
             continue;
         };
 
-        let parsed = parse_stream(&body, |kind, loc| match kind {
-            SitemapKind::Index => {
-                if depth >= MAX_DEPTH {
-                    return false;
+        let file = sitemap_files.last_mut().expect("pushed above");
+        let mut lastmod = LastmodTally::new(today.clone());
+        let parsed = parse_stream(&body, |kind, loc, modified| {
+            file.listed = file.listed.saturating_add(1);
+            match kind {
+                SitemapKind::Index => {
+                    // Past the depth or file cap the index is still read, for its count.
+                    if depth >= MAX_DEPTH {
+                        return true;
+                    }
+                    if attempts + queue.len() >= MAX_SITEMAP_FILES {
+                        dropped = true;
+                        return true;
+                    }
+                    if let Some(child) = normalize(&sitemap_url, loc)
+                        && known.insert(child.as_str().to_owned())
+                    {
+                        queue.push_back((child, depth + 1, Some(index)));
+                    }
+                    true
                 }
-                if attempts + queue.len() >= MAX_SITEMAP_FILES {
-                    dropped = true;
-                    return false;
+                SitemapKind::UrlSet => {
+                    lastmod.add(modified);
+                    let Some(url) = normalize(&sitemap_url, loc) else {
+                        return true;
+                    };
+                    if members < max_members {
+                        members += 1;
+                        file.urls.push(url.as_str().to_owned());
+                    }
+                    if !seen.insert(url_hash(&url)) {
+                        return true;
+                    }
+                    if urls.len() >= max_urls {
+                        truncated = true;
+                        return false;
+                    }
+                    urls.push(url);
+                    true
                 }
-                if let Some(child) = normalize(&sitemap_url, loc)
-                    && known.insert(child.as_str().to_owned())
-                {
-                    queue.push_back((child, depth + 1));
-                }
-                true
-            }
-            SitemapKind::UrlSet => {
-                let Some(url) = normalize(&sitemap_url, loc) else {
-                    return true;
-                };
-                if !seen.insert(url_hash(&url)) {
-                    return true;
-                }
-                if urls.len() >= max_urls {
-                    truncated = true;
-                    return false;
-                }
-                urls.push(url);
-                true
             }
         });
         match parsed {
-            Ok(_) => files.push(sitemap_url),
-            Err(_) => failed += 1,
+            Ok(kind) => {
+                file.kind = Some(kind);
+                file.failed = false;
+                file.lastmod = lastmod.finish();
+                files.push(sitemap_url);
+            }
+            Err(_) => {
+                file.listed = 0;
+                failed += 1;
+            }
         }
     }
 
@@ -306,5 +463,19 @@ pub async fn discover(
             complete,
         },
         urls,
+        files: sitemap_files,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn days_since_the_epoch_are_civil_dates() {
+        assert_eq!(civil_date(0), "1970-01-01");
+        assert_eq!(civil_date(11_016), "2000-02-29");
+        assert_eq!(civil_date(20_000), "2024-10-04");
+        assert_eq!(today().len(), 10);
     }
 }

@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use codoseo_core::output::{CrawlOutput, LinkStatus, LlmsTxtFetch};
 use codoseo_geo::llms::{
-    LlmsCheckId, LlmsState, LlmsTxtReport, MIN_CHARS, NOTICE_BYTES, assess, carry_adoption, links,
-    parse,
+    LlmsCheckId, LlmsState, LlmsTreeLink, LlmsTxtReport, MAX_TREE_LINKS, MIN_CHARS, NOTICE_BYTES,
+    assess, carry_adoption, links, parse,
 };
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use common::*;
@@ -457,6 +457,10 @@ fn a_huge_h1_and_section_names_are_capped() {
         title.len()
     );
     assert!(title.ends_with('…'));
+    let tree = r.tree.as_ref().unwrap();
+    assert_eq!(tree.sections.len(), codoseo_geo::llms::MAX_TREE_SECTIONS);
+    assert_eq!(tree.more_sections as usize, 2001 - tree.sections.len());
+    assert!(tree.title.as_deref().unwrap().chars().count() <= codoseo_geo::llms::MAX_TITLE);
     for c in &r.checks {
         assert!(
             c.detail.chars().count() <= codoseo_geo::llms::MAX_DETAIL,
@@ -473,4 +477,135 @@ fn a_huge_h1_and_section_names_are_capped() {
     }];
     let r = assess(&f, false);
     assert!(r.link_summary.failing_urls[0].chars().count() <= 2048);
+}
+
+// ---- tree -------------------------------------------------------------------------------------
+
+#[test]
+fn the_tree_keeps_sections_links_and_each_links_status() {
+    let mut f = file(&fixture("docs_site.txt"));
+    f.final_url = Some("https://docs.acme.test/llms.txt".to_owned());
+    let status = |url: &str, status: Option<u16>, from_crawl: bool| LinkStatus {
+        url: url.to_owned(),
+        status,
+        from_crawl,
+    };
+    f.links = vec![
+        status("https://docs.acme.test/quickstart.md", Some(200), true),
+        status("https://docs.acme.test/auth.md", Some(404), false),
+        status("https://docs.acme.test/webhooks.md", None, false),
+        status("https://docs.acme.test/api/payments.md", Some(301), false),
+        status("https://docs.acme.test/changelog.md", Some(500), false),
+    ];
+    let r = assess(&f, false);
+    let tree = r.tree.as_ref().expect("a tree for an available file");
+    assert_eq!(tree.title.as_deref(), Some("Acme Docs"));
+    assert!(
+        tree.summary
+            .as_deref()
+            .unwrap()
+            .starts_with("Acme is a payments API.")
+    );
+    assert_eq!(tree.bytes, f.bytes);
+    assert!(tree.chars > 0);
+    let titles: Vec<(&str, bool)> = tree
+        .sections
+        .iter()
+        .map(|s| (s.title.as_str(), s.optional))
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            ("Getting started", false),
+            ("API reference", false),
+            ("Optional", true)
+        ]
+    );
+    let link = |name: &str, url: &str, status: Option<u16>| LlmsTreeLink {
+        name: name.to_owned(),
+        url: url.to_owned(),
+        status,
+    };
+    assert_eq!(
+        tree.sections[0].links,
+        [
+            link(
+                "Quickstart",
+                "https://docs.acme.test/quickstart.md",
+                Some(200)
+            ),
+            link(
+                "Authentication",
+                "https://docs.acme.test/auth.md",
+                Some(404)
+            ),
+            // Checked, but no response.
+            link("Webhooks", "https://docs.acme.test/webhooks.md", Some(0)),
+        ]
+    );
+    assert_eq!(tree.sections[1].links[0].status, Some(301));
+    // Not checked.
+    assert_eq!(tree.sections[1].links[1].status, None);
+    assert_eq!(tree.sections[2].links[0].status, Some(500));
+    // On another origin: never checked.
+    assert_eq!(tree.sections[2].links[1].status, None);
+    assert_eq!((tree.more_links, tree.more_sections), (0, 0));
+
+    let v = serde_json::to_value(&r).unwrap();
+    assert_eq!(v["tree"]["sections"][2]["optional"], true);
+    assert!(v["tree"]["sections"][0].get("optional").is_none());
+    assert!(v["tree"]["sections"][1]["links"][1].get("status").is_none());
+    assert!(v["tree"].get("more_links").is_none());
+    let back: LlmsTxtReport = serde_json::from_value(v).unwrap();
+    assert_eq!(back, r);
+}
+
+#[test]
+fn relative_links_take_the_status_of_where_they_resolve() {
+    let mut f = file("# Site\n\n## Docs\n\n- [A](/a)\n- [B](b.md)\n");
+    f.final_url = Some("https://e.test/docs/llms.txt".to_owned());
+    f.links = vec![
+        LinkStatus {
+            url: "https://e.test/a".to_owned(),
+            status: Some(200),
+            from_crawl: true,
+        },
+        LinkStatus {
+            url: "https://e.test/docs/b.md".to_owned(),
+            status: Some(404),
+            from_crawl: false,
+        },
+    ];
+    let tree = assess(&f, false).tree.unwrap();
+    let links: Vec<(&str, Option<u16>)> = tree.sections[0]
+        .links
+        .iter()
+        .map(|l| (l.url.as_str(), l.status))
+        .collect();
+    assert_eq!(links, [("/a", Some(200)), ("b.md", Some(404))]);
+}
+
+#[test]
+fn the_tree_is_capped_and_says_how_much_it_left_out() {
+    let items: String = (0..MAX_TREE_LINKS + 20)
+        .map(|i| format!("- [P{i}](/p/{i})\n"))
+        .collect();
+    let body = format!("# Big\n\n## One\n\n{items}\n## Two\n\n- [Q](/q)\n");
+    let tree = assess(&file(&body), false).tree.unwrap();
+    let kept: usize = tree.sections.iter().map(|s| s.links.len()).sum();
+    assert_eq!(kept, MAX_TREE_LINKS);
+    assert_eq!(tree.more_links, 21);
+    assert_eq!(tree.sections.len(), 2);
+    assert!(tree.sections[1].links.is_empty());
+}
+
+#[test]
+fn only_an_available_file_has_a_tree_and_older_reports_read_without_one() {
+    assert_eq!(assess(&served(404, "text/html", ""), false).tree, None);
+    let r = assess(&file(&fixture("docs_site.txt")), false);
+    let mut v = serde_json::to_value(&r).unwrap();
+    v.as_object_mut().unwrap().remove("tree");
+    let old: LlmsTxtReport = serde_json::from_value(v).unwrap();
+    assert_eq!(old.tree, None);
+    assert_eq!(old.checks, r.checks);
 }
