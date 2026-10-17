@@ -6,13 +6,16 @@ mod support;
 use std::collections::HashSet;
 use std::time::Duration as StdDuration;
 
-use codoseo_core::output::Progress;
+use codoseo_core::check::IssueBits;
+use codoseo_core::output::{LiveRow, Progress};
+use codoseo_core::page::Indexability;
 use sqlx::Row;
 use support::TestDb;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use codoseo_store::crawl_queue::{CrawlQueue, CrawlTrigger};
+use codoseo_store::crawls;
 
 async fn make_site(pool: &sqlx::PgPool, domain: &str) -> Uuid {
     sqlx::query("INSERT INTO sites (domain, start_url) VALUES ($1, $2) RETURNING id")
@@ -653,4 +656,69 @@ async fn a_failed_quick_audit_never_alerts() {
         .unwrap();
     assert_eq!(status, "failed");
     assert!(alert_jobs(&db.pool).await.is_empty());
+}
+
+fn live_row(n: u32) -> LiveRow {
+    LiveRow {
+        n,
+        url: format!("https://live.example/p/{n}"),
+        status: 200,
+        error: None,
+        response_ms: 40,
+        indexability: Indexability::Indexable,
+        issues: IssueBits::default(),
+        ai_blocked: 0b10,
+        ai_of: 10,
+    }
+}
+
+#[tokio::test]
+async fn live_rows_are_added_once_read_in_crawl_order_and_reset_for_a_retry() {
+    let db = TestDb::new().await;
+    let queue = CrawlQueue::new(db.pool.clone());
+    let site_id = make_site(&db.pool, "live.example").await;
+    let id = queue
+        .enqueue(site_id, "live.example", CrawlTrigger::Manual, 2, None, None)
+        .await
+        .expect("enqueue");
+
+    // Not running yet: nothing is kept.
+    queue.add_live_rows(id, &[live_row(1)]).await.expect("add");
+    assert!(
+        crawls::live_rows(&db.pool, id, 0, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    queue
+        .claim("worker-a")
+        .await
+        .expect("claim")
+        .expect("a crawl");
+    queue
+        .add_live_rows(id, &[live_row(2), live_row(1)])
+        .await
+        .expect("add");
+    // A late write overlapping a newer one keeps the row already there.
+    let mut late = live_row(2);
+    late.status = 500;
+    queue
+        .add_live_rows(id, &[late, live_row(3)])
+        .await
+        .expect("add");
+
+    let rows = crawls::live_rows(&db.pool, id, 0, 10).await.unwrap();
+    assert_eq!(rows.iter().map(|r| r.n).collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(rows[1], live_row(2));
+    let after = crawls::live_rows(&db.pool, id, 1, 1).await.unwrap();
+    assert_eq!(after.iter().map(|r| r.n).collect::<Vec<_>>(), [2]);
+
+    queue.clear_live_rows(id).await.expect("clear");
+    assert!(
+        crawls::live_rows(&db.pool, id, 0, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

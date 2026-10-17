@@ -4,7 +4,7 @@
 
 use codoseo_core::check::IssueBits;
 use codoseo_core::crawl::{RobotsFile, SitemapSummary};
-use codoseo_core::output::{SiteFault, StopReason, robots_failure};
+use codoseo_core::output::{LiveRow, SiteFault, StopReason, robots_failure};
 use codoseo_core::page::{AiMeta, Indexability, JsonLdStatus, OgTags, PageFields, PageRecord};
 use codoseo_core::snapshot::Snapshot;
 use serde::{Deserialize, Serialize};
@@ -147,6 +147,35 @@ impl CrawlQueue {
         .bind(progress)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    /// Adds pages to a still-`running` crawl's live rows. A row already there (a late write
+    /// overlapping a newer one) is kept.
+    pub async fn add_live_rows(&self, id: Uuid, rows: &[LiveRow]) -> Result<(), sqlx::Error> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let rows = serde_json::to_value(rows).expect("live rows always serialize");
+        sqlx::query(
+            "INSERT INTO crawl_live_rows (crawl_id, n, row) \
+             SELECT $1, (r->>'n')::int, r FROM jsonb_array_elements($2) r \
+             WHERE EXISTS (SELECT 1 FROM crawls WHERE id = $1 AND status = 'running') \
+             ON CONFLICT (crawl_id, n) DO NOTHING",
+        )
+        .bind(id)
+        .bind(rows)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Drops a crawl's live rows, so a crawl claimed again after a dead worker starts over.
+    pub async fn clear_live_rows(&self, id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM crawl_live_rows WHERE crawl_id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

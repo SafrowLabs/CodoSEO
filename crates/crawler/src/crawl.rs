@@ -10,7 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
-use codoseo_core::output::{CrawlOutput, Edge, LinkGraph, Progress, SiteSignals, StopReason};
+use codoseo_core::output::{
+    CrawlOutput, Edge, LinkGraph, LiveFiles, LivePhase, Progress, SiteSignals, StopReason,
+};
 use codoseo_core::page::PageRecord;
 use codoseo_core::url::{normalize, url_hash};
 use futures_util::StreamExt;
@@ -44,39 +46,78 @@ pub enum CrawlError {
     Client(String),
 }
 
+/// A running crawl as a watcher sees it: the counters, the stage, what the site files gave,
+/// and the pages recorded so far, in order.
+pub struct Live<'a> {
+    pub progress: Progress,
+    pub phase: LivePhase,
+    pub files: LiveFiles,
+    pub pages: &'a [PageRecord],
+    /// robots.txt as served, once it has been read; `None` before, and when it gave no
+    /// response.
+    pub robots: Option<&'a RobotsFile>,
+}
+
 /// Crawls `cfg.start_url` with its own in-flight cap of `politeness.max_in_flight`.
+/// `on_progress` is called after each recorded page.
 pub async fn crawl(
     cfg: CrawlConfig,
     on_progress: impl Fn(Progress) + Send + Sync,
 ) -> Result<CrawlOutput, CrawlError> {
-    crawl_watched(cfg, |p, _| on_progress(p)).await
+    crawl_watched(cfg, |live: &Live<'_>| {
+        if live.phase == LivePhase::Pages {
+            on_progress(live.progress);
+        }
+    })
+    .await
 }
 
-/// [`crawl`], with the pages recorded so far, in order, passed to `on_progress` too, so a
-/// caller can show the newest ones while the crawl runs.
+/// [`crawl`], with the stage, the site files and the pages recorded so far passed to `on_live`
+/// too, so a caller can show the crawl as it runs.
 pub async fn crawl_watched(
     cfg: CrawlConfig,
-    on_progress: impl Fn(Progress, &[PageRecord]) + Send + Sync,
+    on_live: impl Fn(&Live<'_>) + Send + Sync,
 ) -> Result<CrawlOutput, CrawlError> {
     let global = Arc::new(Semaphore::new(cfg.politeness.max_in_flight.max(1) as usize));
-    crawl_shared(cfg, global, on_progress).await
+    crawl_shared(cfg, global, on_live).await
 }
 
 /// Crawls `cfg.start_url`, taking a slot of `global` for every request, so several
-/// crawls can share one in-flight cap. `on_progress` is called after each recorded page, with
-/// the pages recorded so far.
+/// crawls can share one in-flight cap. `on_live` is called as each stage starts and after each
+/// recorded page.
 pub async fn crawl_shared(
     cfg: CrawlConfig,
     global: Arc<Semaphore>,
-    on_progress: impl Fn(Progress, &[PageRecord]) + Send + Sync,
+    on_live: impl Fn(&Live<'_>) + Send + Sync,
 ) -> Result<CrawlOutput, CrawlError> {
     let started = Instant::now();
     let start = valid_start(&cfg)?;
     let fetcher = fetcher_for(&cfg)?;
     let deadline = started + cfg.limits.max_duration;
     let limiter = Limiter::new(&cfg.politeness, None, global);
+    // A stage with no page recorded yet.
+    let on_phase = |phase: LivePhase, files: LiveFiles| {
+        on_live(&Live {
+            progress: Progress {
+                pages_done: 0,
+                queued: 0,
+                failures: 0,
+                depth: 0,
+                elapsed_ms: elapsed_ms(started),
+            },
+            phase,
+            files,
+            pages: &[],
+            robots: None,
+        });
+    };
 
-    let Ok(pre) = timeout_at(deadline, preflight(&cfg, &fetcher, &limiter, deadline)).await else {
+    let Ok(pre) = timeout_at(
+        deadline,
+        preflight(&cfg, &fetcher, &limiter, deadline, &on_phase),
+    )
+    .await
+    else {
         return Ok(CrawlOutput {
             origin: origin_of(&start),
             pages: Vec::new(),
@@ -97,16 +138,21 @@ pub async fn crawl_shared(
         sitemap,
         mut signals,
         stop,
+        mut files,
     } = pre?;
     limiter.set_crawl_delay(rules.crawl_delay());
     // After the crawl delay, so even this one extra request keeps to it.
     if stop.is_none() && cfg.site_signals {
+        on_phase(LivePhase::LlmsTxt, files);
         signals.tdmrep = timeout_at(deadline, fetch_tdmrep(&fetcher, &limiter, &origin, &rules))
             .await
             .ok()
             .flatten();
         match fetch_llms_txt(&fetcher, &limiter, &origin, &rules, deadline).await {
-            Ok(f) => signals.llms_txt = Some(f),
+            Ok(f) => {
+                files.llms_txt = Some(f.status);
+                signals.llms_txt = Some(f);
+            }
             Err(skip) => signals.llms_txt_skipped = Some(skip),
         }
         // The page the start address settled on, and only when it answered: a site that failed
@@ -131,6 +177,15 @@ pub async fn crawl_shared(
         .filter(|u| scope.is_internal(u))
         .collect();
     run.frontier.reserve(extras);
+    let on_progress = |progress: Progress, pages: &[PageRecord]| {
+        on_live(&Live {
+            progress,
+            phase: LivePhase::Pages,
+            files,
+            pages,
+            robots: robots.as_ref(),
+        });
+    };
     if let Some((url, result)) = start {
         run.record_start(url, result);
         on_progress(run.progress(0), &run.pages);
@@ -199,7 +254,7 @@ pub async fn preflight_for_tests(cfg: CrawlConfig) -> Result<Preflight, CrawlErr
     let fetcher = fetcher_for(&cfg)?;
     let limiter = Limiter::new(&cfg.politeness, None, Arc::new(Semaphore::new(64)));
     let deadline = Instant::now() + cfg.limits.max_duration.max(Duration::from_secs(1));
-    preflight(&cfg, &fetcher, &limiter, deadline).await
+    preflight(&cfg, &fetcher, &limiter, deadline, &|_, _| {}).await
 }
 
 fn valid_start(cfg: &CrawlConfig) -> Result<Url, CrawlError> {

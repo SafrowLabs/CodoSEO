@@ -2,6 +2,7 @@
 //! → site policy → diff → synthetic probes → finalize), and drains in-flight work on shutdown.
 
 pub mod budget;
+pub mod live;
 pub mod probes;
 pub mod run;
 pub mod site_policy;

@@ -81,6 +81,64 @@ async fn worker_loop_once_crawls_and_finalizes_a_claimed_site() {
 }
 
 #[tokio::test]
+async fn a_crawl_lists_every_checked_page_for_the_live_views_and_keeps_only_the_newest() {
+    let db = TestDb::new().await;
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: PerplexityBot\nDisallow: /b\n")
+        .html("/", "Home", &["/a", "/b"])
+        .html("/a", "A", &[])
+        .html("/b", "B", &[])
+        .start()
+        .await;
+    let site_id = db.seed_site("live.test", site.url("/").as_str()).await;
+
+    let first = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let rows = codoseo_store::crawls::live_rows(&db.pool, first, 0, 100)
+        .await
+        .unwrap();
+    assert_eq!(rows.iter().map(|r| r.n).collect::<Vec<_>>(), [1, 2, 3]);
+    assert!(rows.iter().all(|r| r.status == 200 && r.ai_of > 0));
+    let b = rows.iter().find(|r| r.url.ends_with("/b")).unwrap();
+    assert_eq!(
+        b.ai_blocked.count_ones(),
+        1,
+        "only Perplexity is kept off /b"
+    );
+    assert!(
+        rows.iter()
+            .filter(|r| r.url.ends_with("/a"))
+            .all(|r| r.ai_blocked == 0)
+    );
+
+    // The last write says the pages are in and what the site files gave.
+    let progress: serde_json::Value =
+        sqlx::query_scalar("SELECT progress FROM crawls WHERE id = $1")
+            .bind(first)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(progress["phase"], "scoring");
+    assert_eq!(progress["files"]["robots"], 200);
+    assert!(progress["seo_estimate"].is_number());
+
+    // The next crawl's finalize drops the older crawl's rows.
+    let second = run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert!(
+        codoseo_store::crawls::live_rows(&db.pool, first, 0, 100)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        codoseo_store::crawls::live_rows(&db.pool, second, 0, 100)
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
 async fn a_panicking_crawl_is_isolated_and_the_loop_keeps_serving_later_crawls() {
     let db = TestDb::new().await;
     let crawl_queue = CrawlQueue::new(db.pool.clone());

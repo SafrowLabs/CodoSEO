@@ -2,7 +2,7 @@
 //! in flight, history, and the manual-crawl count behind the plan allowance; plus the checked
 //! insert behind Run crawl.
 
-use codoseo_core::output::{LiveProgress, Progress, StopReason};
+use codoseo_core::output::{LiveProgress, LiveRow, Progress, StopReason};
 use codoseo_core::plan::ManualAllowance;
 use codoseo_core::report::CrawlSummary;
 use codoseo_geo::score::GeoScore;
@@ -102,6 +102,24 @@ const SELECT: &str = "SELECT * FROM ( \
               checks_total, geo_score, geo_checks_passed, geo_checks_applicable, overall_score, \
               progress, summary, failure_reason, created_at \
        FROM crawls WHERE site_id = $1) c";
+
+/// A crawl's live rows after the `after`th page, in crawl order, at most `limit`.
+pub async fn live_rows(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    after: u32,
+    limit: i64,
+) -> Result<Vec<LiveRow>, sqlx::Error> {
+    let rows: Vec<sqlx::types::Json<LiveRow>> = sqlx::query_scalar(
+        "SELECT row FROM crawl_live_rows WHERE crawl_id = $1 AND n > $2 ORDER BY n LIMIT $3",
+    )
+    .bind(crawl_id)
+    .bind(i32::try_from(after).unwrap_or(i32::MAX))
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
 
 /// The most recent finished crawl.
 pub async fn latest_done(pool: &PgPool, site_id: Uuid) -> Result<Option<Crawl>, sqlx::Error> {

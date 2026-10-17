@@ -8,7 +8,9 @@
 use std::time::Duration;
 
 use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
-use codoseo_core::output::{ROBOTS_FAILED_REASON, SiteSignals, StopReason, WellKnownFile};
+use codoseo_core::output::{
+    LiveFiles, LivePhase, ROBOTS_FAILED_REASON, SiteSignals, StopReason, WellKnownFile,
+};
 use codoseo_core::url::normalize;
 use tokio::time::Instant;
 use url::Url;
@@ -56,20 +58,29 @@ pub struct Preflight {
     pub signals: SiteSignals,
     /// Set when the crawl should not go on.
     pub stop: Option<StopReason>,
+    /// What robots.txt and the sitemaps gave, for the live views.
+    pub files: LiveFiles,
 }
+
+/// Told each stage preflight starts, with what the files read so far gave.
+pub(crate) type OnPhase<'a> = &'a (dyn Fn(LivePhase, LiveFiles) + Send + Sync);
 
 pub(crate) async fn preflight(
     cfg: &CrawlConfig,
     fetcher: &Fetcher,
     limiter: &Limiter,
     deadline: Instant,
+    on_phase: OnPhase<'_>,
 ) -> Result<Preflight, CrawlError> {
     let requested = normalize(&cfg.start_url, cfg.start_url.as_str())
         .ok_or_else(|| CrawlError::InvalidStart(cfg.start_url.to_string()))?;
     check_url(&requested, cfg.address_policy)
         .map_err(|e| CrawlError::AddressBlocked(e.to_string()))?;
 
+    let mut files = LiveFiles::default();
+    on_phase(LivePhase::Robots, files);
     let (rules, robots) = robots_for(fetcher, limiter, &requested).await?;
+    files.robots = Some(robots.as_ref().map_or(0, |f| f.status));
     let stop = robots_stop(&rules, robots.as_ref()).or_else(|| {
         let path = path_and_query(&requested);
         (!rules.allowed(&path)).then_some(StopReason::RobotsBlocked)
@@ -84,6 +95,7 @@ pub(crate) async fn preflight(
             sitemap: SitemapSummary::default(),
             signals: SiteSignals::default(),
             stop,
+            files,
         });
     }
 
@@ -100,7 +112,9 @@ pub(crate) async fn preflight(
     let (rules, robots) = if final_url.origin() == requested.origin() {
         (rules, robots)
     } else {
-        robots_for(fetcher, limiter, &final_url).await?
+        let moved = robots_for(fetcher, limiter, &final_url).await?;
+        files.robots = Some(moved.1.as_ref().map_or(0, |f| f.status));
+        moved
     };
 
     let signals = SiteSignals {
@@ -130,8 +144,10 @@ pub(crate) async fn preflight(
         sitemap: SitemapSummary::default(),
         signals,
         stop,
+        files,
     };
     if pre.stop.is_none() {
+        on_phase(LivePhase::Sitemap, pre.files);
         let seeds = sitemap_seeds(&pre.origin, &pre.rules);
         let deadline = deadline.min(Instant::now() + SITEMAP_BUDGET);
         let found = discover(
@@ -144,6 +160,7 @@ pub(crate) async fn preflight(
         .await;
         pre.sitemap_urls = found.urls;
         pre.sitemap = found.summary;
+        pre.files.sitemap_urls = Some(pre.sitemap.url_count);
     }
     Ok(pre)
 }
