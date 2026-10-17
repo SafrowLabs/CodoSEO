@@ -152,9 +152,11 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         "no Turnstile script without keys"
     );
 
-    // Signed in: straight to the app, as before.
+    // Signed in: the landing still shows, with the app one link away at `/app`.
     let (_, cookie) = app.login("ana@example.com").await;
     let res = app.get("/", Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    let res = app.get("/app", Some(&cookie)).await;
     assert_eq!(res.status, StatusCode::SEE_OTHER);
     assert_eq!(res.location(), Some("/sites"));
 

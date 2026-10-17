@@ -18,6 +18,7 @@ use crate::live_audit::{
     IssueView, PhaseView, RowView, clock, expected_pages, issues, phases, row_view, severity_dot,
 };
 use crate::routes::audit_fix::{geo_check_label, reads_seo};
+use crate::score_bars::ScoreBar;
 
 /// Fixes shown before the sign-in.
 pub const FREE_FIXES: usize = 3;
@@ -36,11 +37,8 @@ pub struct FreeView {
     pub done_line: String,
     pub lede: String,
     pub steps: Vec<PhaseView>,
-    pub overall: String,
-    /// `c-ok`, `c-warn`, `c-err` or empty while unknown.
-    pub overall_tone: &'static str,
-    pub seo: String,
-    pub geo: String,
+    /// Overall, GEO and SEO as one bar chart.
+    pub bars: Vec<ScoreBar>,
     /// The AI essentials, one line each: (dot, text).
     pub geo_facts: Vec<(&'static str, String)>,
     pub cards: Vec<Card>,
@@ -171,7 +169,12 @@ impl FreeView {
         } else {
             (c.health_score, c.geo_score, c.overall_score)
         };
-        let score = |v: Option<i16>| v.map_or("–".to_owned(), |v| v.to_string());
+        let bars = score_bars(
+            running,
+            geo.as_ref(),
+            [overall, geo_score, seo],
+            summary.as_ref(),
+        );
 
         let fixes_all = summary.as_ref().map(all_fixes).unwrap_or_default();
         FreeView {
@@ -196,26 +199,9 @@ impl FreeView {
                     .to_owned()
             },
             steps: phases(phase, files, done, total),
-            overall: score(overall),
-            overall_tone: match overall {
-                Some(s) if s >= 90 => "c-ok",
-                Some(s) if s >= 70 => "c-warn",
-                Some(_) => "c-err",
-                None => "",
-            },
-            seo: score(seo),
-            geo: score(geo_score),
             geo_facts: geo_facts(geo.as_ref(), running),
-            cards: cards(
-                running,
-                geo.as_ref(),
-                geo_score,
-                seo,
-                summary.as_ref(),
-                live.as_ref(),
-                done,
-                total,
-            ),
+            bars,
+            cards: vec![pages_card(running, live.as_ref(), done, total)],
             score_note: if running {
                 "Scores so far are estimates. GEO and Overall come when the audit is done."
             } else {
@@ -297,36 +283,30 @@ fn geo_facts(geo: Option<&GeoScore>, running: bool) -> Vec<(&'static str, String
     .collect()
 }
 
-#[allow(clippy::too_many_arguments)] // one card row, read top to bottom
-fn cards(
+/// Overall, GEO and SEO, each with a short line on what it rests on.
+fn score_bars(
     running: bool,
     geo: Option<&GeoScore>,
-    geo_score: Option<i16>,
-    seo: Option<i16>,
+    [overall, geo_score, seo]: [Option<i16>; 3],
     summary: Option<&StoredSummary>,
-    live: Option<&LiveProgress>,
-    done: u32,
-    total: u32,
-) -> Vec<Card> {
-    let score = |v: Option<i16>| v.map_or("–".to_owned(), |v| v.to_string());
-    let geo_tags = match geo {
+) -> Vec<ScoreBar> {
+    let geo_detail = match geo {
         Some(g) => {
             let failing = g.checks.iter().filter(|c| c.status == Status::Fail).count();
-            let mut tags = vec![(
-                "ck-note",
-                format!("{} of {} checks pass", g.checks_passed, g.checks_applicable),
-            )];
-            if failing > 0 {
-                tags.push(("ck-warn", format!("{failing} to fix")));
+            let fix = if failing > 0 {
+                format!("{failing} to fix")
             } else {
-                tags.push(("ck-ok", "nothing to fix".to_owned()));
-            }
-            tags
+                "nothing to fix".to_owned()
+            };
+            format!(
+                "{} of {} checks pass · {fix}",
+                g.checks_passed, g.checks_applicable
+            )
         }
-        None if running => vec![("ck-pass", "at the end".to_owned())],
-        None => Vec::new(),
+        None if running => "at the end".to_owned(),
+        None => String::new(),
     };
-    let seo_tags = match summary {
+    let seo_detail = match summary {
         Some(s) => {
             let count = |sev: Severity| {
                 s.counts
@@ -336,23 +316,46 @@ fn cards(
                     .count()
             };
             let (crit, warn) = (count(Severity::Critical), count(Severity::Warning));
-            let mut tags = Vec::new();
+            let mut parts = Vec::new();
             if crit > 0 {
-                tags.push(("ck-crit", format!("{crit} critical")));
+                parts.push(format!("{crit} critical"));
             }
             if warn > 0 {
-                tags.push((
-                    "ck-warn",
-                    format!("{warn} warning{}", if warn == 1 { "" } else { "s" }),
+                parts.push(format!(
+                    "{warn} warning{}",
+                    if warn == 1 { "" } else { "s" }
                 ));
             }
-            if tags.is_empty() {
-                tags.push(("ck-ok", "no critical issues".to_owned()));
+            if parts.is_empty() {
+                "no critical issues".to_owned()
+            } else {
+                parts.join(" · ")
             }
-            tags
         }
-        None => vec![("ck-run", "estimate".to_owned())],
+        None => "estimate".to_owned(),
     };
+    vec![
+        ScoreBar {
+            detail: if running {
+                "at the end".to_owned()
+            } else {
+                "60% SEO + 40% GEO".to_owned()
+            },
+            ..ScoreBar::new("overall", overall)
+        },
+        ScoreBar {
+            detail: geo_detail,
+            ..ScoreBar::new("geo", geo_score)
+        },
+        ScoreBar {
+            detail: seo_detail,
+            live: running,
+            ..ScoreBar::new("seo", seo)
+        },
+    ]
+}
+
+fn pages_card(running: bool, live: Option<&LiveProgress>, done: u32, total: u32) -> Card {
     let errors = live.map_or(0, |l| l.errors);
     let mut page_tags = vec![if errors > 0 {
         (
@@ -365,35 +368,19 @@ fn cards(
     if let Some(blocked) = live.map(|l| l.tally.ai_blocked).filter(|&n| n > 0) {
         page_tags.push(("ck-warn", format!("{blocked} AI can't reach")));
     }
-    vec![
-        Card {
-            tag: Some(("t-ai", "GEO")),
-            label: "GEO score",
-            value: score(geo_score),
-            unit: "/100",
-            tags: geo_tags,
+    Card {
+        tag: None,
+        label: "Pages checked",
+        value: fmt::thousands(done),
+        unit: "",
+        tags: if running {
+            let mut t = vec![("ck-run", format!("of ~{}", fmt::thousands(total)))];
+            t.extend(page_tags);
+            t
+        } else {
+            page_tags
         },
-        Card {
-            tag: Some(("t-seo", "SEO")),
-            label: "SEO score",
-            value: score(seo),
-            unit: "/100",
-            tags: seo_tags,
-        },
-        Card {
-            tag: None,
-            label: "Pages checked",
-            value: fmt::thousands(done),
-            unit: "",
-            tags: if running {
-                let mut t = vec![("ck-run", format!("of ~{}", fmt::thousands(total)))];
-                t.extend(page_tags);
-                t
-            } else {
-                page_tags
-            },
-        },
-    ]
+    }
 }
 
 /// Every fix the audit found, AI first, then search, each by the Overall points it gives back.
@@ -522,11 +509,17 @@ mod tests {
         });
         assert!(v.running);
         assert_eq!(v.count, "24 / 100", "never past the free cap");
+        let bars: Vec<_> = v.bars.iter().map(|b| (b.key, b.shown())).collect();
         assert_eq!(
-            (v.seo.as_str(), v.geo.as_str(), v.overall.as_str()),
-            ("88", "–", "–")
+            bars,
+            [
+                ("overall", "–".into()),
+                ("geo", "–".into()),
+                ("seo", "88".into())
+            ],
+            "GEO before SEO"
         );
-        assert_eq!(v.cards[0].label, "GEO score", "GEO first");
+        assert_eq!(v.cards[0].label, "Pages checked");
         assert_eq!(v.rows.len(), 1);
         let l = limit(&c);
         assert_eq!(

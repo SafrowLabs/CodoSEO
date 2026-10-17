@@ -57,7 +57,10 @@
       m.content = THEME_COLOR[t === "system" ? own : t === "dark" ? "dark" : "light"];
     });
     $$("[data-theme-label]").forEach((el) => (el.textContent = themeLabel()));
+    const label = isDark() ? "Switch to light mode" : "Switch to dark mode";
+    $$('[data-action="theme-toggle"]').forEach((b) => { b.setAttribute("aria-label", label); b.title = label; });
   }
+  const isDark = () => root.dataset.theme === "dark" || (root.dataset.theme === "system" && darkOS.matches);
   function cycleTheme() {
     const t = root.dataset.theme;
     setTheme(t === "dark" ? "system" : t === "system" ? "light" : "dark");
@@ -278,6 +281,215 @@
     $$("#live-audit details[data-live-row]").forEach((d) => { if (openRows.has(d.dataset.liveRow)) d.open = true; });
     openRows = null;
   });
+
+  // ── Live audit: playback ─────────────────────────────
+  // A poll brings the pages checked since the last one, often 5-7 at once. Instead of popping
+  // in together, each new row is held back and played in a live row at the top of the list:
+  // fetched (···), its checks popping in group by group, then it settles into the list and the
+  // next starts. The pace follows the backlog so playback stays about one poll behind. Rows
+  // there on first sight, other filters than All, a hidden tab and reduced motion: no playback.
+  const LIVE = "#live-audit, #audit-main";
+  const POLL = 2000;
+  const BEHIND = 16; // more held rows than this: the oldest go in at once
+  const lv = { el: null, shown: 0, cur: 0, row: null, timer: 0, done: false, poll: false, nums: null };
+  const rowN = (r) => +r.dataset.liveRow || 0;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const allFilter = (el) => { const on = $(".la-chip.is-on", el); return !on || on === $(".la-chip", el); };
+  const held = (el) => $$("[data-live-row]", el).filter((r) => rowN(r) > lv.shown).sort((a, b) => rowN(a) - rowN(b));
+  const liveRowOf = (n) => lv.el && lv.el.querySelector(`[data-live-row="${n}"]`);
+  function stopPlay() {
+    clearTimeout(lv.timer);
+    lv.timer = lv.cur = 0;
+    if (lv.row) lv.row.remove();
+    lv.row = null;
+  }
+  function reveal(r, anim) {
+    r.classList.remove("la-held");
+    lv.shown = Math.max(lv.shown, rowN(r));
+    if (!anim) return;
+    r.classList.add("la-in");
+    r.addEventListener("animationend", () => r.classList.remove("la-in"), { once: true });
+  }
+  function h(tag, cls, text) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+  // A row's checks, read from its own boxes (the opened view, or a <template> on the free audit).
+  const MINI = { "is-ok": ["ck-ok", "✓ "], "is-critical": ["ck-crit", "✕ "], "is-warning": ["ck-warn", "✕ "] };
+  function checksOf(src) {
+    const t = $("template[data-live-checks]", src);
+    return $$(".la-box", t ? t.content : src).map((box) => {
+      const dot = $(".la-box-h .sdot", box);
+      const items = $$("li", box).map((li) => {
+        const [cls, mark] = MINI[(li.querySelector(".sdot") || li).classList[1]] || ["ck-note", ""];
+        return { cls, label: mark + li.textContent.trim() };
+      });
+      $$(".la-bots .ck", box).forEach((b) => items.push({ cls: b.classList[1] || "ck-note", label: b.textContent.trim() }));
+      return { name: $(".la-box-h", box).textContent.trim(), dot: dot ? dot.className : "sdot is-ok", items };
+    });
+  }
+  function play(src, backlog) {
+    const n = rowN(src);
+    const budget = clamp(POLL / backlog, 250, 1600);
+    const groups = checksOf(src);
+    const steps = groups.reduce((k, g) => k + g.items.length, 0);
+    const fetch = clamp(budget * 0.2, 60, 320);
+    const gap = clamp((budget - fetch) / (steps + 1), 60, 140);
+    const per = Math.ceil(steps / Math.max(1, Math.floor((budget - fetch) / gap) - 1)) || 1;
+
+    const row = lv.row || h("div");
+    row.className = `la-row la-live${src.classList.contains("q-row") ? " q-row" : ""}${lv.row ? "" : " la-in"}`;
+    row.setAttribute("aria-hidden", "true");
+    row.replaceChildren();
+    if ($(".la-col-n", src)) row.append(h("span", "la-col-n mono", String(n)));
+    const realPill = $(".la-pill", src);
+    const pill = h("span", "la-pill p-run", "···");
+    const ms = h("span", "la-ms", "fetching as CodoSEObot…");
+    const line = h("span", "la-line");
+    line.append(h("span", "mono la-path", ($(".la-path", src) || src).textContent.trim()), ms);
+    const grps = h("span", "la-grps");
+    const boxes = groups.map((g) => {
+      const box = h("span", "la-grp");
+      const dot = h("i", "sdot is-na");
+      const head = h("span", "la-grp-h");
+      head.append(dot, g.name);
+      const list = h("span", "la-minis");
+      if (g.items.length) list.append(h("span", "ck la-mini ck-wait", "waiting"));
+      box.append(head, list);
+      grps.append(box);
+      return { g, box, dot, list, done: 0 };
+    });
+    const main = h("span", "la-main");
+    main.append(line, grps);
+    const pillWrap = h("span");
+    pillWrap.append(pill);
+    row.append(pillWrap, main, h("span", "la-imp imp-none", "checking…"));
+    lv.row = row;
+    lv.cur = n;
+    src.before(row);
+    if (lv.row.classList.contains("la-in")) row.addEventListener("animationend", () => row.classList.remove("la-in"), { once: true });
+
+    let i = 0;
+    const wait = () => h("span", "ck la-mini ck-wait", "checking…");
+    const first = boxes.find((x) => x.g.items.length);
+    if (first) { first.box.classList.add("is-on"); first.list.replaceChildren(wait()); }
+    const tick = () => {
+      if (i === 0) { // fetched: the real status and timing
+        pill.className = realPill ? realPill.className : "la-pill";
+        pill.textContent = realPill ? realPill.textContent : "";
+        ms.textContent = ($(".la-ms", src) || {}).textContent || "";
+      }
+      $$(".is-new", row).forEach((m) => m.classList.remove("is-new"));
+      for (let k = 0; k < per && i < steps; k++, i++) {
+        const b = boxes.find((x) => x.done < x.g.items.length);
+        const it = b.g.items[b.done++];
+        if (b.done === 1) b.list.replaceChildren();
+        else b.list.lastChild.remove(); // the "checking…" chip
+        b.list.append(h("span", `ck la-mini ${it.cls} is-new`, it.label));
+        if (b.done < b.g.items.length) b.list.append(wait());
+        else { b.dot.className = b.g.dot; b.box.classList.remove("is-on"); }
+      }
+      const next = boxes.find((x) => x.done < x.g.items.length);
+      boxes.forEach((x) => x.box.classList.toggle("is-on", x === next));
+      if (next && next.done === 0) next.list.replaceChildren(wait());
+      lv.timer = setTimeout(i < steps ? tick : settle, gap);
+    };
+    const settle = () => {
+      const r = liveRowOf(n);
+      if (r) reveal(r, true);
+      lv.cur = 0;
+      playNext();
+    };
+    lv.timer = setTimeout(tick, fetch);
+  }
+  function playNext() {
+    lv.timer = 0;
+    const el = lv.el;
+    const q = el && el.isConnected ? held(el) : [];
+    if (!q.length || lv.done) { if (lv.row) lv.row.remove(); lv.row = null; lv.cur = 0; }
+    if (!q.length) return;
+    if (lv.done) { reveal(q[0], true); lv.timer = setTimeout(playNext, 150); return; } // drain
+    play(q[0], q.length);
+  }
+
+  // Numbers that changed on a poll tween from the old value, and the progress bar slides.
+  const TWEEN = ["[data-count]", "[data-tween]", ".la-signal b", ".la-chip b", ".sc-val b", ".q-overall-v"];
+  const NUM = /[−-]?\d[\d,]*(?:\.\d+)?/;
+  const snapNums = (el) => ({
+    text: TWEEN.map((s) => $$(s, el).map((n) => n.textContent)),
+    bars: $$(".la-bar > span", el).map((b) => b.style.width),
+  });
+  function tween(el, from, to) {
+    const a = from.match(NUM), b = to.match(NUM);
+    if (!a || !b || a[0] === b[0] || el.children.length) return;
+    const num = (s) => parseFloat(s.replace(/,/g, "").replace("−", "-"));
+    const x = num(a[0]), y = num(b[0]);
+    if (!isFinite(x) || !isFinite(y)) return;
+    const dec = (b[0].split(".")[1] || "").length;
+    const opts = { minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: b[0].includes(",") || a[0].includes(",") };
+    const minus = b[0][0] === "-" ? "-" : "−";
+    const fmt = (v) => (v < 0 ? minus : "") + Math.abs(v).toLocaleString("en-US", opts);
+    const pre = to.slice(0, b.index), post = to.slice(b.index + b[0].length);
+    const start = performance.now(), dur = 600;
+    const step = (now) => {
+      const t = clamp((now - start) / dur, 0, 1); // a frame's time can be just before start
+      el.textContent = t < 1 ? pre + fmt(x + (y - x) * (1 - Math.pow(1 - t, 3))) + post : to;
+      if (t < 1 && el.isConnected) requestAnimationFrame(step);
+    };
+    el.textContent = pre + fmt(x) + post;
+    requestAnimationFrame(step);
+  }
+  function tweenNums(el, snap) {
+    TWEEN.forEach((s, i) => $$(s, el).forEach((n, j) => {
+      if (n.dataset.count) n.dataset.counted = "1"; // no count-up from zero on every poll
+      if (snap.text[i][j] != null) tween(n, snap.text[i][j], n.textContent);
+    }));
+    $$(".la-bar > span", el).forEach((b, j) => {
+      const was = snap.bars[j], to = b.style.width;
+      if (!was || was === to) return;
+      b.style.width = was;
+      void b.offsetWidth;
+      b.style.width = to;
+    });
+  }
+
+  function liveSync(poll) {
+    const el = $(LIVE);
+    if (el === lv.el) return;
+    const prev = lv.el, nums = lv.nums;
+    lv.el = el;
+    lv.nums = null;
+    if (!el) { stopPlay(); return; }
+    lv.done = !el.hasAttribute("hx-trigger");
+    if (!poll || !prev || reduced() || document.hidden || !allFilter(el)) {
+      stopPlay();
+      lv.shown = Math.max(0, ...$$("[data-live-row]", el).map(rowN));
+      return;
+    }
+    if (nums) tweenNums(el, nums);
+    const q = held(el);
+    q.forEach((r) => r.classList.add("la-held"));
+    while (q.length > BEHIND) reveal(q.shift(), false);
+    // The row playing came back in the new list: carry the live row over, else drop it.
+    const cur = lv.cur && liveRowOf(lv.cur);
+    if (lv.done || !cur || lv.cur <= lv.shown) stopPlay();
+    else {
+      $$(".is-new, .la-in", lv.row).concat(lv.row).forEach((m) => m.classList.remove("is-new", "la-in"));
+      cur.before(lv.row);
+    }
+    if (!lv.timer) playNext();
+  }
+  document.addEventListener("htmx:beforeSwap", (e) => {
+    const t = e.detail.target, elt = e.detail.requestConfig && e.detail.requestConfig.elt;
+    lv.poll = !!(t && t === lv.el && elt === t && !e.detail.isError);
+    if (lv.poll && !reduced()) lv.nums = snapNums(t);
+  });
+  document.addEventListener("htmx:afterSwap", () => { liveSync(lv.poll); lv.poll = false; });
+  document.addEventListener("htmx:historyRestore", () => liveSync(false));
+  document.addEventListener("DOMContentLoaded", () => liveSync(false));
+
   document.body.addEventListener("crawlFinished", refresh);
   document.body.addEventListener("crawlQueued", () => {
     const card = $("#crawler");
@@ -457,6 +669,7 @@
       const a = act.dataset.action;
       if (a === "palette") { e.preventDefault(); openPalette(); }
       else if (a === "theme") { e.preventDefault(); cycleTheme(); }
+      else if (a === "theme-toggle") { e.preventDefault(); setTheme(isDark() ? "light" : "dark"); }
       else if (a === "rail") { e.preventDefault(); toggleRail(); }
       else if (a === "drawer") { e.preventDefault(); drawer(!root.classList.contains("drawer-open")); }
       else if (a === "drawer-close") drawer(false);
@@ -623,6 +836,8 @@
   }
 
   darkOS.addEventListener("change", syncTheme);
+  // A boosted page swap brings a fresh topbar, its switch labelled for light.
+  document.addEventListener("htmx:afterSettle", (e) => { if (e.detail.target === document.body) syncTheme(); });
 
   document.addEventListener("DOMContentLoaded", () => {
     countUp(document);

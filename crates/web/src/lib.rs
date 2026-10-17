@@ -22,6 +22,7 @@ pub mod operator_logo;
 pub mod rankorg;
 pub mod render;
 pub mod routes;
+pub mod score_bars;
 pub mod serp;
 pub mod state;
 pub mod turnstile;

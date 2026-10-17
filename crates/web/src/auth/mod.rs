@@ -148,7 +148,7 @@ pub fn safe_next(next: Option<&str>) -> &str {
         {
             n
         }
-        _ => "/",
+        _ => "/app",
     }
 }
 
@@ -194,10 +194,10 @@ mod tests {
     #[test]
     fn next_must_be_a_local_path() {
         assert_eq!(safe_next(Some("/s/1/audit?x=1")), "/s/1/audit?x=1");
-        assert_eq!(safe_next(Some("//evil.com")), "/");
-        assert_eq!(safe_next(Some("https://evil.com")), "/");
-        assert_eq!(safe_next(Some("/\\evil.com")), "/");
-        assert_eq!(safe_next(None), "/");
+        assert_eq!(safe_next(Some("//evil.com")), "/app");
+        assert_eq!(safe_next(Some("https://evil.com")), "/app");
+        assert_eq!(safe_next(Some("/\\evil.com")), "/app");
+        assert_eq!(safe_next(None), "/app");
         // Browsers strip these, turning the path into `//evil.com`.
         for sneaky in [
             "/\t/evil.com",
@@ -206,7 +206,7 @@ mod tests {
             "/ /evil.com",
             "/\u{0}x",
         ] {
-            assert_eq!(safe_next(Some(sneaky)), "/", "{sneaky:?}");
+            assert_eq!(safe_next(Some(sneaky)), "/app", "{sneaky:?}");
         }
     }
 }

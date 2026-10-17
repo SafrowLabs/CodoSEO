@@ -1,4 +1,5 @@
 {%- import "partials/mascot.html" as m -%}
+{%- import "partials/score_bars.html" as sb -%}
 <section id="audit-main" class="q-main"{% if main.polling %} hx-get="/audit/{{ main.id }}/live" hx-trigger="every 2s" hx-swap="outerHTML" data-quiet{% endif %}>
   <div class="q-head">
     <p class="l-eyebrow">{% if main.polling %}<i class="la-dot" aria-hidden="true"></i>Free audit · live{% else %}Free audit{% endif %}</p>
@@ -32,12 +33,9 @@
   </section>
   {% else %}
   <section class="q-scores" aria-label="Scores">
+    {% call sb::bars(v.bars.as_slice(), "Scores") %}{% endcall %}
     <div class="card q-overall">
-      <div>
-        <div class="q-overall-l">Overall score</div>
-        <div class="q-overall-v {{ v.overall_tone }}">{{ v.overall }}</div>
-        <div class="q-overall-tags"><span class="atag t-ai">GEO {{ v.geo }}</span><span class="atag t-seo">SEO {{ v.seo }}</span></div>
-      </div>
+      <div class="q-overall-l">AI essentials</div>
       <ul class="q-facts">{% for f in v.geo_facts %}<li><i class="sdot {{ f.0 }}" aria-hidden="true"></i>{{ f.1 }}</li>{% endfor %}</ul>
     </div>
     {% for c in v.cards %}
@@ -62,7 +60,8 @@
       </div>
       {% if v.rows.is_empty() %}<p class="la-empty muted">The first pages show up here in a moment.</p>{% endif %}
       {% for r in v.rows %}
-      <div class="la-row q-row">
+      <div class="la-row q-row" data-live-row="{{ r.n }}">
+        <template data-live-checks>{% for g in r.groups %}<div class="la-box"><div class="la-box-h"><i class="sdot {{ g.dot }}"></i>{{ g.name }}</div><ul>{% for it in g.items %}<li><i class="sdot {{ it.0 }}"></i>{{ it.1 }}</li>{% endfor %}</ul>{% if !g.bots.is_empty() %}<div class="la-bots">{% for b in g.bots %}<span class="ck {{ b.0 }}">{{ b.1 }}</span>{% endfor %}</div>{% endif %}</div>{% endfor %}</template>
         <span><span class="la-pill {{ r.pill }}">{{ r.status }}</span></span>
         <span class="la-main">
           <span class="la-line"><span class="mono la-path" title="{{ r.url }}">{{ r.path }}</span>{% if !r.ms.is_empty() %}<span class="la-ms">{{ r.ms }}</span>{% endif %}</span>

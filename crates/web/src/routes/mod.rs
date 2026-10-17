@@ -46,6 +46,7 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(home))
+        .route("/app", get(app_home))
         .merge(account::routes())
         .merge(sites::routes())
         .merge(crawls::routes())
@@ -74,19 +75,23 @@ pub fn router() -> Router<AppState> {
         .route("/sitemap.xml", get(seo::sitemap))
 }
 
-/// `/`: the first site's audit, or onboarding when there is no site yet. A signed-out visitor
-/// gets the landing page on the cloud and the login page everywhere else.
+/// `/`: the landing page on the cloud, signed in or not (it links a signed-in visitor to the
+/// app). Elsewhere a signed-in user goes to the app and a signed-out one to the login page.
 async fn home(
     State(state): State<AppState>,
     user: Option<CurrentUser>,
 ) -> Result<Response, AppError> {
-    let Some(user) = user else {
-        return if state.config.mode == Mode::Cloud {
-            landing::page(&state).await
-        } else {
-            Ok(Redirect::to("/login?next=%2F").into_response())
-        };
-    };
+    if state.config.mode == Mode::Cloud {
+        return landing::page(&state, user.is_some()).await;
+    }
+    match user {
+        Some(user) => app_home(State(state), user).await,
+        None => Ok(Redirect::to("/login?next=%2Fapp").into_response()),
+    }
+}
+
+/// `/app`: the first site's audit, or onboarding when there is no site yet.
+async fn app_home(State(state): State<AppState>, user: CurrentUser) -> Result<Response, AppError> {
     let sites = codoseo_store::sites::list_for_account(&state.pool, user.id()).await?;
     Ok(match sites.first() {
         Some(s) => Redirect::to(&format!("/s/{}/audit", s.id)).into_response(),

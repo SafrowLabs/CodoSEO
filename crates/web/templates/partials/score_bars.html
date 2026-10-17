@@ -1,0 +1,15 @@
+{#- The overall, SEO and GEO scores as horizontal bars out of 100. `bars` is a list of
+    `score_bars::ScoreBar`. -#}
+{% macro bars(bars, title) %}
+<div class="card sb" role="group" aria-label="{{ title }}">
+  <div class="sb-head"><span>{{ title }}</span><span class="sb-scale" aria-hidden="true">out of 100</span></div>
+  {% for b in bars %}
+  <div class="sb-row sb-{{ b.key }}">
+    <span class="sb-label">{% if b.key == "seo" %}<span class="atag t-seo">SEO</span>{% else if b.key == "geo" %}<span class="atag t-ai">GEO</span>{% else %}<b>{{ b.label }}</b>{% endif %}{% if let Some(h) = b.help %}<button type="button" class="q" popovertarget="{{ h }}" aria-label="How the {{ b.label }} score works">?</button>{% endif %}{% if b.live %}<i class="la-dot is-sm" aria-hidden="true"></i>{% endif %}</span>
+    <span class="sb-track" role="meter" aria-label="{{ b.label }} score" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ b.width() }}"><span class="sb-fill" style="width:{{ b.width() }}%"></span></span>
+    <b class="sb-val">{% if let Some(v) = b.value %}<span data-count="{{ v }}">{{ v }}</span>{% else %}–{% endif %}</b>
+    {% if !b.change.is_empty() || !b.detail.is_empty() %}<span class="sb-meta">{% if !b.change.is_empty() %}<span class="{{ b.change_class }}">{{ b.change }}</span>{% endif %}{% if !b.detail.is_empty() %}<span>{{ b.detail }}</span>{% endif %}</span>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}

@@ -47,8 +47,8 @@ async fn the_demo_is_public_read_only_and_labelled_as_sample_data() {
     ] {
         assert!(!body.contains(action), "{action:?} on the demo");
     }
-    // No GEO score in the fixture: those cards read "—", and nothing to mark intended.
-    assert!(body.contains("<b>—</b>"));
+    // No GEO score in the fixture: those bars read "–", and nothing to mark intended.
+    assert!(body.contains(r#"<b class="sb-val">–</b>"#));
     assert!(!body.contains("Mark intended"));
     assert!(body.contains("id=\"fix-1\""));
     // A marketing page: indexable.

@@ -573,6 +573,14 @@ kbd {
   background: transparent; color: var(--muted); transition: background 0.12s, color 0.12s;
 }
 .icon-btn:hover { background: var(--chrome-hover); color: var(--ink); }
+/* The topbar's light/dark switch shows the theme it switches to. */
+.theme-btn { flex: none; }
+.theme-btn .to-light, :root[data-theme="dark"] .theme-btn .to-dark { display: none; }
+:root[data-theme="dark"] .theme-btn .to-light { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] .theme-btn .to-dark { display: none; }
+  :root[data-theme="system"] .theme-btn .to-light { display: block; }
+}
 .play { width: 0; height: 0; border-left: 7px solid var(--cta-mark); border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; transition: transform 0.25s var(--spring); }
 .btn:hover .play { transform: translateX(1px) scale(1.1); }
 .btn.htmx-request .play { animation: spin-tri 0.9s linear infinite; }
@@ -1704,6 +1712,25 @@ a.sc:hover { border-color: var(--ghost-2); background: var(--surface-hover); }
 .sc-line .down { color: var(--err); font-weight: 500; }
 .sc-line .c-err, .sc-line .c-warn, .sc-line .c-ok { font-weight: 600; }
 .sc-dots { display: inline-flex; gap: 3px; margin-right: 4px; }
+/* Overall, SEO and GEO as bars out of 100, beside the other cards. */
+.sc-row.has-bars { display: flex; flex-wrap: wrap; }
+.sc-row.has-bars > .sc { flex: 1 1 142px; }
+.sb { flex: 2 1 340px; min-width: 0; padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
+.sb-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; font-weight: 500; color: var(--muted-2); }
+.sb-scale { font-size: 11px; color: var(--faint-2); }
+.sb-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 34px; align-items: center; column-gap: 10px; row-gap: 2px; }
+.sb-label { display: flex; align-items: center; gap: 5px; font-size: 12.5px; min-width: 0; }
+.sb-label b { font-weight: 600; }
+.sb-track { display: block; height: 10px; border-radius: 4px; background: color-mix(in oklab, var(--ink) 7%, var(--surface)); overflow: hidden; }
+.sb-fill { display: block; height: 100%; border-radius: 4px; transition: width 0.6s var(--ease, ease); }
+.sb-overall .sb-fill { background: var(--ink); }
+.sb-seo .sb-fill { background: var(--blue); }
+.sb-geo .sb-fill { background: var(--purple); }
+.sb-val { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; text-align: right; font-variant-numeric: tabular-nums; }
+.sb-meta { grid-column: 2 / 4; display: flex; flex-wrap: wrap; column-gap: 0.35em; font-size: 11.5px; color: var(--muted-2); min-width: 0; }
+.sb-meta > span:not(:last-child):not(.up):not(.down)::after { content: " ·"; color: var(--faint-2); }
+.sb-meta .up { color: var(--ok); font-weight: 500; }
+.sb-meta .down { color: var(--err); font-weight: 500; }
 .sc-dots .sdot { width: 7px; height: 7px; }
 
 /* The fix list beside the trend and AI bots, the same height. */
@@ -2064,3 +2091,25 @@ details.la-row[open] { background: var(--surface-2); }
 .avatar.site-icon { object-fit: contain; background: var(--surface); padding: 2px; box-sizing: border-box; }
 .la-site { display: inline-flex; align-items: center; gap: 6px; }
 .la-site img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
+
+/* ── Live audit: playback (app.js "Live audit: playback") ──
+   New rows wait hidden (.la-held) while a live row at the top plays each one: status ···,
+   its checks popping in by group, then the row slides into the list (.la-in). */
+.la-held { display: none !important; }
+.la-row.la-live { background: var(--live-bg); }
+.la-live .la-col-n { color: var(--live); }
+.la-live > .la-imp { color: var(--faint); font-weight: 500; }
+.la-pill.p-run { background: var(--live); color: #fff; letter-spacing: 0.08em; }
+.la-grps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 6px; }
+.la-grp { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 7px 9px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); transition: border-color .2s; }
+.la-grp.is-on { border-color: var(--live); }
+.la-grp-h { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-2); }
+.la-minis { display: flex; flex-wrap: wrap; gap: 4px; }
+.ck.la-mini { min-height: 20px; padding: 0 6px; border-radius: 5px; font-size: 11.5px; }
+.ck-wait { color: var(--faint); background: transparent; border: 1px dashed var(--line); }
+@media (prefers-reduced-motion: no-preference) {
+  .la-mini.is-new { animation: la-pop .45s ease-out; }
+  .la-in { animation: la-slidein .5s ease-out; }
+}
+@keyframes la-pop { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes la-slidein { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }

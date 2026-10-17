@@ -2596,9 +2596,10 @@ fn fix_row(body: &str, id: i64) -> Option<String> {
 fn score_card(body: &str, key: &str) -> String {
     let at = body
         .find(&format!("sc sc-{key} "))
+        .or_else(|| body.find(&format!("sb-row sb-{key}\"")))
         .unwrap_or_else(|| panic!("the {key} card"));
     let rest = &body[at + 1..];
-    let end = ["card sc sc-", "id=\"help-overall\""]
+    let end = ["card sc sc-", "sb-row sb-", "id=\"help-overall\""]
         .iter()
         .filter_map(|m| rest.find(m))
         .min()
