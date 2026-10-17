@@ -2113,3 +2113,27 @@ details.la-row[open] { background: var(--surface-2); }
 }
 @keyframes la-pop { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes la-slidein { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* ===== Site graph (routes/graph): the tab bar and what every view shares. ===== */
+.graph-page { display: flex; flex-direction: column; gap: 16px; }
+.graph-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.graph-tabs-group { font: 600 11px var(--font); letter-spacing: .07em; color: var(--faint); padding: 0 8px 0 6px; }
+.graph-tabs-sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; }
+.graph-tab { padding: 7px 12px; border-radius: var(--r); color: var(--muted); font-size: 13px; white-space: nowrap; }
+.graph-tab:hover { color: var(--ink); background: var(--surface-hover); }
+.graph-tab.is-active { background: var(--primary); color: var(--primary-ink); font-weight: 600; }
+/* Status colours every graph view uses for a page. */
+:root { --g-ok: #2fa36b; --g-noindex: #9aa39e; --g-redirect: #4d8ff0; --g-broken: #e5533d; --g-orphan: #c79a12; }
+:root[data-theme="dark"] { --g-ok: #3fbf7f; --g-noindex: #a3b0a9; --g-redirect: #6ea8ff; --g-broken: #f0644a; --g-orphan: #f0c42c; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] { --g-ok: #3fbf7f; --g-noindex: #a3b0a9; --g-redirect: #6ea8ff; --g-broken: #f0644a; --g-orphan: #f0c42c; } }
+
+/* --- Site graph: crawl tree, folder tree and bubble map (graph.js) --- */
+
+
+/* --- Site graph: sitemap, depth, broken & redirects, changes --- */
+
+
+/* --- Site graph: llms.txt and AI reach --- */
+
+
+/* ===== end of Site graph ===== */

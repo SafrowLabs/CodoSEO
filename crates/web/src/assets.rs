@@ -41,6 +41,17 @@ const SOURCES: &[Source] = &[
         content_type: "text/javascript; charset=utf-8",
         bytes: include_bytes!("../assets/htmx.min.js"),
     },
+    // d3 v7.8.5 (ISC licence), for the site graph's maps and trees.
+    Source {
+        name: "d3.min.js",
+        content_type: "text/javascript; charset=utf-8",
+        bytes: include_bytes!("../assets/d3.min.js"),
+    },
+    Source {
+        name: "graph.js",
+        content_type: "text/javascript; charset=utf-8",
+        bytes: include_bytes!("../assets/graph.js"),
+    },
     Source {
         name: "app.js",
         content_type: "text/javascript; charset=utf-8",
