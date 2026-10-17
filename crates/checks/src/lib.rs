@@ -24,7 +24,7 @@ pub use page::{
     THRESHOLD_CHECK_IDS, page_issues, page_issues_with, threshold_issues, threshold_mask,
 };
 pub use registry::{BASE_CHECKS, CHECKS, Category, CheckDef, Scope, def};
-pub use score::{health_score, points_regained};
+pub use score::{health_score, page_points, points_regained};
 pub use thresholds::{Thresholds, duration_words, title_for};
 
 /// Runs the page checks only, replacing the page's issue bits. For `codoseo check` and

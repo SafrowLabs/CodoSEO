@@ -90,6 +90,8 @@ pub struct NavItem {
     pub count: String,
     /// The count is drawn in red (critical issues, critical changes).
     pub alert: bool,
+    /// A crawl is running: the count reads "Live" with a pulsing dot.
+    pub live: bool,
     pub active: bool,
     /// Keyboard shortcut shown in the tooltip, e.g. `G E`.
     pub keys: &'static str,
@@ -205,6 +207,9 @@ impl Shell {
                 summary.as_ref(),
                 changes,
                 ai_issues,
+                active
+                    .as_ref()
+                    .is_some_and(|c| c.status == codoseo_store::crawls::CrawlStatus::Running),
             ));
             crawler = Some(crawler_view(
                 &base,
@@ -355,10 +360,27 @@ fn workspace_item(
         href: href.to_owned(),
         count: String::new(),
         alert: false,
+        live: false,
         active,
         keys,
         soon: false,
         icon,
+    }
+}
+
+impl NavItem {
+    /// While a crawl runs, Site audit says so instead of its count.
+    fn crawling(self, crawling: bool) -> NavItem {
+        if crawling {
+            NavItem {
+                count: "Live".to_owned(),
+                alert: false,
+                live: true,
+                ..self
+            }
+        } else {
+            self
+        }
     }
 }
 
@@ -416,6 +438,7 @@ fn site_group(
     summary: Option<&codoseo_store::crawls::StoredSummary>,
     (changes, critical_change): (i64, bool),
     (ai_open, ai_critical): (i64, i64),
+    crawling: bool,
 ) -> NavGroup {
     let critical_checks = summary.map_or(0, |s| {
         s.counts
@@ -431,6 +454,7 @@ fn site_group(
         href,
         count,
         alert,
+        live: false,
         active,
         keys,
         soon: false,
@@ -451,7 +475,8 @@ fn site_group(
                 screen == Screen::Audit,
                 "G A",
                 "i-audit",
-            ),
+            )
+            .crawling(crawling),
             item(
                 "URL explorer",
                 format!("{base}/explorer"),

@@ -121,6 +121,44 @@ pub async fn live_rows(
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
 
+/// Which of a crawl's live rows to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveFilter {
+    All,
+    /// Pages failing a page check.
+    Issues,
+    /// Pages some answer engine can't use.
+    Ai,
+    /// 4xx, 5xx, or no response that robots.txt didn't cause.
+    Errors,
+}
+
+/// A crawl's newest live rows matching `filter`, newest first, at most `limit`.
+pub async fn newest_live_rows(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    filter: LiveFilter,
+    limit: i64,
+) -> Result<Vec<LiveRow>, sqlx::Error> {
+    let cond = match filter {
+        LiveFilter::All => "TRUE",
+        LiveFilter::Issues => "(row->>'issues')::bigint <> 0",
+        LiveFilter::Ai => "(row->>'ai_blocked')::int <> 0",
+        LiveFilter::Errors => {
+            "((row->>'status')::int >= 400 OR ((row->>'status')::int = 0 \
+               AND row->>'indexability' <> 'blocked_by_robots'))"
+        }
+    };
+    let rows: Vec<sqlx::types::Json<LiveRow>> = sqlx::query_scalar(&format!(
+        "SELECT row FROM crawl_live_rows WHERE crawl_id = $1 AND {cond} ORDER BY n DESC LIMIT $2"
+    ))
+    .bind(crawl_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
 /// The most recent finished crawl.
 pub async fn latest_done(pool: &PgPool, site_id: Uuid) -> Result<Option<Crawl>, sqlx::Error> {
     sqlx::query_as(&format!(

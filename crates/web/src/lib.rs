@@ -15,6 +15,7 @@ pub mod fmt;
 pub mod health;
 pub mod layout;
 pub mod live;
+pub mod live_audit;
 pub mod metrics;
 pub mod operator_logo;
 pub mod rankorg;

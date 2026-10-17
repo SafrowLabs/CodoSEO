@@ -1,7 +1,9 @@
 {%- import "partials/mascot.html" as m -%}
 {%- import "partials/operator_logo.html" as op -%}
 <div id="audit-body" class="page au"{% if reloads_on_queue() %} hx-get="{{ base }}/audit" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
-{% if let Some(d) = done %}
+{% if let Some(w) = watch %}
+  {{ w|safe }}
+{% else if let Some(d) = done %}
   <div class="page-head au-head">
     <div class="au-title">
       <span class="au-domain">{{ domain }}</span>
