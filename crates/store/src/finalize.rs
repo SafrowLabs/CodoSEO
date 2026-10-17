@@ -71,8 +71,10 @@ pub async fn finalize_with_policy(
     // The AI access report and what it opens or resolves, in the same transaction, so a crawl
     // never has its changes without its report or the other way round.
     let geo_changes = match geo {
-        Some(input) => geo::apply_geo(&mut tx, site_id, crawl_id, input).await?,
-        None => Vec::new(),
+        Some(input) if !input.score_only => {
+            geo::apply_geo(&mut tx, site_id, crawl_id, input).await?
+        }
+        _ => Vec::new(),
     };
     insert_changes(&mut tx, crawl_id, site_id, &geo_changes).await?;
 
@@ -120,6 +122,27 @@ pub async fn finalize_with_policy(
                ORDER BY finished_at DESC, id DESC OFFSET 2)"
         );
         sqlx::query(&sql).bind(site_id).execute(&mut *tx).await?;
+    }
+    // The site's icon as this crawl found it, or none.
+    match &out.signals.icon {
+        Some(icon) => {
+            sqlx::query(
+                "INSERT INTO site_icons (site_id, content_type, bytes) VALUES ($1, $2, $3) \
+                 ON CONFLICT (site_id) DO UPDATE SET content_type = EXCLUDED.content_type, \
+                   bytes = EXCLUDED.bytes, updated_at = now()",
+            )
+            .bind(site_id)
+            .bind(icon.content_type)
+            .bind(&icon.bytes)
+            .execute(&mut *tx)
+            .await?;
+        }
+        None => {
+            sqlx::query("DELETE FROM site_icons WHERE site_id = $1")
+                .bind(site_id)
+                .execute(&mut *tx)
+                .await?;
+        }
     }
     // The live rows only matter to the newest crawl, which the live views show until they turn
     // to the results.

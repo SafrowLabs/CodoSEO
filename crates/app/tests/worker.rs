@@ -888,10 +888,18 @@ async fn a_quick_audit_has_no_ai_access_state() {
         .await
         .unwrap();
     assert_eq!((reports, incidents), (0, 0));
+    // It still has a GEO score, and the Overall score that needs it.
+    let (geo, overall): (Option<i16>, Option<i16>) =
+        sqlx::query_as("SELECT geo_score, overall_score FROM crawls WHERE site_id = $1")
+            .bind(site_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert!(geo.is_some() && overall.is_some(), "{geo:?} {overall:?}");
 }
 
 #[tokio::test]
-async fn a_quick_audit_does_not_fetch_tdmrep_and_a_full_crawl_does() {
+async fn a_quick_audit_reads_the_site_files_ai_products_read_like_a_full_crawl() {
     let db = TestDb::new().await;
     let site = SiteBuilder::new()
         .html("/", "Home", &[])
@@ -903,9 +911,10 @@ async fn a_quick_audit_does_not_fetch_tdmrep_and_a_full_crawl_does() {
         .await;
     let site_id = db.seed_site("example.test", site.url("/").as_str()).await;
     run_crawl(&db, site_id, CrawlTrigger::Quick).await;
-    assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 0);
-    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
     assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 1);
+    assert_eq!(site.path_hits("/llms.txt"), 1);
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert_eq!(site.path_hits("/.well-known/tdmrep.json"), 2);
 }
 
 // ---- Synthetic AI-agent fetch probes ------------------------------------------------------
@@ -1648,5 +1657,138 @@ async fn the_ai_bot_fetches_land_on_the_live_rows_of_the_pages_they_probed() {
             .iter()
             .filter(|p| p.token != token)
             .all(|p| p.outcome == "same")
+    );
+}
+
+#[tokio::test]
+async fn a_restarted_crawl_is_dropped_by_its_worker_and_a_new_one_queued() {
+    let db = TestDb::new().await;
+    let links: Vec<String> = (0..40).map(|i| format!("/p/{i}")).collect();
+    let links: Vec<&str> = links.iter().map(String::as_str).collect();
+    let site = SiteBuilder::new()
+        .html("/", "Home", &links)
+        .every_path(
+            codoseo_testkit::Page::html("<title>A page</title>")
+                .delayed(std::time::Duration::from_millis(400)),
+        )
+        .start()
+        .await;
+    let site_id = seed_owned_site(&db, site.url("/").as_str(), "pro").await;
+    let crawl_queue = CrawlQueue::new(db.pool.clone());
+    let first = crawl_queue
+        .enqueue(site_id, "example.test", CrawlTrigger::Manual, 2, None, None)
+        .await
+        .unwrap();
+    let worker = {
+        let pool = db.pool.clone();
+        tokio::spawn(async move {
+            let crawl_queue = CrawlQueue::new(pool.clone());
+            let job_queue = JobQueue::new(pool.clone());
+            worker_loop_once_with(
+                &pool,
+                &crawl_queue,
+                &job_queue,
+                "test-worker",
+                DEFAULT_MEMORY_BUDGET,
+                AddressPolicy::AllowPrivate,
+                &fast_probes(),
+            )
+            .await
+        })
+    };
+    // Let it get going, then restart it as the owner would.
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    let outcome = codoseo_store::crawls::restart_manual(&db.pool, site_id, "example.test", 2, None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        codoseo_store::crawls::ManualOutcome::Queued { .. }
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(10), worker)
+        .await
+        .expect("the worker drops the crawl within a heartbeat or two")
+        .unwrap()
+        .unwrap();
+    let hits_then = site.hits();
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    assert_eq!(
+        site.hits(),
+        hits_then,
+        "nothing fetches for the stopped crawl"
+    );
+    assert!(hits_then < 40, "stopped early: {hits_then} requests");
+
+    let (status, reason): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, failure_reason FROM crawls WHERE id = $1")
+            .bind(first)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert_eq!(
+        reason.as_deref(),
+        Some(codoseo_store::crawls::RESTARTED_REASON)
+    );
+    let queued: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM crawls WHERE site_id = $1 AND status = 'queued'")
+            .bind(site_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(queued, 1);
+    // A restart is not a site failure: no alert goes out.
+    let alerts: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'send_alert'")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(alerts, 0);
+}
+
+#[tokio::test]
+async fn a_crawl_keeps_the_icon_the_home_page_declares() {
+    let db = TestDb::new().await;
+    let icon = "\0\0\u{1}\0an icon";
+    let site = SiteBuilder::new()
+        .page(
+            "/",
+            codoseo_testkit::Page::html(
+                r#"<html><head><title>Home</title><link rel="icon" href="/brand.ico"></head><body></body></html>"#,
+            ),
+        )
+        .page("/brand.ico", codoseo_testkit::Page::html(icon))
+        .start()
+        .await;
+    let site_id = db.seed_site("example.test", site.url("/").as_str()).await;
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    let stored = codoseo_store::sites::icon(&db.pool, site_id).await.unwrap();
+    assert_eq!(
+        stored,
+        Some(("image/x-icon".to_owned(), icon.as_bytes().to_vec()))
+    );
+    assert_eq!(
+        site.path_hits("/favicon.ico"),
+        0,
+        "the declared icon was enough"
+    );
+}
+
+#[tokio::test]
+async fn a_page_that_is_not_an_image_is_never_kept_as_the_icon() {
+    let db = TestDb::new().await;
+    let site = SiteBuilder::new()
+        .html("/", "Home", &[])
+        .page(
+            "/favicon.ico",
+            codoseo_testkit::Page::html("<svg><script>alert(1)</script></svg>"),
+        )
+        .start()
+        .await;
+    let site_id = db.seed_site("example.test", site.url("/").as_str()).await;
+    run_crawl(&db, site_id, CrawlTrigger::Manual).await;
+    assert_eq!(site.path_hits("/favicon.ico"), 1);
+    assert_eq!(
+        codoseo_store::sites::icon(&db.pool, site_id).await.unwrap(),
+        None
     );
 }

@@ -7,7 +7,7 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use codoseo_core::output::StopReason;
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_store::crawl_queue::CrawlTrigger;
@@ -30,6 +30,7 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/s/{site}/crawls", get(history).post(run))
+        .route("/s/{site}/crawls/restart", post(restart))
         .route("/s/{site}/crawls/live", get(live))
         .route("/s/{site}/status", get(status))
 }
@@ -196,17 +197,38 @@ async fn run(
     hx: Hx,
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
+    queue_manual(state, user, hx, site, false).await
+}
+
+/// Restart crawl, from the live audit: stops the crawl that is queued or running and queues a
+/// new one, which counts against the manual allowance like Run crawl.
+async fn restart(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path(site): Path<String>,
+) -> Result<Response, AppError> {
+    queue_manual(state, user, hx, site, true).await
+}
+
+async fn queue_manual(
+    state: AppState,
+    user: CurrentUser,
+    hx: Hx,
+    site: String,
+    restart: bool,
+) -> Result<Response, AppError> {
     let site = load_site(&state, &user, parse_site_id(&site)?).await?;
     let plan = user.account.plan;
     let allowance = PlanLimits::for_plan(plan).manual_crawls;
-    let outcome = codoseo_store::crawls::enqueue_manual_checked(
-        &state.pool,
-        site.id,
-        &site.domain,
-        manual_priority(plan),
-        ManualWindow::for_allowance(allowance),
-    )
-    .await?;
+    let (pool, window) = (&state.pool, ManualWindow::for_allowance(allowance));
+    let priority = manual_priority(plan);
+    let outcome = if restart {
+        codoseo_store::crawls::restart_manual(pool, site.id, &site.domain, priority, window).await?
+    } else {
+        codoseo_store::crawls::enqueue_manual_checked(pool, site.id, &site.domain, priority, window)
+            .await?
+    };
     let number = match outcome {
         ManualOutcome::Queued { number, .. } => number,
         ManualOutcome::Busy(status) => {
@@ -230,8 +252,13 @@ async fn run(
     if !hx.partial() {
         return Ok(Redirect::to(&format!("/s/{}/crawls", site.id)).into_response());
     }
+    let message = if restart {
+        format!("Crawl restarted as #{number}")
+    } else {
+        format!("Crawl #{number} queued")
+    };
     let trigger = json!({
-        "toast": { "kind": "ok", "message": format!("Crawl #{number} queued") },
+        "toast": { "kind": "ok", "message": message },
         "crawlQueued": true,
     });
     Ok((StatusCode::NO_CONTENT, [hx_trigger(&trigger)]).into_response())

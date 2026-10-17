@@ -314,7 +314,11 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
         res.body
     );
     assert!(res.body.contains("every 2s"));
-    assert!(!res.body.contains(r#"class="ring""#));
+    assert!(
+        res.body.contains("q-queue") && res.body.contains("in line"),
+        "{}",
+        res.body
+    );
     assert!(
         res.body.contains("noindex"),
         "the report is not for search engines"
@@ -328,43 +332,55 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
         res.body
     );
 
-    // Running: the live counters and the newest pages.
+    // Running: the stage, the count against the free cap, and each page with its tags.
     sqlx::query(
         "UPDATE crawls SET status = 'running', started_at = now(), progress = $2 WHERE id = $1",
     )
     .bind(crawl)
     .bind(serde_json::json!({
         "pages_done": 37, "queued": 12, "failures": 0, "depth": 2, "elapsed_ms": 9000,
-        "errors": 0,
-        "recent": [
-            {"n": 37, "url": "https://example.com/pricing", "status": 200},
-            {"n": 36, "url": "https://example.com/private", "status": 0, "robots": true},
-        ],
+        "errors": 0, "phase": "pages", "files": {"robots": 200, "sitemap_urls": 452},
+        "seo_estimate": 84,
     }))
     .execute(app.pool())
     .await
     .unwrap();
+    for (n, path, status, indexability) in [
+        (36, "/private", 0, "blocked_by_robots"),
+        (37, "/pricing", 200, "indexable"),
+    ] {
+        sqlx::query("INSERT INTO crawl_live_rows (crawl_id, n, row) VALUES ($1, $2, $3)")
+            .bind(crawl)
+            .bind(n)
+            .bind(serde_json::json!({
+                "n": n, "url": format!("https://example.com{path}"), "status": status,
+                "indexability": indexability, "ai_of": 10,
+            }))
+            .execute(app.pool())
+            .await
+            .unwrap();
+    }
     let res = app.get_hx(&format!("{path}/live"), None).await;
     assert_eq!(res.status, StatusCode::OK);
-    assert!(res.body.contains("37"), "{}", res.body);
     assert!(res.body.contains("every 2s"));
+    for part in [
+        "Checking pages",
+        "37 / 100",
+        ">/pricing<",
+        "AI can reach</b> · 10/10",
+        ">robots<",
+        "blocked by robots.txt",
+    ] {
+        assert!(res.body.contains(part), "{part}: {}", res.body);
+    }
+    let page = app.get(&path, None).await.body;
+    assert!(page.contains("Your sitemap lists 452"), "{page}");
     assert!(
-        res.body
-            .contains("<dt>Queued</dt><dd class=\"num \">12</dd>")
-    );
-    assert!(res.body.contains(">/pricing<"), "{}", res.body);
-    assert!(
-        res.body
-            .contains(r#"<span class="code t-muted">robots</span>"#)
-    );
-    assert!(
-        res.body
-            .contains(&format!(r#"hx-get="{path}/live?seen=37""#)),
-        "{}",
-        res.body
+        !res.body.contains("unlock-card"),
+        "the sign-in card stays put while the audit runs, so typing in it survives a poll"
     );
 
-    // Done: the score and the top issues; the polling stops.
+    // Done: the scores and the fixes; the polling stops and the card says so.
     app.finalize_crawl(
         crawl,
         messy_pages("example.com"),
@@ -374,13 +390,18 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
     .await;
     let res = app.get_hx(&format!("{path}/live"), None).await;
     assert_eq!(res.status, StatusCode::OK);
-    assert!(res.body.contains(r#"class="ring""#), "{}", res.body);
-    assert!(res.body.contains("checks passed"));
+    assert!(res.body.contains("Audit finished"), "{}", res.body);
+    assert!(res.body.contains("Fix these first"), "{}", res.body);
     assert!(
         !res.body.contains("every 2s"),
         "a finished audit stops polling"
     );
-    assert!(!res.body.contains("live-crawl"), "{}", res.body);
+    assert!(
+        res.body
+            .contains(r#"id="unlock-card" class="card q-unlock" hx-swap-oob="true""#),
+        "{}",
+        res.body
+    );
     let res = app.get(&path, None).await;
     assert!(!res.body.contains("http-equiv=\"refresh\""), "{}", res.body);
     assert!(res.body.contains(&format!(r#"action="{path}/unlock""#)));
@@ -395,7 +416,7 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
 }
 
 #[tokio::test]
-async fn the_preview_shows_five_issues_and_keeps_the_rest_and_every_url_locked() {
+async fn the_preview_shows_three_fixes_and_keeps_the_rest_and_every_url_locked() {
     let app = cloud().await;
     let crawl = crawl_id(&submit(&app, "example.com").await);
     finish(&app, crawl, messy_pages("example.com")).await;
@@ -413,11 +434,17 @@ async fn the_preview_shows_five_issues_and_keeps_the_rest_and_every_url_locked()
     );
 
     let body = app.get(&format!("/audit/{crawl}"), None).await.body;
-    assert_eq!(body.matches(r#"class="issue-row"#).count(), 5, "{body}");
-    let locked = failing - 5;
+    // Three real fixes, then placeholders under a blur: the hidden ones aren't in the page.
+    assert_eq!(
+        body.matches(r#"<div class="q-fix">"#).count(),
+        3 + 2,
+        "{body}"
+    );
+    assert!(body.contains("3 shown free"), "{body}");
+    assert!(body.contains("more in the full report"), "{body}");
     assert!(
-        body.contains(&format!("{locked} more issue")),
-        "the locked remainder is counted ({locked}): {body}"
+        body.contains(r#"class="q-locked" aria-hidden="true""#),
+        "{body}"
     );
     // The lead magnet: no page URLs before the email.
     assert!(!body.contains("hidden-secret-path"));

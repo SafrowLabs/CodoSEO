@@ -44,7 +44,7 @@
     <details class="switcher" id="switcher">
       <summary class="site-pill" aria-label="Switch site">
         {% if let Some(site) = shell.current %}
-          <span class="avatar">{{ site.initial }}</span>
+          {% if let Some(icon) = site.icon %}<img class="avatar site-icon" src="{{ icon }}" alt="" width="22" height="22">{% else %}<span class="avatar">{{ site.initial }}</span>{% endif %}
           <span class="meta"><span class="name" style="display:block">{{ site.domain }}</span><span class="sub">{{ site.urls_label }}</span></span>
         {% else %}
           <span class="avatar" style="background:var(--line);color:var(--ink-2)"><svg class="icon" style="width:14px;height:14px"><use href="#i-globe"/></svg></span>

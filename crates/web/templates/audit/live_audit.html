@@ -1,7 +1,7 @@
 <div id="live-audit" class="la" role="region" aria-label="Live audit"{% if running %} hx-get="{{ poll }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML" data-quiet{% endif %}>
   <div class="page-head au-head">
     <div class="au-title">
-      <span class="au-domain">{{ domain }}</span>
+      <span class="au-domain la-site">{% if let Some(i) = icon %}<img src="{{ i }}" alt="" width="16" height="16">{% endif %}{{ domain }}</span>
       <div class="au-title-row">
         <h1>Site audit</h1>
         {% if running %}<span class="la-badge"><i class="la-dot" aria-hidden="true"></i>Live · crawl #{{ number }}</span>{% else %}<span class="la-badge is-done">Crawl #{{ number }} finished</span>{% endif %}
@@ -11,6 +11,7 @@
     <span class="grow"></span>
     {% if running %}
     <span class="la-signal" role="status" aria-live="polite"><i class="la-dot" aria-hidden="true"></i><span class="la-signal-text">{{ signal }}</span><b class="num">{{ count }}</b><span class="la-bar" aria-hidden="true"><span style="width:{{ bar }}%"></span></span><span class="mono">{{ elapsed }}</span></span>
+    <button class="btn" type="button" hx-post="{{ base }}/crawls/restart" hx-swap="none" hx-disabled-elt="this" hx-confirm="Stop this crawl and start a new one? It counts as a manual crawl.">Restart crawl</button>
     {% else %}
     <span class="la-signal is-done" role="status"><i class="sdot is-ok" aria-hidden="true"></i><span><b>Scores final</b> · {{ done_line }} · opening results…</span></span>
     <a class="btn btn-primary" href="{{ base }}/audit">Open full results</a>

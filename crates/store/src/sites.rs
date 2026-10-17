@@ -260,3 +260,21 @@ pub async fn toggle_key_page(
     .await?;
     Ok(starred)
 }
+
+/// A site's icon: its media type and bytes, when its newest crawl found one.
+pub async fn icon(pool: &PgPool, site_id: Uuid) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
+    sqlx::query_as("SELECT content_type, bytes FROM site_icons WHERE site_id = $1")
+        .bind(site_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Whether the site has an icon to show, and when it changed (for the URL that caches it).
+pub async fn icon_version(pool: &PgPool, site_id: Uuid) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXTRACT(EPOCH FROM updated_at)::bigint FROM site_icons WHERE site_id = $1",
+    )
+    .bind(site_id)
+    .fetch_optional(pool)
+    .await
+}

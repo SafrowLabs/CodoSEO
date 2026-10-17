@@ -338,6 +338,33 @@ pub async fn enqueue_manual_checked(
     priority: i16,
     allowance: Option<ManualWindow>,
 ) -> Result<ManualOutcome, sqlx::Error> {
+    enqueue_manual(pool, site_id, domain, priority, allowance, false).await
+}
+
+/// Why a crawl stopped when its owner started it again.
+pub const RESTARTED_REASON: &str = "Stopped to start a new crawl";
+
+/// [`enqueue_manual_checked`], stopping the crawl the site has queued or running instead of
+/// refusing: it ends as failed with [`RESTARTED_REASON`], and its worker drops it on its next
+/// heartbeat. Nothing is stopped when the allowance is used up.
+pub async fn restart_manual(
+    pool: &PgPool,
+    site_id: Uuid,
+    domain: &str,
+    priority: i16,
+    allowance: Option<ManualWindow>,
+) -> Result<ManualOutcome, sqlx::Error> {
+    enqueue_manual(pool, site_id, domain, priority, allowance, true).await
+}
+
+async fn enqueue_manual(
+    pool: &PgPool,
+    site_id: Uuid,
+    domain: &str,
+    priority: i16,
+    allowance: Option<ManualWindow>,
+    restart: bool,
+) -> Result<ManualOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT id FROM sites WHERE id = $1 FOR UPDATE")
         .bind(site_id)
@@ -351,7 +378,9 @@ pub async fn enqueue_manual_checked(
     .bind(site_id)
     .fetch_optional(&mut *tx)
     .await?;
-    if let Some(status) = busy {
+    if let Some(status) = busy
+        && !restart
+    {
         return Ok(ManualOutcome::Busy(status));
     }
 
@@ -369,6 +398,16 @@ pub async fn enqueue_manual_checked(
             let frees_at = oldest.unwrap_or(now) + allowance.window;
             return Ok(ManualOutcome::LimitReached { frees_at });
         }
+    }
+    if restart {
+        sqlx::query(
+            "UPDATE crawls SET status = 'failed', finished_at = now(), failure_reason = $2 \
+             WHERE site_id = $1 AND status IN ('queued', 'running')",
+        )
+        .bind(site_id)
+        .bind(RESTARTED_REASON)
+        .execute(&mut *tx)
+        .await?;
     }
 
     let id: Uuid = sqlx::query_scalar(

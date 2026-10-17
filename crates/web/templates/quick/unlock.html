@@ -1,20 +1,28 @@
-<div id="unlock-card" class="q-unlock">
+<section id="unlock-card" class="card q-unlock"{% if unlock.oob %} hx-swap-oob="true"{% endif %} aria-label="Full report and page limit">
 {% if unlock.sent %}
-  <h3>Check your email</h3>
-  <p class="muted">We sent a link to <b>{{ unlock.email }}</b>. It works once and expires in 15 minutes. Opening it shows the full report and starts monitoring.</p>
+  <div>
+    <h2>Check your email</h2>
+    <p class="muted">We sent a link to <b>{{ unlock.email }}</b>. It works once and expires in 15 minutes. Opening it keeps this audit in your account and carries on to up to 500 pages.</p>
+  </div>
 {% else %}
-  <h3>Get the full report</h3>
-  <ul class="q-perks">
-    <li>Every URL behind every issue</li>
-    <li>A 500-page crawl of the whole site</li>
-    <li>Weekly monitoring, with an email when something important breaks</li>
-  </ul>
+  <div class="q-unlock-text">
+    <h2>{{ unlock.limit.title }}</h2>
+    <p>Sign in free and audit <b>up to 500 pages</b> instead of 100. You also get <b>{{ unlock.limit.fixes }} with copy-paste prompts</b>, every page's checks, and a weekly re-check. No card, no password.</p>
+    <details class="q-why">
+      <summary>Why do we ask you to sign in?</summary>
+      <p>Crawls hit real servers. Signing in stops people from flooding sites that aren't theirs, so anonymous audits stay small (100 pages, 3 an hour) and part of the report stays hidden. It's free.</p>
+    </details>
+    <span class="q-meter" aria-hidden="true"><span style="width:{{ unlock.limit.bar }}%"></span></span>
+    <span class="q-meter-l">{{ unlock.limit.line }}</span>
+  </div>
   <form method="post" action="/audit/{{ unlock.id }}/unlock" hx-post="/audit/{{ unlock.id }}/unlock" hx-target="#unlock-card" hx-swap="outerHTML" hx-disabled-elt="find button">
-    <input class="input input-lg" name="email" type="email" value="{{ unlock.email }}" placeholder="you@company.com" autocomplete="email" aria-label="Your email" required>
-    <button class="btn btn-primary btn-lg" type="submit">Email me the full report<span class="spinner"></span></button>
+    <label for="unlock-email">Work email</label>
+    <span class="q-unlock-row">
+      <input id="unlock-email" class="input input-lg" name="email" type="email" value="{{ unlock.email }}" placeholder="you@company.com" autocomplete="email" required>
+      <button class="btn btn-primary btn-lg" type="submit">Get the full report<span class="spinner"></span></button>
+    </span>
+    {% if let Some(err) = unlock.error %}<p class="error-text" role="alert"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}
+    <span class="l-hint">We send one sign-in link. By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</span>
   </form>
-  {% if let Some(err) = unlock.error %}<p class="error-text" role="alert"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}
-  <p class="l-hint">Free plan: 1 site, weekly crawls, email alerts. No card needed.</p>
-  <p class="l-hint legal-note">By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
 {% endif %}
-</div>
+</section>

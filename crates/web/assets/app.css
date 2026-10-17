@@ -2061,3 +2061,6 @@ details.la-row[open] { background: var(--surface-2); }
 }
 @media (prefers-reduced-motion: reduce) { .la-dot { animation: none; } .la-bar > span { transition: none; } }
 .count.live { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); font-weight: 600; }
+.avatar.site-icon { object-fit: contain; background: var(--surface); padding: 2px; box-sizing: border-box; }
+.la-site { display: inline-flex; align-items: center; gap: 6px; }
+.la-site img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }

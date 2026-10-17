@@ -23,6 +23,7 @@ use url::Url;
 
 use crate::fetch::{FetchError, FetchResult, Fetcher, FetcherConfig};
 use crate::frontier::{Frontier, Queued};
+use crate::icon::fetch_icon;
 use crate::llms::{LinkCheck, check_links, fetch_llms_txt};
 use crate::markdown::fetch_markdown;
 use crate::politeness::{Limiter, retry_after_of};
@@ -163,6 +164,9 @@ pub async fn crawl_shared(
             .map(|r| r.final_url.clone());
         if let Some(home) = home {
             signals.markdown = fetch_markdown(&fetcher, &limiter, &home, &rules, deadline).await;
+        }
+        if let Some(home) = start.as_ref().and_then(|(_, r)| r.as_ref().ok()) {
+            signals.icon = fetch_icon(&fetcher, &limiter, home, &rules, deadline).await;
         }
     }
 

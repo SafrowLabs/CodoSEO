@@ -1030,3 +1030,48 @@ async fn the_live_audit_lists_checked_pages_with_their_tags_and_hands_over_when_
     let res = app.get(&watch, Some(&cookie)).await;
     assert_eq!(res.status, StatusCode::SEE_OTHER);
 }
+
+#[tokio::test]
+async fn the_site_icon_is_served_from_our_origin_and_shown_in_the_sidebar() {
+    let (app, _, cookie, site) = setup().await;
+    let path = format!("/s/{}/icon", site.id);
+    assert_eq!(
+        app.get(&path, Some(&cookie)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let body = app
+        .get(&format!("/s/{}/audit", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(
+        !body.contains("site-icon"),
+        "the initial until there is an icon"
+    );
+
+    sqlx::query(
+        "INSERT INTO site_icons (site_id, content_type, bytes) VALUES ($1, 'image/png', $2)",
+    )
+    .bind(site.id)
+    .bind(b"\x89PNG\r\n\x1a\n".to_vec())
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let res = app.get(&path, Some(&cookie)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(res.header("content-type"), Some("image/png"));
+    assert_eq!(res.header("x-content-type-options"), Some("nosniff"));
+    assert!(
+        res.header("content-security-policy")
+            .is_some_and(|c| c.contains("sandbox"))
+    );
+    assert_eq!(
+        app.get(&path, None).await.status,
+        StatusCode::SEE_OTHER,
+        "owners only"
+    );
+    let body = app
+        .get(&format!("/s/{}/audit", site.id), Some(&cookie))
+        .await
+        .body;
+    assert!(body.contains(r#"class="avatar site-icon""#), "{body}");
+}

@@ -109,6 +109,26 @@ pub fn hx_redirect(to: &str) -> (HeaderName, HeaderValue) {
     )
 }
 
+/// A site's icon, served from our own origin. Only raster types are ever stored; the headers
+/// still keep the browser from reading it as anything else or running anything in it.
+pub fn icon_response(content_type: String, bytes: Vec<u8>) -> axum::response::Response {
+    use axum::http::header;
+    use axum::response::IntoResponse;
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "private, max-age=604800".to_owned()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; sandbox".to_owned(),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
