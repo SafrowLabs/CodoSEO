@@ -120,6 +120,15 @@ impl ProbeConfig {
 /// and a run cut short says why in `stop`. Bodies are read up to [`MAX_PROBE_BODY`] and dropped
 /// once their title, size and challenge markers are taken.
 pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
+    run_probes_watched(cfg, |_, _| {}).await
+}
+
+/// [`run_probes`], with each URL passed to `on_url` as soon as every bot has its verdict there,
+/// so a caller can show the results as they come.
+pub async fn run_probes_watched(
+    cfg: ProbeConfig,
+    on_url: impl Fn(&Url, &ProbedUrl) + Send + Sync,
+) -> ProbeReport {
     let from = valid_from(&cfg.from)
         .and_then(|f| HeaderValue::from_str(&f).ok())
         .unwrap_or_else(|| HeaderValue::from_static(PROBE_FROM));
@@ -264,11 +273,13 @@ pub async fn run_probes(cfg: ProbeConfig) -> ProbeReport {
                 verdict,
             });
         }
-        report.urls.push(ProbedUrl {
+        let probed = ProbedUrl {
             url: idx,
             baseline,
             results,
-        });
+        };
+        on_url(url, &probed);
+        report.urls.push(probed);
         if stopped {
             report.stop = Some(ProbeStop::Budget);
             break;

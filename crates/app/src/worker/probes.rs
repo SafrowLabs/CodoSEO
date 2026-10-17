@@ -8,9 +8,9 @@ use codoseo_core::crawl::{AddressPolicy, PROBE_FROM};
 use codoseo_core::output::CrawlOutput;
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_crawler::probe::{
-    DEFAULT_MIN_GAP, PROBE_TIMEOUT, ProbeConfig, probe_from_value, run_probes,
+    DEFAULT_MIN_GAP, PROBE_TIMEOUT, ProbeConfig, probe_from_value, run_probes_watched,
 };
-use codoseo_geo::probe::{ProbeReport, plan_probes};
+use codoseo_geo::probe::{ProbeReport, ProbedUrl, plan_probes};
 use codoseo_geo::report::AccessReport;
 use codoseo_geo::robots::RobotsTxt;
 use codoseo_web::metrics;
@@ -99,6 +99,7 @@ impl ProbeSettings {
 /// request cap of `limits`. A run still going a minute past its budget stops there and keeps the
 /// pages that finished, with `stop` set to `budget`. `None` when there is nothing to probe (no
 /// robots verdicts, no HTML 200 page), or when the run panicked or did not stop at its deadline.
+/// Each page is passed to `on_url` as soon as every bot has its verdict there.
 pub async fn probe(
     report: &AccessReport,
     out: &CrawlOutput,
@@ -106,6 +107,7 @@ pub async fn probe(
     limits: &PlanLimits,
     settings: &ProbeSettings,
     policy: AddressPolicy,
+    on_url: impl Fn(&url::Url, &ProbedUrl) + Send + Sync + 'static,
 ) -> Option<ProbeReport> {
     // Read only for the crawl delay; the robots verdicts are already in the report.
     let robots = out
@@ -127,7 +129,7 @@ pub async fn probe(
     };
     // Its own task, so a panic in the executor is caught here instead of failing the crawl.
     let backstop = cfg.deadline + BACKSTOP;
-    let mut run = tokio::spawn(run_probes(cfg).in_current_span());
+    let mut run = tokio::spawn(run_probes_watched(cfg, on_url).in_current_span());
     match tokio::time::timeout(backstop, &mut run).await {
         Ok(Ok(probes)) => {
             metrics::probe_requests(u64::from(probes.requests));
