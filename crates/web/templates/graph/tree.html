@@ -1,4 +1,33 @@
 {% extends "graph/frame.html" %}
 {% block graph %}
-<div class="card"><div class="empty-sm">This view is being built.</div></div>
+<section class="gv gv-tree" data-graph="tree" data-src="{{ mount.src }}" data-page="{{ mount.page }}" data-base="{{ base }}">
+  <div class="gv-head">
+    <div class="gv-title">
+      <h1>How many clicks to reach each page</h1>
+      <p>Start at the home page and follow links down. Each row is one more click. Open a box to see what sits below it.</p>
+    </div>
+    <div class="gv-tools" role="group" aria-label="Tree controls">
+      <label class="gv-search"><svg class="icon"><use href="#i-search"/></svg><input type="search" data-ctl="q" list="gv-urls-tree" placeholder="Find a URL" aria-label="Find a URL" autocomplete="off"><datalist id="gv-urls-tree"></datalist></label>
+      <button type="button" class="btn" data-ctl="expand">Expand all</button>
+      <button type="button" class="btn" data-ctl="problems" aria-pressed="false">Show only problems</button>
+      <button type="button" class="btn" data-ctl="fit">Fit</button>
+    </div>
+  </div>
+  <div class="gv-legend">
+    <span><i class="gv-sw" data-x="ok"></i>Indexable</span>
+    <span><i class="gv-sw" data-x="noindex"></i>Noindex</span>
+    <span><i class="gv-sw" data-x="redirect"></i>Redirect</span>
+    <span><i class="gv-sw" data-x="broken"></i>Broken</span>
+    <span><i class="gv-sw gv-sw-path"></i>Path to the selected page</span>
+  </div>
+  <div class="gv-body">
+    <div class="gv-main">
+      <div class="gv-stage gv-stage-tree" data-role="stage"><p class="gv-msg">Loading the crawl…</p></div>
+      <div class="gv-unlinked" data-role="unlinked" hidden></div>
+    </div>
+    <aside class="gv-panel" data-role="panel" aria-live="polite" aria-label="Selected page"></aside>
+  </div>
+</section>
+<script src="{{ crate::assets::url("d3.min.js") }}"></script>
+<script src="{{ crate::assets::url("graph.js") }}"></script>
 {% endblock %}
