@@ -1,4 +1,83 @@
 {% extends "graph/frame.html" %}
 {% block graph %}
-<div class="card"><div class="empty-sm">This view is being built.</div></div>
+{% if let Some(v) = view %}
+{% if let Some(note) = v.note %}
+<div class="gv-head">
+  <h1>What changed since the last crawl</h1>
+</div>
+<div class="card"><div class="empty-sm">{{ note }}</div></div>
+{% else %}
+<div class="gch-layout">
+  <section class="gch-main" aria-label="Changed pages">
+    <div class="gch-top">
+      <div class="gv-head">
+        <h1>What changed since the last crawl</h1>
+        <p>Only folders with changes are shown. Everything else is the same as in the previous crawl.</p>
+      </div>
+      <div class="gch-crawls" role="group" aria-label="Compared crawls">
+        <span class="chip-outline">From {{ v.from_chip }}</span>
+        <svg class="icon faint" aria-label="compared with"><use href="#i-arrow"/></svg>
+        <span class="chip-outline">To {{ v.to_chip }}</span>
+      </div>
+    </div>
+    {% if !v.chips.is_empty() %}
+    <div class="gch-chips">{% for c in v.chips %}<span class="gch-chip is-{{ c.kind }}">{{ c.text }}</span>{% endfor %}</div>
+    {% endif %}
+    {% if let Some(c) = v.capped %}<p class="hint">{{ c }}</p>{% endif %}
+    <div class="card">
+      {% if let Some(t) = v.tree %}
+      <div class="gv-scroll gch-scroll">
+        <div class="gch-tree" style="width:{{ t.width }}px;height:{{ t.height }}px">
+          <svg class="gch-lines" width="{{ t.width }}" height="{{ t.height }}" viewBox="0 0 {{ t.width }} {{ t.height }}" aria-hidden="true">{% for p in t.paths %}<path class="gch-line{{ p.class }}" d="{{ p.d }}"/>{% endfor %}</svg>
+          <div class="gch-home" style="top:{{ t.home_top }}px"><b>Home</b><span>{{ t.home_note }}</span></div>
+          {% for f in t.folders %}
+          <div class="gch-folder{{ f.class }}" style="top:{{ f.top }}px"><span class="mono trunc" title="{{ f.label }}">{{ f.label }}</span><span class="gch-folder-note">{{ f.note }}</span></div>
+          {% endfor %}
+          {% for p in t.pages %}
+          <div class="gch-page is-{{ p.kind }}" style="top:{{ p.top }}px">{% if let Some(h) = p.href %}<a class="mono trunc" href="{{ h }}" title="{{ p.path }}">{{ p.path }}</a>{% else %}<span class="mono trunc" title="{{ p.path }}">{{ p.path }}</span>{% endif %}{% if !p.badge.is_empty() %}<span class="gch-badge">{{ p.badge }}</span>{% endif %}</div>
+          {% endfor %}
+        </div>
+      </div>
+      {% if let Some(m) = t.more_folders %}<div class="load-more">{{ m }}</div>{% endif %}
+      {% else if let Some(n) = v.nothing %}
+      <div class="empty-sm">{{ n }}</div>
+      {% endif %}
+    </div>
+  </section>
+  <aside class="card gch-side" aria-label="Change summary">
+    {% if let Some(h) = v.health %}
+    <div class="gch-side-block">
+      <span class="gv-caps">Site health, last crawls</span>
+      <div class="gch-score"><span class="num">{{ h.score }}</span><span class="{{ h.delta_class }}">{{ h.delta }}</span></div>
+      <svg class="gch-spark" viewBox="0 0 280 70" role="img" aria-label="{{ h.aria }}">
+        <line x1="0" y1="69" x2="280" y2="69"/>
+        <polyline points="{{ h.points }}"/>
+        {% for d in h.dots %}<circle cx="{{ d.0 }}" cy="{{ d.1 }}" r="3.5"/>{% endfor %}
+        <circle class="is-last" cx="{{ h.last.0 }}" cy="{{ h.last.1 }}" r="4.5"/>
+      </svg>
+      <div class="gch-spark-axis mono"><span>{{ h.first_label }}</span><span>{{ h.last_label }}</span></div>
+    </div>
+    {% endif %}
+    {% if let Some(p) = v.problem %}
+    <div class="gch-problem">
+      <b>Biggest new problem</b>
+      <span>{% if let Some(path) = p.path %}<span class="mono">{{ path }}</span>{% endif %}{{ p.text }}</span>
+      <a href="{{ p.href }}">{{ p.link }} ›</a>
+    </div>
+    {% else %}
+    <div class="gch-problem is-none"><b>Biggest new problem</b><span>{{ v.no_problem }}</span></div>
+    {% endif %}
+    <div class="gch-side-block">
+      <span class="gv-caps">Got better</span>
+      {% if v.better.is_empty() %}
+      <span class="c-muted">{{ v.no_better }}</span>
+      {% else %}
+      {% for b in v.better %}<div class="gch-better"><span>{{ b.0 }}</span><b class="c-ok num">{{ b.1 }}</b></div>{% endfor %}
+      {% endif %}
+    </div>
+    <a class="btn" href="{{ v.changes_href }}">See every change</a>
+  </aside>
+</div>
+{% endif %}
+{% endif %}
 {% endblock %}
