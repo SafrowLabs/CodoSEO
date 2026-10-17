@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::check::IssueBits;
 use crate::crawl::{RobotsFile, SitemapSummary};
 use crate::page::{FetchFailure, Indexability, PageRecord};
 
@@ -124,6 +125,16 @@ pub struct LiveProgress {
     /// The newest pages, newest first, at most [`RECENT_PAGES`].
     #[serde(default)]
     pub recent: Vec<RecentPage>,
+    /// The stage the crawl is in. Rows written before stages existed read as `Pages`.
+    #[serde(default)]
+    pub phase: LivePhase,
+    /// What the site files read before the pages gave, as far as the crawl has got.
+    #[serde(default)]
+    pub files: LiveFiles,
+    /// The SEO score of the pages checked so far, from the page checks alone: the checks that
+    /// need the whole crawl only count once it is over. `None` before the first page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seo_estimate: Option<u8>,
 }
 
 impl LiveProgress {
@@ -148,8 +159,72 @@ impl LiveProgress {
             progress,
             errors: u32::try_from(errors).unwrap_or(u32::MAX),
             recent,
+            phase: LivePhase::Pages,
+            files: LiveFiles::default(),
+            seo_estimate: None,
         }
     }
+}
+
+/// The stage a running crawl is in, in the order a crawl goes through them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LivePhase {
+    /// Fetching robots.txt.
+    Robots,
+    /// Reading the sitemaps.
+    Sitemap,
+    /// Fetching `/llms.txt` and the other site files AI products read.
+    LlmsTxt,
+    /// Fetching and checking pages.
+    #[default]
+    Pages,
+    /// The pages are in: the checks that need the whole crawl, the AI access report and the
+    /// final scores.
+    Scoring,
+}
+
+/// What the site files read before the pages gave. `None` until the crawl has read the file,
+/// and for good when it never does (a crawl that stopped first, or a quick audit that skips
+/// `llms.txt`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveFiles {
+    /// robots.txt's status; 0 when it gave no response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub robots: Option<u16>,
+    /// URLs the sitemaps list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sitemap_urls: Option<u32>,
+    /// `/llms.txt`'s status; 0 when it gave no response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llms_txt: Option<u16>,
+}
+
+/// One checked page of a running crawl, as the live views list it. The worker keeps one per
+/// recorded page, so the views can show and filter every page, not only the newest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveRow {
+    /// Its place in the crawl: 1 for the first page recorded.
+    pub n: u32,
+    pub url: String,
+    /// 0 when there was no response, or robots.txt kept the crawler out.
+    pub status: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<FetchFailure>,
+    #[serde(default)]
+    pub response_ms: u32,
+    pub indexability: Indexability,
+    /// What the page checks found on the page alone; the checks that need the whole crawl are
+    /// left to the report.
+    #[serde(default)]
+    pub issues: IssueBits,
+    /// The AI products that can't use the page, as bits over the answer engines in their
+    /// registry order: robots.txt blocks their crawler, or the page's own controls keep it out.
+    #[serde(default)]
+    pub ai_blocked: u16,
+    /// How many answer engines were judged; 0 when robots.txt gave no verdicts.
+    #[serde(default)]
+    pub ai_of: u8,
 }
 
 /// A page counted by [`LiveProgress::errors`].
@@ -346,8 +421,18 @@ mod tests {
                 error: None,
                 robots: false,
             }],
+            phase: LivePhase::LlmsTxt,
+            files: LiveFiles {
+                robots: Some(200),
+                sitemap_urls: Some(452),
+                llms_txt: None,
+            },
+            seo_estimate: Some(84),
         };
         let json = serde_json::to_value(&live).unwrap();
+        assert_eq!(json["phase"], "llms_txt");
+        assert_eq!(json["files"]["sitemap_urls"], 452);
+        assert!(json["files"].get("llms_txt").is_none());
         assert_eq!(json["pages_done"], 3);
         assert_eq!(json["recent"][0]["status"], 404);
         assert!(json["recent"][0].get("robots").is_none());
@@ -359,5 +444,9 @@ mod tests {
         let old = serde_json::to_value(progress()).unwrap();
         let read: LiveProgress = serde_json::from_value(old).unwrap();
         assert_eq!((read.errors, read.recent.len()), (0, 0));
+        // One written before stages were kept reads as listing pages, with no files known.
+        assert_eq!(read.phase, LivePhase::Pages);
+        assert_eq!(read.files, LiveFiles::default());
+        assert_eq!(read.seo_estimate, None);
     }
 }

@@ -121,6 +121,16 @@ pub async fn finalize_with_policy(
         );
         sqlx::query(&sql).bind(site_id).execute(&mut *tx).await?;
     }
+    // The live rows only matter to the newest crawl, which the live views show until they turn
+    // to the results.
+    sqlx::query(
+        "DELETE FROM crawl_live_rows WHERE crawl_id IN (\
+           SELECT id FROM crawls WHERE site_id = $1 AND id <> $2)",
+    )
+    .bind(site_id)
+    .bind(crawl_id)
+    .execute(&mut *tx)
+    .await?;
 
     enqueue_alert_job(
         &mut tx,

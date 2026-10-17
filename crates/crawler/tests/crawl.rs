@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use codoseo_core::Url;
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
-use codoseo_core::output::LiveProgress;
+use codoseo_core::output::{LiveFiles, LivePhase, LiveProgress};
 use codoseo_core::page::{FetchFailure, Indexability, PageRecord};
-use codoseo_crawler::crawl::{CrawlError, crawl, crawl_watched, inspect_page};
+use codoseo_crawler::crawl::{CrawlError, Live, crawl, crawl_watched, inspect_page};
 use codoseo_crawler::preflight::BLOCKED_MSG;
 use codoseo_crawler::{CrawlOutput, StopReason};
 use codoseo_testkit::{Page, SiteBuilder, TestSite, html_page};
@@ -171,6 +171,47 @@ async fn robots_disallowed_paths_become_records_and_are_never_requested() {
 }
 
 #[tokio::test]
+async fn a_watched_crawl_reports_each_stage_with_what_the_site_files_gave() {
+    let site = SiteBuilder::new()
+        .robots(200, "User-agent: *\nAllow: /")
+        .sitemap(&["/", "/a"])
+        .html("/", "Home", &["/a"])
+        .html("/a", "A", &[])
+        .start()
+        .await;
+    let seen: Mutex<Vec<(LivePhase, LiveFiles, bool)>> = Mutex::new(Vec::new());
+    crawl_watched(cfg(site.url("/")), |live: &Live<'_>| {
+        seen.lock()
+            .unwrap()
+            .push((live.phase, live.files, live.robots.is_some()));
+    })
+    .await
+    .unwrap();
+    let seen = seen.into_inner().unwrap();
+    let mut phases: Vec<LivePhase> = seen.iter().map(|s| s.0).collect();
+    phases.dedup();
+    assert_eq!(
+        phases,
+        [
+            LivePhase::Robots,
+            LivePhase::Sitemap,
+            LivePhase::LlmsTxt,
+            LivePhase::Pages
+        ]
+    );
+    // Nothing is known before robots.txt; each stage starts with what the earlier ones gave.
+    assert_eq!(seen[0].1, LiveFiles::default());
+    let at = |phase| seen.iter().find(|s| s.0 == phase).unwrap();
+    assert_eq!(at(LivePhase::Sitemap).1.robots, Some(200));
+    assert_eq!(at(LivePhase::LlmsTxt).1.sitemap_urls, Some(2));
+    let last = seen.last().unwrap();
+    assert_eq!(last.1.robots, Some(200));
+    assert_eq!(last.1.llms_txt, Some(404));
+    // The pages come with the file their AI verdicts are read from.
+    assert!(last.2);
+}
+
+#[tokio::test]
 async fn a_watched_crawl_shows_its_newest_pages_as_they_are_recorded() {
     let site = SiteBuilder::new()
         .robots(200, "User-agent: *\nDisallow: /private")
@@ -179,9 +220,13 @@ async fn a_watched_crawl_shows_its_newest_pages_as_they_are_recorded() {
         .start()
         .await;
     let seen: Mutex<Vec<LiveProgress>> = Mutex::new(Vec::new());
-    let out = crawl_watched(cfg(site.url("/")), |p, pages| {
-        assert_eq!(p.pages_done as usize, pages.len());
-        seen.lock().unwrap().push(LiveProgress::new(p, pages));
+    let out = crawl_watched(cfg(site.url("/")), |live: &Live<'_>| {
+        assert_eq!(live.progress.pages_done as usize, live.pages.len());
+        if live.phase == LivePhase::Pages {
+            seen.lock()
+                .unwrap()
+                .push(LiveProgress::new(live.progress, live.pages));
+        }
     })
     .await
     .unwrap();

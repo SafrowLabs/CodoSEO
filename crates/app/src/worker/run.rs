@@ -7,12 +7,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use codoseo_core::crawl::{AddressPolicy, CrawlConfig, CrawlLimits, Politeness, USER_AGENT};
-use codoseo_core::output::{
-    BLOCKED_REASON_PREFIX, LiveProgress, Progress, StopReason, UNREACHABLE_REASON_PREFIX,
-};
-use codoseo_core::page::PageRecord;
+use codoseo_core::output::{BLOCKED_REASON_PREFIX, StopReason, UNREACHABLE_REASON_PREFIX};
 use codoseo_core::plan::{Plan, PlanLimits};
-use codoseo_crawler::crawl::crawl_watched;
+use codoseo_crawler::crawl::{Live, crawl_watched};
 use codoseo_diff::{diff, key_pages};
 use codoseo_geo::report::{AccessReport, build_report, important_urls};
 use codoseo_geo::robots::{RobotsAvailability, availability};
@@ -27,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use url::Url;
 
+use crate::worker::live::{LiveTracker, LiveWrite};
 use crate::worker::probes::{self, ProbeSettings};
 use crate::worker::site_policy::{self, SitePolicyRun};
 
@@ -368,27 +366,39 @@ async fn run_one_crawl(
     };
 
     let crawl_id = claimed.id;
-    let last_heartbeat_ms = Arc::new(AtomicI64::new(0));
-    let on_progress = {
-        let last_heartbeat_ms = Arc::clone(&last_heartbeat_ms);
+    // A crawl claimed again after a dead worker lists its pages from the start.
+    crawl_queue
+        .clear_live_rows(crawl_id)
+        .await
+        .map_err(|e| format!("could not reset the live rows: {e}"))?;
+    let live = Arc::new(LiveTracker::new(site_policy.policy.thresholds()));
+    // One writer, so the writes land in the order they were taken.
+    let (live_tx, mut live_rx) = tokio::sync::mpsc::unbounded_channel::<LiveWrite>();
+    let live_writer = tokio::spawn({
         let crawl_queue = crawl_queue.clone();
-        move |progress: Progress, pages: &[PageRecord]| {
+        async move {
+            while let Some(write) = live_rx.recv().await {
+                let _ = write_live(&crawl_queue, crawl_id, &write).await;
+            }
+        }
+    });
+    let last_heartbeat_ms = Arc::new(AtomicI64::new(0));
+    let on_live = {
+        let live = Arc::clone(&live);
+        let last_heartbeat_ms = Arc::clone(&last_heartbeat_ms);
+        let live_tx = live_tx.clone();
+        move |view: &Live<'_>| {
+            live.observe(view);
             let now = now_millis();
             let prev = last_heartbeat_ms.load(Ordering::Relaxed);
-            if now - prev < HEARTBEAT_THROTTLE.as_millis() as i64 {
-                return;
-            }
-            if last_heartbeat_ms
-                .compare_exchange(prev, now, Ordering::Relaxed, Ordering::Relaxed)
-                .is_ok()
-            {
-                // The newest pages ride along on the same throttled write, for the live views:
-                // no extra writes, and nothing is copied between heartbeats.
-                let progress = LiveProgress::new(progress, pages);
-                let crawl_queue = crawl_queue.clone();
-                tokio::spawn(async move {
-                    let _ = crawl_queue.heartbeat(crawl_id, &progress).await;
-                });
+            let due = now - prev >= HEARTBEAT_THROTTLE.as_millis() as i64
+                && last_heartbeat_ms
+                    .compare_exchange(prev, now, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok();
+            // The checked pages ride along on the same throttled write, for the live views: no
+            // extra writes. A new stage goes out straight away.
+            if let Some(write) = live.take(due) {
+                let _ = live_tx.send(write);
             }
         }
     };
@@ -410,10 +420,18 @@ async fn run_one_crawl(
         })
     });
 
-    let crawl_result = crawl_watched(cfg, on_progress).await;
+    let crawl_result = crawl_watched(cfg, on_live).await;
     if let Ok(out) = &crawl_result {
         metrics::pages_crawled(out.pages.len() as u64);
+        // The last pages, and the step to scoring, before the slower work that follows.
+        live.scoring();
+        if let Some(write) = live.take(true) {
+            let _ = live_tx.send(write);
+        }
     }
+    // Every write is out before the slower work that follows.
+    drop(live_tx);
+    let _ = live_writer.await;
 
     let mut out = crawl_result.map_err(|e| format!("could not start crawl: {e}"))?;
 
@@ -510,6 +528,16 @@ async fn run_one_crawl(
 
     tracing::info!(pages = out.pages.len(), "crawl finished");
     Ok(())
+}
+
+/// Writes the live rows first, so a view that sees the new progress finds its pages.
+async fn write_live(
+    crawl_queue: &CrawlQueue,
+    crawl_id: uuid::Uuid,
+    write: &LiveWrite,
+) -> Result<(), sqlx::Error> {
+    crawl_queue.add_live_rows(crawl_id, &write.rows).await?;
+    crawl_queue.heartbeat(crawl_id, &write.progress).await
 }
 
 /// Whether the site's owner left the synthetic probes on. A database error skips them: they are

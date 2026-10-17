@@ -170,7 +170,7 @@ fn path_of(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codoseo_core::output::Progress;
+    use codoseo_core::output::{LiveFiles, LivePhase, Progress};
 
     fn page(n: u32, status: u16) -> RecentPage {
         RecentPage {
@@ -193,6 +193,9 @@ mod tests {
             },
             errors: 2,
             recent,
+            phase: LivePhase::Pages,
+            files: LiveFiles::default(),
+            seo_estimate: None,
         }
     }
 
