@@ -1807,19 +1807,12 @@ a.sc:hover { border-color: var(--ghost-2); background: var(--surface-hover); }
 .tr-pinline { stroke-width: 1.25; stroke-dasharray: 4 4; stroke: var(--warn-bar); }
 .tr-pinline.is-drop { stroke: var(--err); }
 .tr-pinline.is-rise { stroke: var(--ok-bar); }
-.tr-line { fill: none; stroke-linejoin: round; stroke-linecap: round; }
-.tr-line.tr-overall { stroke: var(--ink); stroke-width: 3.25; }
-.tr-line.tr-seo { stroke: var(--blue); stroke-width: 2.25; }
-.tr-line.tr-geo { stroke: var(--purple); stroke-width: 2.25; stroke-dasharray: 6 5; }
-.tr-y { position: absolute; left: 0; transform: translate(-2px, -110%); font-size: 10px; color: var(--faint-2); pointer-events: none; }
-.tr-end { position: absolute; width: 9px; height: 9px; border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid var(--surface); }
-.tr-end.tr-overall { background: var(--ink); width: 11px; height: 11px; }
-.tr-end.tr-seo { background: var(--blue); }
-.tr-end.tr-geo { background: var(--purple); }
-.tr-label { position: absolute; left: calc(80% + 10px); transform: translateY(-50%); font-size: 11.5px; font-weight: 600; white-space: nowrap; pointer-events: none; }
-.tr-label.tr-overall { color: var(--ink); font-weight: 700; }
-.tr-label.tr-seo { color: var(--blue); }
-.tr-label.tr-geo { color: var(--purple); }
+.tr-bar { opacity: 0.55; transition: opacity 0.15s; }
+.tr-bar.is-last, .tr-bar:hover { opacity: 1; }
+.tr-bar.tr-overall { fill: var(--ink); }
+.tr-bar.tr-seo { fill: var(--blue); }
+.tr-bar.tr-geo { fill: var(--purple); }
+.tr-y { position: absolute; left: 0; transform: translateY(-50%); font-size: 10px; color: var(--faint-2); pointer-events: none; }
 .tr-pin { position: absolute; top: -10px; width: 22px; height: 22px; margin-left: -11px; padding: 0; border-radius: 50%; border: 2px solid var(--surface); background: var(--warn-bar); color: var(--accent-ink); font: 700 11px/1 var(--font); cursor: help; }
 .tr-pin.is-drop { background: var(--err); color: #fff; }
 .tr-pin.is-rise { background: var(--ok-bar); }
@@ -1830,9 +1823,10 @@ a.sc:hover { border-color: var(--ghost-2); background: var(--surface-hover); }
 .tr-axis span.is-end { transform: translateX(-100%); }
 .tr-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted-2); }
 .tr-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.tr-key { display: inline-block; width: 16px; height: 0; border-top: 3px solid var(--ink); }
-.tr-key.tr-seo { border-top: 2px solid var(--blue); }
-.tr-key.tr-geo { border-top: 2px dashed var(--purple); }
+.tr-legend b { color: var(--ink); font-weight: 600; }
+.tr-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--ink); }
+.tr-key.tr-seo { background: var(--blue); }
+.tr-key.tr-geo { background: var(--purple); }
 
 /* AI bots table */
 .bt { padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; overflow: hidden; }
@@ -1895,7 +1889,6 @@ a.sc:hover { border-color: var(--ghost-2); background: var(--surface-hover); }
   .fx-side { order: 3; flex-direction: row; flex-basis: 100%; max-width: none; justify-content: space-between; align-items: center; }
   .fx-hint { display: none; }
   .tr, .bt, .au-card { padding: 14px; }
-  .tr-label { font-size: 10.5px; left: calc(80% + 6px); }
   .bt-table { min-width: 520px; }
 }
 
@@ -2328,7 +2321,7 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-head { display: flex; flex-direction: column; gap: 4px; }
 .gv-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.025em; }
 .gv-head p { color: var(--muted); max-width: 680px; text-wrap: pretty; }
-.gv-card { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.gv-panel { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
 .gv-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
 .gv-card-head h2 { font-size: 15px; font-weight: 600; }
 .gv-card-head-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }

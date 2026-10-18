@@ -5,7 +5,7 @@
   <h1>What your sitemap says vs what your site links</h1>
   <p>Search engines read both. When they disagree, pages get missed or crawl time goes to URLs that should not be there.</p>
 </div>
-<section class="card gv-card" aria-label="Sitemap tree">
+<section class="card gv-panel" aria-label="Sitemap tree">
   <div class="gv-card-head">
     <h2>Sitemap tree</h2>
     <div class="gv-legend">
@@ -42,7 +42,7 @@
   {% endif %}
 </section>
 <div class="gv-pair">
-  <section class="card gv-card" aria-label="Sitemap vs crawl">
+  <section class="card gv-panel" aria-label="Sitemap vs crawl">
     <div class="gv-card-head"><h2>Sitemap vs crawl</h2></div>
     {% if let Some(n) = v.venn %}
     <svg class="gsm-venn" viewBox="0 0 560 330" role="img" aria-label="{{ n.aria }}">
@@ -64,7 +64,7 @@
     <div class="empty-sm">No crawled page was listed in a sitemap.</div>
     {% endif %}
   </section>
-  <section class="card gv-card" aria-label="What to fix">
+  <section class="card gv-panel" aria-label="What to fix">
     <div class="gv-card-head"><h2>What to fix</h2></div>
     {% if v.fixes.is_empty() %}
     <div class="empty-sm">Your sitemap and your links agree. Nothing to fix.</div>

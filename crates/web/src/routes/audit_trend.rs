@@ -1,8 +1,8 @@
 //! The site audit's "Score trend": the Overall, SEO and GEO scores of the last finished crawls
-//! as one server-drawn SVG, a sentence saying what happened, and numbered pins on the crawls
+//! as one server-drawn SVG bar chart (a group of three bars per crawl), a sentence saying what happened, and numbered pins on the crawls
 //! whose change records hold something serious, with what changed and what it did to the
 //! scores. A policy change is always a pin of its own, on the crawl it judged again, so a score
-//! jump can be traced to the edit behind it. Crawls without a GEO (or Overall) score are left out of that line; with fewer than
+//! jump can be traced to the edit behind it. A crawl without a GEO (or Overall) score has no bar for it; with fewer than
 //! two crawls there is no chart, only when the next crawl is due.
 
 use codoseo_core::change::ChangeKind;
@@ -13,15 +13,17 @@ use time::OffsetDateTime;
 use crate::fmt;
 
 /// The chart's box, in % of the drawn chart, so the SVG (stretched to fit) and the HTML labels
-/// over it share one scale: plot from `X0` to `X1`, and from `Y0` (100) down to `Y1`.
+/// over it share one scale: plot from `X0` to `X1`, and from `Y0` (100) down to `Y1` (0).
 pub const W: f64 = 100.0;
 pub const H: f64 = 100.0;
-const X0: f64 = 1.0;
-const X1: f64 = 80.0;
+const X0: f64 = 7.0;
+const X1: f64 = 100.0;
 const Y0: f64 = 6.0;
 const Y1: f64 = 92.0;
-/// End labels at least this far apart, in % of the height.
-const LABEL_GAP: f64 = 7.5;
+/// The share of a crawl's slot its three bars fill; the rest is the gap between crawls.
+const GROUP: f64 = 0.72;
+/// A group is never wider than with this many crawls, so two crawls don't draw slabs.
+const MIN_SLOTS: f64 = 6.0;
 /// Pins on the chart at most.
 const PINS: usize = 4;
 
@@ -47,12 +49,18 @@ pub struct PolicyPin {
     pub geo: (Option<i16>, Option<i16>),
 }
 
-pub struct Line {
+/// One score of one crawl, as a bar from 0.
+pub struct Bar {
     /// `overall`, `seo` or `geo`.
     pub key: &'static str,
-    pub points: String,
-    /// The last point and its label: `(x, y, label y, "Overall 75")`.
-    pub end: Option<(f64, f64, f64, String)>,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// The latest crawl's bars stand out.
+    pub last: bool,
+    /// `Crawl #12 · Oct 3 · SEO 78`, the bar's tooltip.
+    pub title: String,
 }
 
 pub struct Pin {
@@ -74,7 +82,9 @@ pub struct Trend {
     pub sentence: String,
     /// `Last 14 crawls`
     pub aside: String,
-    pub lines: Vec<Line>,
+    pub bars: Vec<Bar>,
+    /// The latest crawl's scores for the legend: `(key, "Overall", 75)`.
+    pub latest: Vec<(&'static str, &'static str, i16)>,
     /// `(y, value)` of the grid lines.
     pub grid: Vec<(f64, i64)>,
     /// `(x, label, anchor)` under the chart.
@@ -94,12 +104,17 @@ impl Trend {
     }
 }
 
+/// One score on the chart: its key, its name and how to read it off a crawl.
+type Series = (&'static str, &'static str, fn(&TrendPoint) -> Option<i16>);
+
+/// The width of one crawl's slot.
+fn slot(n: usize) -> f64 {
+    (X1 - X0) / n.max(1) as f64
+}
+
+/// The middle of crawl `i`'s group of bars.
 fn x_of(i: usize, n: usize) -> f64 {
-    if n <= 1 {
-        X1
-    } else {
-        X0 + i as f64 * (X1 - X0) / (n - 1) as f64
-    }
+    X0 + (i as f64 + 0.5) * slot(n)
 }
 
 /// The change behind a pin: the most severe kind, the most frequent first.
@@ -135,7 +150,8 @@ pub fn trend(points: &[TrendPoint], next: Option<OffsetDateTime>, now: OffsetDat
             1 => "1 crawl".to_owned(),
             n => format!("Last {n} crawls"),
         },
-        lines: Vec::new(),
+        bars: Vec::new(),
+        latest: Vec::new(),
         grid: Vec::new(),
         axis: Vec::new(),
         pins: Vec::new(),
@@ -149,66 +165,43 @@ pub fn trend(points: &[TrendPoint], next: Option<OffsetDateTime>, now: OffsetDat
         return t;
     }
     let n = points.len();
-    let values = points
-        .iter()
-        .flat_map(|p| [p.seo, p.geo, p.overall])
-        .flatten();
-    let min = values.min().map_or(0, i64::from);
-    // 100 at the top; the bottom is the lowest score rounded down to 20, at most 60, so a
-    // small move still reads as one.
-    let lo = (((min - 5).max(0) / 20) * 20).min(60);
-    let y = |v: i16| Y1 - (f64::from(v) - lo as f64) / (100 - lo) as f64 * (Y1 - Y0);
+    // Bars start at 0, so their heights compare.
+    let y = |v: i16| Y1 - f64::from(v.clamp(0, 100)) / 100.0 * (Y1 - Y0);
     t.grid = (0..=4)
         .map(|k| {
-            let v = lo + (100 - lo) * k / 4;
-            (y(v as i16), v)
+            let v = 25 * k;
+            (y(v as i16), i64::from(v))
         })
         .collect();
 
-    let mut ends: Vec<(usize, f64, String)> = Vec::new();
-    for (key, name, get) in [
-        (
-            "overall",
-            "Overall",
-            (|p: &TrendPoint| p.overall) as fn(&TrendPoint) -> Option<i16>,
-        ),
-        ("seo", "SEO", |p: &TrendPoint| p.seo),
-        ("geo", "GEO", |p: &TrendPoint| p.geo),
-    ] {
-        let pts: Vec<(f64, f64, i16)> = points
-            .iter()
-            .enumerate()
-            .filter_map(|(i, p)| get(p).map(|v| (x_of(i, n), y(v), v)))
-            .collect();
-        if pts.is_empty() {
-            continue;
-        }
-        let last = *pts.last().expect("not empty");
-        ends.push((t.lines.len(), last.1, format!("{name} {}", last.2)));
-        t.lines.push(Line {
-            key,
-            points: pts
-                .iter()
-                .map(|(x, y, _)| format!("{x:.2},{y:.2}"))
-                .collect::<Vec<_>>()
-                .join(" "),
-            end: Some((last.0, last.1, last.1, String::new())),
-        });
-    }
-    // End labels apart, in the order of their values.
-    ends.sort_by(|a, b| a.1.total_cmp(&b.1));
-    let mut prev: Option<f64> = None;
-    for (i, y0, label) in ends {
-        let ly = match prev {
-            Some(p) if y0 - p < LABEL_GAP => p + LABEL_GAP,
-            _ => y0,
-        };
-        prev = Some(ly);
-        if let Some(end) = t.lines[i].end.as_mut() {
-            end.2 = ly;
-            end.3 = label;
+    let series: [Series; 3] = [
+        ("overall", "Overall", |p| p.overall),
+        ("seo", "SEO", |p| p.seo),
+        ("geo", "GEO", |p| p.geo),
+    ];
+    let group = slot(n).min((X1 - X0) / MIN_SLOTS) * GROUP;
+    let w = group / series.len() as f64;
+    for (i, p) in points.iter().enumerate() {
+        let left = x_of(i, n) - group / 2.0;
+        for (k, (key, name, get)) in series.iter().enumerate() {
+            let Some(v) = get(p) else { continue };
+            let top = y(v);
+            t.bars.push(Bar {
+                key,
+                x: left + k as f64 * w,
+                y: top,
+                // A hairline gap between the three bars.
+                w: w * 0.86,
+                h: Y1 - top,
+                last: i == n - 1,
+                title: format!("Crawl #{} · {} · {name} {v}", p.number, fmt::date(p.at)),
+            });
         }
     }
+    t.latest = series
+        .iter()
+        .filter_map(|(key, name, get)| Some((*key, *name, get(&points[n - 1])?)))
+        .collect();
 
     let day = |at: OffsetDateTime| {
         if at.date() == now.date() {
@@ -218,9 +211,9 @@ pub fn trend(points: &[TrendPoint], next: Option<OffsetDateTime>, now: OffsetDat
         }
     };
     t.axis = vec![
-        (x_of(0, n), fmt::date(points[0].at), "start"),
+        (X0, fmt::date(points[0].at), "start"),
         (x_of(n / 2, n), fmt::date(points[n / 2].at), "middle"),
-        (x_of(n - 1, n), day(points[n - 1].at), "end"),
+        (X1, day(points[n - 1].at), "end"),
     ];
     if n < 5 {
         t.axis.remove(1);
@@ -448,11 +441,11 @@ mod tests {
             t.waiting.as_deref(),
             Some("Next crawl: Oct 15, 09:00 UTC. Or run one now.")
         );
-        assert!(t.lines.is_empty());
+        assert!(t.bars.is_empty());
     }
 
     #[test]
-    fn three_lines_skip_crawls_without_a_geo_score_and_pins_name_the_drop() {
+    fn three_bars_a_crawl_skip_a_missing_geo_score_and_pins_name_the_drop() {
         let blocked = ChangeCounts {
             rows: vec![
                 (ChangeKind::AiBotBlocked, Severity::Critical, 1),
@@ -469,14 +462,14 @@ mod tests {
         let now = points[4].at;
         let t = trend(&points, None, now);
         assert!(t.waiting.is_none());
-        let keys: Vec<&str> = t.lines.iter().map(|l| l.key).collect();
-        assert_eq!(keys, ["overall", "seo", "geo"]);
-        assert_eq!(t.lines[1].points.split(' ').count(), 5);
-        assert_eq!(
-            t.lines[2].points.split(' ').count(),
-            4,
-            "the first crawl has no GEO"
-        );
+        let count = |key: &str| t.bars.iter().filter(|b| b.key == key).count();
+        assert_eq!(count("seo"), 5);
+        assert_eq!(count("geo"), 4, "the first crawl has no GEO");
+        assert_eq!(count("overall"), 4);
+        let latest: Vec<&str> = t.latest.iter().map(|l| l.0).collect();
+        assert_eq!(latest, ["overall", "seo", "geo"]);
+        assert_eq!(t.bars.iter().filter(|b| b.last).count(), 3);
+        assert_eq!(t.bars[0].title, "Crawl #1 · Sep 1 · SEO 71");
         assert_eq!(t.pins.len(), 1);
         let pin = &t.pins[0];
         assert_eq!(pin.tone, "drop");
@@ -496,18 +489,21 @@ mod tests {
         );
         assert!(t.sentence.contains("AI bot blocked"), "{}", t.sentence);
         assert_eq!(t.axis.last().unwrap().1, "Today");
-        // Every point sits inside the box, and the end labels don't overlap.
-        for l in &t.lines {
-            for p in l.points.split(' ') {
-                let y: f64 = p.split(',').nth(1).unwrap().parse().unwrap();
-                assert!((Y0..=Y1).contains(&y), "{p}");
-            }
+        // Every bar stands on 0 inside the box, and the groups don't overlap.
+        for b in &t.bars {
+            assert!((Y0..=Y1).contains(&b.y), "{}", b.title);
+            assert!((b.y + b.h - Y1).abs() < 0.01, "{}", b.title);
+            assert!(b.x >= X0 && b.x + b.w <= X1, "{}", b.title);
         }
-        let mut ys: Vec<f64> = t.lines.iter().map(|l| l.end.as_ref().unwrap().2).collect();
-        ys.sort_by(f64::total_cmp);
+        let seo: Vec<f64> = t
+            .bars
+            .iter()
+            .filter(|b| b.key == "seo")
+            .map(|b| b.x)
+            .collect();
         assert!(
-            ys.windows(2).all(|w| w[1] - w[0] >= LABEL_GAP - 0.01),
-            "{ys:?}"
+            seo.windows(2).all(|w| w[1] - w[0] >= slot(5) - 0.01),
+            "{seo:?}"
         );
     }
 
@@ -518,7 +514,7 @@ mod tests {
             pt(1, 80, None, ChangeCounts::default()),
         ];
         let t = trend(&points, None, points[1].at);
-        assert_eq!(t.lines.len(), 1);
+        assert_eq!(t.bars.len(), 2);
         assert!(
             t.sentence.starts_with("The SEO score held steady at 80"),
             "{}",

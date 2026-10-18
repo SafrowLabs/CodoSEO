@@ -9,7 +9,7 @@
   {% for t in v.tiles %}<div class="tile{{ t.class }}"><div class="tile-label">{{ t.label }}</div><div class="tile-value{% if !t.tone.is_empty() %} {{ t.tone }}{% endif %}">{{ t.value }}</div></div>{% endfor %}
 </div>
 <div class="gv-pair">
-  <section class="card gv-card" aria-label="Pages per click depth">
+  <section class="card gv-panel" aria-label="Pages per click depth">
     <div class="gv-card-head">
       <h2>Pages per click depth</h2>
       <div class="gv-legend">
@@ -30,7 +30,7 @@
     </div>
     <div class="gdp-axis">{% for c in v.cols %}<span{% if c.deep %} class="is-deep"{% endif %}>{{ c.label }}</span>{% endfor %}</div>
   </section>
-  <section class="card gv-card" aria-label="Depth by folder">
+  <section class="card gv-panel" aria-label="Depth by folder">
     <div class="gv-card-head gv-card-head-stack">
       <h2>Depth by folder</h2>
       <span class="gv-sub">Darker cells hold more pages. Amber cells sit too deep.</span>
@@ -50,7 +50,7 @@
     {% endif %}
   </section>
 </div>
-<section class="card gv-card" aria-label="Deep pages worth lifting">
+<section class="card gv-panel" aria-label="Deep pages worth lifting">
   <div class="gv-card-head">
     <div class="gv-card-head-stack">
       <h2>Deep pages worth lifting</h2>

@@ -1,6 +1,5 @@
 {%- import "partials/mascot.html" as m -%}
 {%- import "partials/operator_logo.html" as op -%}
-{%- import "partials/score_bars.html" as sb -%}
 <div id="audit-body" class="page au"{% if reloads_on_queue() %} hx-get="{{ base }}/audit" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
 {% if let Some(w) = watch %}
   {{ w|safe }}
@@ -34,10 +33,9 @@
   </div>
   {% endif %}
 
-  <section class="sc-row has-bars" aria-labelledby="sc-h">
+  <section class="sc-row" aria-labelledby="sc-h">
     <h2 id="sc-h" class="sr-only">Scores</h2>
-    {% call sb::bars(d.bars(), "Scores") %}{% endcall %}
-    {% for c in d.side_cards() %}
+    {% for c in d.cards %}
     {% if let Some(href) = c.href %}<a class="card sc sc-{{ c.key }} {{ c.tone }}" href="{{ href }}">{% else %}<div class="card sc sc-{{ c.key }} {{ c.tone }}">{% endif %}
       <span class="sc-label">{% if let Some(t) = c.tag %}<span class="atag {{ t.0 }}">{{ t.1 }}</span>{% endif %}<span>{{ c.label }}</span>{% if c.help %}<button type="button" class="q" popovertarget="help-{{ c.key }}" aria-label="How the {% if c.key == "overall" %}overall{% else %}GEO{% endif %} score works">?</button>{% endif %}</span>
       <span class="sc-val">{% if c.count.is_empty() %}<b>{{ c.value }}</b>{% else %}<b data-count="{{ c.count }}">{{ c.value }}</b>{% endif %}{% if !c.unit.is_empty() %}<small>{{ c.unit }}</small>{% endif %}</span>
@@ -142,12 +140,11 @@
         <p class="tr-text">{{ d.trend.sentence }}</p>
         <div class="tr-chart">
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="{{ d.trend.label }}">
-            {% for gl in d.trend.grid %}<line x1="1" x2="80" y1="{{ "{:.2}"|format(gl.0) }}" y2="{{ "{:.2}"|format(gl.0) }}" class="tr-grid" vector-effect="non-scaling-stroke"/>{% endfor %}
+            {% for gl in d.trend.grid %}<line x1="7" x2="100" y1="{{ "{:.2}"|format(gl.0) }}" y2="{{ "{:.2}"|format(gl.0) }}" class="tr-grid" vector-effect="non-scaling-stroke"/>{% endfor %}
             {% for p in d.trend.pins %}<line x1="{{ "{:.2}"|format(p.x) }}" x2="{{ "{:.2}"|format(p.x) }}" y1="4" y2="92" class="tr-pinline is-{{ p.tone }}" vector-effect="non-scaling-stroke"/>{% endfor %}
-            {% for l in d.trend.lines.iter().rev() %}<polyline points="{{ l.points }}" class="tr-line tr-{{ l.key }}" vector-effect="non-scaling-stroke"/>{% endfor %}
+            {% for b in d.trend.bars %}<rect x="{{ "{:.2}"|format(b.x) }}" y="{{ "{:.2}"|format(b.y) }}" width="{{ "{:.2}"|format(b.w) }}" height="{{ "{:.2}"|format(b.h) }}" class="tr-bar tr-{{ b.key }}{% if b.last %} is-last{% endif %}"><title>{{ b.title }}</title></rect>{% endfor %}
           </svg>
           {% for gl in d.trend.grid %}<span class="tr-y mono" style="top:{{ "{:.2}"|format(gl.0) }}%" aria-hidden="true">{{ gl.1 }}</span>{% endfor %}
-          {% for l in d.trend.lines %}{% if let Some(e) = l.end %}<i class="tr-end tr-{{ l.key }}" style="left:{{ "{:.2}"|format(e.0) }}%;top:{{ "{:.2}"|format(e.1) }}%" aria-hidden="true"></i><span class="tr-label tr-{{ l.key }}" style="top:{{ "{:.2}"|format(e.2) }}%" aria-hidden="true">{{ e.3 }}</span>{% endif %}{% endfor %}
           {% for p in d.trend.pins %}
           <button type="button" class="tr-pin is-{{ p.tone }}" style="left:{{ "{:.2}"|format(p.left) }}%" popovertarget="pin-{{ p.n }}" data-hover-pop aria-label="Change {{ p.n }}: {{ p.what }}">{{ p.n }}</button>
           <div id="pin-{{ p.n }}" popover class="pop">
@@ -158,7 +155,7 @@
           {% endfor %}
         </div>
         <div class="tr-axis mono" aria-hidden="true">{% for a in d.trend.axis %}<span class="is-{{ a.2 }}" style="left:{{ "{:.2}"|format(a.0) }}%">{{ a.1 }}</span>{% endfor %}</div>
-        <div class="tr-legend" aria-hidden="true"><span><i class="tr-key tr-overall"></i>Overall</span><span><i class="tr-key tr-seo"></i>SEO</span><span><i class="tr-key tr-geo"></i>GEO</span></div>
+        <div class="tr-legend" aria-hidden="true">{% for l in d.trend.latest %}<span><i class="tr-key tr-{{ l.0 }}"></i>{{ l.1 }} <b>{{ l.2 }}</b></span>{% endfor %}</div>
         {% endif %}
       </section>
 
