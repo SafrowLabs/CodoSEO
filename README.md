@@ -443,7 +443,7 @@ Self-hosting has no plan caps (the limits are settings you can raise). The hoste
 | Pages per crawl | 500 | 5,000 | 10,000 |
 | Crawl time limit | 10 minutes | 1 hour | 2 hours |
 | Scheduled crawls | weekly | daily | daily |
-| Manual crawls | 1 a week | 1 a day | unlimited, 1 running per site |
+| Manual crawls | 1 a week | 5 a day | unlimited, 1 running per site |
 | Alerts | email | email, Slack, Discord, webhook | email, Slack, Discord, webhook |
 | History | 30 days | 1 year | 1 year |
 | API and MCP calls a day | 100 | 1,000 | 5,000 |

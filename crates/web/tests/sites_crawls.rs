@@ -297,7 +297,9 @@ async fn the_allowance_is_per_site() {
         .await;
     let a = app.site(&account, "a.com").await;
     let b = app.site(&account, "b.com").await;
-    crawl_at(&app, &a, "manual", "done", "1 hour").await;
+    for age in ["5 hours", "4 hours", "3 hours", "2 hours", "1 hour"] {
+        crawl_at(&app, &a, "manual", "done", age).await;
+    }
     assert_eq!(
         run_crawl(&app, &a, &cookie).await.status,
         StatusCode::FORBIDDEN
@@ -309,19 +311,26 @@ async fn the_allowance_is_per_site() {
 }
 
 #[tokio::test]
-async fn pro_allows_one_manual_crawl_a_day() {
+async fn lite_allows_five_manual_crawls_a_day() {
     let app = TestApp::new().await;
     let (account, cookie) = app
         .login_with_plan("ana@example.com", Some(Plan::Lite))
         .await;
     let site = app.site(&account, "example.com").await;
     let old = crawl_at(&app, &site, "manual", "done", "23 hours").await;
+    for age in ["20 hours", "12 hours", "6 hours"] {
+        crawl_at(&app, &site, "manual", "done", age).await;
+    }
+    // The fifth of the day still runs.
+    let res = run_crawl(&app, &site, &cookie).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.body);
+    finish_all(&app, &site).await;
 
     let res = run_crawl(&app, &site, &cookie).await;
     assert_eq!(res.status, StatusCode::FORBIDDEN, "{}", res.body);
     assert!(
         res.body.contains(
-            "Your Lite plan includes 1 manual crawl a day. The next one is available in 1 hour."
+            "Your Lite plan includes 5 manual crawls a day. The next one is available in 1 hour."
         ),
         "{}",
         res.body
