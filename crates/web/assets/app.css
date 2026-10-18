@@ -2152,11 +2152,11 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
 .gv-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
 .gv-legend > span { display: inline-flex; align-items: center; gap: 6px; }
-.gv-sw { width: 14px; height: 6px; border-radius: 2px; background: var(--g-ok); }
+.gv-sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--g-ok); }
 .gv-sw[data-x="noindex"] { background: var(--g-noindex); }
 .gv-sw[data-x="redirect"] { background: var(--g-redirect); }
 .gv-sw[data-x="broken"] { background: var(--g-broken); }
-.gv-sw-path { height: 2px; background: var(--ink); }
+.gv-sw-path { width: 14px; height: 2px; background: var(--ink); }
 .gv-sw-orphan { height: 8px; background: transparent; border: 1.5px dashed var(--g-orphan); }
 
 .gv-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
@@ -2205,8 +2205,7 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-badge.b-ink { color: var(--primary-ink); background: var(--primary); border-color: var(--primary); }
 .gv-knob { position: absolute; left: 50%; bottom: -10px; width: 20px; height: 20px; margin-left: -10px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 13px; line-height: 1; }
 .gv-card.is-sel .gv-knob { border-color: var(--ink); color: var(--ink); }
-.gv-more { justify-content: center; border-style: dashed; background: var(--surface-2); box-shadow: none; }
-.gv-more { gap: 2px; }
+.gv-more { justify-content: center; gap: 2px; border-style: dashed; background: var(--surface-2); box-shadow: none; }
 .gv-more b { font-weight: 600; font-size: 14px; }
 .gv-more span { font-size: 12.5px; color: var(--muted); }
 /* The crawl tree's rows: one band per click, labelled at the left edge. */
@@ -2215,6 +2214,8 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-band:nth-child(even) { background: var(--surface-2); }
 .gv-blabels { position: absolute; left: 0; top: 0; bottom: 0; z-index: 2; border-right: 1px solid var(--line-soft); pointer-events: none; overflow: hidden; }
 .gv-blabel { position: absolute; left: 14px; right: 8px; display: flex; flex-direction: column; gap: 1px; }
+.gv-blabel.is-tight span { display: none; }
+.gv-blabel.is-tight b { font-size: 11px; }
 .gv-blabel b { font-size: 13px; font-weight: 600; }
 .gv-blabel span { font-size: 12px; color: var(--muted); }
 .gv-blabel span:empty { display: none; }
@@ -2228,6 +2229,10 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-fp { flex: 1; min-width: 0; font: 500 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gv-fc { font: 12px var(--mono); color: var(--muted); }
 .gv-fcard.is-unlinked { border: 1.5px dashed var(--g-orphan); background: color-mix(in oklab, var(--g-orphan) 6%, var(--surface)); box-shadow: none; }
+/* A page under a folder: lighter than a folder, its name in the text face. */
+.gv-pcard { border-radius: 7px; box-shadow: none; background: var(--surface-2); }
+.gv-pcard .gv-pname { font: 500 12.5px var(--font); }
+.gv-pdot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
 /* Pages no link reaches, under the crawl tree. */
 .gv-unlinked { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1.5px dashed var(--g-orphan); border-radius: var(--r-lg); background: color-mix(in oklab, var(--g-orphan) 6%, var(--surface)); }
 .gv-unlinked[hidden] { display: none; }
@@ -2336,7 +2341,6 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-caps { font-size: 11px; color: var(--faint-2); letter-spacing: 0.06em; text-transform: uppercase; }
 .gv-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink-3); }
 .gv-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.gv-sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
 .gv-ok { background: var(--g-ok); }
 .gv-noindex { background: var(--g-noindex); }
 .gv-redirect { background: var(--g-redirect); }

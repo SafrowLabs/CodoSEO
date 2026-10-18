@@ -504,7 +504,36 @@
       const sx = t.x + x * t.k, sy = t.y + y * t.k;
       return sx > 0 && sy > 0 && sx < view.clientWidth - 60 && sy < view.clientHeight - 40;
     }
-    return { draw, fit, center, visible, limits, limitOf, get layout() { return layout; } };
+    // Pans, at the current scale, just enough to bring the open node's children into view,
+    // keeping the node itself on screen.
+    function showKids(n, ms = 450) {
+      const d = layout && layout.find((d) => d.data === n);
+      if (!d || !d.children) return;
+      const W = view.clientWidth, H = view.clientHeight, m = 24;
+      const box = (ds) => {
+        const xs = [], ys = [];
+        for (const e of ds) {
+          const [x, y] = at(e), [w, hh] = cfg.size(e);
+          xs.push(t.x + x * t.k, t.x + (x + w) * t.k);
+          ys.push(t.y + y * t.k, t.y + (y + hh) * t.k);
+        }
+        return [d3.min(xs), d3.min(ys), d3.max(xs), d3.max(ys)];
+      };
+      const [x0, y0, x1, y1] = box([d, ...d.children]);
+      const [nx0, ny0] = box([d]);
+      let dx = 0, dy = 0;
+      if (x1 > W - m) dx = W - m - x1;
+      if (x0 + dx < m) dx = Math.min(m - x0, m - nx0);
+      if (cfg.orient === "down") {
+        if (y1 > H - m) dy = Math.max(H - m - y1, m - ny0);
+      } else if (y1 - y0 <= H - 2 * m) {
+        if (y0 < m) dy = m - y0;
+        else if (y1 > H - m) dy = H - m - y1;
+      }
+      if (!dx && !dy) return;
+      (ms && !reduced() ? sel.transition().duration(ms) : sel).call(zoom.translateBy, dx / t.k, dy / t.k);
+    }
+    return { draw, fit, center, visible, showKids, limits, limitOf, get layout() { return layout; } };
   }
 
   // Open the path down to `n`, raising child limits so it isn't folded away.
@@ -621,10 +650,12 @@
         if (n === selected && n.kids.length) {
           if (open.has(n)) open.delete(n);
           else open.add(n);
-          return redraw(n);
+          redraw(n);
+          return tree.showKids(n);
         }
         if (n.kids.length) open.add(n);
         select(n, n);
+        tree.showKids(n);
       },
       overlay: (t, layout) => {
         const levels = d3.max(layout.nodes, (d) => d.depth) + 1;
@@ -634,10 +665,13 @@
           let b = bands.children[i], l = labels.children[i];
           if (!b) bands.append((b = h("div", { class: "gv-band" })));
           if (!l) labels.append((l = h("div", { class: "gv-blabel" }, h("b"), h("span"))));
-          const depth = d0 + i, y = t.y + (i * ROW - 22) * t.k;
+          const depth = d0 + i, y = t.y + (i * ROW - 22) * t.k, rowPx = ROW * t.k;
           b.style.top = y + "px";
-          b.style.height = ROW * t.k + "px";
-          l.style.top = y + 8 + "px";
+          b.style.height = rowPx + "px";
+          // Zoomed out, a row is too short for both lines, then for any: drop the count, then all.
+          l.hidden = rowPx < 18;
+          l.classList.toggle("is-tight", rowPx < 44);
+          l.style.top = y + Math.min(8, rowPx * 0.12) + "px";
           l.classList.toggle("is-deep", depth >= DEEP);
           l.children[0].textContent = i === 0 && top === site.root ? "Start" : clicks(depth);
           l.children[1].textContent = i === 0 && top === site.root ? "" : plural(perDepth.get(depth) || 0, "page");
@@ -779,12 +813,19 @@
       }
       f.own.push(n);
     }
-    // A folder shows the folders under it: every one at the top, deeper only those holding
-    // more than one page.
+    // A folder shows the folders under it (every one at the top, deeper only those holding more
+    // than one page), then its own pages: those whose path ends there, and those of the
+    // one-page folders it doesn't show, best linked first.
     const all = [];
+    const pagesIn = (f) => [...f.own, ...[...f.sub.values()].flatMap(pagesIn)];
     const walk = (f) => {
       all.push(f);
       f.kids = [...f.sub.values()].filter((c) => f.level === 0 || c.count > 1).sort((a, b) => b.count - a.count || (a.path < b.path ? -1 : 1));
+      const hidden = [...f.sub.values()].filter((c) => !f.kids.includes(c));
+      f.pages = [...f.own, ...hidden.flatMap(pagesIn)]
+        .filter((n) => n !== site.root)
+        .sort((a, b) => b.score - a.score || (a.url < b.url ? -1 : 1))
+        .map((n) => ({ page: n, id: "p" + n.hash, parent: f, level: f.level + 1 }));
       f.prob = f.mix.broken + f.mix.redirect + f.mix.noindex + f.deep + f.orphans;
       for (const c of f.kids) walk(c);
     };
@@ -803,11 +844,12 @@
     stage.append(heads);
     let selected = null, problems = false;
     const open = new Set([root]);
-    const order = (f) => (problems ? f.kids.filter((c) => c.prob) : f.kids);
+    // Folders first, then the folder's pages.
+    const order = (f) => (f.page ? [] : problems ? [...f.kids.filter((c) => c.prob), ...f.pages.filter((p) => p.page.prob)] : [...f.kids, ...f.pages]);
     const kidsOf = (f) => (open.has(f) ? order(f) : null);
     let path = new Set();
     const label = (f) => (f === root ? "Home" : f.level <= 2 ? f.path : "/" + f.path.slice(f.path.lastIndexOf("/") + 1));
-    const unlinked = (f) => f !== root && f.orphans === f.count;
+    const unlinked = (f) => (f.page ? f.page.orphan : f !== root && f.orphans === f.count);
 
     function problem(f) {
       if (f.mix.broken) return badge(`${fmt(f.mix.broken)} broken`, "err");
@@ -826,8 +868,20 @@
       size: (d) => (d.data === root ? [150, 56] : [d.data.more ? 200 : CW, CH]),
       kids: kidsOf,
       card: (f, d, card) => {
-        card.className = "gv-card gv-fcard" + (f === root ? " is-root" : "") + (f === selected ? " is-sel" : "") +
+        card.className = "gv-card gv-fcard" + (f.page ? " gv-pcard" : "") + (f === root ? " is-root" : "") + (f === selected ? " is-sel" : "") +
           (path.has(f) ? " is-path" : "") + (unlinked(f) ? " is-unlinked" : "");
+        if (f.page) {
+          const n = f.page;
+          card.title = n.title ? `${n.title}\n${n.url}` : n.url;
+          fill(card,
+            h("i", { class: "gv-sw gv-pdot", "data-x": n.st, "aria-hidden": "true" }),
+            h("span", { class: "gv-fp gv-pname" }, nameOf(n, site.root)),
+            n.st !== "ok" ? badge(statusLabel(n).toLowerCase(), n.st === "broken" ? "err" : n.st === "redirect" ? "blue" : "muted")
+              : n.depth >= DEEP ? badge(clicks(n.depth), "warn") : null,
+            h("span", { class: "gv-fc", title: "link score" }, fmt(n.score)));
+          card.removeAttribute("aria-expanded");
+          return;
+        }
         card.title = f.path;
         if (f === root) {
           fill(card, eyes(), h("span", { class: "gv-cn" }, h("b", {}, "Home"), h("span", { class: "gv-cu" }, plural(f.count, "URL"))));
@@ -846,6 +900,7 @@
       link: (d) => {
         const f = d.data;
         if (f.more) return { width: 1.4 };
+        if (f.page) return path.has(f) ? { cls: "is-on", width: 1.6, on: true } : { width: 1.2 };
         const width = 1.4 + 4.6 * Math.sqrt(f.count / Math.max(1, root.count));
         if (unlinked(f)) return { cls: "is-unlinked", width };
         return path.has(f) ? { cls: "is-on", width, on: true } : { width };
@@ -858,19 +913,22 @@
         if (f === selected && order(f).length) {
           if (open.has(f)) open.delete(f);
           else open.add(f);
-          return redraw(f);
+          redraw(f);
+          return tree.showKids(f);
         }
         if (order(f).length) open.add(f);
         select(f, f);
+        tree.showKids(f);
       },
       overlay: (t, layout) => {
         const levels = d3.max(layout.nodes, (d) => d.depth) + 1;
-        const names = ["Site", "Folder", "Subfolder", "Next level"];
+        // Past the top folders a column holds subfolders and pages alike.
+        const names = ["Site", "Folder"];
         while (heads.children.length > levels) heads.lastChild.remove();
         for (let i = 0; i < levels; i++) {
           let c = heads.children[i];
           if (!c) heads.append((c = h("span")));
-          c.textContent = names[i] || `Level ${i}`;
+          c.textContent = names[i] || "Inside";
           c.style.left = t.x + i * COL * t.k + "px";
         }
       },
@@ -889,6 +947,20 @@
       showPanel();
     }
     function showPanel() {
+      if (selected && selected.page) {
+        const n = selected.page;
+        return pagePanel(panel, site, n, {
+          base, pageSrc: el.dataset.page,
+          // A page on its route or in its links: show it in its own folder.
+          select: (p) => {
+            const owner = all.find((f) => f.pages.some((x) => x.page === p));
+            const node = owner && owner.pages.find((x) => x.page === p);
+            if (node) select(node);
+          },
+          root: (p) => (location.href = `${base}/graph/tree?sel=${p.hash}`),
+          rootLabel: "Open in crawl tree",
+        });
+      }
       if (!selected || selected === root) {
         return sitePanel(panel, site, h("p", { class: "gv-muted" }, `${plural(all.length - 1, "folder")} in your URLs. Pick one to see its pages and what to fix there.`));
       }
@@ -967,6 +1039,14 @@
   }
 
   // ---------- the bubble map: a force-directed picture of the whole site ----------
+
+  // Labels on the bubble map at most, besides the focus.
+  const LABELS = 28;
+
+  // A bubble's label: a long slug keeps its start and end.
+  function shortLabel(s) {
+    return s.length > 28 ? s.slice(0, 18) + "…" + s.slice(-8) : s;
+  }
 
   views.map = (el) => load(el, (site) => bubbleMap(el, site));
 
@@ -1357,24 +1437,47 @@
         ctx.stroke();
       }
 
-      // Labels, more of them the closer you zoom.
+      // Labels, more of them the closer you zoom. They go in by priority (the focus, then hubs
+      // and the biggest bubbles), each on its own plate, and one that would overlap a label
+      // already drawn is left out, so the map never turns into a wall of text.
       ctx.font = `500 ${11.5 / k}px ${FONT}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      ctx.lineJoin = "round";
+      const parentOfFocus = related && tree.parentOf.get(related.f);
+      const hub = (n) => (tree.kids.get(n) || []).length;
+      const rank = (n) => (n === selected ? 4 : n === related?.f || n === hover ? 3 : n === parentOfFocus || n === home ? 2 : 0) * 1e6 + hub(n) * 100 + n.r;
+      const vx0 = -transform.x / k, vy0 = -transform.y / k, vx1 = vx0 + W / k, vy1 = vy0 + H / k;
+      const wanted = [];
       for (const n of simNodes) {
-        if (n.vis < 0.5) continue;
+        if (n.vis < 0.5 || n.x === undefined) continue;
+        if (n.x + n.r < vx0 || n.x - n.r > vx1 || n.y + n.r < vy0 || n.y - n.r > vy1) continue;
         const big = n.r * k >= 9.5;
-        const rel = related && related.set.has(n) && (related.set.size < 40 || n === related.f || tree.parentOf.get(related.f) === n);
-        if (!big && !rel && n !== selected) continue;
-        const label = n === home ? "Home" : n.virtual ? n.title : n.url.split(/[?#]/)[0].split("/").filter(Boolean).pop() || n.url;
-        const x = n.x + n.r + 4 / k, y = n.y;
+        const rel = related && related.set.has(n) && (related.set.size < 40 || n === related.f || n === parentOfFocus);
+        if (big || rel || n === selected || n === home) wanted.push(n);
+      }
+      wanted.sort((a, b) => rank(b) - rank(a));
+      const placed = [];
+      const hits = (b) => placed.some((p) => b[0] < p[2] && b[2] > p[0] && b[1] < p[3] && b[3] > p[1]);
+      const lh = 17 / k, padX = 5 / k, gap = 2 / k;
+      for (const n of wanted) {
+        const must = n === selected || n === related?.f || n === hover;
+        if (!must && placed.length >= LABELS) break;
+        const label = shortLabel(n === home ? "Home" : n.virtual ? n.title : n.url.split(/[?#]/)[0].split("/").filter(Boolean).pop() || n.url);
+        const w = ctx.measureText(label).width;
+        const x = n.x + n.r + 3 / k, y = n.y;
+        const box = [x - gap, y - lh / 2 - gap, x + w + 2 * padX + gap, y + lh / 2 + gap];
+        if (!must && hits(box)) continue;
+        placed.push(box);
         ctx.globalAlpha = n.vis;
-        ctx.lineWidth = 3.5 / k;
-        ctx.strokeStyle = C.surface2;
-        ctx.strokeText(label, x, y);
-        ctx.fillStyle = n === related?.f ? C.ink : C.muted;
-        ctx.fillText(label, x, y);
+        ctx.fillStyle = C.surface2;
+        ctx.beginPath();
+        ctx.roundRect(x, y - lh / 2, w + 2 * padX, lh, 4 / k);
+        ctx.fill();
+        ctx.lineWidth = 1 / k;
+        ctx.strokeStyle = must ? C.ink : C.line;
+        ctx.stroke();
+        ctx.fillStyle = must ? C.ink : C.muted;
+        ctx.fillText(label, x + padX, y);
       }
       ctx.globalAlpha = 1;
     }

@@ -36,14 +36,14 @@ pub fn routes() -> Router<AppState> {
         .merge(reach::routes())
 }
 
-/// `/s/{site}/graph` opens the crawl tree.
+/// `/s/{site}/graph` opens the bubble map.
 async fn index(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    Ok(Redirect::to(&format!("/s/{}/graph/{}", site.id, Tab::Tree.slug())).into_response())
+    Ok(Redirect::to(&format!("/s/{}/graph/{}", site.id, Tab::Map.slug())).into_response())
 }
 
 /// One tab of the site graph.
@@ -61,10 +61,11 @@ pub enum Tab {
 }
 
 impl Tab {
+    /// In tab order; the bubble map comes first and is where `/graph` opens.
     pub const ALL: [Tab; 9] = [
+        Tab::Map,
         Tab::Tree,
         Tab::Folders,
-        Tab::Map,
         Tab::Sitemap,
         Tab::Depth,
         Tab::Links,
