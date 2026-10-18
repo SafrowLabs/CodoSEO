@@ -16,7 +16,20 @@ CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in R
 
 It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. A synthetic fetch check requests a few pages with the AI bots' documented user agents to catch a CDN or firewall that turns them away. It also checks that your important pages' content is in their HTML as served, since GPTBot, ClaudeBot and PerplexityBot don't run JavaScript (Vercel and MERJ, 2024), and reports on your `/llms.txt` (informational, never scored). Every finding says how to fix it (a robots.txt snippet, a ticket or a coding-agent prompt to copy), can be rechecked without a crawl: a fix seen by a recheck is verified after the operator's wait (documented where they publish it), and a crawl that no longer sees the problem resolves it directly; incidents can be snoozed or accepted and exported as CSV or JSON. See [docs/ai-access.md](docs/ai-access.md).
 
-![The AI access screen](docs/images/ai-access/ai-access-hero.png)
+<table>
+  <tr>
+    <td width="50%"><a href="docs/images/site-audit/site-audit-light.png"><img src="docs/images/site-audit/site-audit-light.png" alt="The site audit: Overall, SEO and GEO scores, the ranked fix list and the score trend"></a><br><b>Site audit</b>: Overall, SEO and GEO scores, one ranked fix list, the score trend</td>
+    <td width="50%"><a href="docs/images/site-graph/bubble-map.png"><img src="docs/images/site-graph/bubble-map.png" alt="The bubble map: every page as a bubble, joined to the page the crawler found it from"></a><br><b>Bubble map</b>: the whole site at a glance, coloured by indexability</td>
+  </tr>
+  <tr>
+    <td width="50%"><a href="docs/images/site-graph/crawl-tree.png"><img src="docs/images/site-graph/crawl-tree.png" alt="The crawl tree: pages by clicks from the home page"></a><br><b>Crawl tree</b>: how many clicks it takes to reach each page</td>
+    <td width="50%"><a href="docs/images/site-graph/folder-tree.png"><img src="docs/images/site-graph/folder-tree.png" alt="The folder tree: the URL folders with page counts and problems"></a><br><b>Folder tree</b>: the site folder by folder, with what to fix in each</td>
+  </tr>
+  <tr>
+    <td width="50%"><a href="docs/images/site-graph/ai-reach.png"><img src="docs/images/site-graph/ai-reach.png" alt="AI reach: robots.txt and CDN to each AI crawler to the answer engines"></a><br><b>AI reach</b> (GEO): which AI answers can read your site, and why not</td>
+    <td width="50%"><a href="docs/images/site-graph/llms-txt.png"><img src="docs/images/site-graph/llms-txt.png" alt="The llms.txt tree: title, sections and links, with format checks and a suggested edit"></a><br><b>llms.txt</b> (GEO): your file as a tree, format checks and a suggested edit</td>
+  </tr>
+</table>
 
 It respects `robots.txt` and `Crawl-delay`, backs off on `429` and `503`, and ships as one static binary. AGPL-3.0.
 
@@ -418,9 +431,15 @@ This repository is also a Claude Code plugin marketplace: `/plugin marketplace a
 
 The web app lets you add sites, run crawls, and work through them in a URL explorer (filters for status, indexability, content type and every check; a SERP preview; inlinks; reconstructed headers), a site audit (Overall, SEO and GEO scores, one ranked fix list across SEO and AI with a fix prompt for each issue, the score trend, which AI products can reach your pages, then response codes, response time, crawl depth and issues by area), and a changes view that compares each crawl with the one before. It can crawl on a schedule and alert you by email, Slack, Discord or webhook. It runs on Postgres and needs nothing else: no Redis, no outside requests (fonts and scripts are bundled).
 
-![The site audit: the score cards, the ranked fix list, the score trend and the AI bots table](docs/images/site-audit/site-audit-light.png)
+![The site audit: the Overall, SEO and GEO score cards, the ranked fix list, the score trend and the AI bots table](docs/images/site-audit/site-audit-light.png)
 
 More: [dark theme](docs/images/site-audit/site-audit-dark.png), [on a phone](docs/images/site-audit/site-audit-mobile.png), [after the first crawl](docs/images/site-audit/site-audit-first-light.png). Or open the [live demo](https://codoseo.com/demo): the site audit of a sample site with the fix for each AI access issue, read-only and without sign-up (cloud only; its data is a fixture compiled into the app, so it never crawls).
+
+The **site graph** draws the latest crawl nine ways. For SEO: a crawl tree (clicks from the home page), a folder tree, a bubble map, the sitemap against the crawl, click depth, broken links and redirect chains, and what changed since the last crawl. For GEO: your `/llms.txt` as a tree with format checks and a suggested edit, and AI reach, from robots.txt and your CDN to each AI crawler to the answer engines it feeds.
+
+![The site graph's depth view: pages per click depth, depth by folder and deep pages worth a link from a hub](docs/images/site-graph/depth.png)
+
+More: [crawl tree](docs/images/site-graph/crawl-tree.png), [folder tree](docs/images/site-graph/folder-tree.png), [bubble map](docs/images/site-graph/bubble-map.png) ([dark](docs/images/site-graph/bubble-map-dark.png)), [llms.txt](docs/images/site-graph/llms-txt.png), [AI reach](docs/images/site-graph/ai-reach.png).
 
 Self-host with Docker Compose in three commands:
 
