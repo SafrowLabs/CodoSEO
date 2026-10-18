@@ -2654,7 +2654,7 @@ async fn an_ai_issue_is_ranked_in_the_fix_list_with_its_geo_points() {
     assert_eq!(scores.len(), 2);
     assert_eq!(scores[0], scores[1]);
     // The trend has two crawls to draw, the GEO line among them.
-    assert!(body.contains("tr-line tr-geo"), "{body}");
+    assert!(body.contains("tr-bar tr-geo"), "{body}");
 }
 
 #[tokio::test]
