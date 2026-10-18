@@ -2321,7 +2321,7 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-head { display: flex; flex-direction: column; gap: 4px; }
 .gv-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.025em; }
 .gv-head p { color: var(--muted); max-width: 680px; text-wrap: pretty; }
-.gv-card { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.gv-panel { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
 .gv-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
 .gv-card-head h2 { font-size: 15px; font-weight: 600; }
 .gv-card-head-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }

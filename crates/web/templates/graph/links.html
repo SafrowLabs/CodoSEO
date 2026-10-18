@@ -8,7 +8,7 @@
 <div class="tiles">
   {% for t in v.tiles %}<div class="tile{{ t.class }}"><div class="tile-label">{{ t.label }}</div><div class="tile-value{% if !t.tone.is_empty() %} {{ t.tone }}{% endif %}">{{ t.value }}</div><div class="gv-tile-sub">{{ t.sub }}</div></div>{% endfor %}
 </div>
-<section class="card gv-card" aria-label="Broken pages">
+<section class="card gv-panel" aria-label="Broken pages">
   <div class="gv-card-head">
     <h2>Broken pages and who links to them</h2>
     <span class="gv-sub">Fix the target once, or change each link</span>
@@ -42,7 +42,7 @@
   <div class="empty-sm">No broken pages in this crawl.</div>
   {% endif %}
 </section>
-<section class="card gv-card" aria-label="Redirect chains">
+<section class="card gv-panel" aria-label="Redirect chains">
   <div class="gv-card-head">
     <h2>Redirect chains</h2>
     <span class="gv-sub">Each hop costs crawl time. Point links straight at the last page.</span>
