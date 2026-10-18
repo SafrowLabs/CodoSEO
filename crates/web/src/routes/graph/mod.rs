@@ -1,5 +1,5 @@
 //! `/s/{site}/graph/…`: the site graph. Pictures of how the site hangs together (crawl tree,
-//! folder tree, bubble map, sitemap, click depth, broken links and redirects, changes) and of
+//! folder tree, bubble map, sitemap and click depth, broken links and redirects, changes) and of
 //! what AI can reach and read (llms.txt, AI reach). Each tab is its own page under one tab bar,
 //! drawn from the latest finished crawl.
 
@@ -53,7 +53,6 @@ pub enum Tab {
     Folders,
     Map,
     Sitemap,
-    Depth,
     Links,
     Changes,
     Llms,
@@ -62,12 +61,11 @@ pub enum Tab {
 
 impl Tab {
     /// In tab order; the bubble map comes first and is where `/graph` opens.
-    pub const ALL: [Tab; 9] = [
+    pub const ALL: [Tab; 8] = [
         Tab::Map,
         Tab::Tree,
         Tab::Folders,
         Tab::Sitemap,
-        Tab::Depth,
         Tab::Links,
         Tab::Changes,
         Tab::Llms,
@@ -81,7 +79,6 @@ impl Tab {
             Tab::Folders => "folders",
             Tab::Map => "map",
             Tab::Sitemap => "sitemap",
-            Tab::Depth => "depth",
             Tab::Links => "links",
             Tab::Changes => "changes",
             Tab::Llms => "llms",
@@ -94,8 +91,7 @@ impl Tab {
             Tab::Tree => "Crawl tree",
             Tab::Folders => "Folder tree",
             Tab::Map => "Bubble map",
-            Tab::Sitemap => "Sitemap",
-            Tab::Depth => "Depth",
+            Tab::Sitemap => "Sitemap & depth",
             Tab::Links => "Broken & redirects",
             Tab::Changes => "Changes",
             Tab::Llms => "llms.txt",
@@ -195,10 +191,10 @@ mod tests {
 
     #[test]
     fn tabs_are_grouped_seo_then_geo() {
-        let t = tabs("/s/x", Tab::Depth);
+        let t = tabs("/s/x", Tab::Links);
         let groups: Vec<_> = t.iter().filter_map(|l| l.group).collect();
         assert_eq!(groups, ["SEO", "GEO"]);
         assert_eq!(t.iter().filter(|l| l.active).count(), 1);
-        assert!(t.iter().any(|l| l.active && l.href == "/s/x/graph/depth"));
+        assert!(t.iter().any(|l| l.active && l.href == "/s/x/graph/links"));
     }
 }

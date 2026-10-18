@@ -1,4 +1,4 @@
-//! `/s/{site}/graph/sitemap`: the sitemap index and its child sitemaps, each split by what the crawl found for its URLs, against the pages the crawl reached by links.
+//! `/s/{site}/graph/sitemap`: Sitemap & depth. The sitemap index and its child sitemaps, each split by what the crawl found for its URLs, against the pages the crawl reached by links; then how deep those pages sit (see `depth`).
 //!
 //! Also home to the small helpers the other server-drawn views (depth, broken & redirects,
 //! changes) share: short paths, explorer links and plurals.
@@ -42,6 +42,7 @@ pub struct SitemapTab {
     pub tabs: Vec<TabLink>,
     pub empty: Option<Empty>,
     pub view: Option<SitemapView>,
+    pub depth: Option<super::depth::DepthView>,
 }
 
 pub struct SitemapView {
@@ -128,7 +129,7 @@ async fn sitemap_page(
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
     let ctx = super::load(&state, &user, &site, Tab::Sitemap).await?;
-    let view = match &ctx.latest {
+    let (view, depth) = match &ctx.latest {
         Some(crawl) => {
             let pool = &state.pool;
             let tree = sitemaps::load_tree(pool, crawl.id).await?;
@@ -143,15 +144,17 @@ async fn sitemap_page(
                 1,
             )
             .await?;
-            Some(view(
+            let sitemap = view(
                 &ctx.base,
                 tree.as_ref(),
                 &overlap,
                 orphan_folders.first(),
                 missing_folders.first(),
-            ))
+            );
+            let depth = super::depth::view(&state, &ctx, crawl).await?;
+            (Some(sitemap), Some(depth))
         }
-        None => None,
+        None => (None, None),
     };
     Ok(html(&SitemapTab {
         shell: ctx.shell,
@@ -159,6 +162,7 @@ async fn sitemap_page(
         tabs: ctx.tabs,
         empty: ctx.empty,
         view,
+        depth,
     })?
     .into_response())
 }

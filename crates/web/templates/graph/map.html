@@ -30,6 +30,10 @@
       <input type="range" data-ctl="depth" min="1" max="8" value="8" step="1">
       <output data-ctl="depth-out">All</output>
     </label>
+    <label class="gv-ctl" title="How strong the labels are. The hovered and selected page always show theirs.">Labels
+      <input type="range" data-ctl="labels" min="0" max="100" value="45" step="5" aria-label="Label strength">
+      <output data-ctl="labels-out">45%</output>
+    </label>
     <span class="gv-spacer"></span>
     <label class="gv-search"><svg class="icon"><use href="#i-search"/></svg><input type="search" data-ctl="q" list="gv-urls-map" placeholder="Find a URL" aria-label="Find a URL" autocomplete="off"><datalist id="gv-urls-map"></datalist></label>
     <button type="button" class="btn" data-ctl="links" aria-pressed="false">Show all links</button>

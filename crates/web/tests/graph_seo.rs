@@ -284,12 +284,13 @@ async fn the_sitemap_tab_draws_the_tree_the_overlap_and_what_to_fix() {
 }
 
 #[tokio::test]
-async fn the_depth_tab_counts_clicks_and_suggests_hubs() {
+async fn the_sitemap_tab_counts_clicks_and_suggests_hubs() {
     let app = TestApp::new().await;
     let (account, cookie) = app.login("a@x.com").await;
     let site = app.site(&account, DOMAIN).await;
     docs_site(&app, &site).await;
-    let body = tab(&app, &site, &cookie, "depth").await;
+    let body = tab(&app, &site, &cookie, "sitemap").await;
+    assert!(body.contains(r#"id="depth""#), "{body}");
 
     // 14 linked pages, 29 clicks between them; 12 within 3 clicks.
     assert!(body.contains(">2.1<"), "{body}");
@@ -449,9 +450,9 @@ async fn crawls_from_before_the_graph_say_to_run_a_new_one() {
     assert!(sitemap.contains("Run a new crawl to see this."));
     // The overlap comes from the pages, which every crawl has.
     assert!(sitemap.contains("In sitemap · 13"));
-    let depth = tab(&app, &site, &cookie, "depth").await;
-    assert!(depth.contains("Run a new crawl to see this."));
-    assert!(depth.contains(">5 clicks<"));
+    // The sitemap tree and the depth lift table (it reads the link graph) both say so.
+    assert_eq!(sitemap.matches("Run a new crawl to see this.").count(), 2);
+    assert!(sitemap.contains(">5 clicks<"));
 }
 
 #[tokio::test]

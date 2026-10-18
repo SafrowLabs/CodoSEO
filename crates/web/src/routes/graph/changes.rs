@@ -658,7 +658,7 @@ fn problem(base: &str, domain: &str, changed: &[(Kind, &PageDiff)]) -> Option<Pr
                 plural(deeper, "page", "pages"),
                 plural(i64::from(deepest), "click", "clicks")
             ),
-            href: format!("{base}/graph/depth"),
+            href: format!("{base}/graph/sitemap#depth"),
             link: "See click depth",
         });
     }

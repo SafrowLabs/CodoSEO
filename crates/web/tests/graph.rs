@@ -1,5 +1,5 @@
 //! The site graph's frame: every tab answers for the site's owner (empty before the first
-//! crawl, the tab bar after it), `/graph` opens the crawl tree and another account gets a 404.
+//! crawl, the tab bar after it), `/graph` opens the bubble map and another account gets a 404.
 
 mod support;
 
@@ -7,8 +7,8 @@ use axum::http::StatusCode;
 use support::{TestApp, page};
 
 const DOMAIN: &str = "example.com";
-const TABS: [&str; 9] = [
-    "tree", "folders", "map", "sitemap", "depth", "links", "changes", "llms", "reach",
+const TABS: [&str; 8] = [
+    "tree", "folders", "map", "sitemap", "links", "changes", "llms", "reach",
 ];
 
 #[tokio::test]
@@ -23,6 +23,21 @@ async fn graph_opens_the_bubble_map() {
     assert_eq!(
         res.location(),
         Some(format!("/s/{}/graph/map", site.id).as_str())
+    );
+}
+
+#[tokio::test]
+async fn depth_lands_on_its_part_of_the_sitemap_tab() {
+    let app = TestApp::new().await;
+    let (account, cookie) = app.login("a@x.com").await;
+    let site = app.site(&account, DOMAIN).await;
+    let res = app
+        .get(&format!("/s/{}/graph/depth", site.id), Some(&cookie))
+        .await;
+    assert!(res.status.is_redirection());
+    assert_eq!(
+        res.location(),
+        Some(format!("/s/{}/graph/sitemap#depth", site.id).as_str())
     );
 }
 

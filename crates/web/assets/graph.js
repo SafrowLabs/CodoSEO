@@ -143,6 +143,13 @@
     return s;
   }
 
+  // Zoom in, zoom out and back to the opening view, in the stage's top right corner.
+  function zoomPad(stage, on) {
+    const b = (label, title, fn) => h("button", { type: "button", class: "gv-zbtn", title, "aria-label": title, onclick: fn }, label);
+    stage.append(h("div", { class: "gv-float gv-zoom", role: "group", "aria-label": "Zoom" },
+      b("+", "Zoom in", on.in), b("−", "Zoom out", on.out), b("Reset", "Reset the view", on.reset)));
+  }
+
   function badge(text, tone) {
     return h("span", { class: `gv-badge b-${tone}` }, text);
   }
@@ -339,20 +346,16 @@
     const limits = new Map();
     let t = d3.zoomIdentity, layout = null, first = true;
 
+    // Like the bubble map: the wheel (or a pinch) zooms, a drag pans.
     const zoom = d3.zoom().scaleExtent([0.15, 2])
-      .filter((e) => (e.type === "wheel" ? e.ctrlKey : !e.button && !e.target.closest("input, select")))
+      .filter((e) => e.type === "wheel" || (!e.button && !e.target.closest("input, select")))
       .on("zoom", (e) => {
         t = e.transform;
         layer.style.transform = `translate(${t.x}px, ${t.y}px) scale(${t.k})`;
         cfg.overlay && layout && cfg.overlay(t, layout);
       });
     const sel = d3.select(view).call(zoom).on("dblclick.zoom", null);
-    // A plain wheel or two-finger swipe pans; pinch (or ctrl + wheel) zooms.
-    view.addEventListener("wheel", (e) => {
-      if (e.ctrlKey) return;
-      e.preventDefault();
-      zoom.translateBy(sel, -e.deltaX / t.k, -e.deltaY / t.k);
-    }, { passive: false });
+    const zoomBy = (f) => (reduced() ? sel : sel.transition().duration(250)).call(zoom.scaleBy, f);
 
     const limitOf = (n) => limits.get(n) || cfg.limit;
     function children(n) {
@@ -533,7 +536,7 @@
       if (!dx && !dy) return;
       (ms && !reduced() ? sel.transition().duration(ms) : sel).call(zoom.translateBy, dx / t.k, dy / t.k);
     }
-    return { draw, fit, center, visible, showKids, limits, limitOf, get layout() { return layout; } };
+    return { draw, fit, center, visible, showKids, zoomBy, limits, limitOf, get layout() { return layout; } };
   }
 
   // Open the path down to `n`, raising child limits so it isn't folded away.
@@ -740,6 +743,12 @@
 
     wireSearch(el, site.nodes.map((n) => n.url), (v) => findPage(site, v), (n) => select(n));
     ctl("fit").addEventListener("click", () => tree.fit(600, 0.15));
+    zoomPad(stage, {
+      in: () => tree.zoomBy(1.3),
+      out: () => tree.zoomBy(1 / 1.3),
+      // Back to how it opened: full size, the tree's top centred at the top.
+      reset: () => tree.fit(600, 1),
+    });
     const expand = ctl("expand");
     expand.addEventListener("click", () => {
       const all = expand.dataset.on !== "1";
@@ -912,11 +921,11 @@
         }
         if (f === selected && order(f).length) {
           if (open.has(f)) open.delete(f);
-          else open.add(f);
+          else openAll(f);
           redraw(f);
           return tree.showKids(f);
         }
-        if (order(f).length) open.add(f);
+        if (order(f).length) openAll(f);
         select(f, f);
         tree.showKids(f);
       },
@@ -934,6 +943,18 @@
       },
     });
 
+    // Opening a folder branches out every folder under it and lists all their pages, none folded
+    // into "+ N more".
+    function openAll(f) {
+      const stack = [f];
+      while (stack.length) {
+        const g = stack.pop();
+        if (g.page || !order(g).length) continue;
+        open.add(g);
+        tree.limits.set(g, Infinity);
+        stack.push(...g.kids);
+      }
+    }
     function redraw(keep) {
       path = new Set();
       for (let f = selected; f; f = f.parent) path.add(f);
@@ -1007,6 +1028,8 @@
       }
       if (f !== root) start = f;
     }
+    // Every top folder shows; a folder deeper down lists everything once opened.
+    tree.limits.set(root, Infinity);
     selected = start;
     if (start) reveal(start, open, tree, order);
     redraw();
@@ -1016,6 +1039,7 @@
 
     wireSearch(el, all.slice(1).map((f) => f.path), (v) => all.find((f) => f.path.toLowerCase() === v) || all.find((f) => f.path.toLowerCase().includes(v)), (f) => select(f));
     ctl("fit").addEventListener("click", () => tree.fit(600, 0.15));
+    zoomPad(stage, { in: () => tree.zoomBy(1.3), out: () => tree.zoomBy(1 / 1.3), reset: () => tree.fit(600) });
     const expand = ctl("expand");
     expand.addEventListener("click", () => {
       const on = expand.dataset.on !== "1";
@@ -1041,7 +1065,10 @@
   // ---------- the bubble map: a force-directed picture of the whole site ----------
 
   // Labels on the bubble map at most, besides the focus.
-  const LABELS = 28;
+  const LABELS = 20;
+  // How strong the other labels start, out of 100; the Labels slider changes it and the browser
+  // keeps the choice.
+  const LABEL_SHOW = 45;
 
   // A bubble's label: a long slug keeps its start and end.
   function shortLabel(s) {
@@ -1082,7 +1109,11 @@
     const R = 18 * Math.sqrt(site.nodes.length) + 140;
     const ORPHAN = { x: R * 0.9, y: R * 0.7 };
 
-    let mode = "crawl", colorBy = "status", sizeBy = "score", depthLimit = 99, showAll = false;
+    let mode = "crawl", colorBy = "status", sizeBy = "score", depthLimit = 99, showAll = false, labelShow = LABEL_SHOW;
+    try {
+      const v = localStorage.getItem("codoseo.mapLabels");
+      if (v != null && !isNaN(+v)) labelShow = Math.max(0, Math.min(100, +v));
+    } catch (_) {}
     let tree = null, simNodes = [], sim = null, focusRoot = null;
     let hover = null, selected = null, related = null, transform = d3.zoomIdentity;
     let W = 0, H = 0, dpr = 1, dirty = true, autoFitted = false;
@@ -1439,7 +1470,9 @@
 
       // Labels, more of them the closer you zoom. They go in by priority (the focus, then hubs
       // and the biggest bubbles), each on its own plate, and one that would overlap a label
-      // already drawn is left out, so the map never turns into a wall of text.
+      // already drawn or any bubble is left out, so the map never turns into a wall of text and no
+      // page (a parent least of all) hides under a label; zooming in makes room for more. The Labels slider fades all but
+      // the focus's.
       ctx.font = `500 ${11.5 / k}px ${FONT}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -1458,17 +1491,34 @@
       wanted.sort((a, b) => rank(b) - rank(a));
       const placed = [];
       const hits = (b) => placed.some((p) => b[0] < p[2] && b[2] > p[0] && b[1] < p[3] && b[3] > p[1]);
+      for (const n of simNodes) {
+        if (n.vis < 0.5 || n.x === undefined || n.r * k < 2) continue;
+        if (n.x + n.r < vx0 || n.x - n.r > vx1 || n.y + n.r < vy0 || n.y - n.r > vy1) continue;
+        placed.push([n.x - n.r, n.y - n.r, n.x + n.r, n.y + n.r]);
+      }
+      const bubbles = placed.length;
+      const fade = labelShow / 100;
       const lh = 17 / k, padX = 5 / k, gap = 2 / k;
       for (const n of wanted) {
         const must = n === selected || n === related?.f || n === hover;
-        if (!must && placed.length >= LABELS) break;
+        if (!must && (!fade || placed.length - bubbles >= LABELS)) continue;
         const label = shortLabel(n === home ? "Home" : n.virtual ? n.title : n.url.split(/[?#]/)[0].split("/").filter(Boolean).pop() || n.url);
         const w = ctx.measureText(label).width;
+        // A bubble big enough holds its own label, cut to fit, which covers nothing else.
+        const room = 2 * n.r - 10 / k, fits = Math.floor((label.length * room) / w);
+        if (n !== home && lh <= 1.3 * n.r && fits >= Math.min(label.length, 7)) {
+          ctx.globalAlpha = n.vis * (must ? 1 : Math.max(fade, 0.25));
+          ctx.fillStyle = d3.hsl(n.fill).l > 0.58 ? "#14201a" : "#ffffff";
+          ctx.textAlign = "center";
+          ctx.fillText(fits >= label.length ? label : label.slice(0, fits - 1) + "…", n.x, n.y);
+          ctx.textAlign = "left";
+          continue;
+        }
         const x = n.x + n.r + 3 / k, y = n.y;
         const box = [x - gap, y - lh / 2 - gap, x + w + 2 * padX + gap, y + lh / 2 + gap];
         if (!must && hits(box)) continue;
         placed.push(box);
-        ctx.globalAlpha = n.vis;
+        ctx.globalAlpha = n.vis * (must ? 1 : fade);
         ctx.fillStyle = C.surface2;
         ctx.beginPath();
         ctx.roundRect(x, y - lh / 2, w + 2 * padX, lh, 4 / k);
@@ -1506,6 +1556,8 @@
 
     // ---------- zoom, drag, hit test ----------
     const zoom = d3.zoom().scaleExtent([0.08, 10]).on("zoom", (e) => {
+      // Once someone moves the camera, the map stops fitting itself as it settles.
+      if (e.sourceEvent) autoFitted = true;
       transform = e.transform;
       dirty = true;
       hideTip();
@@ -1770,6 +1822,18 @@
       dirty = true;
       renderStats();
     });
+    const labelsIn = ctl("labels"), labelsOut = ctl("labels-out");
+    const showLabels = () => (labelsOut.textContent = labelShow ? labelShow + "%" : "Off");
+    labelsIn.value = labelShow;
+    showLabels();
+    labelsIn.addEventListener("input", () => {
+      labelShow = +labelsIn.value;
+      showLabels();
+      dirty = true;
+      try {
+        localStorage.setItem("codoseo.mapLabels", String(labelShow));
+      } catch (_) {}
+    });
     const linksBtn = ctl("links");
     if (!site.nodes.some((n) => n.extraOut.length)) linksBtn.hidden = true;
     linksBtn.addEventListener("click", () => {
@@ -1779,6 +1843,12 @@
       dirty = true;
     });
     ctl("fit").addEventListener("click", () => fit(750));
+    const zoomBy = (f) => (reduced() ? d3.select(canvas) : d3.select(canvas).transition().duration(250)).call(zoom.scaleBy, f);
+    const userZoom = (f) => {
+      autoFitted = true;
+      zoomBy(f);
+    };
+    zoomPad(stage, { in: () => userZoom(1.4), out: () => userZoom(1 / 1.4), reset: () => fit(750) });
     wireSearch(el, site.nodes.map((n) => n.url), (v) => findPage(site, v), (n) => {
       if (focusRoot && !descendants(focusRoot).includes(n)) unfocus();
       if (!visibleBase(n)) {

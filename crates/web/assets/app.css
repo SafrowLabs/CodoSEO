@@ -2253,6 +2253,13 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-lrow { display: flex; align-items: center; gap: 8px; }
 .gv-lrow svg { flex: none; }
 .gv-hint { right: 12px; bottom: 12px; padding: 7px 12px; font-size: 12px; color: var(--muted); }
+.gv-zoom { right: 12px; top: 12px; z-index: 4; display: flex; flex-direction: column; overflow: hidden; }
+.gv-zbtn { min-width: 40px; height: 32px; padding: 0 8px; border: 0; background: transparent; color: var(--ink); font: 500 16px/1 var(--font); cursor: pointer; }
+.gv-folders .gv-zoom { top: 42px; }
+.gv-zbtn + .gv-zbtn { border-top: 1px solid var(--line); }
+.gv-zbtn:last-child { font-size: 11.5px; color: var(--muted); }
+.gv-zbtn:hover { background: var(--surface-hover); color: var(--ink); }
+.gv-zbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .gv-crumb { left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 5px 5px 5px 14px; font-size: 13px; color: var(--muted); }
 .gv-crumb b { font: 500 12.5px var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gv-tree .gv-crumb { z-index: 3; }
@@ -2326,6 +2333,8 @@ details.la-row[open] { background: var(--surface-2); }
 .gv-head { display: flex; flex-direction: column; gap: 4px; }
 .gv-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.025em; }
 .gv-head p { color: var(--muted); max-width: 680px; text-wrap: pretty; }
+.gv-head h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+.gv-sect { margin-top: 16px; scroll-margin-top: 16px; }
 .gv-panel { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
 .gv-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
 .gv-card-head h2 { font-size: 15px; font-weight: 600; }
