@@ -208,3 +208,33 @@ async fn each_tab_mounts_its_view() {
         assert!(!view_html.contains('\u{2014}'), "{tab} has an em dash");
     }
 }
+
+/// graph.js and the server-drawn graph views share app.css. A class graph.js builds its cards
+/// from must have one plain rule: a second `.name { … }` further down restyles every use of it
+/// (that is how the tree cards once lost their labels and the depth cards their place).
+#[test]
+fn each_graph_js_class_has_one_plain_rule_in_app_css() {
+    let js = include_str!("../assets/graph.js");
+    let css = include_str!("../assets/app.css");
+    let mut classes: Vec<&str> = Vec::new();
+    for (i, _) in js.match_indices("gv-") {
+        let name = &js[i..];
+        let end = name
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .unwrap_or(name.len());
+        let name = name[..end].trim_end_matches('-');
+        if !classes.contains(&name) {
+            classes.push(name);
+        }
+    }
+    assert!(classes.contains(&"gv-card"), "{classes:?}");
+    let doubled: Vec<String> = classes
+        .iter()
+        .filter_map(|c| {
+            let rule = format!(".{c} {{");
+            let n = css.lines().filter(|l| l.starts_with(&rule)).count();
+            (n > 1).then(|| format!("{c} ({n} rules)"))
+        })
+        .collect();
+    assert!(doubled.is_empty(), "styled twice: {doubled:?}");
+}

@@ -12,7 +12,7 @@ const TABS: [&str; 9] = [
 ];
 
 #[tokio::test]
-async fn graph_opens_the_crawl_tree() {
+async fn graph_opens_the_bubble_map() {
     let app = TestApp::new().await;
     let (account, cookie) = app.login("a@x.com").await;
     let site = app.site(&account, DOMAIN).await;
@@ -22,7 +22,7 @@ async fn graph_opens_the_crawl_tree() {
     assert!(res.status.is_redirection());
     assert_eq!(
         res.location(),
-        Some(format!("/s/{}/graph/tree", site.id).as_str())
+        Some(format!("/s/{}/graph/map", site.id).as_str())
     );
 }
 
