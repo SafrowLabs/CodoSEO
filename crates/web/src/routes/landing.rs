@@ -621,7 +621,7 @@ mod tests {
                 "Up to 5,000 pages per crawl",
                 "Crawls of up to 1 hour",
                 "A scheduled crawl every day",
-                "1 manual crawl a day",
+                "5 manual crawls a day",
                 "A year of history",
                 "Email, Slack, Discord and webhook alerts",
                 "1,000 API calls a day",

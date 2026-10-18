@@ -24,7 +24,7 @@ fn lite_plan_matches_spec() {
     assert_eq!(l.max_pages, Some(5_000));
     assert_eq!(l.max_duration, Some(Duration::from_secs(HOUR)));
     assert_eq!(l.fastest_schedule, Some(Schedule::Daily));
-    assert_eq!(l.manual_crawls, ManualAllowance::PerDay(1));
+    assert_eq!(l.manual_crawls, ManualAllowance::PerDay(5));
     assert_eq!(l.history_days, Some(365));
     assert_eq!(l.api_calls_per_day, Some(1_000));
     assert!(!l.email_alerts_only);

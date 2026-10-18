@@ -47,7 +47,7 @@ Table (default), JSON, Markdown, CSV. Use `--format json -o audit.json` to save 
 ## Pricing
 
 - **Free** (hosted): 1 monitored site, up to 500 pages per crawl, crawls of up to 10 minutes, a scheduled crawl every week, 1 manual crawl a week, 30 days of history, email alerts, 100 API calls a day, 3 AI incident rechecks a day
-- **Lite** (hosted, $9 a month): 5 monitored sites, up to 5,000 pages per crawl, crawls of up to 1 hour, a scheduled crawl every day, 1 manual crawl a day, a year of history, email, Slack, Discord and webhook alerts, 1,000 API calls a day, 20 AI incident rechecks a day
+- **Lite** (hosted, $9 a month): 5 monitored sites, up to 5,000 pages per crawl, crawls of up to 1 hour, a scheduled crawl every day, 5 manual crawls a day, a year of history, email, Slack, Discord and webhook alerts, 1,000 API calls a day, 20 AI incident rechecks a day
 - **Pro** (hosted, $19 a month): 10 monitored sites, up to 10,000 pages per crawl, crawls of up to 2 hours, a scheduled crawl every day, unlimited manual crawls (1 running per site), a year of history, email, Slack, Discord and webhook alerts, 5,000 API calls a day, 60 AI incident rechecks a day
 - **Enterprise**: more than Pro, contact contact@codoseo.com
 - **Self-hosted**: free and open source (AGPL-3.0), unlimited sites

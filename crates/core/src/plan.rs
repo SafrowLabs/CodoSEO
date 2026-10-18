@@ -83,7 +83,7 @@ impl PlanLimits {
                 max_pages: Some(5_000),
                 max_duration: Some(Duration::from_secs(HOUR)),
                 fastest_schedule: Some(Schedule::Daily),
-                manual_crawls: ManualAllowance::PerDay(1),
+                manual_crawls: ManualAllowance::PerDay(5),
                 history_days: Some(365),
                 api_calls_per_day: Some(1_000),
                 email_alerts_only: false,
