@@ -1,23 +1,24 @@
-//! `/s/{site}/graph/depth`: how many clicks from the home page each page sits, by status and by folder, and the deep pages worth a link from higher up.
+//! The depth half of the Sitemap & depth tab: how many clicks from the home page each page sits,
+//! by status and by folder, and the deep pages worth a link from higher up. `/s/{site}/graph/depth`
+//! now lands there.
 
 use std::collections::{BTreeMap, HashMap};
 
-use askama::Template;
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use codoseo_core::check::CheckId;
+use codoseo_store::crawls::Crawl;
 use codoseo_store::graph::{self, StoredGraph};
 use codoseo_store::site_graph::{self, DepthBucket, LinkedPage};
 
+use super::Ctx;
 use super::sitemap::{RUN_NEW_CRAWL, check_href, page_href, plural, short_url};
-use super::{Empty, Tab, TabLink};
-use crate::auth::CurrentUser;
+use crate::auth::{CurrentUser, load_site};
 use crate::error::AppError;
 use crate::fmt;
-use crate::layout::Shell;
-use crate::render::html;
+use crate::routes::audit::site_id;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -34,16 +35,6 @@ const MAX_FOLDERS: usize = 8;
 const MAX_LIFT: usize = 10;
 /// Deep pages read to rank by link score; the best linked come first.
 const LIFT_POOL: i64 = 2000;
-
-#[derive(Template)]
-#[template(path = "graph/depth.html")]
-pub struct DepthTab {
-    pub shell: Shell,
-    pub base: String,
-    pub tabs: Vec<TabLink>,
-    pub empty: Option<Empty>,
-    pub view: Option<DepthView>,
-}
 
 pub struct DepthView {
     pub tiles: Vec<DepthTile>,
@@ -105,55 +96,52 @@ pub struct LiftRow {
     pub hub: Option<(String, String)>,
 }
 
+/// The depth view had its own tab; old links land on its part of Sitemap & depth.
 async fn depth_page(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
-    let ctx = super::load(&state, &user, &site, Tab::Depth).await?;
-    let view = match &ctx.latest {
-        Some(crawl) => {
-            let pool = &state.pool;
-            let buckets = site_graph::depth_buckets(pool, crawl.id).await?;
-            let folders = site_graph::folder_depths(pool, crawl.id, LAST_COL as i32).await?;
-            let deep = site_graph::deep_pages(pool, crawl.id, TOO_DEEP as i32, LIFT_POOL).await?;
-            let graph = graph::load(pool, crawl.id).await?;
-            let (lift, lift_note) = match (&graph, deep.is_empty()) {
-                (_, true) => (
-                    Vec::new(),
-                    Some("No indexable page sits 4 or more clicks deep."),
-                ),
-                (None, false) => (Vec::new(), Some(RUN_NEW_CRAWL)),
-                (Some(g), false) => {
-                    let picks = lift_picks(g, &deep);
-                    let hubs: Vec<u64> = picks.iter().filter_map(|p| p.hub).collect();
-                    let urls = site_graph::urls_by_hash(pool, crawl.id, &hubs).await?;
-                    let rows = picks
-                        .iter()
-                        .map(|p| lift_row(&ctx.base, &ctx.site.domain, p, &urls))
-                        .collect();
-                    (rows, None)
-                }
-            };
-            Some(DepthView {
-                tiles: tiles(&buckets),
-                cols: cols(&buckets),
-                folders: folder_rows(&folders),
-                lift,
-                lift_note,
-                deep_href: check_href(&ctx.base, CheckId::DeepPage),
-            })
+    let site = load_site(&state, &user, site_id(&site)?).await?;
+    Ok(Redirect::to(&format!("/s/{}/graph/sitemap#depth", site.id)).into_response())
+}
+
+/// The depth view of the crawl.
+pub(super) async fn view(
+    state: &AppState,
+    ctx: &Ctx,
+    crawl: &Crawl,
+) -> Result<DepthView, AppError> {
+    let pool = &state.pool;
+    let buckets = site_graph::depth_buckets(pool, crawl.id).await?;
+    let folders = site_graph::folder_depths(pool, crawl.id, LAST_COL as i32).await?;
+    let deep = site_graph::deep_pages(pool, crawl.id, TOO_DEEP as i32, LIFT_POOL).await?;
+    let graph = graph::load(pool, crawl.id).await?;
+    let (lift, lift_note) = match (&graph, deep.is_empty()) {
+        (_, true) => (
+            Vec::new(),
+            Some("No indexable page sits 4 or more clicks deep."),
+        ),
+        (None, false) => (Vec::new(), Some(RUN_NEW_CRAWL)),
+        (Some(g), false) => {
+            let picks = lift_picks(g, &deep);
+            let hubs: Vec<u64> = picks.iter().filter_map(|p| p.hub).collect();
+            let urls = site_graph::urls_by_hash(pool, crawl.id, &hubs).await?;
+            let rows = picks
+                .iter()
+                .map(|p| lift_row(&ctx.base, &ctx.site.domain, p, &urls))
+                .collect();
+            (rows, None)
         }
-        None => None,
     };
-    Ok(html(&DepthTab {
-        shell: ctx.shell,
-        base: ctx.base,
-        tabs: ctx.tabs,
-        empty: ctx.empty,
-        view,
-    })?
-    .into_response())
+    Ok(DepthView {
+        tiles: tiles(&buckets),
+        cols: cols(&buckets),
+        folders: folder_rows(&folders),
+        lift,
+        lift_note,
+        deep_href: check_href(&ctx.base, CheckId::DeepPage),
+    })
 }
 
 fn tiles(buckets: &[DepthBucket]) -> Vec<DepthTile> {
