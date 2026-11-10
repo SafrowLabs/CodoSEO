@@ -6,7 +6,7 @@ mod support;
 use axum::http::StatusCode;
 use codoseo_core::plan::{Plan, PlanLimits};
 use codoseo_web::routes::landing::{monthly_price, plan_features};
-use support::{TestApp, cloud_config};
+use support::{TestApp, cloud_config, cloud_config_with};
 
 #[tokio::test]
 async fn the_cloud_landing_renders_the_plans_from_the_code() {
@@ -51,6 +51,15 @@ async fn the_cloud_landing_renders_the_plans_from_the_code() {
     assert!(body.contains(&format!(
         "Lite at ${lite} a month and Pro at ${pro} a month"
     )));
+    // Every check category and its highlights render from the route's table.
+    assert!(
+        body.contains(r#"<div class="cat"><b>Response</b>"#),
+        "{body}"
+    );
+    assert!(
+        body.contains(r#"<li class="r">4xx and 5xx errors</li>"#),
+        "{body}"
+    );
     // The comparison and the developer block are present.
     assert!(body.contains("Screaming Frog audits. CodoSEO watches."));
     assert!(body.contains("For developers and AI agents"));
@@ -82,4 +91,29 @@ async fn a_signed_in_visitor_sees_the_landing_with_a_way_into_the_app() {
     let res = app.get("/app", Some(&cookie)).await;
     assert_eq!(res.status, StatusCode::SEE_OTHER);
     assert_eq!(res.location(), Some("/sites"));
+}
+
+#[tokio::test]
+async fn the_turnstile_widget_sits_inside_each_audit_form() {
+    let app = TestApp::with_config(cloud_config_with(&[
+        ("TURNSTILE_SITE_KEY", "site-key-123"),
+        ("TURNSTILE_SECRET", "shh-secret"),
+    ]))
+    .await;
+    let body = app.get("/", None).await.body;
+    // Cloudflare injects the hidden token input inside the widget's div, so the widget has
+    // to be a descendant of the form or the token is never submitted.
+    let mut rest = body.as_str();
+    let mut forms = 0;
+    while let Some(start) = rest.find(r#"<form class="audit-form"#) {
+        let end = rest[start..].find("</form>").expect("form closes") + start;
+        assert!(
+            rest[start..end].contains(r#"class="cf-turnstile ts" data-sitekey="site-key-123""#),
+            "{}",
+            &rest[start..end]
+        );
+        forms += 1;
+        rest = &rest[end..];
+    }
+    assert_eq!(forms, 2, "{body}");
 }

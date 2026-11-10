@@ -4,7 +4,7 @@
 @font-face { font-family: "Geist Mono"; src: url("/assets/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
 :root {
   --bg: #F4F4F0; --bg-2: #ECEDE7; --surface: #FFFFFF; --surface-2: #F7F7F4;
-  --line: #E2E4DE; --line-strong: #CFD3CB;
+  --line: #E2E4DE; --line-2: #EEEFEA; --line-strong: #CFD3CB;
   --ink: #111613; --ink-2: #4C544F; --ink-3: #6B736E;
   --yellow: #F0C42C; --yellow-h: #E5B51A; --on-yellow: #0E1A17; --yellow-ink: #7A5E00; --yellow-bg: #FBF6DF; --yellow-line: #EFE2AE;
   --mark: rgba(240,196,44,.55);
@@ -27,7 +27,7 @@
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #0A1411; --bg-2: #0E1A17; --surface: #13221E; --surface-2: #182B26;
-  --line: #2A4238; --line-strong: #3A574C;
+  --line: #2A4238; --line-2: #213530; --line-strong: #3A574C;
   --ink: #F2F5F0; --ink-2: #C3CCC6; --ink-3: #9AA6A0;
   --yellow-h: #F7D24E; --yellow-ink: #F0C42C; --yellow-bg: rgba(240,196,44,.08); --yellow-line: rgba(240,196,44,.28);
   --mark: rgba(240,196,44,.22);
@@ -42,7 +42,7 @@
 } }
 :root[data-theme="dark"] {
   --bg: #0A1411; --bg-2: #0E1A17; --surface: #13221E; --surface-2: #182B26;
-  --line: #2A4238; --line-strong: #3A574C;
+  --line: #2A4238; --line-2: #213530; --line-strong: #3A574C;
   --ink: #F2F5F0; --ink-2: #C3CCC6; --ink-3: #9AA6A0;
   --yellow-h: #F7D24E; --yellow-ink: #F0C42C; --yellow-bg: rgba(240,196,44,.08); --yellow-line: rgba(240,196,44,.28);
   --mark: rgba(240,196,44,.22);
@@ -368,9 +368,9 @@ html { overflow-x: hidden; }
 .reach .site-t { font: 600 11.5px var(--sans); fill: var(--ink); }
 .reach .site-s { font: 400 9px var(--mono); fill: var(--ink-3); } .reach .site-s.bad { fill: var(--red); }
 .reach .ln { fill: none; stroke-width: 1.6; } .reach .ln.ok { stroke: var(--st-ok); opacity: .8; } .reach .ln.err { stroke: var(--st-err); }
-.reach .pill rect { fill: var(--surface-2); stroke: var(--line); }
-.reach .pill circle.ok { fill: var(--st-ok); } .reach .pill circle.err { fill: var(--st-err); }
-.reach .pill text { font: 400 10.5px var(--mono); fill: var(--ink); }
+.reach .ua rect { fill: var(--surface-2); stroke: var(--line); }
+.reach .ua circle.ok { fill: var(--st-ok); } .reach .ua circle.err { fill: var(--st-err); }
+.reach .ua text { font: 400 10.5px var(--mono); fill: var(--ink); }
 .reach .eng circle { fill: var(--surface); stroke: var(--st-ok); stroke-width: 1.5; }
 .reach .eng.err circle { stroke: var(--st-err); }
 .reach .eng { color: var(--ink); }
@@ -559,7 +559,8 @@ footer .foot-bottom span:last-child { margin-left: auto; text-align: right; }
 [data-theme-pref="light"] .theme .i-light, [data-theme-pref="dark"] .theme .i-dark, [data-theme-pref="system"] .theme .i-system { opacity: 1; transform: none; }
 p.err { display: flex; gap: 8px; align-items: baseline; margin-top: 10px; font-size: 14px; color: var(--red); }
 p.err::before { content: '!'; flex: none; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--red); transform: translateY(2px); }
-.ts { margin-top: 10px; min-height: 0; }
+.audit-form { flex-wrap: wrap; }
+.ts { flex-basis: 100%; margin-top: 4px; min-height: 0; }
 .ts:empty { display: none; }
 .audit-form input[aria-invalid="true"] { color: var(--red); }
 .plan .btn.dis, .plan .btn.dis:hover { cursor: default; background: transparent; color: var(--ink-3); border: 1px dashed var(--line-strong); }

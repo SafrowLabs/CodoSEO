@@ -288,7 +288,8 @@
     else start();
     if ('ResizeObserver' in window) new ResizeObserver(function () { if (!started) return; size(); alpha = Math.max(alpha, .4); kick(); }).observe(wrap);
     function retheme() { setTimeout(function () { palette(); kick(); }, 30); }
-    if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retheme);
+    var mq = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+    if (mq && mq.addEventListener) mq.addEventListener('change', retheme);
     var tb = document.getElementById('theme'); if (tb) tb.addEventListener('click', retheme);
   })();
 
@@ -302,7 +303,8 @@
   document.querySelectorAll('.copy').forEach(function (b) {
     b.addEventListener('click', function () {
       var el = $(b.getAttribute('data-copy')), text = el.textContent;
-      function done() { b.textContent = 'Copied'; b.classList.add('done'); setTimeout(function () { b.textContent = 'Copy'; b.classList.remove('done'); }, 1600); }
+      var orig = b.textContent;
+      function done() { b.textContent = 'Copied'; b.classList.add('done'); setTimeout(function () { b.textContent = orig; b.classList.remove('done'); }, 1600); }
       function fallback() { var r = document.createRange(); r.selectNodeContents(el); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
     });
