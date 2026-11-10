@@ -106,13 +106,13 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         r#""@type":"SoftwareApplication""#,
         r#""logo":"https://codoseo.com/assets/icon-512."#,
         // The hero mascot that follows the cursor, and the page's own styles and script.
-        "data-follow",
+        r#"id="peek""#,
         "/assets/home.",
         // The marketing sections, with numbers taken from the code.
         r#"id="pricing""#,
         r#"id="faq""#,
         r#""@type":"FAQPage""#,
-        "44 checks after every crawl",
+        r#"<div class="cat"><b>Response</b>"#,
         "Up to 500 pages per crawl",
         "A scheduled crawl every week",
         // The paid plans, Enterprise and self-hosting; checkout is off without Dodo keys.
@@ -123,10 +123,10 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         "Unlimited manual crawls, 1 running per site",
         "Checkout opens soon",
         r#"href="mailto:contact@codoseo.com""#,
-        "Hosted or self-hosted?",
+        "Screaming Frog audits. CodoSEO watches.",
         r#""name":"Lite","price":"9""#,
-        "Free · first 100 pages · no signup",
-        "https://codoseo.com/mcp",
+        "Free · 100 pages · takes about a minute.",
+        "For developers and AI agents",
         r#"href="https://rankorg.com/""#,
         r#"href="https://safrow.com/""#,
     ] {
@@ -137,14 +137,12 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         !res.body.contains(r#"data-umami-event="choose-lite""#),
         "no checkout link without billing"
     );
-    // The GitHub Actions example keeps its expression rather than being read as a template.
-    assert!(res.body.contains("${{ env.SITE_URL }}"));
     assert!(
         !res.body.contains("data-website-id"),
         "no analytics without UMAMI_*"
     );
     assert!(
-        !res.body.contains(r#"content="noindex"#),
+        !res.body.contains(r#"<meta name="robots" content="noindex"#),
         "the landing page is for search engines"
     );
     assert!(
