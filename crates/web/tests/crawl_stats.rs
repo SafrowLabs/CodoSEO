@@ -46,7 +46,7 @@ async fn finished_crawls_and_free_audits_count_on_the_cloud_landing() {
     assert_eq!(res.status, StatusCode::OK);
     assert!(
         res.body.contains(
-            r#"<b id="pages-crawled" class="mono" data-poll="/stats/pages-crawled">1,203</b> pages crawled"#
+            r#"<b id="pages-crawled" class="mono" data-poll="/stats/pages-crawled">1,203</b><span>pages audited so far</span>"#
         ),
         "{}",
         res.body

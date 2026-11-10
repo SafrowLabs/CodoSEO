@@ -1,59 +1,59 @@
-//! The cloud landing's hosted vs self-hosted comparison: it renders from the price table in
-//! `routes::landing`, every price with its source and date, and only on the cloud.
+//! The cloud landing page: written for the person responsible for rankings, with every number
+//! (plan lines, prices, the size of the free audit) rendered from the code, and only on the cloud.
 
 mod support;
 
 use axum::http::StatusCode;
-use codoseo_web::routes::landing::{OTHER_COSTS, PRICES_AS_OF, VPS_OFFERS};
+use codoseo_core::plan::{Plan, PlanLimits};
+use codoseo_web::routes::landing::{monthly_price, plan_features};
 use support::{TestApp, cloud_config};
 
 #[tokio::test]
-async fn the_cloud_landing_compares_hosted_and_self_hosted_costs() {
+async fn the_cloud_landing_renders_the_plans_from_the_code() {
     let app = TestApp::with_config(cloud_config()).await;
     let res = app.get("/", None).await;
     assert_eq!(res.status, StatusCode::OK);
     let body = res.body;
 
+    // The hero, the free audit box and its size.
+    assert!(body.contains("Find out your site broke"), "{body}");
     assert!(
-        body.contains(r#"<div class="sh mt" id="self-host">"#),
+        body.contains(r#"<form class="audit-form" method="post" action="/audit">"#),
         "{body}"
     );
-    assert!(body.contains("Lite $9 · Pro $19"), "{body}");
+    let quick = PlanLimits::quick_audit().max_pages.unwrap_or(0);
     assert!(
-        body.contains("A server for 5 sites × 5,000 pages costs $4.54 to $12 a month"),
+        body.contains(&format!("Free · {quick} pages · takes about a minute.")),
         "{body}"
     );
-    assert!(body.contains("for 10 sites × 10,000 pages $4.54 to $24"));
-    assert!(body.contains(&format!(
-        "Cheapest VPS that fits, per month before tax, as of {PRICES_AS_OF}"
-    )));
 
-    // Every provider, both sizes, and every source link with its date.
-    for o in &VPS_OFFERS {
-        assert!(body.contains(o.provider), "{}", o.provider);
-        assert!(body.contains(&format!("{}: {}", o.lite.plan, o.lite.spec)));
-        assert!(body.contains(&format!("{}: {}", o.pro.plan, o.pro.spec)));
-        for s in o.sources {
-            assert!(
-                body.contains(&format!(r#"<a href="{}""#, s.url)),
-                "{}",
-                s.url
-            );
+    // Prices and every plan line come from the plan limits, so the page can't drift.
+    let lite = monthly_price(Plan::Lite).unwrap();
+    let pro = monthly_price(Plan::Pro).unwrap();
+    assert!(
+        body.contains(&format!("<b>${lite}</b><span>a month</span>")),
+        "{body}"
+    );
+    assert!(
+        body.contains(&format!("<b>${pro}</b><span>a month</span>")),
+        "{body}"
+    );
+    assert!(body.contains(&format!("Watch every site you manage from ${lite}.")));
+    for plan in [Plan::Free, Plan::Lite, Plan::Pro] {
+        for line in plan_features(plan) {
+            assert!(body.contains(&format!("<span>{line}</span>")), "{line}");
         }
     }
-    for c in &OTHER_COSTS {
-        assert!(body.contains(&format!("<dt>{}</dt>", c.item)), "{}", c.item);
-        for s in c.sources {
-            assert!(
-                body.contains(&format!(r#"<a href="{}""#, s.url)),
-                "{}",
-                s.url
-            );
-        }
-    }
-    assert!(body.contains(r#"<li id="sh-src-1">"#));
-    assert!(body.contains(&format!("</a>, as of {PRICES_AS_OF}</li>")));
     assert!(body.contains(">Self-host guide</a>"));
+    // The old hosted-vs-self-hosted price table is gone from the page.
+    assert!(!body.contains(r#"id="self-host""#), "{body}");
+    // The FAQ JSON-LD carries the visible prices.
+    assert!(body.contains(&format!(
+        "Lite at ${lite} a month and Pro at ${pro} a month"
+    )));
+    // The comparison and the developer block are present.
+    assert!(body.contains("Screaming Frog audits. CodoSEO watches."));
+    assert!(body.contains("For developers and AI agents"));
 }
 
 #[tokio::test]

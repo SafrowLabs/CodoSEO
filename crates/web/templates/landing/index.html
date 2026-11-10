@@ -1,16 +1,18 @@
-{#- The cloud landing page at `/` for signed-out visitors. It stands alone rather than extending
-    solo_base.html: it has its own design tokens (home.css) and needs none of the app's CSS,
-    htmx or app.js. Keep the FAQPage JSON-LD in step with the visible FAQ section. -#}
+{#- The cloud landing page at `/` for signed-out visitors (a signed-in one gets links into the
+    app). It stands alone rather than extending solo_base.html: it has its own design tokens
+    (home.css) and script (home.js) and needs none of the app's CSS, htmx or app.js. Written for
+    the person responsible for rankings, not the person who deploys the code. Keep the FAQPage
+    JSON-LD in step with the visible FAQ section. -#}
 {%- import "partials/seo.html" as seo -%}
 <!doctype html>
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CodoSEO — Open-Source SEO Crawler &amp; Site Monitor</title>
-<meta name="description" content="Know the moment your SEO breaks. Open-source SEO crawler and site monitor: {{ checks }} checks, a 0–100 health score, change alerts and CI gates. Free plan available.">
+<title>CodoSEO — Find out your site broke before your rankings do</title>
+<meta name="description" content="Find out your site broke before your rankings do. CodoSEO checks every page every day, tells you in plain English what changed, checks whether ChatGPT, Claude and Perplexity can read your site, and gives you the fix to forward. Free plan, open source.">
 <meta name="robots" content="index, follow, max-image-preview:large">
-{% call seo::social(base, "/", "CodoSEO — Open-Source SEO Crawler & Site Monitor", "Know the moment your SEO breaks. {} SEO checks, health scoring, change alerts and CI gates. Start free."|format(checks)) %}{% endcall %}
+{% call seo::social(base, "/", "CodoSEO: find out your site broke before your rankings do", "Daily SEO and AI visibility monitoring with the fix written out. Free plan, nothing to install, open source.") %}{% endcall %}
 {% include "partials/icons_head.html" %}
 {#- Theme before paint: light unless the visitor picked dark or system (same key as app.js). #}
 <script>(function(){var d=document.documentElement,p="light";try{p=localStorage.getItem("codoseo-theme")||"light"}catch(e){}if(p!=="dark"&&p!=="system")p="light";var t=p==="dark"||(p==="system"&&window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";d.setAttribute("data-theme",t);d.setAttribute("data-theme-pref",p);d.className+=" js";var m=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<m.length;i++)m[i].setAttribute("content",t==="dark"?"#0A1411":"#F4F4F0")})()</script>
@@ -23,15 +25,14 @@
 {"@type":"Organization","@id":"{{ base }}/#organization","name":"SafrowLabs","url":"https://safrow.com","logo":{"@type":"ImageObject","url":"{{ base }}{{ crate::assets::url("icon-512.png") }}","width":512,"height":512},"image":"{{ base }}/og.png","sameAs":["https://github.com/SafrowLabs"],"brand":{"@id":"{{ base }}/#brand"}},
 {"@type":"Brand","@id":"{{ base }}/#brand","name":"CodoSEO","logo":"{{ base }}{{ crate::assets::url("icon-512.png") }}"},
 {"@type":"WebSite","@id":"{{ base }}/#website","name":"CodoSEO","url":"{{ base }}/","inLanguage":"en","publisher":{"@id":"{{ base }}/#organization"}},
-{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","alternateName":["codoseo","CodoSEO CLI"],"applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","description":"Open-source SEO crawler and site monitor built in Rust. Crawls a site, runs {{ checks }} SEO checks across response health, indexability, on-page, content, links, technical, sitemap, social and schema, scores the site 0–100, tracks changes between crawls and alerts on regressions. Ships as a CLI, a web app, an MCP server and a REST API.","url":"{{ base }}/","image":"{{ base }}/og.png","screenshot":"{{ base }}/og.png","downloadUrl":"https://crates.io/crates/codoseo","installUrl":"https://github.com/SafrowLabs/CodoSEO/releases","license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"brand":{"@id":"{{ base }}/#brand"},"author":{"@id":"{{ base }}/#organization"},"publisher":{"@id":"{{ base }}/#organization"},"offers":[{"@type":"Offer","name":"Free","price":"0","priceCurrency":"USD"},{"@type":"Offer","name":"Lite","price":"{{ lite_price }}","priceCurrency":"USD"},{"@type":"Offer","name":"Pro","price":"{{ pro_price }}","priceCurrency":"USD"}],"keywords":"SEO crawler, site audit, SEO monitoring, open source SEO, Rust SEO tool, technical SEO, sitemap checker, robots.txt checker, MCP server"},
+{"@type":"SoftwareApplication","@id":"{{ base }}/#app","name":"CodoSEO","alternateName":["codoseo","CodoSEO CLI"],"applicationCategory":"BusinessApplication","operatingSystem":"Web, Linux, macOS, Windows","description":"Daily SEO and AI visibility monitoring. CodoSEO checks every page of your site every day, tells you in plain English what changed, fetches your pages as the AI crawlers do, and gives you the fix to forward. Open source, with a CLI, a GitHub Action, an MCP server and a REST API.","url":"{{ base }}/","image":"{{ base }}/og.png","screenshot":"{{ base }}/og.png","downloadUrl":"https://crates.io/crates/codoseo","installUrl":"https://github.com/SafrowLabs/CodoSEO/releases","license":"https://www.gnu.org/licenses/agpl-3.0.html","isAccessibleForFree":true,"brand":{"@id":"{{ base }}/#brand"},"author":{"@id":"{{ base }}/#organization"},"publisher":{"@id":"{{ base }}/#organization"},"offers":[{"@type":"Offer","name":"Free","price":"0","priceCurrency":"USD"},{"@type":"Offer","name":"Lite","price":"{{ lite_price }}","priceCurrency":"USD"},{"@type":"Offer","name":"Pro","price":"{{ pro_price }}","priceCurrency":"USD"}],"keywords":"SEO monitoring, site audit, AI visibility, GEO, Screaming Frog alternative, AI crawler access, open source SEO, MCP server"},
 {"@type":"FAQPage","mainEntity":[
-{"@type":"Question","name":"Is CodoSEO free?","acceptedAnswer":{"@type":"Answer","text":"Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site; Lite (${{ lite_price }} a month) and Pro (${{ pro_price }} a month) add more sites and bigger, daily crawls."}},
-{"@type":"Question","name":"Do I need an account?","acceptedAnswer":{"@type":"Answer","text":"Not for the CLI or the local MCP server, and not for a one-off audit of up to {{ quick_pages }} pages in the hosted app. A free account lets you monitor a site on a schedule and get alerts."}},
-{"@type":"Question","name":"How do I install the CLI?","acceptedAnswer":{"@type":"Answer","text":"Run brew install safrowlabs/codoseo/codoseo, npx codoseo, or cargo install codoseo (Rust 1.88 or newer). Prebuilt binaries for Linux, macOS and Windows are on the GitHub releases page, and a Docker image is at ghcr.io/safrowlabs/codoseo."}},
-{"@type":"Question","name":"What does CodoSEO check?","acceptedAnswer":{"@type":"Answer","text":"{{ checks }} checks across {{ categories.len() }} categories: response codes and redirects, indexability (noindex, canonicals, robots.txt), on-page (titles, meta descriptions, H1s), content (thin and duplicate pages, image alt text), links (broken links, orphan pages, click depth), technical (HTTPS, mixed content, slow responses), sitemaps, Open Graph and structured data (JSON-LD, hreflang)."}},
-{"@type":"Question","name":"Will crawling slow down my site?","acceptedAnswer":{"@type":"Answer","text":"CodoSEO is built to be polite. It obeys robots.txt and Crawl-delay, slows down on its own when a server answers 429 or 503, and identifies itself as CodoSEObot so you can spot it in your logs."}},
-{"@type":"Question","name":"Does it work with AI assistants?","acceptedAnswer":{"@type":"Answer","text":"Yes. CodoSEO includes an MCP server. Run codoseo mcp on your machine, or connect the hosted server at {{ base }}/mcp, and Claude, Cursor or any MCP client can run audits and read the results."}},
-{"@type":"Question","name":"Can I self-host the web app?","acceptedAnswer":{"@type":"Answer","text":"Yes. Docker Compose brings it up in three commands and it needs nothing but Postgres. The self-hosting guide covers email, sign-in, reverse proxies, upgrades and backups."}}
+{"@type":"Question","name":"Do I need a developer to set this up?","acceptedAnswer":{"@type":"Answer","text":"No. Type your site's address and the first check runs in about a minute. There is no plugin to install and no code to add. You only need a developer when a fix has to be made, and CodoSEO writes that fix out for you to forward."}},
+{"@type":"Question","name":"Is CodoSEO better than Screaming Frog?","acceptedAnswer":{"@type":"Answer","text":"For watching a site, yes. Screaming Frog is desktop software you install and run by hand. CodoSEO runs in the cloud with nothing to install, checks every site you manage around the clock, emails you only what changed, and is AI-native: it fetches your pages as GPTBot, ClaudeBot and PerplexityBot, scores AI visibility and writes every fix as a prompt for a coding agent. Screaming Frog still wins for a deep one-off audit of a very large site with JavaScript rendering, so many teams use both."}},
+{"@type":"Question","name":"What does AI visibility mean?","acceptedAnswer":{"@type":"Answer","text":"Whether ChatGPT, Claude, Perplexity and the other AI products can reach and read your site. CodoSEO visits your pages the way their crawlers do, reads what your robots.txt tells them, checks your pages make sense without JavaScript, and gives you the exact rule to fix anything that shuts them out."}},
+{"@type":"Question","name":"Can I share reports with clients or my manager?","acceptedAnswer":{"@type":"Answer","text":"Yes. Every site has a score trend and a ranked list of open problems. Export any list as CSV or JSON, or give a teammate access to the site."}},
+{"@type":"Question","name":"Is CodoSEO free?","acceptedAnswer":{"@type":"Answer","text":"The free plan watches one site every week with email alerts. Lite at ${{ lite_price }} a month and Pro at ${{ pro_price }} a month add more sites, daily checks and Slack alerts. The software is open source, so a developer can also run it on your own server for nothing."}},
+{"@type":"Question","name":"Will it slow down my site?","acceptedAnswer":{"@type":"Answer","text":"No. CodoSEO obeys your robots.txt, slows down when your server is busy, and names itself CodoSEObot so your developers can spot it in the logs."}}
 ]}
 ]}
 </script>
@@ -43,520 +44,487 @@
   <symbol id="wm-o" viewBox="0 0 24 24"><g class="wo-b"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="4.2"/><circle class="wo-p" cx="13.5" cy="12.5" r="3.4" fill="#F0C42C"/></g></symbol>
 </svg>
 
-<header class="top">
-  <div class="wrap bar">
+<header class="nav">
+  <div class="wrap">
     <a href="/" class="wm brand" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
-    <nav aria-label="Primary">
-      <a href="#features">Features</a>
-      <a href="#checks">Checks</a>
-      <a href="#ai">AI agents</a>
-      <a href="/demo">Demo</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#docs">Docs</a>
-      <a href="#faq">FAQ</a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#why">Why</a><a href="#features">Features</a><a href="#checks">What we check</a><a href="#pricing">Pricing</a><a href="#compare">Compare</a><a href="#dev">For developers</a><a href="https://github.com/SafrowLabs/CodoSEO/tree/main/docs" target="_blank" rel="noopener">Docs</a>
     </nav>
-    <div class="bar-r">
-      <button class="theme" id="theme" type="button" aria-label="Theme: light. Switch to dark" title="Theme: light">
+    <div class="nav-cta">
+      <button class="theme" id="theme" type="button" aria-label="Theme: light. Switch to dark" title="Theme: light" data-umami-event="theme-toggle">
         <svg class="i-light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
         <svg class="i-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
-        <svg class="i-system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/></svg>
+        <svg class="i-system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
       </button>
-      <a class="ghost gh" href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
       {% if signed_in %}<a class="ghost" href="/app">Open app</a>{% else %}<a class="ghost" href="/login">Sign in</a>{% endif %}
-      <a class="solid" href="#audit">Start free audit</a>
+      <a class="btn btn-y" href="#audit" data-umami-event="nav-start">Start free audit</a>
     </div>
   </div>
 </header>
 
-<main>
-<section class="hero">
+
+<section class="hero" id="top">
   <div class="wrap">
-    <div>
-      <div class="pills"><span class="hot">Open source</span><span>Free plan</span><span>Written in Rust</span><span>AGPL-3.0</span></div>
-      <h1>Know the moment your <mark>SEO breaks.</mark></h1>
-      <p class="lede">CodoSEO crawls your site, runs {{ checks }} SEO checks, scores it from 0 to 100 and shows exactly what changed since the last crawl. You hear about a broken page the day it ships, not when rankings drop.</p>
+    <div class="hero-copy">
+      <div class="hero-tags"><span class="pill">Open source</span><span class="pill">SEO</span><span class="pill">GEO</span></div>
+      <h1>Find out your site broke <span class="ai">before your rankings do.</span></h1>
+      <p class="lede">CodoSEO checks every page of your site every day, tells you in plain English what changed, and gives you the fix to forward. For Google, and for ChatGPT, Claude and Perplexity.</p>
       <form class="audit-form" method="post" action="/audit">
-        <div class="audit">
-          <input id="audit" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="audit-hint"{% if error.is_some() %} aria-invalid="true" autofocus{% endif %} required>
-          <button class="btn" type="submit" data-umami-event="audit-start">Audit my site <span class="ar" aria-hidden="true">→</span></button>
-        </div>
-        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
+        <input id="audit" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="audit-hint"{% if error.is_some() %} aria-invalid="true" autofocus{% endif %} required>
+        <button class="btn btn-y" type="submit" data-umami-event="audit-start" data-umami-event-place="hero">Audit my site →</button>
       </form>
+      {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
       {% if let Some(err) = error %}<p class="err" role="alert">{{ err }}</p>{% endif %}
-      <div class="notes" id="audit-hint"><span>Free · first {{ quick_pages }} pages · no signup</span><span>Prefer the terminal? <a href="#install-options">Install the CLI</a></span></div>
-      {% if let Some(n) = pages_crawled %}<p class="crawled-count"><i class="live-dot" aria-hidden="true"></i><b id="pages-crawled" class="mono" data-poll="/stats/pages-crawled">{{ n }}</b> pages crawled so far, free audits included</p>{% endif %}
+      <p class="hero-note" id="audit-hint">Free · {{ quick_pages }} pages · takes about a minute.</p>
+      <div class="hero-proof">
+        {% if let Some(n) = pages_crawled %}<div class="live-row"><i class="live-dot"></i><b id="pages-crawled" class="mono" data-poll="/stats/pages-crawled">{{ n }}</b><span>pages audited so far</span></div>{% endif %}
+        <div><b>50+</b><span>SEO/GEO audits</span></div>
+        <div><b>12+</b><span>AI bots probed</span></div>
+      </div>
     </div>
 
     <div class="stage">
-      <div class="peek" id="peek" data-mascot="look" data-follow aria-hidden="true"></div>
-      <div class="panel shot" role="img" aria-label="Sample crawl in progress">
-        <div class="ptop">
-          <span class="url"><span data-mascot="crawl" data-small id="dot"></span>https://northwind-outdoor.com</span>
-          <span class="state" id="state">Crawling…</span>
+    <div class="peek" id="peek" aria-hidden="true"><svg class="mascot m-rest" id="peek-eyes" viewBox="4 16 56 32"><g class="m-blink"><circle class="m-ring" cx="20.5" cy="32" r="11.5"/><circle class="m-ring" cx="43.5" cy="32" r="11.5"/><g class="m-gaze"><circle class="m-pupil" cx="20.5" cy="32" r="5"/><circle class="m-pupil" cx="43.5" cy="32" r="5"/></g></g></svg></div>
+    <div class="demo" id="demo" data-step="0" aria-label="A CodoSEO audit, animated">
+      <div class="d-bar">
+        <svg class="mascot m-rest" id="d-mascot" viewBox="4 16 56 32" aria-hidden="true"><g class="m-blink"><circle class="m-ring" cx="20.5" cy="32" r="11.5"/><circle class="m-ring" cx="43.5" cy="32" r="11.5"/><g class="m-gaze"><circle class="m-pupil" cx="20.5" cy="32" r="5"/><circle class="m-pupil" cx="43.5" cy="32" r="5"/></g></g></svg>
+        <div class="d-url"><span class="typed" id="d-typed">https://codoseo.com</span><span class="caret" id="d-caret"></span></div>
+        <div class="d-status" id="d-status" data-s="idle"><i></i><span id="d-status-t">Ready</span></div>
+      </div>
+      <div class="d-body">
+        <div class="d-main">
+          <div class="d-stats">
+            <div class="d-stat"><span>Pages</span><b id="n-crawled">0</b></div>
+            <div class="d-stat"><span>Problems</span><b id="n-issues">0</b></div>
+            <div class="d-stat"><span>Bots blocked</span><b id="n-bots">0</b></div>
+          </div>
+          <div>
+            <div class="d-rows-head"><span>Address</span><span>Status</span><span>Index</span><span>Time</span></div>
+            <div class="d-rows" id="d-rows">
+              <div class="d-row"><span class="p">/</span><span class="st ok">200</span><span class="ix">indexable</span><span class="ms">182 ms</span></div>
+              <div class="d-row"><span class="p">/tents</span><span class="st ok">200</span><span class="ix">indexable</span><span class="ms">201 ms</span></div>
+              <div class="d-row"><span class="p">/pricing</span><span class="st ok">200</span><span class="ix no">noindex</span><span class="ms">164 ms</span></div>
+              <div class="d-row"><span class="p">/sale</span><span class="st rd">301</span><span class="ix">→ /deals</span><span class="ms">96 ms</span></div>
+              <div class="d-row"><span class="p">/journal/old-trail-guide</span><span class="st er">404</span><span class="ix">—</span><span class="ms">88 ms</span></div>
+              <div class="d-row"><span class="p">/journal/packing-light</span><span class="st ok">200</span><span class="ix">indexable</span><span class="ms">240 ms</span></div>
+              <div class="d-row"><span class="p">/contact</span><span class="st ok">200</span><span class="ix">indexable</span><span class="ms">150 ms</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="d-label" style="margin-bottom:8px">Checks</div>
+            <div class="d-checks" id="d-checks">
+              <span class="d-chk">Titles</span><span class="d-chk">Canonicals</span><span class="d-chk">HTTPS</span><span class="d-chk err">Broken pages <b>1</b></span><span class="d-chk">Sitemap</span><span class="d-chk warn">Hidden from Google <b>1</b></span><span class="d-chk warn">Missing descriptions <b>6</b></span><span class="d-chk">Structured data</span><span class="d-chk warn">Slow redirects <b>1</b></span><span class="d-chk">Open Graph</span><span class="d-chk">Orphan pages</span>
+            </div>
+          </div>
         </div>
-        <div class="stats">
-          <div><small>Crawled</small><b id="s-crawled">0</b></div>
-          <div><small>Queue</small><b id="s-queue">0</b></div>
-          <div><small>URL/s</small><b id="s-rate">0</b></div>
-          <div><small>Issues</small><b id="s-issues">0</b></div>
+        <div class="d-side">
+          <div>
+            <div class="d-label" style="margin-bottom:10px">Scores</div>
+            <div class="d-rings">
+              <div class="ring"><div class="ring-wrap"><svg viewBox="0 0 46 46"><circle class="bg" cx="23" cy="23" r="18"/><circle class="fg" id="r-seo" cx="23" cy="23" r="18"/></svg><b id="v-seo">–</b></div><span>SEO</span></div>
+              <div class="ring geo"><div class="ring-wrap"><svg viewBox="0 0 46 46"><circle class="bg" cx="23" cy="23" r="18"/><circle class="fg" id="r-geo" cx="23" cy="23" r="18"/></svg><b id="v-geo">–</b></div><span>GEO</span></div>
+              <div class="ring all"><div class="ring-wrap"><svg viewBox="0 0 46 46"><circle class="bg" cx="23" cy="23" r="18"/><circle class="fg" id="r-all" cx="23" cy="23" r="18"/></svg><b id="v-all">–</b></div><span>All</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="d-label" style="margin-bottom:8px">Can AI bots read it?</div>
+            <div class="d-bots" id="d-bots">
+              <div class="d-bot"><span class="n"><svg class="bl" aria-hidden="true" viewBox="0 0 24 24"><path fill="#4285F4" d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>Googlebot</span><span class="v">200 ok</span></div>
+              <div class="d-bot"><span class="n"><svg class="bl" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>GPTBot</span><span class="v">200 ok</span></div>
+              <div class="d-bot"><span class="n"><svg class="bl" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>OAI-SearchBot</span><span class="v">200 ok</span></div>
+              <div class="d-bot"><span class="n"><svg class="bl" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>ClaudeBot</span><span class="v blocked">blocked</span></div>
+              <div class="d-bot"><span class="n"><svg class="bl" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>Claude-SearchBot</span><span class="v blocked">blocked</span></div>
+              <div class="d-bot"><span class="n"><svg class="bl" aria-hidden="true" viewBox="0 0 24 24"><path fill="#1FB8CD" d="M22.3977 7.0896h-2.3106V.0676l-7.5094 6.3542V.1577h-1.1554v6.1966L4.4904 0v7.0896H1.6023v10.3976h2.8882V24l6.932-6.3591v6.2005h1.1554v-6.0469l6.9318 6.1807v-6.4879h2.8882V7.0896zm-3.4657-4.531v4.531h-5.355l5.355-4.531zm-13.2862.0676 4.8691 4.4634H5.6458V2.6262zM2.7576 16.332V8.245h7.8476l-6.1149 6.1147v1.9723H2.7576zm2.8882 5.0404v-3.8852h.0001v-2.6488l5.7763-5.7764v7.0111l-5.7764 5.2993zm12.7086.0248-5.7766-5.1509V9.0618l5.7766 5.7766v6.5588zm2.8882-5.0652h-1.733v-1.9723L13.3948 8.245h7.8478v8.087z"/></svg>PerplexityBot</span><span class="v">200 ok</span></div>
+              <div class="d-bot"><span class="n"><svg class="bl" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>Applebot</span><span class="v">200 ok</span></div>
+            </div>
+          </div>
         </div>
-        <div class="prog" id="progw"><i id="prog"></i></div>
-        <div class="row head"><span>Address</span><span>Status</span><span class="i">Indexability</span><span style="text-align:right">Time</span></div>
-        <div class="feed" id="feed"></div>
+      </div>
+      <div class="d-toast" id="d-toast"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></div><div><b>New email · CodoSEO alerts</b><span>{{ host }}: /pricing is hidden from Google · ClaudeBot blocked by your CDN · score 91 → 84</span></div></div>
+    </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="why">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">The problem, and what we do about it</span>
+      <h2>Your site breaks on a Tuesday. You hear about it in next month's traffic report.</h2>
+      <p class="lede">A developer ships a change and a page disappears from Google. A new firewall rule shuts ChatGPT out. Nobody tells the person responsible for rankings. CodoSEO checks every day and tells you the same day, with the fix to forward.</p>
+    </div>
+    <div class="story">
+      <div class="story-step">
+        <div class="when"><i></i>Tue 14:12 · deploy #482</div>
+        <div class="card sstep">
+          <div class="sart">
+            <div class="days">
+              <span>Mon</span><i class="ok"></i><span>Tue</span><i class="err"></i><span>Wed</span><i class="ok"></i><span>Thu</span><i class="ok"></i><span>Fri</span><i class="ok"></i><span>Sat</span><i class="ok"></i><span>Sun</span><i class="ok"></i>
+            </div>
+            <div class="scan">
+              <svg class="mascot m-crawling" viewBox="4 16 56 32" aria-hidden="true"><g class="m-blink"><circle class="m-ring" cx="20.5" cy="32" r="11.5"/><circle class="m-ring" cx="43.5" cy="32" r="11.5"/><g class="m-gaze"><circle class="m-pupil" cx="20.5" cy="32" r="5"/><circle class="m-pupil" cx="43.5" cy="32" r="5"/></g></g></svg>
+              <div><b>Daily check, 142 pages</b><span>Compared with Monday's crawl</span></div>
+            </div>
+            <div class="found"><em>Found</em><code>/pricing</code> is hidden from Google <b>new since yesterday</b></div>
+          </div>
+          <div class="sbody">
+            <h3>We check your site every day</h3>
+            <p>Every page, every day, without anyone remembering to run a tool. A template change hid the pricing page after the afternoon deploy. The daily check caught it the same afternoon.</p>
+          </div>
+        </div>
+      </div>
+      <div class="story-step">
+        <div class="when"><i></i>Tue 14:40 · email to you</div>
+        <div class="card sstep">
+          <div class="sart scene-inbox">
+            <div class="inbox">
+              <div class="inbox-h">Inbox <span>14:41</span></div>
+              <div class="msg"><span class="av g">N</span><div><b>Newsletter</b><span>This week in outdoor retail…</span></div><em>13:10</em></div>
+              <div class="msg hot"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><div><b>CodoSEO alerts</b><span>{{ host }}: pricing page hidden from Google</span></div><em>14:40</em><i class="unread"></i></div>
+              <div class="msg"><span class="av g">C</span><div><b>Calendar</b><span>Standup moved to 15:30</span></div><em>12:05</em></div>
+            </div>
+            <div class="open-mail">
+              <div class="om-s">Pricing page hidden from Google since today's deploy</div>
+              <div class="om-r"><span class="sev">High</span><span>/pricing now carries a noindex tag. Google will drop it within days.</span></div>
+              <div class="om-r"><span class="sev mid">Medium</span><span>/journal/old-trail-guide returns 404. Two pages still link to it.</span></div>
+              <div class="om-m">Score 91 → 84 · 2 new · 1 fixed · <u>open the fix</u></div>
+            </div>
+          </div>
+          <div class="sbody">
+            <h3>We tell you what changed and why it matters</h3>
+            <p>Not a 400-row spreadsheet. The pages that broke since yesterday, in plain English, ranked by how much they hurt.</p>
+          </div>
+        </div>
+      </div>
+      <div class="story-step">
+        <div class="when"><i></i>Tue 15:05 · forwarded to your AI agent</div>
+        <div class="card sstep">
+          <div class="sart scene-chat">
+            <div class="chat">
+              <div class="bub me"><span class="who">You → Claude Code · 15:05</span>Fix this on {{ host }} and open a PR:<code>/pricing is hidden from Google. Remove
+&lt;meta name="robots" content="noindex"&gt;
+from pricing.html.</code></div>
+              <div class="bub them"><span class="who">Claude Code · 15:09</span>Removed the tag and opened PR #918.</div>
+              <div class="sys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><b>Rechecked 16:02</b> · resolved · score 91</div>
+            </div>
+          </div>
+          <div class="sbody">
+            <h3>You forward the fix to your AI agent</h3>
+            <p>Every problem comes with the fix written out as a prompt. Paste it into Claude Code, Cursor or any coding agent, or send it to a developer, and recheck the moment it ships.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card midcta">
+      <div><b>See what Tuesday looks like on your site.</b><span>{{ quick_pages }} pages, every check, about a minute.</span></div>
+      <form class="audit-form mid" method="post" action="/audit">
+        <input id="audit-2" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" aria-label="Your site's address" required>
+        <button class="btn btn-y" type="submit" data-umami-event="audit-start" data-umami-event-place="mid">Audit my site →</button>
+      </form>
+      {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="band" id="features" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Features</span>
+      <h2>Everything you need to keep a site healthy, and prove it.</h2>
+      <p class="lede">Built for the person responsible for rankings, not the person who deploys the code.</p>
+    </div>
+    <div class="bento">
+
+      <div class="card tile wide">
+        <div class="tile-art art-map">
+          <div class="map-wrap" id="map-wrap">
+            <canvas id="map" aria-label="An interactive map of a site's pages, coloured by what is wrong"></canvas>
+            <div class="map-tip" id="map-tip" hidden></div>
+            <div class="map-stats" id="map-stats"></div><div class="map-hint">Hover a bubble to light up its links · drag to move it</div>
+          </div>
+          <div class="map-side">
+            <div class="ring big"><div class="ring-wrap"><svg viewBox="0 0 46 46"><circle class="bg" cx="23" cy="23" r="18"/><circle class="fg" cx="23" cy="23" r="18" style="stroke-dashoffset:18"/></svg><b>84</b></div><span>SEO score</span></div>
+            <div class="legend2"><span><i class="ok"></i>Indexable (lighter is deeper)</span><span><i class="hollow"></i>Noindex or canonicalised</span><span><i class="redir"></i>Redirect</span><span><i class="err"></i>Broken</span></div>
+            <div class="map-sel" id="map-sel"><span class="lbl">Selected page</span><b id="sel-url">/</b><em id="sel-note">Home. Every page below is reached from here.</em></div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <h3>Every page of your site, on one map</h3>
+          <p>Every page as a bubble, sized by how many pages link to it and coloured by what is wrong. The ones to fix first are the big ones that aren't green.</p>
+          <div class="chips"><span>Score 0 to 100</span><span>Click depth from home</span><span>Folder view</span><span>Every page searchable</span></div>
+        </div>
+      </div>
+
+      <div class="card tile">
+        <div class="tile-art art-watch">
+          <div class="days">
+            <span>Mon</span><i class="ok"></i><span>Tue</span><i class="err"></i><span>Wed</span><i class="ok"></i><span>Thu</span><i class="warn"></i><span>Fri</span><i class="ok"></i><span>Sat</span><i class="ok"></i><span>Sun</span><i class="ok"></i>
+          </div>
+          <div class="diff">
+            <div class="diff-h">Tuesday, what changed since Monday</div>
+            <div class="diff-r bad"><b>+</b><span>/pricing hidden from Google</span><em>new</em></div>
+            <div class="diff-r bad"><b>+</b><span>/journal/old-trail-guide now 404</span><em>new</em></div>
+            <div class="diff-r good"><b>−</b><span>Missing H1 on /tents</span><em>fixed</em></div>
+          </div>
+          <div class="mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>Sent to you at 14:40</div>
+        </div>
+        <div class="tile-body">
+          <h3>Watches every day, tells you what changed</h3>
+          <p>Not a 400-row spreadsheet. Only the difference since yesterday, by email, Slack or webhook, the day it happens.</p>
+          <div class="chips"><span>Daily checks</span><span>Only what changed</span><span>Up to 10 sites</span></div>
+        </div>
+      </div>
+
+      <div class="card tile">
+        <div class="tile-art art-ai">
+          <div class="reach-key"><span class="k ok">Allowed</span><span class="k err">Blocked, costs reach</span><span class="k n"><b>3</b> of 4 answer engines can read you</span></div><svg class="reach" viewBox="0 0 560 204" aria-hidden="true"><rect class="site" x="0" y="62" width="150" height="80" rx="10"/><text class="site-t" x="14" y="86">{{ host }}</text><text class="site-s" x="14" y="106">robots.txt · 2 rules</text><text class="site-s bad" x="14" y="124">CDN · blocks 1 bot</text><path class="ln ok" d="M150 102 C 174 102, 174 32, 196 32"/><path class="ln ok" d="M338 32 C 366 32, 366 32, 392 32"/><g class="pill"><rect x="196" y="20" width="142" height="24" rx="12"/><circle class="ok" cx="211" cy="32" r="3.5"/><text x="222" y="36">OAI-SearchBot</text></g><g class="eng ok"><circle cx="410" cy="32" r="16"/><g transform="translate(401 23) scale(.75)"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></g><text class="eng-n" x="434" y="31">ChatGPT</text><text class="eng-v ok" x="434" y="45">reachable</text></g><path class="ln err" d="M150 102 C 174 102, 174 78, 196 78"/><path class="ln err" d="M338 78 C 366 78, 366 78, 392 78"/><g class="pill"><rect x="196" y="66" width="142" height="24" rx="12"/><circle class="err" cx="211" cy="78" r="3.5"/><text x="222" y="82">Claude-SearchBot</text></g><g class="eng err"><circle cx="410" cy="78" r="16"/><g transform="translate(401 69) scale(.75)"><path fill="currentColor" d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></g><text class="eng-n" x="434" y="77">Claude</text><text class="eng-v err" x="434" y="91">blocked by CDN</text></g><path class="ln ok" d="M150 102 C 174 102, 174 124, 196 124"/><path class="ln ok" d="M338 124 C 366 124, 366 124, 392 124"/><g class="pill"><rect x="196" y="112" width="142" height="24" rx="12"/><circle class="ok" cx="211" cy="124" r="3.5"/><text x="222" y="128">PerplexityBot</text></g><g class="eng ok"><circle cx="410" cy="124" r="16"/><g transform="translate(401 115) scale(.75)"><path fill="#1FB8CD" d="M22.3977 7.0896h-2.3106V.0676l-7.5094 6.3542V.1577h-1.1554v6.1966L4.4904 0v7.0896H1.6023v10.3976h2.8882V24l6.932-6.3591v6.2005h1.1554v-6.0469l6.9318 6.1807v-6.4879h2.8882V7.0896zm-3.4657-4.531v4.531h-5.355l5.355-4.531zm-13.2862.0676 4.8691 4.4634H5.6458V2.6262zM2.7576 16.332V8.245h7.8476l-6.1149 6.1147v1.9723H2.7576zm2.8882 5.0864v-5.8831l5.0902-5.0867v6.2626l-5.0902 4.7072zm11.5674 0-5.0902-4.7072v-6.2626l5.0902 5.0867v5.8831zm4.0276-5.0864h-1.7327v-1.9723l-6.1149-6.1147h7.8476v8.087z"/></g><text class="eng-n" x="434" y="123">Perplexity</text><text class="eng-v ok" x="434" y="137">reachable</text></g><path class="ln ok" d="M150 102 C 174 102, 174 170, 196 170"/><path class="ln ok" d="M338 170 C 366 170, 366 170, 392 170"/><g class="pill"><rect x="196" y="158" width="142" height="24" rx="12"/><circle class="ok" cx="211" cy="170" r="3.5"/><text x="222" y="174">Googlebot</text></g><g class="eng ok"><circle cx="410" cy="170" r="16"/><g transform="translate(401 161) scale(.75)"><path fill="#4285F4" d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></g><text class="eng-n" x="434" y="169">Google & AI Overviews</text><text class="eng-v ok" x="434" y="183">reachable</text></g></svg>
+          <div class="fixline"><b>Fix:</b> <code>allow "Claude-SearchBot" in the CDN bot rule</code></div>
+        </div>
+        <div class="tile-body">
+          <h3>Can ChatGPT, Claude and Perplexity read your site?</h3>
+          <p>Your rules on the left, each crawler in the middle, the answer engine it feeds on the right. We fetch as every bot, so a CDN block shows up too, with the rule to fix it.</p>
+          <div class="chips"><span>12 AI bots</span><span>robots.txt and llms.txt</span><span>Content without JavaScript</span></div>
+        </div>
+      </div>
+
+      <div class="card tile wide">
+        <div class="tile-art art-report">
+          <svg class="trend" viewBox="0 0 640 150" aria-hidden="true" preserveAspectRatio="none">
+            <defs><linearGradient id="tg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#F0C42C" stop-opacity=".35"/><stop offset="1" stop-color="#F0C42C" stop-opacity="0"/></linearGradient></defs>
+            <g class="grid"><line x1="0" x2="640" y1="30" y2="30"/><line x1="0" x2="640" y1="75" y2="75"/><line x1="0" x2="640" y1="120" y2="120"/></g>
+            <path class="area" d="M16 86 L96 80 L176 90 L256 118 L336 112 L416 72 L496 58 L616 34 L616 146 L16 146 Z"/>
+            <path class="line" d="M16 86 L96 80 L176 90 L256 118 L336 112 L416 72 L496 58 L616 34"/>
+            <circle class="pt" cx="256" cy="118" r="5"/>
+            <circle class="pt end" cx="616" cy="34" r="6"/>
+          </svg>
+          <div class="trend-labels"><span class="l1">84 · Tuesday's deploy</span><span class="l2">91 · today</span></div>
+          <div class="report-row">
+            <div class="open"><b>6</b> open problems, ranked by impact</div>
+            <div class="export"><span>Export</span><code>CSV</code><code>JSON</code></div>
+          </div>
+        </div>
+        <div class="tile-body side">
+          <h3>Proof you can send to a client or your manager</h3>
+          <p>A year of score history and a ranked list of what's still open. Export any list, or give a teammate access.</p>
+          <div class="chips"><span>365 days of history</span><span>CSV and JSON</span><span>Team access</span></div>
+        </div>
+      </div>
+
+    </div>
+    <div class="feat-more">
+      <div><b>Nothing to install.</b> Type a site address. The first check runs in about a minute.</div>
+      <div><b>Fix, recheck, done.</b> Each finding has the fix written out. Recheck it without waiting for tomorrow.</div>
+      <div><b>Polite to your site.</b> Obeys robots.txt, slows down when your server is busy, names itself CodoSEObot.</div>
+    </div>
+  </div>
+</section>
+
+<section class="band checks" id="checks">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">What we check</span>
+      <h2>The things that hurt rankings. And the ones that hide you from AI answers.</h2>
+      <p class="lede">Each check names the pages behind it. Serious problems cost more points, and a problem on every page costs more than one on a single page, so the score reflects what actually matters.</p>
+    </div>
+    <div class="check-cols">
+      <div class="card check-card">
+        <h3>SEO checks</h3>
+        <div class="cats">
+          <div class="cat"><b>Response</b><ul><li class="r">4xx and 5xx errors</li><li class="r">Fetch failures</li><li class="r">Redirect loops</li><li class="a">Redirect chains</li></ul></div>
+          <div class="cat"><b>Indexability</b><ul><li class="r">robots.txt blocking the site</li><li class="a">Pages blocked by robots.txt</li><li class="a">Canonical to non-200</li><li>Noindex, missing canonicals</li></ul></div>
+          <div class="cat"><b>On-page</b><ul><li class="a">Missing or duplicate titles</li><li class="a">Missing or duplicate descriptions</li><li class="a">Missing H1s</li><li>Length violations</li></ul></div>
+          <div class="cat"><b>Content</b><ul><li class="a">Duplicate content</li><li>Thin pages under 200 words</li><li>Missing image alt text</li></ul></div>
+          <div class="cat"><b>Links</b><ul><li class="a">Broken links</li><li class="a">Orphan pages</li><li>Links to redirects</li><li>Deep pages</li></ul></div>
+          <div class="cat"><b>Technical</b><ul><li class="a">HTTP instead of HTTPS</li><li class="a">Mixed content</li><li>Slow responses</li></ul></div>
+          <div class="cat"><b>Sitemap</b><ul><li class="a">Sitemap pages not 200</li><li class="a">Sitemap pages that are noindex</li><li>Pages missing from the sitemap</li></ul></div>
+          <div class="cat"><b>Social</b><ul><li>Missing Open Graph title or image</li></ul></div>
+          <div class="cat"><b>Schema</b><ul><li class="a">Invalid JSON-LD</li><li>hreflang missing self-reference</li></ul></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--red)"></i>Critical</span><span><i style="background:var(--amber)"></i>Warning</span><span><i style="background:var(--ink-3)"></i>Notice</span><span>Plus your site policy's own rules, when you declare them.</span></div>
+      </div>
+      <div class="card check-card">
+        <h3>AI visibility checks</h3>
+        <div class="geo-list"><ul>
+          <li><span class="pt">70 pts</span><span><b>Can AI products reach and read it?</b> Your robots.txt loads · the AI search bots you want are allowed in · no page tells AI engines to leave it out of answers · a visit as each bot is not blocked or challenged · your important pages make sense without JavaScript</span></li>
+          <li><span class="pt">30 pts</span><span><b>Is it easy for AI to understand?</b> Structured data is valid · the sitemap works · an llms.txt exists · robots.txt says what AI may do with your content · a plain-text version is available for AI agents</span></li>
+        </ul></div>
+        <div>
+          <div class="eyebrow" style="margin-bottom:10px">Bots probed</div>
+          <div class="bots"><code>GPTBot</code><code>OAI-SearchBot</code><code>ChatGPT-User</code><code>ClaudeBot</code><code>Claude-SearchBot</code><code>Claude-User</code><code>PerplexityBot</code><code>Perplexity-User</code><code>Googlebot</code><code>Bingbot</code><code>Applebot</code><code>DuckAssistBot</code></div>
+        </div>
+        <p class="fine">Your choices never cost points. A bot you chose to block is not a failure.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="blk wrap reveal" id="product">
-  <div class="shead">
-    <div><div class="eyebrow">One engine, four ways in</div><h2>Audit from a browser, a terminal or a chat.</h2></div>
-    <p>The same crawler and the same {{ checks }} checks power the web app, the CLI, the MCP server and the REST API. A finding means the same thing wherever you see it.</p>
-  </div>
-  <div class="ways mt">
-    <a class="way" href="{% if signed_in %}/app{% else %}/login{% endif %}">
-      <span class="way-k">Web app</span>
-      <h3>Monitor the sites you care about</h3>
-      <p>Scheduled crawls, a URL explorer, change tracking and alerts. Use the hosted app or run it on your own servers.</p>
-      <code>{{ host }}</code>
-    </a>
-    <a class="way" href="#cli">
-      <span class="way-k">CLI</span>
-      <h3>One binary for audits and CI</h3>
-      <p>Crawl a site, inspect a page, follow a redirect chain or compare two audits. No account and no API key.</p>
-      <code>codoseo crawl &lt;URL&gt;</code>
-    </a>
-    <a class="way" href="#ai">
-      <span class="way-k">MCP server</span>
-      <h3>Give your AI agent an SEO crawler</h3>
-      <p>Claude, Cursor and other MCP clients can audit a site, list the pages behind an issue and compare crawls.</p>
-      <code>codoseo mcp</code>
-    </a>
-    <a class="way" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener">
-      <span class="way-k">REST API</span>
-      <h3>Your audits as JSON</h3>
-      <p>Read health scores, failing pages and changes for your monitored sites, or queue a crawl, with one API key.</p>
-      <code>GET /api/v1/sites</code>
-    </a>
-  </div>
-</section>
-
-<section class="blk wrap reveal" id="features">
-  <div class="shead">
-    <div><div class="eyebrow">Features</div><h2>Everything you need to keep a site healthy.</h2></div>
-    <p>Crawl, score, compare and alert. CodoSEO finds what broke, names the pages behind it and tells you when it happened.</p>
-  </div>
-  <div class="feats mt">
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h6"/><path d="m15 17.5 2.2 2.2 4.3-4.4"/></svg></span>
-      <h3>{{ checks }} SEO checks</h3>
-      <p>Status codes, indexability, titles and descriptions, content, links, HTTPS, sitemaps, Open Graph and structured data.</p>
+<section class="band" id="pricing" style="background:var(--bg-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Pricing</span>
+      <h2>Start free. Watch every site you manage from ${{ lite_price }}.</h2>
+      <p class="lede">Less than one hour of an SEO consultant's time a month. Cancel any time.</p>
     </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 17 4.2-5"/></svg></span>
-      <h3>Health score from 0 to 100</h3>
-      <p>Each check is weighted by severity and by how many pages it affects, so one number tells you where a site stands.</p>
-    </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v13M3.5 13.5 7 17l3.5-3.5"/><path d="M17 20V7M13.5 10.5 17 7l3.5 3.5"/></svg></span>
-      <h3>Change tracking</h3>
-      <p>Every crawl is compared with the one before: new and fixed issues, status codes, titles and redirect chains that changed.</p>
-    </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
-      <h3>Scheduled crawls</h3>
-      <p>Crawl every week or every day. The hosted app runs them for you, so nothing has to stay switched on.</p>
-    </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></span>
-      <h3>Alerts where you work</h3>
-      <p>Get told about regressions by email, Slack, Discord or webhook, the same day the broken change goes live.</p>
-    </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span>
-      <h3>URL explorer</h3>
-      <p>Filter every crawled URL by status, indexability, content type or check. See a SERP preview, inlinks and headers.</p>
-    </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7 10 3 2.5L7 15M12.5 15H17"/></svg></span>
-      <h3>CI gates</h3>
-      <p><code class="k">--fail-on critical</code> fails the build when a deploy breaks SEO. Works in GitHub Actions, GitLab CI or any shell.</p>
-    </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 5 6.2v5.3c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6.2z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg></span>
-      <h3>Polite by default</h3>
-      <p>Obeys robots.txt and Crawl-delay, backs off on 429 and 503, and identifies itself as <a href="/bot">CodoSEObot</a>.</p>
-    </div>
-    <div class="feat">
-      <span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></svg></span>
-      <h3>Self-host in three commands</h3>
-      <p>The web app needs only Postgres: no Redis and no outside requests. Your crawl data stays on your servers.</p>
-    </div>
-  </div>
-</section>
-
-<section class="blk wrap reveal" id="checks">
-  <div class="shead">
-    <div><div class="eyebrow">Site audit</div><h2>{{ checks }} checks after every crawl.</h2></div>
-    <p>Each check passes or fails and names the pages behind it. Results roll up into a health score from 0 to 100, weighted by severity and by how many pages are affected.</p>
-  </div>
-  <div class="cats mt">
-    {%- for c in categories %}
-    <div class="cat"><div class="ch"><h3>{{ c.name }}</h3><span class="n">{{ c.count }} check{% if c.count != 1 %}s{% endif %}</span></div><ul>{% for h in c.highlights %}<li class="{{ h.severity }}">{{ h.label }}</li>{% endfor %}</ul></div>
-    {%- endfor %}
-  </div>
-  <div class="legend"><span class="r">Critical</span><span class="a">Warning</span><span class="n0">Notice</span><a href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener">Full check reference →</a></div>
-</section>
-
-<section class="blk wrap reveal" id="cli">
-  <div class="shead">
-    <div><div class="eyebrow">The CLI</div><h2>Point it at a URL. Read what's broken.</h2></div>
-    <p>One command crawls the site, runs every check and prints a report. Output is a table, JSON, Markdown or CSV, so you can read it, pipe it into <code class="k">jq</code> or save it as a file.</p>
-  </div>
-  <div class="panel term mt">
-    <div class="tabs"><span>codoseo crawl https://example.com --format md</span></div>
-<pre><span class="c-dim">Preflight … ok
-Crawling  ━━━━━━━━━━━━━━━━━━━━  142 pages  28s</span>
-
-<b># CodoSEO report for https://example.com/</b>
-
-- <b>Health score:</b> <span class="c-g"><b>84 / 100</b></span>
-- <b>Checks:</b> {{ checks - 7 }} of {{ checks }} checks passed
-
-<span class="c-r"><b>## Critical (1)</b></span>
-<span class="c-dim">| Check                      | Slug                 | Affected | Examples                   |</span>
-| <span class="c-r">Page returns a 4xx error</span>   | <span class="c-l">http_4xx</span>             | 1 page   | /old-page                  |
-
-<span class="c-a"><b>## Warning (2)</b></span>
-| <span class="c-a">Page links to a broken URL</span> | <span class="c-l">links_to_broken</span>      | 1 page   | /contact                   |
-| <span class="c-a">Meta description is missing</span> | <span class="c-l">description_missing</span>  | 6 pages  | /blog/…                    |
-
-<b>## Summary</b>
-- Pages: <span class="c-g"><b>142</b></span> <span class="c-dim">(138 indexable)</span>
-- Status: <span class="c-g">2xx 138</span> <span class="c-dim">· 3xx 3 ·</span> <span class="c-r">4xx 1</span> <span class="c-dim">· 5xx 0</span>
-- Avg response: <span class="c-g">210 ms</span></pre>
-  </div>
-  <div class="cmds">
-    <code>codoseo check &lt;URL&gt;</code><code>codoseo robots &lt;URL&gt;</code><code>codoseo redirects &lt;URL&gt;</code><code>codoseo diff before.json after.json</code>
-  </div>
-</section>
-
-<section class="blk wrap reveal" id="diff">
-  <div class="band">
-    <div>
-      <h2>Crawl again tomorrow and see the diff.</h2>
-      <p>Every crawl is compared with the last one. In the web app it happens on its own; on the command line, <code class="k">codoseo diff</code> compares any two saved audits. New issues, resolved issues, score changes, status changes, title changes and redirect regressions.</p>
-    </div>
-    <div class="panel">
-      <div class="dhead"><span>before.json → after.json</span><span>Score 84 → 79</span></div>
-      <div class="diff r"><div class="t">Became noindex <em>/pricing</em></div><div class="l"><div>− meta robots: index, follow</div><div class="c-r">+ meta robots: noindex</div></div></div>
-      <div class="diff r"><div class="t">Status changed <em>/journal/old-trail-guide</em></div><div class="l"><div>− 200 OK</div><div class="c-r">+ 404 Not Found</div></div></div>
-      <div class="diff a"><div class="t">Title changed <em>/tents</em></div><div class="l"><div>− Tents &amp; Shelters | Northwind Outdoor</div><div class="c-a">+ Tents</div></div></div>
-      <div class="diff a"><div class="t">Redirect chain grew <em>/sale</em></div><div class="l"><div>− /sale → /deals</div><div class="c-a">+ /sale → /deals → /offers → /</div></div></div>
-    </div>
-  </div>
-</section>
-
-<section class="blk wrap reveal" id="ci">
-  <div class="split">
-    <div>
-      <div class="eyebrow">CI/CD</div>
-      <h2>Fail the build before rankings drop.</h2>
-      <p>CodoSEO is one static binary with no browser and no config file, so it drops into any pipeline. <code class="k">--fail-on critical</code> exits with code 1 when the threshold is reached.</p>
-      <div class="facts">
-        <div><b>Fast and polite</b><span>Async crawling in Rust that still respects robots.txt and Crawl-delay, and backs off on 429 and 503.</span></div>
-        <div><b>Exit codes for CI</b><span>Gate a deploy on <code class="k">critical</code> or <code class="k">warning</code> findings, for crawls and for diffs.</span></div>
-        <div><b>Plain output</b><span>Table, JSON, Markdown and CSV. Audit files are portable and diffable.</span></div>
-        <div><b>Embed the crates</b><span>Core, crawler, checks and diff are published separately for your own Rust projects.</span></div>
-      </div>
-    </div>
-    <div class="panel term">
-      <div class="tabs"><span>.github/workflows/seo.yml</span></div>
-<pre><span class="c-y">- name:</span> SEO audit
-  <span class="c-y">run:</span> |
-    cargo install codoseo
-    codoseo crawl {% raw %}${{ env.SITE_URL }}{% endraw %} \
-      --format json -o audit.json \
-      --fail-on critical
-
-<span class="c-dim"># later: compare against the last release</span>
-<span class="c-y">- name:</span> SEO diff
-  <span class="c-y">run:</span> codoseo diff before.json audit.json --fail-on critical</pre>
-    </div>
-  </div>
-</section>
-
-<section class="blk wrap reveal" id="ai">
-  <div class="split">
-    <div class="panel term">
-      <div class="tabs"><span>Claude Code</span></div>
-<pre><span class="c-dim"># run it on your machine, no account</span>
-claude mcp add codoseo -- npx -y codoseo mcp
-
-<span class="c-dim"># or connect the hosted server</span>
-claude mcp add --transport http codoseo \
-  {{ base }}/mcp
-
-<span class="c-y">&gt;</span> Audit example.com and list the pages
-  with broken links.</pre>
-    </div>
-    <div>
-      <div class="eyebrow">For AI agents</div>
-      <h2>Ask your agent to audit the site.</h2>
-      <p>CodoSEO ships an MCP server, so Claude, Cursor or any MCP client can crawl a site, pull the pages behind an issue, check a redirect chain and compare two audits from a single prompt.</p>
-      <div class="facts">
-        <div><b>Local, no account</b><span><code class="k">codoseo mcp</code> runs over stdio on your machine and can reach staging and internal hosts.</span></div>
-        <div><b>Hosted for your sites</b><span>Connect <code class="k">{{ host }}/mcp</code> with an API key to ask about the sites you monitor.</span></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="blk wrap reveal" id="pricing">
-  <div class="shead">
-    <div><div class="eyebrow">Pricing</div><h2>Start free. Pay when you need more.</h2></div>
-    <p>The hosted free plan monitors one site. Lite and Pro add sites, daily crawls up to 10,000 pages per site, and alerts in Slack, Discord or a webhook. The CLI, the MCP server and the self-hosted web app are free and open source.</p>
-  </div>
-  <div class="prices mt">
-    <div class="price">
-      <div class="ph"><h3>Free</h3><span class="tag ship">Hosted</span></div>
-      <div class="amt"><b>$0</b><span>forever</span></div>
-      <p>Weekly monitoring for one site.</p>
-      <ul>
+    <div class="plans">
+      <div class="card plan">
+        <h3>Free <small>Hosted</small></h3>
+        <div class="price"><b>$0</b><span>forever</span></div>
+        <p class="for">For one site you own. Checked every week, plus every free audit you want.</p>
+        <ul>
         {%- for f in free %}
-        <li>{{ f }}</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>{{ f }}</span></li>
         {%- endfor %}
-      </ul>
-      {% if signed_in %}<a class="btn" href="/app">Open app <span class="ar" aria-hidden="true">→</span></a>{% else %}<a class="btn" href="/login" data-umami-event="signup-free">Create a free account <span class="ar" aria-hidden="true">→</span></a>{% endif %}
-    </div>
-    <div class="price hl">
-      <div class="ph"><h3>Lite</h3><span class="tag ship">Hosted</span></div>
-      <div class="amt"><b>${{ lite_price }}</b><span>a month</span></div>
-      <p>Daily monitoring for a handful of sites.</p>
-      <ul>
+        </ul>
+        {% if signed_in %}<a class="btn btn-ghost" href="/app">Open app</a>{% else %}<a class="btn btn-ghost" href="/login" data-umami-event="signup-free">Create a free account</a>{% endif %}
+      </div>
+      <div class="card plan">
+        <h3>Lite <small>Hosted</small></h3>
+        <div class="price"><b>${{ lite_price }}</b><span>a month</span></div>
+        <p class="for">For a freelancer or small team with a few sites. Checked every day, alerts in Slack.</p>
+        <ul>
         {%- for f in lite %}
-        <li>{{ f }}</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>{{ f }}</span></li>
         {%- endfor %}
-      </ul>
-      {%- if billing %}
-      <a class="btn" href="/billing" data-umami-event="choose-lite">Choose Lite <span class="ar" aria-hidden="true">→</span></a>
-      {%- else %}
-      <span class="btn dis" aria-disabled="true">Checkout opens soon</span>
-      {%- endif %}
-    </div>
-    <div class="price">
-      <div class="ph"><h3>Pro</h3><span class="tag ship">Hosted</span></div>
-      <div class="amt"><b>${{ pro_price }}</b><span>a month</span></div>
-      <p>More sites, bigger crawls, no manual crawl cap.</p>
-      <ul>
+        </ul>
+        {% if billing %}<a class="btn btn-ink" href="/billing" data-umami-event="choose-lite">Choose Lite</a>{% else %}<span class="btn dis">Checkout opens soon</span>{% endif %}
+      </div>
+      <div class="card plan hot">
+        <span class="tag">Most popular</span>
+        <h3>Pro <small>Hosted</small></h3>
+        <div class="price"><b>${{ pro_price }}</b><span>a month</span></div>
+        <p class="for">For an agency or in-house team with up to 10 sites. Bigger sites, re-check whenever you like.</p>
+        <ul>
         {%- for f in pro %}
-        <li>{{ f }}</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>{{ f }}</span></li>
         {%- endfor %}
-      </ul>
-      {%- if billing %}
-      <a class="btn out" href="/billing" data-umami-event="choose-pro">Choose Pro <span class="ar" aria-hidden="true">→</span></a>
-      {%- else %}
-      <span class="btn dis" aria-disabled="true">Checkout opens soon</span>
-      {%- endif %}
+        </ul>
+        {% if billing %}<a class="btn btn-y" href="/billing" data-umami-event="choose-pro">Choose Pro</a>{% else %}<span class="btn dis">Checkout opens soon</span>{% endif %}
+      </div>
+      <div class="card plan">
+        <h3>Self-hosted <small>Open source</small></h3>
+        <div class="price"><b>$0</b><span>+ a server</span></div>
+        <p class="for">For teams with a developer who wants it on their own server. Every feature, no caps.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Unlimited sites</b>, 100,000 pages a crawl</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Daily crawls, unlimited manual</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>All alerts, no API limit</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Your data on your servers</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Docker Compose and Postgres</span></li>
+        </ul>
+        <a class="btn btn-ghost" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener" data-umami-event="plan-selfhost">Self-host guide</a>
+      </div>
     </div>
-    <div class="price soon">
-      <div class="ph"><h3>Enterprise</h3><span class="tag plan">Custom</span></div>
-      <div class="amt"><b class="tbd">Contact us</b></div>
-      <p>Need more than Pro? Tell us about your sites.</p>
-      <ul>
-        <li>More sites than Pro</li>
-        <li>Larger or longer crawls</li>
-        <li>Terms that fit your team</li>
-      </ul>
-      <a class="btn out" href="mailto:contact@codoseo.com" data-umami-event="contact-enterprise">contact@codoseo.com</a>
-    </div>
+    <p class="pricing-note">Need more than Pro? Write to <a href="mailto:{{ crate::routes::legal::CONTACT }}">{{ crate::routes::legal::CONTACT }}</a>. Every paid plan is month to month, cancel any time.</p>
   </div>
-  {#- Hosted vs self-hosted: every number comes from the table in routes/landing.rs. #}
-  <div class="sh mt" id="self-host">
-    <h3>Hosted or self-hosted?</h3>
-    <p class="sh-lead">Self-hosting is the same app with every feature, free under AGPL-3.0, with no plan caps and your data on your machines. You pay for the server and run it yourself.</p>
-    <div class="sh-cards">
-      <div class="sh-card">
-        <div class="ph"><h4>Hosted</h4><span class="tag ship">Lite ${{ lite_price }} · Pro ${{ pro_price }}</span></div>
-        <p>The crawler, alerts, backups and upgrades are run for you. Your time: none.</p>
-      </div>
-      <div class="sh-card">
-        <div class="ph"><h4>Self-hosted</h4><span class="tag plan">Software $0</span></div>
-        <p>A server for {{ selfhost.lite_size }} costs {{ selfhost.lite_range }} a month, and for {{ selfhost.pro_size }} {{ selfhost.pro_range }}, plus backups. Your time: about an hour a month.</p>
-      </div>
+</section>
+
+<section class="band compare" id="compare">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Compared</span>
+      <h2>Screaming Frog audits. CodoSEO watches.</h2>
+      <p class="lede">Keep Screaming Frog for the big quarterly audit. CodoSEO is for the other 89 days: it checks on its own, tells you what changed, and watches the AI crawlers nobody else checks.</p>
     </div>
-    <div class="sh-scroll">
-      <table class="sh-table">
-        <caption>Cheapest VPS that fits, per month before tax, as of {{ selfhost.as_of }}</caption>
-        <thead><tr><th scope="col">Provider</th><th scope="col">Lite size (2 GB+)</th><th scope="col">Pro size (4 GB+)</th></tr></thead>
+    <div class="cmp-wrap">
+      <table class="cmp">
+        <thead><tr><th>&nbsp;</th><th class="us">CodoSEO</th><th>Screaming Frog</th><th>Sitebulb</th><th>Ahrefs Site Audit</th><th>Semrush Site Audit</th></tr></thead>
         <tbody>
-          {%- for r in selfhost.vps %}
-          <tr>
-            <th scope="row">{{ r.provider }}{% if !r.refs.is_empty() %}<sup>{% for n in r.refs %}{% if !loop.first %},{% endif %}<a href="#sh-src-{{ n }}">{{ n }}</a>{% endfor %}</sup>{% endif %}{% if !r.note.is_empty() %}<small>{{ r.note }}</small>{% endif %}</th>
-            <td><b>{{ r.lite.price }}</b><small>{{ r.lite.plan }}: {{ r.lite.spec }}</small></td>
-            <td><b>{{ r.pro.price }}</b><small>{{ r.pro.plan }}: {{ r.pro.spec }}</small></td>
-          </tr>
-          {%- endfor %}
+          <tr><td>Price to watch 5 sites, per month</td><td class="us">${{ lite_price }}</td><td>$279 a year per person<small>desktop software</small></td><td>Cloud from £95<small>2 people minimum</small></td><td>$129</td><td>$139</td></tr>
+          <tr><td>Checks your sites on its own, every day</td><td class="us"><span class="y">Yes</span></td><td><span class="p">Only if your computer stays on</span></td><td><span class="p">Cloud plan only</span></td><td><span class="y">Yes</span></td><td><span class="y">Yes</span></td></tr>
+          <tr><td>Tells you what changed since yesterday</td><td class="us"><span class="y">Yes</span>, every day</td><td><span class="p">You compare two crawls yourself</span></td><td><span class="p">Pro plan</span></td><td><span class="y">Yes</span></td><td><span class="y">Yes</span></td></tr>
+          <tr><td>Alerts in Slack</td><td class="us"><span class="y">Yes</span>, plus email, Discord, webhook</td><td><span class="p">Email</span></td><td><span class="p">Email</span></td><td><span class="p">Email</span></td><td><span class="p">Email</span></td></tr>
+          <tr><td>The fix written out, ready to forward</td><td class="us"><span class="y">Yes</span>, per finding</td><td><span class="n">No</span></td><td><span class="p">Hints and guides</span></td><td><span class="p">How-to articles</span></td><td><span class="p">How-to articles</span></td></tr>
+          <tr><td>Checks whether ChatGPT, Claude and Perplexity can read your site</td><td class="us"><span class="y">Yes</span>, every major AI bot, with the cause</td><td><span class="n">No</span></td><td><span class="n">No</span></td><td><span class="n">No</span></td><td><span class="n">No</span></td></tr>
+          <tr><td>Needs a developer or a desktop install</td><td class="us"><span class="y">No</span>, type a site address</td><td><span class="p">Desktop install, learning curve</span></td><td><span class="p">Desktop install</span></td><td><span class="y">No</span></td><td><span class="y">No</span></td></tr>
+          <tr><td>Free plan</td><td class="us"><span class="y">Yes</span>, one site, every week</td><td><span class="p">500 pages, no scheduling</span></td><td><span class="n">14-day trial</span></td><td><span class="p">Limited</span></td><td><span class="p">Limited</span></td></tr>
+          <tr><td>Open source</td><td class="us"><span class="y">Yes</span></td><td><span class="n">No</span></td><td><span class="n">No</span></td><td><span class="n">No</span></td><td><span class="n">No</span></td></tr>
         </tbody>
       </table>
     </div>
-    <dl class="sh-other">
-      {%- for c in selfhost.other %}
-      <div><dt>{{ c.item }}</dt><dd>{{ c.cost }}{% if !c.refs.is_empty() %}<sup>{% for n in c.refs %}{% if !loop.first %},{% endif %}<a href="#sh-src-{{ n }}">{{ n }}</a>{% endfor %}</sup>{% endif %}</dd></div>
-      {%- endfor %}
-    </dl>
-    <p class="fine"><b>The honest version:</b> a small VPS undercuts Lite and Pro on price. What hosted buys is the setup and the hour a month, with the managed crawler, alerts and backups included. <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Self-host guide</a>.</p>
-    <ol class="sh-notes" aria-label="Sources, prices as of {{ selfhost.as_of }}">
-      {%- for f in selfhost.notes %}
-      <li id="sh-src-{{ f.n }}"><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.label }}</a>, as of {{ selfhost.as_of }}</li>
-      {%- endfor %}
-    </ol>
+    <p class="fine">From each vendor's public pricing and feature pages, November 2026. Screaming Frog and Sitebulb go deeper in a one-off audit and render JavaScript. For developers, CodoSEO also includes a command line, a GitHub Action, an MCP server, an API and self-hosting. Got a correction? <a href="https://github.com/SafrowLabs/CodoSEO/issues">Open an issue</a>.</p>
   </div>
-  <p class="fine">Want to try it first? Run a one-off audit of up to {{ quick_pages }} pages <a href="#audit">from the box at the top</a>, no signup needed. The CLI is free and has no page cap of its own.</p>
 </section>
 
-<section class="blk wrap reveal" id="docs">
-  <div class="shead">
-    <div><div class="eyebrow">Documentation</div><h2>Up and running in minutes.</h2></div>
-    <p>Guides for every way to run CodoSEO, from a first crawl to a self-hosted install. The docs live with the code on GitHub.</p>
-  </div>
-  <div class="docs mt">
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#quick-start" target="_blank" rel="noopener"><b>Quick start</b><span>Your first crawl, a saved audit and a diff.</span></a>
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#commands" target="_blank" rel="noopener"><b>CLI reference</b><span>Every command and flag, with defaults.</span></a>
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#the-44-seo-checks" target="_blank" rel="noopener"><b>Check reference</b><span>All {{ checks }} checks with severity and slug.</span></a>
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO#ci-integration" target="_blank" rel="noopener"><b>CI integration</b><span>Exit codes, baselines and a GitHub Actions example.</span></a>
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md" target="_blank" rel="noopener"><b>MCP server</b><span>Connect Claude, Cursor and other MCP clients.</span></a>
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener"><b>REST API</b><span>Sites, issues, pages and changes as JSON.</span></a>
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener"><b>Self-hosting</b><span>Docker Compose, email, sign-in, upgrades and backups.</span></a>
-    <a class="doc" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/configuration.md" target="_blank" rel="noopener"><b>Configuration</b><span>Every environment variable for the web app.</span></a>
-  </div>
-  <div class="get mt" id="install-options">
-    <div>
-      <h3>Install the CLI your way</h3>
-      <p>Prebuilt binaries for Linux, macOS and Windows are on the releases page, each with a checksum. Every crate is on crates.io, so you can embed the crawler or the checks in your own project.</p>
-      <div class="crates">
-        <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">Releases</a>
-        <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">codoseo</a>
-        <a href="https://crates.io/crates/codoseo-core" target="_blank" rel="noopener">codoseo-core</a>
-        <a href="https://crates.io/crates/codoseo-crawler" target="_blank" rel="noopener">codoseo-crawler</a>
+<section class="band" id="dev" style="padding-bottom:0">
+  <div class="wrap">
+    <div class="card dev">
+      <div class="dev-copy">
+        <span class="eyebrow">For developers and AI agents</span>
+        <h3>The same checks, in their tools.</h3>
+        <p>When you forward a fix, a developer or a coding agent can run the exact same audit from the terminal, fail a deploy on it, or ask Claude about it. One engine, one set of answers.</p>
+        <code>npx codoseo crawl https://your-site.com</code>
+        <div class="ask-ai">
+          <span>Ask an AI about CodoSEO:</span>
+          <a class="ask" href="https://chatgpt.com/?q=What%20is%20CodoSEO%20%28https%3A//codoseo.com%29%3F%20Summarise%20what%20it%20does%20for%20daily%20SEO%20and%20AI%20visibility%20monitoring%2C%20and%20how%20it%20compares%20to%20Screaming%20Frog." data-umami-event="ask-ai" data-umami-event-engine="chatgpt"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>ChatGPT</a>
+          <a class="ask" href="https://claude.ai/new?q=What%20is%20CodoSEO%20%28https%3A//codoseo.com%29%3F%20Summarise%20what%20it%20does%20for%20daily%20SEO%20and%20AI%20visibility%20monitoring%2C%20and%20how%20it%20compares%20to%20Screaming%20Frog." data-umami-event="ask-ai" data-umami-event-engine="claude"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>Claude</a>
+          <a class="ask" href="https://www.perplexity.ai/search?q=What%20is%20CodoSEO%20%28https%3A//codoseo.com%29%3F%20Summarise%20what%20it%20does%20for%20daily%20SEO%20and%20AI%20visibility%20monitoring%2C%20and%20how%20it%20compares%20to%20Screaming%20Frog." data-umami-event="ask-ai" data-umami-event-engine="perplexity"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#1FB8CD" d="M22.3977 7.0896h-2.3106V.0676l-7.5094 6.3542V.1577h-1.1554v6.1966L4.4904 0v7.0896H1.6023v10.3976h2.8882V24l6.932-6.3591v6.2005h1.1554v-6.0469l6.9318 6.1807v-6.4879h2.8882V7.0896zm-3.4657-4.531v4.531h-5.355l5.355-4.531zm-13.2862.0676 4.8691 4.4634H5.6458V2.6262zM2.7576 16.332V8.245h7.8476l-6.1149 6.1147v1.9723H2.7576zm2.8882 5.0864v-5.8831l5.0902-5.0867v6.2626l-5.0902 4.7072zm11.5674 0-5.0902-4.7072v-6.2626l5.0902 5.0867v5.8831zm4.0276-5.0864h-1.7327v-1.9723l-6.1149-6.1147h7.8476v8.087z"/></svg>Perplexity</a>
+          <a class="ask" href="https://gemini.google.com/app?q=What%20is%20CodoSEO%20%28https%3A//codoseo.com%29%3F%20Summarise%20what%20it%20does%20for%20daily%20SEO%20and%20AI%20visibility%20monitoring%2C%20and%20how%20it%20compares%20to%20Screaming%20Frog." data-umami-event="ask-ai" data-umami-event-engine="gemini"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M12 24A14.3 14.3 0 0 0 0 12 14.3 14.3 0 0 0 12 0a14.3 14.3 0 0 0 12 12 14.3 14.3 0 0 0-12 12"/></svg>Gemini</a>
+        </div>
+        <div class="dev-actions"><button class="btn btn-ink" type="button" id="agent-btn" data-umami-event="agent-prompt-open" aria-expanded="false" aria-controls="agent-prompts">Add to your AI agent</button><a class="btn btn-ghost" href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md">MCP docs</a></div>
+      </div>
+      <div class="dev-list">
+        <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg></div><div><b>Command line</b><span>One static binary. Homebrew, npx, cargo or Docker. Table, JSON, Markdown or CSV out.</span></div></div>
+        <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></div><div><b>GitHub Action</b><span>Fails the build on serious SEO or AI problems before the page ships. SARIF for code scanning.</span></div></div>
+        <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6M5 8h14v3a7 7 0 0 1-14 0zM12 18v4"/></svg></div><div><b>MCP server</b><span>Claude Code, Cursor or any MCP client can audit a site and diff two crawls. Local with no account, or hosted.</span></div></div>
+        <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></svg></div><div><b>REST API</b><span>Every finding, page and change as JSON, with an API key on every plan.</span></div></div>
+        <div class="feat"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></div><div><b>Self-hosting</b><span>The whole app on your own server with Docker and Postgres. Free and open source.</span></div></div>
+      </div>
+      <div class="prompts" id="agent-prompts" hidden>
+        <div class="prompt">
+          <div class="prompt-h"><div><b>Paste this into Claude Code, Cursor or any agent that can run commands</b><br><span>It installs the CodoSEO MCP server, then runs the audit. Change the site address first.</span></div><button class="copy" type="button" data-copy="p-all" data-umami-event="agent-prompt-copy">Copy prompt</button></div>
+          <pre id="p-all">Add the CodoSEO MCP server to this project: run `claude mcp add codoseo -- npx -y codoseo mcp` (or register `npx -y codoseo mcp` as a stdio MCP server named "codoseo" in this editor's MCP config) and confirm its tools are listed.
+
+Then, using CodoSEO, audit https://your-site.com. Give me the SEO and AI visibility scores, the critical and warning findings with the pages behind each, whether GPTBot, ClaudeBot and PerplexityBot can fetch the site and what blocks them if not, and the fix for each problem.</pre>
+        </div>
       </div>
     </div>
-    <div class="panel term">
-      <div class="tabs"><span>Install</span></div>
-<pre><span class="c-dim"># Homebrew (macOS, Linux)</span>
-brew install safrowlabs/codoseo/codoseo
+  </div>
+</section>
 
-<span class="c-dim"># npm</span>
-npx codoseo --help
-
-<span class="c-dim"># Cargo (Rust 1.88+)</span>
-cargo install codoseo
-
-<span class="c-dim"># Docker</span>
-docker run --rm ghcr.io/safrowlabs/codoseo crawl https://example.com</pre>
+<section class="band" id="faq">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">FAQ</span>
+      <h2>Questions, answered.</h2>
+    </div>
+    <div class="faq">
+      <details open><summary>Do I need a developer to set this up?</summary><p>No. Type your site's address and the first check runs in about a minute. There is no plugin to install and no code to add. You only need a developer when a fix has to be made, and CodoSEO writes that fix out for you to forward.</p></details>
+      <details><summary>Is CodoSEO better than Screaming Frog?</summary><p>For watching a site, yes. Screaming Frog is desktop software: someone installs it, runs it by hand, and keeps the laptop open for scheduled crawls. CodoSEO runs in the cloud with nothing to install, checks every site you manage around the clock, and emails you only what changed. It is also AI-native: it fetches your pages as GPTBot, ClaudeBot, PerplexityBot and the other AI crawlers, scores your AI visibility, and writes every fix as a prompt you can hand to a coding agent. Screaming Frog does none of that. Where Screaming Frog still wins is a deep one-off audit of a very large site with JavaScript rendering, so plenty of teams use both: Screaming Frog for the quarterly audit, CodoSEO for every day in between.</p></details>
+      <details><summary>What does "AI visibility" mean?</summary><p>Whether ChatGPT, Claude, Perplexity and the other AI products can reach and read your site. CodoSEO visits your pages the way their crawlers do, reads what your robots.txt tells them, and checks your pages make sense without JavaScript. If something shuts them out, you get the exact rule to fix it.</p></details>
+      <details><summary>Can I share reports with clients or my manager?</summary><p>Yes. Every site has a score trend and a ranked list of open problems. Export any list as CSV or JSON, or give a teammate access to the site.</p></details>
+      <details><summary>Is CodoSEO free?</summary><p>The free plan watches one site every week with email alerts. Lite at ${{ lite_price }} a month and Pro at ${{ pro_price }} a month add more sites, daily checks and Slack alerts. The software itself is open source, so a developer can also run it on your own server for nothing.</p></details>
+      <details><summary>Will it slow down my site?</summary><p>No. CodoSEO is polite: it obeys your robots.txt, slows down when your server is busy, and names itself CodoSEObot so your developers can spot it in the logs.</p></details>
     </div>
   </div>
 </section>
 
-<section class="blk wrap reveal" id="faq">
-  <div class="shead">
-    <div><div class="eyebrow">FAQ</div><h2>Questions, answered.</h2></div>
-    <p>Something else on your mind? <a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Open an issue on GitHub</a> and we'll get back to you.</p>
-  </div>
-  <div class="faq mt">
-    <details open>
-      <summary>Is CodoSEO free?</summary>
-      <p>Yes. The CLI, the MCP server and the self-hosted web app are free and open source under AGPL-3.0. The hosted app has a free plan for one site; Lite (${{ lite_price }} a month) and Pro (${{ pro_price }} a month) add more sites and bigger, daily crawls.</p>
-    </details>
-    <details>
-      <summary>Do I need an account?</summary>
-      <p>Not for the CLI or the local MCP server, and not for a one-off audit of up to {{ quick_pages }} pages in the hosted app. A free account lets you monitor a site on a schedule and get alerts.</p>
-    </details>
-    <details>
-      <summary>How do I install the CLI?</summary>
-      <p>Run <code class="k">brew install safrowlabs/codoseo/codoseo</code>, <code class="k">npx codoseo</code>, or <code class="k">cargo install codoseo</code> (Rust 1.88 or newer). Prebuilt binaries for Linux, macOS and Windows are on the <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">GitHub releases page</a>, and a Docker image is at <code class="k">ghcr.io/safrowlabs/codoseo</code>.</p>
-    </details>
-    <details>
-      <summary>What does CodoSEO check?</summary>
-      <p>{{ checks }} checks across {{ categories.len() }} categories: response codes and redirects, indexability (noindex, canonicals, robots.txt), on-page (titles, meta descriptions, H1s), content (thin and duplicate pages, image alt text), links (broken links, orphan pages, click depth), technical (HTTPS, mixed content, slow responses), sitemaps, Open Graph and structured data (JSON-LD, hreflang).</p>
-    </details>
-    <details>
-      <summary>Will crawling slow down my site?</summary>
-      <p>CodoSEO is built to be polite. It obeys robots.txt and Crawl-delay, slows down on its own when a server answers 429 or 503, and identifies itself as <a href="/bot">CodoSEObot</a> so you can spot it in your logs.</p>
-    </details>
-    <details>
-      <summary>Does it work with AI assistants?</summary>
-      <p>Yes. CodoSEO includes an MCP server. Run <code class="k">codoseo mcp</code> on your machine, or connect the hosted server at <code class="k">{{ base }}/mcp</code>, and Claude, Cursor or any MCP client can run audits and read the results.</p>
-    </details>
-    <details>
-      <summary>Can I self-host the web app?</summary>
-      <p>Yes. Docker Compose brings it up in three commands and it needs nothing but Postgres. The <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">self-hosting guide</a> covers email, sign-in, reverse proxies, upgrades and backups.</p>
-    </details>
-  </div>
-</section>
-
-<section class="wrap reveal">
-  <div class="cta">
-    <div class="cta-eyes" data-mascot="look" data-follow aria-hidden="true"></div>
-    <h2>Run your first audit in a minute.</h2>
-    <div class="acts">
-      <a class="btn" href="#audit">Start free audit <span class="ar" aria-hidden="true">→</span></a>
-      <a class="btn out" href="#install-options">Install the CLI</a>
-      <a class="btn out" href="#docs">Read the docs</a>
+<section class="band cta">
+  <div class="wrap">
+    <svg class="mascot m-rest" viewBox="4 16 56 32" aria-hidden="true"><g class="m-blink"><circle class="m-ring" cx="20.5" cy="32" r="11.5"/><circle class="m-ring" cx="43.5" cy="32" r="11.5"/><g class="m-gaze"><circle class="m-pupil" cx="20.5" cy="32" r="5"/><circle class="m-pupil" cx="43.5" cy="32" r="5"/></g></g></svg>
+    <div>
+      <h2>See what's broken on your site in under a minute.</h2>
+      <p>{{ quick_pages }} pages, every check, no signup, no developer. Then let it watch for you.</p>
+    </div>
+    <div class="btns">
+      <a class="btn btn-ink" href="#audit" data-umami-event="cta-start">Start free audit →</a>
+      <a class="btn btn-ghost" href="#pricing">See pricing</a>
     </div>
   </div>
 </section>
-</main>
 
 <footer>
   <div class="wrap">
-    <div class="fgrid">
-      <div class="fbrand">
-        <a href="/" class="wm" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
-        <p>Know the moment your SEO breaks. An open-source SEO crawler and site monitor, written in Rust.</p>
-      </div>
-      <div class="fcol">
-        <p class="fh">Product</p>
-        <a href="#features">Features</a>
-        <a href="#checks">SEO checks</a>
-        <a href="#ai">AI agents</a>
-        <a href="#pricing">Pricing</a>
-        {% if signed_in %}<a href="/app">Open app</a>{% else %}<a href="/login">Sign in</a>{% endif %}
-      </div>
-      <div class="fcol">
-        <p class="fh">Docs</p>
-        <a href="https://github.com/SafrowLabs/CodoSEO#quick-start" target="_blank" rel="noopener">Quick start</a>
-        <a href="https://github.com/SafrowLabs/CodoSEO#commands" target="_blank" rel="noopener">CLI reference</a>
-        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md" target="_blank" rel="noopener">MCP server</a>
-        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener">REST API</a>
-        <a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Self-hosting</a>
-        <a href="/bot">CodoSEObot</a>
-      </div>
-      <div class="fcol">
-        <p class="fh">Open source</p>
-        <a href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">Releases</a>
-        <a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">crates.io</a>
-        <a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Issues</a>
-      </div>
-      <div class="fcol">
-        <p class="fh">From the makers</p>
-        <a href="https://safrow.com/" target="_blank" rel="noopener">SafrowLabs</a>
-        <a href="https://rankorg.com/" target="_blank" rel="noopener">RankOrg</a>
-      </div>
-      <div class="fcol">
-        <p class="fh">Legal</p>
-        <a href="/terms">Terms</a>
-        <a href="/privacy">Privacy</a>
-        <a href="/refunds">Refunds</a>
-        <a href="mailto:{{ crate::routes::legal::CONTACT }}">Contact</a>
-      </div>
+    <div>
+      <a href="/" class="wm" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
+      <p style="margin-top:10px;max-width:34ch">Find out your site broke before your rankings do. Daily SEO and AI visibility monitoring, open source.</p>
     </div>
-    <div class="fbot">
-      <span>© 2026 SafrowLabs. CodoSEO is open source under AGPL-3.0.</span>
-      <span>Built by <a href="https://safrow.com/" target="_blank" rel="noopener">SafrowLabs</a>, the team behind <a href="https://rankorg.com/" target="_blank" rel="noopener">RankOrg</a>.</span>
-    </div>
+    <div><h4>Product</h4><ul><li><a href="#features">Features</a></li><li><a href="#checks">What we check</a></li><li><a href="#pricing">Pricing</a></li><li><a href="#compare">Compare</a></li><li><a href="#dev">For developers</a></li><li>{% if signed_in %}<a href="/app">Open app</a>{% else %}<a href="/login">Sign in</a>{% endif %}</li></ul></div>
+    <div><h4>Docs</h4><ul><li><a href="https://github.com/SafrowLabs/CodoSEO#quick-start" target="_blank" rel="noopener">Quick start</a></li><li><a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/ci.md" target="_blank" rel="noopener">CI integration</a></li><li><a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/mcp.md" target="_blank" rel="noopener">MCP server</a></li><li><a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/api.md" target="_blank" rel="noopener">REST API</a></li><li><a href="https://github.com/SafrowLabs/CodoSEO/blob/main/docs/self-hosting.md" target="_blank" rel="noopener">Self-hosting</a></li><li><a href="/bot">CodoSEObot</a></li></ul></div>
+    <div><h4>Open source</h4><ul><li><a href="https://github.com/SafrowLabs/CodoSEO" target="_blank" rel="noopener">GitHub</a></li><li><a href="https://github.com/SafrowLabs/CodoSEO/releases" target="_blank" rel="noopener">Releases</a></li><li><a href="https://crates.io/crates/codoseo" target="_blank" rel="noopener">crates.io</a></li><li><a href="https://github.com/SafrowLabs/CodoSEO/issues" target="_blank" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Company</h4><ul><li><a href="https://safrow.com/" target="_blank" rel="noopener">SafrowLabs</a></li><li><a href="https://rankorg.com/" target="_blank" rel="noopener">RankOrg</a></li><li><a href="/terms">Terms</a></li><li><a href="/privacy">Privacy</a></li><li><a href="/refunds">Refunds</a></li><li><a href="mailto:{{ crate::routes::legal::CONTACT }}">Contact</a></li></ul></div>
   </div>
+  <div class="wrap foot-bottom"><span>© 2026 SafrowLabs</span><span>CodoSEO is open source under AGPL-3.0.</span></div>
 </footer>
 </body>
 </html>
