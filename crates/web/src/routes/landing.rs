@@ -44,8 +44,6 @@ pub struct Landing {
     pub billing: bool,
     /// Every page crawled so far, `1,284,302`; `None` while the totals can't be read.
     pub pages_crawled: Option<String>,
-    /// The hosted vs self-hosted cost comparison under the pricing cards.
-    pub selfhost: SelfHostView,
     /// The visitor is signed in: "Sign in" links become "Open app".
     pub signed_in: bool,
 }
@@ -534,7 +532,6 @@ fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) 
         pro_price: monthly_price(Plan::Pro).unwrap_or(0),
         billing: state.config.billing.is_some(),
         pages_crawled: pages.map(fmt::thousands),
-        selfhost: selfhost_view(),
         signed_in: false,
     }
 }
