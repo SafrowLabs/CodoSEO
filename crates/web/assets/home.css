@@ -226,6 +226,20 @@ html { overflow-x: hidden; }
 .d-toast span { font-size: 11.5px; line-height: 1.4; opacity: .8; font-family: var(--mono); display: block; }
 .d-toast:not(.on) { pointer-events: none; }
 
+/* ---- Promo video: the muted loop under the hero, the full cut with sound on click ---- */
+.promo-band { padding-block: 0 96px; }
+.promo-head { max-width: 880px; margin-bottom: 28px; }
+.promo { position: relative; max-width: 1040px; margin: 0 auto; aspect-ratio: 16 / 9; border-radius: 18px; overflow: hidden; background: #F8F7F3; border: 1px solid var(--line); box-shadow: 0 2px 4px rgba(17,22,19,.05), 0 40px 90px -40px rgba(17,22,19,.4); }
+.promo video { display: block; width: 100%; height: 100%; object-fit: cover; background: #F8F7F3; }
+.promo-play { position: absolute; left: 18px; bottom: 18px; display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 18px 0 8px; border-radius: 999px; border: 1px solid rgba(17,22,19,.12); background: rgba(255,255,255,.94); color: #111613; font: 600 14px/1.1 var(--sans); cursor: pointer; box-shadow: 0 10px 30px -12px rgba(17,22,19,.45); transition: transform .12s ease, background .15s ease; text-align: left; }
+.promo-play:hover { transform: translateY(-1px); background: #fff; }
+.promo-play:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.promo-play-ic { width: 32px; height: 32px; border-radius: 50%; background: var(--yellow); color: var(--on-yellow); display: grid; place-items: center; flex: none; }
+.promo-play-ic svg { margin-left: 2px; }
+.promo-play-t small { display: block; margin-top: 3px; font: 500 11px var(--mono); color: #6B736E; letter-spacing: .04em; text-transform: uppercase; }
+.promo.playing .promo-play, .promo.playing .promo-loop { display: none; }
+@media (max-width: 480px) { .promo { border-radius: 12px; } .promo-play { left: 10px; bottom: 10px; height: 40px; padding: 0 5px; gap: 0; } .promo-play-t { display: none; } }
+
 /* ---- Problem + how it works: one story ---- */
 .story { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; position: relative; }
 .story::before { content: ""; position: absolute; left: 5px; right: 5px; top: 9px; height: 1px; background: var(--line-strong); }
@@ -542,7 +556,7 @@ footer .foot-bottom span:last-child { margin-left: auto; text-align: right; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .mascot .m-blink, .mascot.m-crawling .m-gaze, .d-url .caret, .live-dot { animation: none; }
-  .d-row, .d-chk, .d-bot, .d-toast, .ring .fg { transition: none; }
+  .d-row, .d-chk, .d-bot, .d-toast, .ring .fg, .promo-play { transition: none; }
 }
 
 /* ---- Pieces shared with the old page: wordmark symbol, three-state theme button, audit errors ---- */
