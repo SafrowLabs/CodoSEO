@@ -1,5 +1,5 @@
 // The cloud landing page (templates/landing/index.html): theme toggle, the live audit demo in
-// the hero, the peeking mascot, the interactive site map, the AI agent prompt, analytics events
+// the hero, the promo video under it, the peeking mascot, the interactive site map, the AI agent prompt, analytics events
 // and the live pages-audited counter. The theme is applied before paint by an inline script.
 (function () {
   // Theme: the viewer's choice wins, then the system setting.
@@ -128,6 +128,34 @@
         else if (e.isIntersecting && paused) { paused = false; run(); }
       });
     }, { threshold: 0.15 }).observe(demo);
+  }
+
+  /* Promo video under the hero: the muted loop plays while on screen; the play button swaps in the full cut with sound */
+  var promo = $('promo'), loop = $('promo-loop'), full = $('promo-full'), playBtn = $('promo-play');
+  if (promo && loop && full && playBtn) {
+    if (reduce) { loop.removeAttribute('autoplay'); loop.pause(); }
+    else if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          if (promo.classList.contains('playing')) return;
+          if (e.isIntersecting) { var p = loop.play(); if (p && p.catch) p.catch(function () {}); } else loop.pause();
+        });
+      }, { threshold: 0.2 }).observe(promo);
+    }
+    playBtn.addEventListener('click', function () {
+      loop.pause();
+      promo.classList.add('playing');
+      full.hidden = false;
+      full.currentTime = 0;
+      var p = full.play(); if (p && p.catch) p.catch(function () {});
+      full.focus({ preventScroll: true });
+    });
+    full.addEventListener('ended', function () {
+      promo.classList.remove('playing');
+      full.hidden = true;
+      if (!reduce) { var p = loop.play(); if (p && p.catch) p.catch(function () {}); }
+      playBtn.focus({ preventScroll: true });
+    });
   }
 
   // The peeking mascot looks at the pointer

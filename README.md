@@ -16,6 +16,12 @@ CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in R
 
 It also watches **AI access**: whether OpenAI, Anthropic, Google, Perplexity and the other AI crawlers can reach your site, and whether your pages' own controls keep them out of AI answers. A synthetic fetch check requests a few pages with the AI bots' documented user agents to catch a CDN or firewall that turns them away. It also checks that your important pages' content is in their HTML as served, since GPTBot, ClaudeBot and PerplexityBot don't run JavaScript (Vercel and MERJ, 2024), and reports on your `/llms.txt` (informational, never scored). Every finding says how to fix it (a robots.txt snippet, a ticket or a coding-agent prompt to copy), can be rechecked without a crawl: a fix seen by a recheck is verified after the operator's wait (documented where they publish it), and a crawl that no longer sees the problem resolves it directly; incidents can be snoozed or accepted and exported as CSV or JSON. See [docs/ai-access.md](docs/ai-access.md).
 
+
+<p align="center">
+  <a href="https://assets.codoseo.com/media/codoseo-promo.mp4"><img src="https://assets.codoseo.com/media/codoseo-promo-poster.jpg" alt="Watch the 55-second CodoSEO demo: a daily audit catches a broken page, alerts you, and the fix lands" width="820"></a><br>
+  <sub><b>55-second demo</b>: a daily audit catches what broke, alerts you, and the fix lands. <a href="https://assets.codoseo.com/media/codoseo-promo.mp4">Play</a> · <a href="https://codoseo.com/#video">on codoseo.com</a></sub>
+</p>
+
 <table>
   <tr>
     <td width="50%"><a href="docs/images/site-audit/site-audit-light.png"><img src="docs/images/site-audit/site-audit-light.png" alt="The site audit: Overall, SEO and GEO scores, the ranked fix list and the score trend"></a><br><b>Site audit</b>: Overall, SEO and GEO scores, one ranked fix list, the score trend</td>
