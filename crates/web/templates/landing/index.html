@@ -48,7 +48,7 @@
   <div class="wrap">
     <a href="/" class="wm brand" aria-label="CodoSEO home"><span aria-hidden="true">C</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">d</span><svg class="o" aria-hidden="true" focusable="false"><use href="#wm-o"/></svg><span aria-hidden="true">SEO</span></a>
     <nav class="nav-links" aria-label="Primary">
-      <a href="#why">Why</a><a href="#features">Features</a><a href="#checks">What we check</a><a href="#pricing">Pricing</a><a href="#compare">Compare</a><a href="#dev">For developers</a><a href="https://github.com/SafrowLabs/CodoSEO/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+      <a href="#video">Demo</a><a href="#why">Why</a><a href="#features">Features</a><a href="#checks">What we check</a><a href="#pricing">Pricing</a><a href="#compare">Compare</a><a href="#dev">For developers</a><a href="https://github.com/SafrowLabs/CodoSEO/tree/main/docs" target="_blank" rel="noopener">Docs</a>
     </nav>
     <div class="nav-cta">
       <button class="theme" id="theme" type="button" aria-label="Theme: light. Switch to dark" title="Theme: light" data-umami-event="theme-toggle">
@@ -76,7 +76,7 @@
         {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
       </form>
       {% if let Some(err) = error %}<p class="err" role="alert">{{ err }}</p>{% endif %}
-      <p class="hero-note" id="audit-hint">Free · {{ quick_pages }} pages · takes about a minute.</p>
+      <p class="hero-note" id="audit-hint">Free · up to {{ quick_pages }} pages · takes about a minute.</p>
       <div class="hero-proof">
         {% if let Some(n) = pages_crawled %}<div class="live-row"><i class="live-dot"></i><b id="pages-crawled" class="mono" data-poll="/stats/pages-crawled">{{ n }}</b><span>pages audited so far</span></div>{% endif %}
         <div><b>50+</b><span>SEO/GEO audits</span></div>
@@ -150,8 +150,7 @@
 <section class="band promo-band" id="video" aria-labelledby="video-h">
   <div class="wrap">
     <div class="sec-head promo-head">
-      <span class="eyebrow">55 seconds</span>
-      <h2 id="video-h">Watch what a daily audit catches, and how the fix lands.</h2>
+      <h2 id="video-h">See it in action</h2>
     </div>
     <div class="promo" id="promo">
       <video class="promo-loop" id="promo-loop" autoplay muted loop playsinline preload="metadata" poster="https://assets.codoseo.com/media/codoseo-promo-poster.jpg" aria-hidden="true" tabindex="-1">
