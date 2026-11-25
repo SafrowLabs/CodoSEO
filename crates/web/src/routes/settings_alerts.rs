@@ -151,8 +151,15 @@ pub struct AlertsPage {
     pub columns: Vec<ColumnView>,
     pub sites: Vec<SiteRules>,
     pub secret: Option<NewSecret>,
-    /// Set when the account's own address unsubscribed from email: the date, for the notice.
-    pub unsubscribed: Option<String>,
+    /// Set when the account's own address is on the suppression list, for the notice.
+    pub unsubscribed: Option<EmailOff>,
+}
+
+/// Why email to the account's address is off, in the words of the notice.
+pub struct EmailOff {
+    /// `Nov 25, 2026`.
+    pub since: String,
+    pub why: &'static str,
 }
 
 #[derive(Template)]
@@ -308,7 +315,15 @@ async fn render_page(
         .await?
         .map(|s| {
             let d = s.created_at.date();
-            format!("{} {}, {}", d.month(), d.day(), d.year())
+            EmailOff {
+                since: format!("{} {}, {}", d.month(), d.day(), d.year()),
+                why: match s.reason.as_str() {
+                    "bounce" => "an email to it bounced, so the address may be wrong",
+                    "complaint" => "it reported a CodoSEO email as spam",
+                    "opt_out" => "you asked us to send nothing to it",
+                    _ => "you unsubscribed",
+                },
+            }
         });
     let shell = Shell::load(state, user, None, Screen::Alerts).await?;
     html(&AlertsPage {

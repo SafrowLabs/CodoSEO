@@ -1,0 +1,11 @@
+{
+  "Type": "Notification",
+  "MessageId": "m-2",
+  "TopicArn": "arn:aws:sns:eu-north-1:123456789012:codoseo-ses-feedback",
+  "Message": "{\"notificationType\": \"Bounce\", \"bounce\": {\"bounceType\": \"Transient\", \"bounceSubType\": \"MailboxFull\", \"bouncedRecipients\": [{\"emailAddress\": \"full@example.com\"}], \"timestamp\": \"2026-11-25T12:59:30.000Z\", \"feedbackId\": \"fb-2\"}, \"mail\": {\"timestamp\": \"2026-11-25T12:58:00.000Z\", \"source\": \"CodoSEO <hello@codoseo.com>\", \"messageId\": \"0100-abc\", \"destination\": [\"Bounced.Person+x@Example.com\", \"fine@example.com\"]}}",
+  "Timestamp": "2026-11-25T13:00:00.000Z",
+  "SignatureVersion": "2",
+  "Signature": "IM9B3XBm2Il/M477kmVJ21YCgM0Bb+3w56ao/f5tmZVOUgtBtcmySdIVOq3xwIOWbt9Xkbytbn+ZMTBYuv3+ElLE/AfdqkKO5Otie1P+WYduIxg7yRNnIJ6Lw9YT2FRJcM/h+3QOM0+iniK6dBuv4FlecDMNAyFLgnfHprl9eIRfwS6pkss3WFTqAdQo7KKvOSTiljbir9FCG/htWbo2aGx7o4LEfeyP6NDLnsodT6iaexhN84OayK+tPe8NcXzGIEoCof8lmNUqi/N0HOQ87BpKUHGXAZEUT+g8GP2+r7LJjflaEWJSkfQopbHu4N7JDlS7B24Rd39zrfZYTp4KNA==",
+  "SigningCertURL": "https://sns.eu-north-1.amazonaws.com/SimpleNotificationService-test.pem",
+  "UnsubscribeURL": "https://sns.eu-north-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=x"
+}
