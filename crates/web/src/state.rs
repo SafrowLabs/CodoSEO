@@ -32,6 +32,8 @@ pub struct AppState {
     pub anon_calls: Arc<crate::agent::limiter::CallLimiter>,
     /// The landing page's crawl totals, read from the database at most every few seconds.
     pub crawl_stats: Arc<crate::crawl_stats::StatsCache>,
+    /// Signs the unsubscribe links in emails (derived from `SECRET_KEY`).
+    pub unsubscribe: crate::unsubscribe::Signer,
 }
 
 impl AppState {
@@ -43,6 +45,7 @@ impl AppState {
         AppState {
             pool,
             channel_key: ChannelKey::derive(&config.secret_key),
+            unsubscribe: crate::unsubscribe::Signer::derive(&config.secret_key),
             notify_http: GuardedHttp::new(policy).expect("http client builds"),
             config: Arc::new(config),
             mailer,

@@ -16,6 +16,7 @@ use codoseo_notify::{AlertMessage, ChannelKind, ChannelTarget, DeliveryError, de
 use codoseo_store::alert_rules::{self, ALL_KINDS};
 use codoseo_store::channels::{self, ChannelSummary, DeleteOutcome};
 use codoseo_store::events::{self, EventKind};
+use codoseo_store::suppressions;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -47,6 +48,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/settings/alerts/channels/{id}/test", post(test_channel))
         .route("/settings/alerts/rules", post(set_rule))
+        .route("/settings/alerts/email/resume", post(resume_email))
 }
 
 const UPGRADE: &str = "Slack, Discord and webhook alerts are on Lite and Pro. \
@@ -149,6 +151,8 @@ pub struct AlertsPage {
     pub columns: Vec<ColumnView>,
     pub sites: Vec<SiteRules>,
     pub secret: Option<NewSecret>,
+    /// Set when the account's own address unsubscribed from email: the date, for the notice.
+    pub unsubscribed: Option<String>,
 }
 
 #[derive(Template)]
@@ -300,9 +304,16 @@ async fn render_page(
                 .collect(),
         })
         .collect();
+    let unsubscribed = suppressions::get(pool, &email::canonical(&user.account.email))
+        .await?
+        .map(|s| {
+            let d = s.created_at.date();
+            format!("{} {}, {}", d.month(), d.day(), d.year())
+        });
     let shell = Shell::load(state, user, None, Screen::Alerts).await?;
     html(&AlertsPage {
         shell,
+        unsubscribed,
         channels: listed.iter().map(channel_view).collect(),
         form,
         columns: listed
@@ -555,6 +566,16 @@ async fn mute_channel(
     Ok(Redirect::to("/settings/alerts").into_response())
 }
 
+/// Lifts the unsubscribe on the account's own address. The person is signed in, so they own
+/// the address: that also lifts an opt-out, a bounce or a complaint.
+async fn resume_email(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> Result<Response, AppError> {
+    suppressions::remove(&state.pool, &email::canonical(&user.account.email)).await?;
+    Ok(Redirect::to("/settings/alerts").into_response())
+}
+
 async fn enable_channel(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -614,7 +635,7 @@ async fn test_channel(
     let message = AlertMessage::test(domain, dashboard);
     let outcome = tokio::time::timeout(
         TEST_TIMEOUT,
-        deliver(&state.notify_http, &state.mailer, &target, &message),
+        deliver(&state.notify_http, &state.mailer, &target, &message, None),
     )
     .await;
     match outcome {

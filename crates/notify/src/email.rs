@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lettre::message::header::{HeaderName, HeaderValue};
 use lettre::message::{Mailbox, MultiPart};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
@@ -15,6 +16,11 @@ pub struct Email {
     pub text: String,
     /// When set, the message goes out as multipart/alternative with `text` as the plain part.
     pub html: Option<String>,
+    /// A one-click unsubscribe link, for notifications (alerts, the digest, reminders). Sent as
+    /// `List-Unsubscribe` and `List-Unsubscribe-Post`, which mail clients turn into their own
+    /// unsubscribe button; a POST to the link with `List-Unsubscribe=One-Click` must work
+    /// without a page. Sign-in links and other one-off emails leave it unset.
+    pub unsubscribe: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -127,10 +133,22 @@ fn build_message(from: &Mailbox, email: &Email) -> Result<Message, MailError> {
         .to
         .parse()
         .map_err(|_| MailError::Address(email.to.clone()))?;
-    let builder = Message::builder()
+    let mut builder = Message::builder()
         .from(from.clone())
         .to(to)
         .subject(email.subject.clone());
+    if let Some(url) = &email.unsubscribe {
+        // RFC 8058: the URL in angle brackets, and the POST body the client sends to it.
+        builder = builder
+            .raw_header(HeaderValue::new(
+                HeaderName::new_from_ascii_str("List-Unsubscribe"),
+                format!("<{url}>"),
+            ))
+            .raw_header(HeaderValue::new(
+                HeaderName::new_from_ascii_str("List-Unsubscribe-Post"),
+                "List-Unsubscribe=One-Click".to_owned(),
+            ));
+    }
     let built = match &email.html {
         Some(html) => builder.multipart(MultiPart::alternative_plain_html(
             email.text.clone(),
@@ -151,6 +169,7 @@ mod tests {
             subject: "Hi".into(),
             text: "plain body".into(),
             html: html.map(str::to_owned),
+            unsubscribe: None,
         }
     }
 
@@ -197,6 +216,25 @@ mod tests {
             "{raw}"
         );
         assert!(raw.contains("hello@codoseo.com"), "{raw}");
+    }
+
+    #[test]
+    fn an_unsubscribe_link_becomes_the_one_click_headers() {
+        let mut e = email(None);
+        e.unsubscribe = Some("https://codoseo.com/email/unsubscribe/abc.def".into());
+        let raw = build_message(&from(), &e).unwrap().formatted();
+        let raw = String::from_utf8_lossy(&raw).into_owned();
+        assert!(
+            raw.contains("List-Unsubscribe: <https://codoseo.com/email/unsubscribe/abc.def>"),
+            "{raw}"
+        );
+        assert!(
+            raw.contains("List-Unsubscribe-Post: List-Unsubscribe=One-Click"),
+            "{raw}"
+        );
+        // Without a link, neither header is sent: a sign-in link is not a list.
+        let raw = build_message(&from(), &email(None)).unwrap().formatted();
+        assert!(!String::from_utf8_lossy(&raw).contains("List-Unsubscribe"));
     }
 
     #[test]

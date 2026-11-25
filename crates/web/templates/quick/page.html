@@ -4,6 +4,7 @@
 {% block head %}
 <link rel="stylesheet" href="{{ crate::assets::url("landing.css") }}">
 {% include "partials/analytics.html" %}
+{% if unlock.turnstile_site_key.is_some() %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}
 {#- Without JavaScript nothing polls, so the page reloads itself until the audit is over. #}
 {% if main.polling %}<noscript><meta http-equiv="refresh" content="5"></noscript>{% endif %}
 {% endblock %}

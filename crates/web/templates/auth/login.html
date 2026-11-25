@@ -1,6 +1,7 @@
 {% extends "solo_base.html" %}
 {%- import "partials/mascot.html" as m -%}
 {% block title %}Sign in — CodoSEO{% endblock %}
+{% block head %}{% if card.turnstile_site_key.is_some() %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}{% endblock %}
 {% block body %}
 <div class="auth">
   <div class="auth-side">

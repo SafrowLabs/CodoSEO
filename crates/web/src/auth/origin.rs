@@ -19,8 +19,10 @@ use crate::state::AppState;
 const EXEMPT_PATHS: &[&str] = &["/billing/webhook", mcp::PATH];
 
 /// The REST API: Bearer-authenticated, it never looks at cookies, so a cross-site form post has
-/// nothing to ride on. Under this prefix (with the slash) only.
-const EXEMPT_PREFIXES: &[&str] = &[api::PREFIX];
+/// nothing to ride on. Under this prefix (with the slash) only. Unsubscribe links take a
+/// one-click POST from mail clients, which send no `Origin`; the signed token in the path is
+/// their credential, and a cookie plays no part.
+const EXEMPT_PREFIXES: &[&str] = &[api::PREFIX, crate::unsubscribe::PATH_PREFIX];
 
 /// Whether `path` is `prefix` followed by a slash and more, not just a path that starts alike.
 fn under(path: &str, prefix: &str) -> bool {

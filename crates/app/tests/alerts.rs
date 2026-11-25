@@ -61,6 +61,7 @@ impl World {
             http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
             rankorg_url: None,
             recheck: codoseo::recheck::RecheckSettings::new(AddressPolicy::AllowPrivate),
+            unsubscribe: codoseo_web::unsubscribe::Signer::derive("test secret"),
         };
         let account: Uuid = sqlx::query_scalar(
             "INSERT INTO accounts (email, email_canonical, plan) VALUES ('owner@example.com', 'owner@example.com', $1::plan) RETURNING id",
@@ -589,6 +590,57 @@ async fn a_free_accounts_slack_channel_is_skipped_and_its_email_alerted() {
         .unwrap();
     w.drain().await;
     assert!(hook.bodies().is_empty());
+}
+
+#[tokio::test]
+async fn an_email_alert_carries_the_unsubscribe_link_and_an_unsubscribed_address_gets_none() {
+    let w = World::new("free").await;
+    w.email_channel().await;
+    w.change(ChangeKind::ErrorSpike, None).await;
+    w.queue
+        .enqueue(JobKind::SendAlert, json!({ "crawl_id": w.crawl }))
+        .await
+        .unwrap();
+    w.drain().await;
+    let mail = w.mail_to("owner@example.com").remove(0);
+    let link = mail.unsubscribe.clone().expect("one-click headers");
+    assert!(
+        link.starts_with("https://codoseo.test/email/unsubscribe/"),
+        "{link}"
+    );
+    assert!(
+        mail.text.contains(&format!("Stop these emails: {link}")),
+        "{}",
+        mail.text
+    );
+    let claims = codoseo_web::unsubscribe::Signer::derive("test secret")
+        .parse(link.rsplit('/').next().unwrap())
+        .expect("signed by this process");
+    assert_eq!(claims.address, "owner@example.com");
+    assert_eq!(claims.account_id, Some(w.account));
+
+    // The person presses it: the next delivery is dropped quietly, the job done.
+    codoseo_store::suppressions::add(
+        w.pool(),
+        "owner@example.com",
+        codoseo_store::suppressions::Scope::Notifications,
+        "unsubscribe",
+    )
+    .await
+    .unwrap();
+    let crawl = new_crawl(w.pool(), w.site, "schedule").await;
+    insert_change(w.pool(), crawl, w.site, ChangeKind::ErrorSpike, None).await;
+    w.queue
+        .enqueue(JobKind::SendAlert, json!({ "crawl_id": crawl }))
+        .await
+        .unwrap();
+    w.drain().await;
+    assert_eq!(w.mail_to("owner@example.com").len(), 1, "no second email");
+    let failed: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE status = 'failed'")
+        .fetch_one(w.pool())
+        .await
+        .unwrap();
+    assert_eq!(failed, 0);
 }
 
 #[tokio::test]

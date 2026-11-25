@@ -108,6 +108,8 @@ pub struct DigestView {
     pub sites: Vec<SiteDigest>,
     /// Where the account turns alerts and the digest down.
     pub settings_url: String,
+    /// The one-click link that stops the digest, alerts and reminders to this address.
+    pub unsubscribe_url: String,
 }
 
 #[derive(Template)]
@@ -139,6 +141,7 @@ impl DigestView {
             subject: self.subject(),
             text: TextDigest { view: self }.render()?,
             html: Some(HtmlDigest { view: self }.render()?),
+            unsubscribe: Some(self.unsubscribe_url.clone()),
         })
     }
 }

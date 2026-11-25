@@ -7,9 +7,12 @@ use std::time::Duration;
 use codoseo_core::crawl::AddressPolicy;
 use codoseo_notify::{ChannelKey, Email, GuardedHttp, Mailer};
 use codoseo_store::jobs::{ClaimedJob, JobKind, JobQueue};
+use codoseo_store::suppressions;
 use codoseo_web::Config;
 use codoseo_web::Mode;
+use codoseo_web::auth::email::canonical;
 use codoseo_web::metrics;
+use codoseo_web::unsubscribe::{Signer, Unsubscribe};
 
 use crate::recheck::RecheckSettings;
 use serde::Deserialize;
@@ -36,6 +39,8 @@ pub struct JobContext {
     pub rankorg_url: Option<Url>,
     /// How AI access rechecks fetch (the same address policy as the crawl worker's).
     pub recheck: RecheckSettings,
+    /// Signs the unsubscribe links in alerts and digests.
+    pub unsubscribe: Signer,
 }
 
 impl JobContext {
@@ -46,6 +51,7 @@ impl JobContext {
             pool,
             mailer,
             channel_key: ChannelKey::derive(&config.secret_key),
+            unsubscribe: Signer::derive(&config.secret_key),
             base_url: config.base_url.clone(),
             http: GuardedHttp::new(match config.mode {
                 Mode::Cloud => AddressPolicy::Public,
@@ -156,17 +162,54 @@ struct SendEmailPayload {
     text: String,
     #[serde(default)]
     html: Option<String>,
+    /// The one-click unsubscribe link, when the email is a notification.
+    #[serde(default)]
+    unsubscribe: Option<String>,
 }
 
+impl JobContext {
+    /// The unsubscribe link for a notification to `address` (its one-click headers and footer).
+    pub fn unsubscribe_link(&self, address: &str, account_id: Option<uuid::Uuid>) -> String {
+        self.unsubscribe
+            .link(
+                &self.base_url,
+                &Unsubscribe {
+                    address: address.to_owned(),
+                    scope: codoseo_store::suppressions::Scope::Notifications,
+                    account_id,
+                },
+            )
+            .to_string()
+    }
+
+    /// Whether a notification may not go to `address`: it unsubscribed, opted out, bounced or
+    /// complained. The caller skips the send and the job is done.
+    pub async fn suppressed(&self, address: &str) -> Result<bool, String> {
+        let blocked = suppressions::blocks_notifications(&self.pool, &canonical(address))
+            .await
+            .map_err(|e| format!("database error: {e}"))?;
+        if blocked {
+            tracing::info!("not sent: the address unsubscribed from CodoSEO email");
+        }
+        Ok(blocked)
+    }
+}
+
+/// Every `send_email` job is a notification (a reminder, a channel-switched-off notice): an
+/// address that unsubscribed gets none of them.
 async fn send_email(ctx: &JobContext, payload: &serde_json::Value) -> Result<(), String> {
     let p: SendEmailPayload = serde_json::from_value(payload.clone())
         .map_err(|e| format!("send_email payload is invalid: {e}"))?;
+    if ctx.suppressed(&p.to).await? {
+        return Ok(());
+    }
     ctx.mailer
         .send(Email {
             to: p.to,
             subject: p.subject,
             text: p.text,
             html: p.html,
+            unsubscribe: p.unsubscribe,
         })
         .await
         .map_err(|e| e.to_string())

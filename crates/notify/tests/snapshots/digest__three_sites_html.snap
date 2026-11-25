@@ -161,7 +161,7 @@ expression: three().render().unwrap().html.unwrap()
   </td></tr>
 
   <tr><td class="muted" style="padding:4px 4px 0 4px;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#52525b;">
-    You get this email every Monday. <a href="https://codoseo.test/settings/alerts">Change what you hear about</a>.
+    You get this email every Monday. <a href="https://codoseo.test/settings/alerts">Change what you hear about</a> or <a href="https://codoseo.test/email/unsubscribe/abc.def">stop these emails</a>.
   </td></tr>
 </table>
 </td></tr>

@@ -17,6 +17,7 @@ pub mod bot;
 pub mod changes;
 pub mod crawls;
 pub mod demo;
+pub mod email;
 pub mod explorer;
 pub mod export;
 pub mod graph;
@@ -70,6 +71,7 @@ pub fn router() -> Router<AppState> {
         .merge(rankorg::routes())
         .merge(legal::routes())
         .merge(demo::routes())
+        .merge(email::routes())
         .route("/bot", get(bot::page))
         .route("/stats/pages-crawled", get(landing::pages_crawled))
         .route("/robots.txt", get(seo::robots))

@@ -30,6 +30,7 @@ fn ctx(db: &TestDb, mode: Mode) -> SchedulerContext {
         base_url: url::Url::parse("https://codoseo.com").unwrap(),
         heartbeat_url: None,
         http: reqwest::Client::new(),
+        unsubscribe: codoseo_web::unsubscribe::Signer::derive("test secret"),
     }
 }
 
@@ -496,6 +497,19 @@ async fn a_free_account_inactive_for_31_days_is_asked_once_and_paused_a_week_lat
     assert_eq!(
         stored, 1,
         "the link's token is stored hashed, with a 7 day expiry"
+    );
+    // A reminder is a notification: it carries the unsubscribe link, in the text and for the
+    // one-click headers.
+    let unsubscribe = mail[0]["unsubscribe"].as_str().expect("unsubscribe link");
+    assert!(
+        unsubscribe.starts_with("https://codoseo.com/email/unsubscribe/"),
+        "{unsubscribe}"
+    );
+    assert!(
+        text.contains(&format!(
+            "Stop CodoSEO emails to quiet@example.test: {unsubscribe}"
+        )),
+        "{text}"
     );
     let paused: bool = sqlx::query_scalar("SELECT paused FROM accounts WHERE id = $1")
         .bind(id)

@@ -27,6 +27,7 @@ fn context(pool: &PgPool) -> (JobContext, Arc<Mutex<Vec<Email>>>) {
         http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
         rankorg_url: None,
         recheck: codoseo::recheck::RecheckSettings::new(AddressPolicy::AllowPrivate),
+        unsubscribe: codoseo_web::unsubscribe::Signer::derive("test secret"),
     };
     (ctx, sent)
 }

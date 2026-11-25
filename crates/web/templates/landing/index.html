@@ -73,7 +73,7 @@
       <form class="audit-form" method="post" action="/audit">
         <input id="audit" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="audit-hint"{% if error.is_some() %} aria-invalid="true" autofocus{% endif %} required>
         <button class="btn btn-y" type="submit" data-umami-event="audit-start" data-umami-event-place="hero">Audit my site →</button>
-        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
+        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}" data-action="audit"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
       </form>
       {% if let Some(err) = error %}<p class="err" role="alert">{{ err }}</p>{% endif %}
       <p class="hero-note" id="audit-hint">Free · up to {{ quick_pages }} pages · takes about a minute.</p>
@@ -243,7 +243,7 @@ from pricing.html.</code></div>
       <form class="audit-form mid" method="post" action="/audit">
         <input id="audit-2" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" aria-label="Your site's address" required>
         <button class="btn btn-y" type="submit" data-umami-event="audit-start" data-umami-event-place="mid">Audit my site →</button>
-        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
+        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}" data-action="audit"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
       </form>
     </div>
   </div>

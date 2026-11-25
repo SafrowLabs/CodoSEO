@@ -71,7 +71,7 @@ claude mcp add --transport http codoseo https://codoseo.com/mcp
 | `quick_audit` | Audits a public site: crawls up to 100 pages, returns the health score, failing checks with example URLs and a report link. If it is not done in about 45 seconds it returns `{"status":"running","audit_id":...}`. A site audited in the last 24 hours returns that report instead of a new crawl. |
 | `get_audit` | Progress or summary of a `quick_audit`, by `audit_id`. |
 | `get_issue_urls` | Pages failing one check in a finished quick audit (`audit_id`, `check`, `limit`, `offset`). |
-| `start_monitoring` | Starts free weekly monitoring for a site's owner (`url`, `email`). Emails a confirmation link; nothing starts until the owner opens it. On confirming, they get an account and an API key shown once. |
+| `start_monitoring` | Starts free weekly monitoring for a site's owner (`url`, `email`). Emails a confirmation link; nothing starts until the owner opens it. On confirming, they get an account and an API key shown once. An address gets at most 2 of these emails a day, a client 3 an hour, and everyone together `MCP_ANON_DAILY_EMAILS` a day (0 switches the tool's email off). An address that opted out of CodoSEO email gets none. |
 
 The no-key tier is rate limited: a cap on fresh audits and start-monitoring emails per 24 hours across all agents (`MCP_ANON_DAILY_AUDITS`, `MCP_ANON_DAILY_EMAILS`, both default 200), plus per-IP limits (including 30 tool calls per minute per client). A self-hosted install refuses requests without a key.
 

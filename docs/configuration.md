@@ -30,7 +30,7 @@ These are read in every long-running role but only take effect in cloud mode (th
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | none | Cloudflare Turnstile on the public audit form. Both are needed; without them the form has no challenge. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | none | Cloudflare Turnstile on the public forms: the audit form, the sign-in form and an audit's "get the full report" form. Both are needed; without them the forms have no challenge. Each form's widget carries a `data-action` (`audit`, `login`, `unlock`), and a token is only accepted for the form it was solved on, on `BASE_URL`'s host. |
 | `TURNSTILE_VERIFY_URL` | `https://challenges.cloudflare.com/turnstile/v0/siteverify` | Verification endpoint. Meant for tests; leave unset. |
 | `UMAMI_SCRIPT_URL`, `UMAMI_WEBSITE_ID` | none | [Umami](https://umami.is) analytics on the public pages (the landing page, the bot page and the no-signup audit report): the tracker's script URL (`https://.../script.js`) and the website id from Umami. Both are needed; with only one set, analytics stays off and a warning is logged. Never loaded in self-host mode. |
 | `CLIENT_IP_HEADER` | `CF-Connecting-IP` | Request header that carries the visitor's address behind your proxy. Used for per-IP abuse limits. |

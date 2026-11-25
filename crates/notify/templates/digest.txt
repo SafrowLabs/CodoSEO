@@ -37,3 +37,4 @@ Turn these pages into rankings with RankOrg: {{ url }}
 {%- endif %}
 {% endfor %}
 You get this email every Monday. Change what you hear about: {{ view.settings_url }}
+Stop CodoSEO emails to {{ view.account_email }}: {{ view.unsubscribe_url }}

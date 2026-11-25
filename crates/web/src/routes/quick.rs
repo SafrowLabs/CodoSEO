@@ -19,7 +19,7 @@ use codoseo_store::accounts::Account;
 use codoseo_store::crawls::{self, Crawl, CrawlStatus, LiveFilter};
 use codoseo_store::events::{self, EventKind};
 use codoseo_store::quick::{
-    self, Audit, ClaimOutcome, LimitWindow, Limits, Source, StartOutcome, StartRequest, UnlockSlot,
+    self, Audit, ClaimOutcome, LimitWindow, Limits, Source, StartOutcome, StartRequest,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -35,7 +35,7 @@ use crate::error::AppError;
 use crate::free_audit::{self, FreeInput, FreeView, Limit};
 use crate::render::{Hx, html, hx_redirect};
 use crate::state::AppState;
-use crate::turnstile::{self, Verdict};
+use crate::turnstile::{self, Action, Verdict};
 
 pub const CLAIM_COOKIE: &str = "codoseo_audit";
 /// Unclaimed audits live 7 days (spec section 6), and so does the cookie.
@@ -107,7 +107,7 @@ async fn start(
             return super::landing::refuse(&state, &form.url, StatusCode::BAD_REQUEST, message);
         }
     };
-    match turnstile::verify(&state, form.turnstile.as_deref(), ip).await {
+    match turnstile::verify(&state, Action::Audit, form.turnstile.as_deref(), ip).await {
         Verdict::Passed => {}
         Verdict::Failed => {
             return super::landing::refuse(
@@ -262,10 +262,12 @@ pub struct UnlockCard {
     pub limit: Limit,
     /// Sent along with a poll that ends the audit, to update the card in place.
     pub oob: bool,
+    /// Turnstile's site key, when the form is gated.
+    pub turnstile_site_key: Option<String>,
 }
 
 impl UnlockCard {
-    pub fn new(crawl: &Crawl) -> UnlockCard {
+    pub fn new(state: &AppState, crawl: &Crawl) -> UnlockCard {
         UnlockCard {
             id: crawl.id,
             email: String::new(),
@@ -273,6 +275,7 @@ impl UnlockCard {
             sent: false,
             limit: free_audit::limit(crawl),
             oob: false,
+            turnstile_site_key: state.config.turnstile.as_ref().map(|t| t.site_key.clone()),
         }
     }
 }
@@ -452,7 +455,7 @@ async fn report(
     let audit = load(&state, &id).await?;
     let page = ReportPage {
         main: main_view(&state, &audit).await?,
-        unlock: UnlockCard::new(&audit.crawl),
+        unlock: UnlockCard::new(&state, &audit.crawl),
         umami: state.config.umami.clone(),
     };
     Ok((report_headers(), html(&page)?).into_response())
@@ -473,7 +476,7 @@ async fn live(State(state): State<AppState>, Path(id): Path<String>) -> Result<R
     // The poll that ends the audit updates the sign-in card too.
     let unlock = UnlockCard {
         oob: !main.polling,
-        ..UnlockCard::new(&audit.crawl)
+        ..UnlockCard::new(&state, &audit.crawl)
     };
     let part = MainPartial { main, unlock };
     Ok((report_headers(), html(&part)?).into_response())
@@ -482,16 +485,20 @@ async fn live(State(state): State<AppState>, Path(id): Path<String>) -> Result<R
 #[derive(Deserialize)]
 pub struct UnlockForm {
     email: String,
+    /// Added to the form by Cloudflare's Turnstile script.
+    #[serde(rename = "cf-turnstile-response", default)]
+    turnstile: Option<String>,
 }
 
 async fn unlock(
     State(state): State<AppState>,
     hx: Hx,
     Path(id): Path<String>,
+    ClientIp(ip): ClientIp,
     Form(form): Form<UnlockForm>,
 ) -> Result<Response, AppError> {
     let audit = load(&state, &id).await?;
-    let mut card = UnlockCard::new(&audit.crawl);
+    let mut card = UnlockCard::new(&state, &audit.crawl);
     card.email = form.email.trim().to_owned();
 
     let mut status = StatusCode::OK;
@@ -506,6 +513,15 @@ async fn unlock(
         }
         Some(address) => {
             let address = address.to_owned();
+            // Cloudflare is only asked once the address is worth an email.
+            let verdict =
+                turnstile::verify(&state, Action::Unlock, form.turnstile.as_deref(), ip).await;
+            if let Some((code, message)) = magic::turnstile_text(verdict) {
+                status = code;
+                card.error = Some(message.to_owned());
+                card.email = address;
+                return finish(&state, hx, &audit, status, card).await;
+            }
             let outcome = magic::issue_link(
                 &state,
                 &address,
@@ -514,6 +530,7 @@ async fn unlock(
                     crawl_id: audit.crawl.id,
                     domain: &audit.domain,
                 }),
+                ip,
             )
             .await?;
             match outcome {
@@ -530,30 +547,29 @@ async fn unlock(
                 }
                 LinkOutcome::Throttled(slot) => {
                     status = StatusCode::TOO_MANY_REQUESTS;
-                    card.error = Some(
-                        match slot {
-                            UnlockSlot::AddressCapReached => {
-                                "We've already sent several emails to that address recently. \
-                                 Check your inbox and spam folder, or try again in an hour."
-                            }
-                            _ => {
-                                "We already sent several links for this audit. Check your \
-                                 inbox and spam folder, or try again in an hour."
-                            }
-                        }
-                        .to_owned(),
-                    );
+                    card.error = Some(magic::throttle_text(slot).to_owned());
                 }
+                LinkOutcome::Blocked => card.error = Some(magic::blocked_text()),
             }
             card.email = address;
         }
     }
+    finish(&state, hx, &audit, status, card).await
+}
 
+/// The unlock form's answer: the card alone for htmx, the whole report page otherwise.
+async fn finish(
+    state: &AppState,
+    hx: Hx,
+    audit: &Audit,
+    status: StatusCode,
+    card: UnlockCard,
+) -> Result<Response, AppError> {
     if hx.request {
         return Ok((status, html(&UnlockPartial { unlock: card })?).into_response());
     }
     let page = ReportPage {
-        main: main_view(&state, &audit).await?,
+        main: main_view(state, audit).await?,
         unlock: card,
         umami: state.config.umami.clone(),
     };

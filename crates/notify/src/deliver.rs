@@ -269,15 +269,19 @@ fn unix_now() -> u64 {
 }
 
 /// Delivers `msg` to one channel. HTTP channels check the URL with the address guard first, then
-/// post through `http`'s guarded client.
+/// post through `http`'s guarded client. `unsubscribe` is the email channel's one-click link
+/// (ignored by the others); `None` for a test message.
 pub async fn deliver(
     http: &GuardedHttp,
     mailer: &Mailer,
     target: &ChannelTarget,
     msg: &AlertMessage,
+    unsubscribe: Option<&str>,
 ) -> Result<(), DeliveryError> {
     match target {
-        ChannelTarget::Email { to } => Ok(mailer.send(message::email(msg, to)).await?),
+        ChannelTarget::Email { to } => {
+            Ok(mailer.send(message::email(msg, to, unsubscribe)).await?)
+        }
         ChannelTarget::Slack { url } => post(http, url, &slack::payload(msg), None).await,
         ChannelTarget::Discord { url } => post(http, url, &discord::payload(msg), None).await,
         ChannelTarget::Webhook { url, secret } => {

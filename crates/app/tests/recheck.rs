@@ -233,6 +233,7 @@ impl World {
             http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
             rankorg_url: None,
             recheck: fast_rechecks(),
+            unsubscribe: codoseo_web::unsubscribe::Signer::derive("test secret"),
         };
         World {
             db,
