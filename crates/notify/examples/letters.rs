@@ -129,6 +129,7 @@ fn main() {
                     pages: 100,
                     scores: Some([78, 64, 86]),
                     fixes: "all 9 fixes".to_owned(),
+                    more_pages: true,
                 },
             )
             .email(to)

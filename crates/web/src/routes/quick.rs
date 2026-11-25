@@ -579,6 +579,7 @@ fn report_audit(crawl: &Crawl) -> codoseo_notify::letters::Audit {
         } else {
             String::new()
         },
+        more_pages: free_audit::limit(crawl).more_pages,
     }
 }
 

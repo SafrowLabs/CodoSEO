@@ -93,25 +93,40 @@ pub struct Audit {
     pub scores: Option<[i16; 3]>,
     /// "all 9 fixes", or "every fix" before they are known.
     pub fixes: String,
+    /// The site has more pages than the free audit read: signing in carries on.
+    pub more_pages: bool,
 }
 
-/// An audit's "get the full report" email. Anyone may have typed the address, so it carries
-/// the opt-out link.
+/// An audit's sign-in email. The report already showed every fix for the pages checked, so
+/// the email is about what signing in adds: the rest of the site, the prompts, the weekly
+/// re-check. Anyone may have typed the address, so it carries the opt-out link.
 pub fn report_link(images: &str, domain: &str, link: &str, opt_out: &str, audit: &Audit) -> Draft {
-    let (title, intro) = match audit.scores {
-        Some(_) => (
-            "Your full report is ready".to_owned(),
+    let done = audit.scores.is_some();
+    let (title, intro, button) = match (done, audit.more_pages) {
+        (true, true) => (
+            format!("Audit the rest of {domain}"),
             format!(
-                "We checked {} of {domain}. Here is where it stands; the full report has the \
-                 rest.",
+                "We audited the first {} of {domain} and showed every fix for them. Signing in \
+                 carries on to up to 500 pages.",
                 pages(audit.pages)
             ),
+            "Audit the rest free",
         ),
-        None => (
-            format!("Your full report of {domain}"),
+        (true, false) => (
+            format!("Keep your audit of {domain}"),
             format!(
-                "We are checking {domain} now. The full report has everything, as it comes in."
+                "You saw the whole result for {domain}. Sign in to keep it and have us watch \
+                 the site."
             ),
+            "Keep this audit",
+        ),
+        (false, _) => (
+            format!("Your audit of {domain}"),
+            format!(
+                "We are checking {domain} now. Sign in to keep the result and carry on to up \
+                 to 500 pages."
+            ),
+            "Keep this audit",
         ),
     };
     let fixes = if audit.fixes.is_empty() {
@@ -119,6 +134,24 @@ pub fn report_link(images: &str, domain: &str, link: &str, opt_out: &str, audit:
     } else {
         audit.fixes.clone()
     };
+    let mut rows = Vec::new();
+    if !done || audit.more_pages {
+        rows.push(row(
+            Icon::Pages,
+            "Up to 500 pages",
+            "The rest of the site, with every page's checks.",
+        ));
+    }
+    rows.push(Row {
+        icon: Icon::Fix,
+        title: format!("{} as copy-paste prompts", capitalise(&fixes)),
+        detail: "Ready for your CMS, your developer or your AI agent.".to_owned(),
+    });
+    rows.push(row(
+        Icon::Week,
+        "A re-check every week",
+        "With an email when something important breaks.",
+    ));
     Draft {
         subject: format!("Your CodoSEO report for {domain}"),
         letter: Letter {
@@ -137,26 +170,10 @@ pub fn report_link(images: &str, domain: &str, link: &str, opt_out: &str, audit:
                     ]
                 })
                 .unwrap_or_default(),
-            rows_label: Some("In the full report".to_owned()),
-            rows: vec![
-                row(
-                    Icon::Pages,
-                    "Up to 500 pages",
-                    "Every page's checks, not only the first 100.",
-                ),
-                Row {
-                    icon: Icon::Fix,
-                    title: format!("{}, with copy-paste prompts", capitalise(&fixes)),
-                    detail: "Ready for your CMS, your developer or your AI agent.".to_owned(),
-                },
-                row(
-                    Icon::Week,
-                    "A re-check every week",
-                    "With an email when something important breaks.",
-                ),
-            ],
+            rows_label: Some("When you sign in".to_owned()),
+            rows,
             button: Some(Button {
-                label: "Open the full report".to_owned(),
+                label: button.to_owned(),
                 url: link.to_owned(),
             }),
             after: vec![
@@ -381,6 +398,7 @@ mod tests {
             pages: 100,
             scores: Some([78, 64, 86]),
             fixes: "all 9 fixes".into(),
+            more_pages: true,
         };
         for draft in [
             report_link(
@@ -418,8 +436,8 @@ mod tests {
     }
 
     #[test]
-    fn the_report_email_shows_scores_when_the_audit_is_done_and_not_before() {
-        let done = report_link(
+    fn the_report_email_says_what_signing_in_adds_for_each_state_of_the_audit() {
+        let more = report_link(
             IMAGES,
             "example.com",
             "https://l",
@@ -428,19 +446,40 @@ mod tests {
                 pages: 100,
                 scores: Some([78, 64, 86]),
                 fixes: "all 9 fixes".into(),
+                more_pages: true,
             },
         );
-        assert_eq!(done.letter.title, "Your full report is ready");
-        let text = done.email("a@b.co").unwrap().text;
+        assert_eq!(more.letter.title, "Audit the rest of example.com");
+        let text = more.email("a@b.co").unwrap().text;
         assert!(
-            text.contains("We checked 100 pages of example.com."),
+            text.contains("We audited the first 100 pages of example.com"),
             "{text}"
         );
         assert!(text.contains("Overall 78 · GEO 64 · SEO 86\n"), "{text}");
+        assert!(text.contains("- Up to 500 pages:"), "{text}");
         assert!(
-            text.contains("- All 9 fixes, with copy-paste prompts:"),
+            text.contains("- All 9 fixes as copy-paste prompts:"),
             "{text}"
         );
+        assert!(text.contains("Audit the rest free:\nhttps://l\n"), "{text}");
+
+        let whole = report_link(
+            IMAGES,
+            "example.com",
+            "https://l",
+            "https://o",
+            &Audit {
+                pages: 40,
+                scores: Some([90, 80, 95]),
+                fixes: "all 2 fixes".into(),
+                more_pages: false,
+            },
+        );
+        assert_eq!(whole.letter.title, "Keep your audit of example.com");
+        let text = whole.email("a@b.co").unwrap().text;
+        assert!(!text.contains("Up to 500 pages"), "{text}");
+        assert!(text.contains("Keep this audit:\nhttps://l\n"), "{text}");
+
         let running = report_link(
             IMAGES,
             "example.com",
@@ -448,13 +487,14 @@ mod tests {
             "https://o",
             &Audit::default(),
         );
-        assert_eq!(running.letter.title, "Your full report of example.com");
+        assert_eq!(running.letter.title, "Your audit of example.com");
         assert!(running.letter.scores.is_empty());
         let text = running.email("a@b.co").unwrap().text;
         assert!(
-            text.contains("- Every fix, with copy-paste prompts:"),
+            text.contains("- Every fix as copy-paste prompts:"),
             "{text}"
         );
+        assert!(text.contains("- Up to 500 pages:"), "{text}");
     }
 
     #[test]
