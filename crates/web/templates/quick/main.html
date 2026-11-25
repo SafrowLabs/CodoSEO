@@ -84,7 +84,7 @@
       <div class="la-stream-head">
         <div>
           <h2>Fix these first</h2>
-          <p class="muted au-small">{% if v.all_clear %}Nothing to fix on these pages.{% else %}AI fixes first, then search.{% if v.hidden_fixes > 0 %} {{ v.fixes.len() }} shown free, {{ v.hidden_fixes }} more in the full report.{% endif %}{% endif %}</p>
+          <p class="muted au-small">{% if v.all_clear %}Nothing to fix on these pages.{% else %}AI fixes first, then search.{% endif %}</p>
         </div>
       </div>
       {% for f in v.fixes %}
@@ -94,13 +94,6 @@
         <b class="up num">{{ f.points }}</b>
       </div>
       {% endfor %}
-      {% if v.hidden_fixes > 0 %}
-      <div class="q-locked" aria-hidden="true">
-        <div class="q-fix"><i class="sdot is-warning"></i><div class="grow"><div class="q-fix-t"><b>A fix kept for the full report</b></div><div class="muted au-small">On several pages.</div></div><b class="num">+0.0</b></div>
-        <div class="q-fix"><i class="sdot is-notice"></i><div class="grow"><div class="q-fix-t"><b>Another fix for the full report</b></div><div class="muted au-small">On a few pages.</div></div><b class="num">+0.0</b></div>
-      </div>
-      <div class="la-foot"><span>The rest is hidden until you sign in. That keeps anonymous use small and stops people crawling sites that aren't theirs. <a class="au-link" href="#unlock-card">Sign in free</a></span></div>
-      {% endif %}
     </section>
     {% endif %}
   </div>

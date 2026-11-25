@@ -416,7 +416,7 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
 }
 
 #[tokio::test]
-async fn the_preview_shows_three_fixes_and_keeps_the_rest_and_every_url_locked() {
+async fn the_report_shows_every_fix_unblurred_and_no_page_urls() {
     let app = cloud().await;
     let crawl = crawl_id(&submit(&app, "example.com").await);
     finish(&app, crawl, messy_pages("example.com")).await;
@@ -434,18 +434,11 @@ async fn the_preview_shows_three_fixes_and_keeps_the_rest_and_every_url_locked()
     );
 
     let body = app.get(&format!("/audit/{crawl}"), None).await.body;
-    // Three real fixes, then placeholders under a blur: the hidden ones aren't in the page.
-    assert_eq!(
-        body.matches(r#"<div class="q-fix">"#).count(),
-        3 + 2,
-        "{body}"
-    );
-    assert!(body.contains("3 shown free"), "{body}");
-    assert!(body.contains("more in the full report"), "{body}");
-    assert!(
-        body.contains(r#"class="q-locked" aria-hidden="true""#),
-        "{body}"
-    );
+    // Every fix for the pages checked, none held back or blurred.
+    assert!(body.matches(r#"<div class="q-fix">"#).count() > 5, "{body}");
+    assert!(!body.contains("q-locked"), "{body}");
+    assert!(!body.contains("shown free"), "{body}");
+    assert!(body.contains("the whole result"), "{body}");
     // The lead magnet: no page URLs before the email.
     assert!(!body.contains("hidden-secret-path"));
     assert!(!body.contains("/messy-0"));

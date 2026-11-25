@@ -1,11 +1,12 @@
-//! Cloudflare Turnstile on the public forms (cloud only, and only when keys are configured):
-//! the audit form, the sign-in form and an audit's unlock form. The page loads Cloudflare's
+//! Cloudflare Turnstile on the forms that send email (cloud only, and only when keys are
+//! configured): the sign-in form and an audit's sign-in card. The page loads Cloudflare's
 //! script, which adds a `cf-turnstile-response` field to the form; the server checks that token
-//! with Cloudflare before starting a crawl or sending an email.
+//! with Cloudflare before sending an email. The landing page's audit form has no challenge: it
+//! sends nothing, and its crawls are capped per client and per day.
 //!
 //! Each form's widget carries a `data-action` ([`Action`]), and the server only accepts a token
-//! solved for that action on this app's own hostname: a token solved on the audit form can't be
-//! replayed on the sign-in form, and one solved on a copy of the page elsewhere is refused.
+//! solved for that action on this app's own hostname: a token solved on one form can't be
+//! replayed on the other, and one solved on a copy of the page elsewhere is refused.
 
 use std::net::IpAddr;
 
@@ -26,18 +27,15 @@ pub enum Verdict {
 /// Which form a token was solved for: the widget's `data-action`, echoed back by Cloudflare.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    /// The landing page's audit form.
-    Audit,
     /// The sign-in form.
     Login,
-    /// An audit's "get the full report" form.
+    /// The sign-in card on an audit's report.
     Unlock,
 }
 
 impl Action {
     pub fn as_str(self) -> &'static str {
         match self {
-            Action::Audit => "audit",
             Action::Login => "login",
             Action::Unlock => "unlock",
         }

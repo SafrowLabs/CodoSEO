@@ -18,7 +18,6 @@
 <script>(function(){var d=document.documentElement,p="light";try{p=localStorage.getItem("codoseo-theme")||"light"}catch(e){}if(p!=="dark"&&p!=="system")p="light";var t=p==="dark"||(p==="system"&&window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";d.setAttribute("data-theme",t);d.setAttribute("data-theme-pref",p);d.className+=" js";var m=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<m.length;i++)m[i].setAttribute("content",t==="dark"?"#0A1411":"#F4F4F0")})()</script>
 <link rel="stylesheet" href="{{ crate::assets::url("home.css") }}">
 <script src="{{ crate::assets::url("home.js") }}" defer></script>
-{% if turnstile_site_key.is_some() %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>{% endif %}
 {% include "partials/analytics.html" %}
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
@@ -73,7 +72,6 @@
       <form class="audit-form" method="post" action="/audit">
         <input id="audit" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" value="{{ url }}" aria-label="Your site's address" aria-describedby="audit-hint"{% if error.is_some() %} aria-invalid="true" autofocus{% endif %} required>
         <button class="btn btn-y" type="submit" data-umami-event="audit-start" data-umami-event-place="hero">Audit my site →</button>
-        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}" data-action="audit"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
       </form>
       {% if let Some(err) = error %}<p class="err" role="alert">{{ err }}</p>{% endif %}
       <p class="hero-note" id="audit-hint">Free · up to {{ quick_pages }} pages · takes about a minute.</p>
@@ -243,7 +241,6 @@ from pricing.html.</code></div>
       <form class="audit-form mid" method="post" action="/audit">
         <input id="audit-2" name="url" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="yoursite.com" aria-label="Your site's address" required>
         <button class="btn btn-y" type="submit" data-umami-event="audit-start" data-umami-event-place="mid">Audit my site →</button>
-        {% if let Some(key) = turnstile_site_key %}<div class="cf-turnstile ts" data-sitekey="{{ key }}" data-action="audit"></div><script>document.currentScript.previousElementSibling.dataset.theme=document.documentElement.dataset.theme==="dark"?"dark":"light"</script>{% endif %}
       </form>
     </div>
   </div>

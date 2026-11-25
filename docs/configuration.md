@@ -30,7 +30,7 @@ These are read in every long-running role but only take effect in cloud mode (th
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | none | Cloudflare Turnstile on the public forms: the audit form, the sign-in form and an audit's "get the full report" form. Both are needed; without them the forms have no challenge. Each form's widget carries a `data-action` (`audit`, `login`, `unlock`), and a token is only accepted for the form it was solved on, on `BASE_URL`'s host. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | none | Cloudflare Turnstile on the forms that send email: the sign-in form and the sign-in card on an audit's report. Both are needed; without them the forms have no challenge. The landing page's audit form never has one. Each form's widget carries a `data-action` (`login`, `unlock`), and a token is only accepted for the form it was solved on, on `BASE_URL`'s host. |
 | `TURNSTILE_VERIFY_URL` | `https://challenges.cloudflare.com/turnstile/v0/siteverify` | Verification endpoint. Meant for tests; leave unset. |
 | `SES_SNS_TOPIC_ARN` | none | Amazon SES bounce and complaint feedback: the ARN of the SNS topic subscribed to `https://<BASE_URL>/hooks/ses`. Messages from any other topic, or with a bad signature, are refused. See [operations](operations.md#email). |
 | `SNS_BASE_URL` | none | Where the SES hook fetches SNS signing certificates and confirms its subscription, instead of `sns.<region>.amazonaws.com`. Meant for tests; leave unset. |

@@ -1,6 +1,6 @@
 //! The no-signup audit as it runs and once it is done (`/audit/{id}`): GEO first, the Overall
-//! score large with SEO and GEO under it, every page as it is checked, then the fixes, of which
-//! three are free and the rest wait for a sign-in.
+//! score large with SEO and GEO under it, every page as it is checked, then every fix for the
+//! pages checked. Nothing is held back; signing in carries the audit past the free page cap.
 //!
 //! The running view is the live audit's (`live_audit`): the same steps, rows and issue ranking,
 //! without the in-app chrome.
@@ -20,8 +20,6 @@ use crate::live_audit::{
 use crate::routes::audit_fix::{geo_check_label, reads_seo};
 use crate::score_bars::ScoreBar;
 
-/// Fixes shown before the sign-in.
-pub const FREE_FIXES: usize = 3;
 /// Pages listed while the audit runs: the newest.
 pub const ROWS_SHOWN: i64 = 30;
 
@@ -48,8 +46,6 @@ pub struct FreeView {
     pub counter: String,
     pub issues: Vec<IssueView>,
     pub fixes: Vec<Fix>,
-    /// Fixes kept for the full report.
-    pub hidden_fixes: usize,
     pub all_clear: bool,
     pub stop_chip: Option<String>,
     /// The counted link to RankOrg, once the audit is done.
@@ -78,6 +74,8 @@ pub struct Fix {
 /// The sign-in card's words, which depend on how far the audit got.
 pub struct Limit {
     pub title: String,
+    /// The site has more pages than the free audit reads: signing in carries on.
+    pub more_pages: bool,
     /// `all 9 fixes`, or `every fix` before they are known.
     pub fixes: String,
     /// Pages crawled of the free cap, 0-100.
@@ -106,20 +104,27 @@ pub fn limit(crawl: &Crawl) -> Limit {
     let done = live.as_ref().map_or(0, |l| l.progress.pages_done);
     let cap = cap();
     let finished = crawl.status == CrawlStatus::Done;
+    let summary = crawl.summary();
+    let more_pages = sitemap > cap
+        || summary
+            .as_ref()
+            .is_some_and(|s| matches!(s.stop_reason, StopReason::PageLimit));
     let title = match (finished, sitemap > cap) {
         (true, true) => format!(
-            "Get the full report and all {} pages",
+            "We audited the first {cap} pages. Your sitemap lists {}.",
             fmt::thousands(sitemap)
         ),
-        (true, false) => "Get the full report".to_owned(),
+        (true, false) if more_pages => {
+            format!("We audited the first {cap} pages. Your site has more.")
+        }
+        (true, false) => "Keep this audit and watch the site".to_owned(),
         (false, true) => format!(
             "This free audit stops at {cap} pages. Your sitemap lists {}.",
             fmt::thousands(sitemap)
         ),
         (false, false) => format!("This free audit stops at {cap} pages."),
     };
-    let fixes = crawl
-        .summary()
+    let fixes = summary
         .map(|s| fix_count(&s))
         .filter(|&n| n > 0 && finished)
         .map_or("every fix".to_owned(), |n| {
@@ -127,6 +132,7 @@ pub fn limit(crawl: &Crawl) -> Limit {
         });
     Limit {
         title,
+        more_pages,
         fixes,
         bar: (u64::from(done.min(cap)) * 100 / u64::from(cap.max(1))) as u32,
         line: format!(
@@ -222,10 +228,9 @@ impl FreeView {
             } else {
                 Vec::new()
             },
-            hidden_fixes: fixes_all.len().saturating_sub(FREE_FIXES),
             all_clear: !running && fixes_all.is_empty(),
             rankorg: format!("/go/rankorg?src=audit&audit={}", c.id),
-            fixes: fixes_all.into_iter().take(FREE_FIXES).collect(),
+            fixes: fixes_all,
             stop_chip: summary.as_ref().and_then(|s| match s.stop_reason {
                 StopReason::PageLimit => {
                     Some(format!("Stopped at the free limit of {} pages", cap()))
