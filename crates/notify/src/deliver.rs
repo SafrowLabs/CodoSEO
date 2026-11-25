@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use url::{Host, Url};
 
 use crate::email::{MailError, Mailer};
-use crate::message::{self, AlertMessage};
+use crate::message::{self, AlertMessage, EmailOptions};
 use crate::{discord, slack, webhook};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -269,19 +269,17 @@ fn unix_now() -> u64 {
 }
 
 /// Delivers `msg` to one channel. HTTP channels check the URL with the address guard first, then
-/// post through `http`'s guarded client. `unsubscribe` is the email channel's one-click link
-/// (ignored by the others); `None` for a test message.
+/// post through `http`'s guarded client. `email` is what the email channel's rendering needs
+/// (ignored by the others).
 pub async fn deliver(
     http: &GuardedHttp,
     mailer: &Mailer,
     target: &ChannelTarget,
     msg: &AlertMessage,
-    unsubscribe: Option<&str>,
+    email: &EmailOptions<'_>,
 ) -> Result<(), DeliveryError> {
     match target {
-        ChannelTarget::Email { to } => {
-            Ok(mailer.send(message::email(msg, to, unsubscribe)).await?)
-        }
+        ChannelTarget::Email { to } => Ok(mailer.send(message::email(msg, to, email)).await?),
         ChannelTarget::Slack { url } => post(http, url, &slack::payload(msg), None).await,
         ChannelTarget::Discord { url } => post(http, url, &discord::payload(msg), None).await,
         ChannelTarget::Webhook { url, secret } => {

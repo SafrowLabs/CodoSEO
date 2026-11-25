@@ -27,12 +27,12 @@ use uuid::Uuid;
 use super::error::AgentError;
 use super::service::{crawl_health, issue_page, parse_check};
 use crate::abuse;
-use crate::auth::mailer::Email;
 use crate::auth::{email, session};
 use crate::routes::quick::no_report_notice;
 use crate::routes::sites::{check_public_target, parse_start_url};
 use crate::state::AppState;
 use crate::unsubscribe::Unsubscribe;
+use codoseo_notify::letters;
 
 /// How long a start-monitoring link works. Longer than a sign-in link: the person has to see
 /// the email, which an agent's user may do later.
@@ -445,28 +445,11 @@ impl<'a> AnonService<'a> {
                 account_id: None,
             },
         );
-        let text = format!(
-            "An AI assistant you are working with asked CodoSEO to monitor {domain}.\n\n\
-             To confirm, open this link and press the button:\n\n{link}\n\n\
-             CodoSEO then starts weekly monitoring on your free CodoSEO account (one is created \
-             if you don't have one), crawls {domain} now, and emails you when something \
-             important breaks. It also shows you an API key once, which lets your assistant \
-             read your site's results.\n\n\
-             The link works once and expires in 24 hours. If you didn't ask for this, ignore \
-             this email and nothing happens.\n\n\
-             Don't want any email from CodoSEO? {opt_out}"
-        );
-        if let Err(e) = state
-            .mailer
-            .send(Email {
-                to: address.clone(),
-                subject: format!("Confirm monitoring for {domain}"),
-                text,
-                html: None,
-                unsubscribe: None,
-            })
-            .await
-        {
+        let email =
+            letters::confirm_monitoring(&state.email_logo_url(), &domain, &link, opt_out.as_str())
+                .email(&address)
+                .map_err(|e| format!("the confirmation email did not render: {e}"))?;
+        if let Err(e) = state.mailer.send(email).await {
             // The answer is the same either way; a broken mail server is for the operator.
             tracing::error!(error = %e, "could not send the start-monitoring link");
         }

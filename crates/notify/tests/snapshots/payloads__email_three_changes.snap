@@ -5,25 +5,89 @@ expression: email_snapshot(&changes(3))
 to: owner@example.com
 subject: CodoSEO: 3 changes on example.com
 --- text ---
+Instant alert · example.com
 3 changes on example.com
 
 [Critical] Became noindex
-  https://example.com/page-0
-  index → noindex
+  https://example.com/page-0 · index → noindex
 [Warning] Status changed
-  https://example.com/page-1
-  200 → 500
+  https://example.com/page-1 · 200 → 500
 [Notice] Title changed
-  https://example.com/page-2
-  index → noindex
+  https://example.com/page-2 · index → noindex
 
-Open in CodoSEO: https://codoseo.com/sites/abc
+See the changes:
+https://codoseo.com/sites/abc
+
+Sent to an alert channel on CodoSEO.
+
+CodoSEO by SafrowLabs · https://codoseo.com
 
 --- html ---
-<h2 style="font-size:18px">3 changes on example.com</h2>
-<ul>
-<li><strong>Became noindex</strong> (critical)<br><a href="https://example.com/page-0">https://example.com/page-0</a><br>index → noindex</li>
-<li><strong>Status changed</strong> (warning)<br><a href="https://example.com/page-1">https://example.com/page-1</a><br>200 → 500</li>
-<li><strong>Title changed</strong> (notice)<br><a href="https://example.com/page-2">https://example.com/page-2</a><br>index → noindex</li>
-</ul>
-<p><a href="https://codoseo.com/sites/abc">Open in CodoSEO</a></p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>3 changes on example.com</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4F4F0;">
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#F4F4F0;"></div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F4F0;">
+<tr><td align="center" style="padding:28px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;font-family:Geist,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#111613;">
+  <tr><td style="padding:0 0 18px 4px;">
+
+    <span style="font-size:16px;font-weight:600;letter-spacing:-.01em;color:#111613;">CodoSEO</span>
+
+  </td></tr>
+  <tr><td style="background-color:#ffffff;border:1px solid #E2E4DE;border-radius:14px;padding:30px 32px 28px;">
+
+    <p style="margin:0 0 6px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7A5E00;">Instant alert · example.com</p>
+
+    <h1 style="margin:0 0 10px;font-size:22px;line-height:1.25;font-weight:600;letter-spacing:-.01em;color:#111613;">3 changes on example.com</h1>
+
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:6px;border-top:1px solid #E2E4DE;">
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
+
+        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-0 · index → noindex</span>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+
+        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-1 · 200 → 500</span>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#6B736E;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Title changed</b>
+
+        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-2 · index → noindex</span>
+
+      </td></tr>
+
+    </table>
+
+
+
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr><td style="background-color:#F0C42C;border-radius:10px;">
+      <a href="https://codoseo.com/sites/abc" style="display:inline-block;padding:13px 22px;font-size:15px;font-weight:600;color:#0E1A17;text-decoration:none;">See the changes</a>
+    </td></tr></table>
+
+
+  </td></tr>
+  <tr><td style="padding:18px 8px 0;font-size:12px;line-height:1.6;color:#6B736E;">
+Sent to an alert channel on CodoSEO. <br>
+    CodoSEO by SafrowLabs &middot; <a href="https://codoseo.com" style="color:#6B736E;">codoseo.com</a> &middot; <a href="mailto:contact@codoseo.com" style="color:#6B736E;">contact@codoseo.com</a>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

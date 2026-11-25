@@ -609,9 +609,16 @@ async fn an_email_alert_carries_the_unsubscribe_link_and_an_unsubscribed_address
         "{link}"
     );
     assert!(
-        mail.text.contains(&format!("Stop these emails: {link}")),
+        mail.text.contains(&format!("Unsubscribe: {link}")),
         "{}",
         mail.text
+    );
+    assert!(
+        mail.html
+            .as_deref()
+            .is_some_and(|h| h.contains("https://codoseo.test/email-logo.png")),
+        "{:?}",
+        mail.html
     );
     let claims = codoseo_web::unsubscribe::Signer::derive("test secret")
         .parse(link.rsplit('/').next().unwrap())

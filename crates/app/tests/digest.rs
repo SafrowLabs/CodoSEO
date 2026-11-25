@@ -384,12 +384,16 @@ async fn the_digest_carries_a_signed_unsubscribe_link_for_the_accounts_address()
         "{link}"
     );
     assert!(
-        mail.text
-            .contains(&format!("Stop CodoSEO emails to owner@example.com: {link}")),
+        mail.text.contains(&format!("Unsubscribe: {link}")),
         "{}",
         mail.text
     );
-    assert!(mail.html.unwrap().contains(&link));
+    let html = mail.html.unwrap();
+    assert!(html.contains(&link));
+    assert!(
+        html.contains("https://codoseo.test/email-logo.png"),
+        "{html}"
+    );
     let token = link.rsplit('/').next().unwrap();
     let claims = codoseo_web::unsubscribe::Signer::derive("test secret")
         .parse(token)
