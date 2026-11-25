@@ -1,6 +1,7 @@
 //! Shared state handed to every handler.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::PgPool;
@@ -34,6 +35,8 @@ pub struct AppState {
     pub crawl_stats: Arc<crate::crawl_stats::StatsCache>,
     /// Signs the unsubscribe links in emails (derived from `SECRET_KEY`).
     pub unsubscribe: crate::unsubscribe::Signer,
+    /// SNS signing certificates by URL, for the SES feedback hook: fetched once each.
+    pub sns_certs: Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>,
 }
 
 impl AppState {
@@ -46,6 +49,7 @@ impl AppState {
             pool,
             channel_key: ChannelKey::derive(&config.secret_key),
             unsubscribe: crate::unsubscribe::Signer::derive(&config.secret_key),
+            sns_certs: Arc::default(),
             notify_http: GuardedHttp::new(policy).expect("http client builds"),
             config: Arc::new(config),
             mailer,

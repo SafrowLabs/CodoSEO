@@ -31,6 +31,7 @@ pub mod quick;
 pub mod rankorg;
 pub mod search;
 pub mod seo;
+pub mod ses_hook;
 pub mod settings_alerts;
 pub mod settings_keys;
 pub mod sites;
@@ -72,6 +73,7 @@ pub fn router() -> Router<AppState> {
         .merge(legal::routes())
         .merge(demo::routes())
         .merge(email::routes())
+        .merge(ses_hook::routes())
         .route("/bot", get(bot::page))
         .route("/stats/pages-crawled", get(landing::pages_crawled))
         .route("/robots.txt", get(seo::robots))

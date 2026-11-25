@@ -1,0 +1,12 @@
+{
+  "Type": "Notification",
+  "MessageId": "m-3",
+  "TopicArn": "arn:aws:sns:eu-north-1:123456789012:codoseo-ses-feedback",
+  "Message": "{\"notificationType\": \"Complaint\", \"complaint\": {\"complainedRecipients\": [{\"emailAddress\": \"angry@yahoo.com\"}], \"timestamp\": \"2026-11-25T12:59:40.000Z\", \"feedbackId\": \"fb-3\", \"complaintFeedbackType\": \"abuse\", \"userAgent\": \"Yahoo!-Mail-Feedback/2.0\"}, \"mail\": {\"timestamp\": \"2026-11-25T12:58:00.000Z\", \"source\": \"CodoSEO <hello@codoseo.com>\", \"messageId\": \"0100-abc\", \"destination\": [\"Bounced.Person+x@Example.com\", \"fine@example.com\"]}}",
+  "Timestamp": "2026-11-25T13:00:00.000Z",
+  "SignatureVersion": "1",
+  "Signature": "F1Ibj6Ac6Z/iPTzzbEB0HAyS4i+fcdLuTlNDuIyUFMNYKINTXOTXe+jLmfzBXECu+Nh2XMrO+X5WDYuugSMhvecdKkKrXPbKRXOQH8pZivrasDz6btlYj3L6axNPnuo+xcC2Y3YPyO4gBGLx1yWBic4Lil/0KySbXKYDXnRu66VzMbBDywZ78Wtzv3cZizecs8F0M5ooARRfhJvV6Nl/xPhag4CRQoAxCHpDNsAaqwn7YMrbhcFDYKFWgDcXBaF/ihgSUNZ2rvqPy1Gu13MuUyFREiS4xeyuIkb6/lQBNPJiGRInwzpp/bxQiDtx6q7opEfcUVvJlJs7+1A1bPH1nA==",
+  "SigningCertURL": "https://sns.eu-north-1.amazonaws.com/SimpleNotificationService-test.pem",
+  "UnsubscribeURL": "https://sns.eu-north-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=x",
+  "Subject": "Amazon SES Email Event Notification"
+}

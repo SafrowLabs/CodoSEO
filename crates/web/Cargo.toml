@@ -43,6 +43,8 @@ futures-util.workspace = true
 tokio-util.workspace = true
 bytes.workspace = true
 csv.workspace = true
+ring = "0.17"
+x509-cert = { version = "0.2", features = ["pem"] }
 
 [dev-dependencies]
 metrics-exporter-prometheus.workspace = true

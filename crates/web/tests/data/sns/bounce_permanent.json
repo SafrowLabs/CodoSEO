@@ -1,0 +1,11 @@
+{
+  "Type": "Notification",
+  "MessageId": "m-1",
+  "TopicArn": "arn:aws:sns:eu-north-1:123456789012:codoseo-ses-feedback",
+  "Message": "{\"notificationType\": \"Bounce\", \"bounce\": {\"bounceType\": \"Permanent\", \"bounceSubType\": \"General\", \"bouncedRecipients\": [{\"emailAddress\": \"Bounced.Person+x@Example.com\", \"action\": \"failed\", \"status\": \"5.1.1\", \"diagnosticCode\": \"smtp; 550 5.1.1 user unknown\"}], \"timestamp\": \"2026-11-25T12:59:30.000Z\", \"feedbackId\": \"fb-1\"}, \"mail\": {\"timestamp\": \"2026-11-25T12:58:00.000Z\", \"source\": \"CodoSEO <hello@codoseo.com>\", \"messageId\": \"0100-abc\", \"destination\": [\"Bounced.Person+x@Example.com\", \"fine@example.com\"]}}",
+  "Timestamp": "2026-11-25T13:00:00.000Z",
+  "SignatureVersion": "2",
+  "Signature": "ibQe0aN4VPcVX3EBG2aAi3gOV4yg9PMlb/OLtc8pa4klMPw8C5EYqGZUcIfaKN/rE3ETUrdGFcBu9Ot0971AC8s1UoSDqgN1qVGmv8MMJRlLKyOAGANzZ+gRVX42xcccaYQjvxJG+KZscxIyCdnC5hUugTyRBMy3qrLci+9QaubRREO1vFH/thzSn4jO9kVum4A176nRoqu8bBYvpcT3e3VFCC2yRhu/7Lgf+TAQJEVSKxgPhwpBrgULgzWQ26Rg7rXFBALmxBJmo7+p3wsunEMXYngDBBvBO5v9Z+E3MtrvBCYjGR/l0GQZjNly4hfGHQlz4BtISSJxy8dihYE5rw==",
+  "SigningCertURL": "https://sns.eu-north-1.amazonaws.com/SimpleNotificationService-test.pem",
+  "UnsubscribeURL": "https://sns.eu-north-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=x"
+}

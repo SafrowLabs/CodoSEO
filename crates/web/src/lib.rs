@@ -24,6 +24,7 @@ pub mod render;
 pub mod routes;
 pub mod score_bars;
 pub mod serp;
+pub mod sns;
 pub mod state;
 pub mod turnstile;
 pub mod unsubscribe;

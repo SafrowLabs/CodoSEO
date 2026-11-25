@@ -13,11 +13,11 @@
   </div>
   {% endif %}
 
-  {% if let Some(since) = unsubscribed %}
+  {% if let Some(off) = unsubscribed %}
   <div class="card callout" role="status">
-    <div class="card-head"><span class="card-title">Email to {{ shell.user.email }} is off</span><span class="card-aside">since {{ since }}</span></div>
+    <div class="card-head"><span class="card-title">Email to {{ shell.user.email }} is off</span><span class="card-aside">since {{ off.since }}</span></div>
     <div class="card-pad" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <p class="hint" style="margin:0;flex:1">You unsubscribed, so alerts, the weekly digest and reminders aren't sent to this address.</p>
+      <p class="hint" style="margin:0;flex:1">Alerts, the weekly digest and reminders aren't sent to this address because {{ off.why }}. Turning email back on lifts that.</p>
       <form method="post" action="/settings/alerts/email/resume"><button class="btn btn-primary btn-sm" type="submit">Turn email back on</button></form>
     </div>
   </div>

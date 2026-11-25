@@ -42,6 +42,14 @@ pub struct TurnstileConfig {
     pub verify_url: Url,
 }
 
+/// Where SES feedback comes from: the one SNS topic whose messages `/hooks/ses` accepts, and
+/// (for tests) where SNS lives instead of `sns.<region>.amazonaws.com`.
+#[derive(Debug, Clone)]
+pub struct SesFeedbackConfig {
+    pub topic_arn: String,
+    pub sns_base_url: Option<Url>,
+}
+
 impl std::fmt::Debug for TurnstileConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TurnstileConfig")
@@ -134,6 +142,8 @@ pub struct Config {
     pub turnstile: Option<TurnstileConfig>,
     /// Umami on the public pages: `UMAMI_SCRIPT_URL` and `UMAMI_WEBSITE_ID`. Cloud only.
     pub umami: Option<UmamiConfig>,
+    /// Amazon SES bounce and complaint feedback through SNS (`SES_SNS_TOPIC_ARN`).
+    pub ses_feedback: Option<SesFeedbackConfig>,
     /// The request header carrying the visitor's address behind the cloud's proxy
     /// (`CLIENT_IP_HEADER`, default `CF-Connecting-IP`). Read in cloud mode only.
     pub client_ip_header: String,
@@ -195,6 +205,7 @@ impl std::fmt::Debug for Config {
             .field("github", &self.github)
             .field("bot_ip", &self.bot_ip)
             .field("turnstile", &self.turnstile)
+            .field("ses_feedback", &self.ses_feedback)
             .field("umami", &self.umami)
             .field("client_ip_header", &self.client_ip_header)
             .field("admin_emails", &self.admin_emails)
@@ -312,6 +323,7 @@ impl Config {
         };
 
         let umami = umami_from(&get, mode)?;
+        let ses_feedback = ses_feedback_from(&get)?;
 
         let admin_emails = get("ADMIN_EMAILS")
             .unwrap_or_default()
@@ -350,6 +362,7 @@ impl Config {
             bot_ip: get("CODOSEO_BOT_IP"),
             turnstile,
             umami,
+            ses_feedback,
             client_ip_header: get("CLIENT_IP_HEADER")
                 .unwrap_or_else(|| "CF-Connecting-IP".to_owned()),
             admin_emails,
@@ -408,6 +421,34 @@ fn count_from(
 
 /// Umami needs both values. With only one set the tracker would load without reporting
 /// anywhere (or not load at all), so it stays off and startup says why.
+fn ses_feedback_from(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<SesFeedbackConfig>, ConfigError> {
+    let Some(topic_arn) = get("SES_SNS_TOPIC_ARN").map(|v| v.trim().to_owned()) else {
+        return Ok(None);
+    };
+    // arn:aws:sns:<region>:<account>:<name>, or arn:aws-cn / arn:aws-us-gov.
+    let shape = topic_arn.starts_with("arn:aws") && topic_arn.split(':').nth(2) == Some("sns");
+    if !shape || topic_arn.split(':').count() != 6 {
+        return Err(ConfigError::Invalid {
+            name: "SES_SNS_TOPIC_ARN",
+            reason: format!("expected an SNS topic ARN, got {topic_arn:?}"),
+        });
+    }
+    let sns_base_url = get("SNS_BASE_URL")
+        .map(|v| {
+            Url::parse(v.trim()).map_err(|e| ConfigError::Invalid {
+                name: "SNS_BASE_URL",
+                reason: e.to_string(),
+            })
+        })
+        .transpose()?;
+    Ok(Some(SesFeedbackConfig {
+        topic_arn,
+        sns_base_url,
+    }))
+}
+
 fn umami_from(
     get: &impl Fn(&str) -> Option<String>,
     mode: Mode,
@@ -737,6 +778,50 @@ mod tests {
             let env: Vec<_> = CLOUD.iter().chain(bad.iter()).copied().collect();
             assert!(cfg(&env).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn ses_feedback_needs_a_topic_arn_of_the_right_shape() {
+        assert!(cfg(&[]).unwrap().ses_feedback.is_none());
+        let c = cfg(&[(
+            "SES_SNS_TOPIC_ARN",
+            " arn:aws:sns:eu-north-1:123456789012:codoseo-ses ",
+        )])
+        .unwrap();
+        let f = c.ses_feedback.expect("configured");
+        assert_eq!(
+            f.topic_arn,
+            "arn:aws:sns:eu-north-1:123456789012:codoseo-ses"
+        );
+        assert!(f.sns_base_url.is_none());
+        let with_base = cfg(&[
+            ("SES_SNS_TOPIC_ARN", "arn:aws:sns:eu-north-1:1:t"),
+            ("SNS_BASE_URL", "http://127.0.0.1:9/"),
+        ])
+        .unwrap();
+        assert_eq!(
+            with_base
+                .ses_feedback
+                .unwrap()
+                .sns_base_url
+                .unwrap()
+                .as_str(),
+            "http://127.0.0.1:9/"
+        );
+        for bad in [
+            "topic",
+            "arn:aws:sqs:eu-north-1:1:q",
+            "arn:aws:sns:eu-north-1:1",
+        ] {
+            assert!(cfg(&[("SES_SNS_TOPIC_ARN", bad)]).is_err(), "{bad}");
+        }
+        assert!(
+            cfg(&[
+                ("SES_SNS_TOPIC_ARN", "arn:aws:sns:eu-north-1:1:t"),
+                ("SNS_BASE_URL", "not a url"),
+            ])
+            .is_err()
+        );
     }
 
     #[test]
