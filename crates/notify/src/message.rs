@@ -7,7 +7,7 @@ use codoseo_core::check::Severity;
 use uuid::Uuid;
 
 use crate::email::Email;
-use crate::letter::{Button, Letter, Line, Link, Tone};
+use crate::letter::{Button, Icon, Letter, Line, Link, Mood, Row, Tone};
 
 /// How many changes a message lists; the rest become "and N more".
 pub const MAX_ITEMS: usize = 20;
@@ -197,11 +197,12 @@ fn more_text(more: u32) -> String {
     format!("and {more} more")
 }
 
-/// What the email rendering needs beyond the message: the logo image and, for a real alert,
-/// the recipient's one-click unsubscribe link (a test message has none).
+/// What the email rendering needs beyond the message: where the images are and, for a real
+/// alert, the recipient's one-click unsubscribe link (a test message has none).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EmailOptions<'a> {
-    pub logo_url: &'a str,
+    /// `https://codoseo.com/email/`.
+    pub images: &'a str,
     pub unsubscribe: Option<&'a str>,
 }
 
@@ -209,42 +210,84 @@ pub struct EmailOptions<'a> {
 /// link the footer says how to stop these emails, and the message carries the one-click headers.
 pub fn email(msg: &AlertMessage, to: &str, opts: &EmailOptions<'_>) -> Email {
     let subject = format!("CodoSEO: {}", one_line(&msg.headline));
-    let (eyebrow, button_label) = match msg.kind {
+    let critical = msg.items.iter().any(|i| i.severity == Severity::Critical);
+    let (mood, eyebrow, intro, button_label) = match msg.kind {
         AlertKind::Changes => (
+            if critical { Mood::Error } else { Mood::Warning },
             format!("Instant alert · {}", msg.site_domain),
+            vec!["Found on the latest crawl, compared with the one before.".to_owned()],
             "See the changes",
         ),
         AlertKind::Unreachable => (
+            Mood::Error,
             format!("Site unreachable · {}", msg.site_domain),
+            vec![
+                "Twice in a row the site could not be crawled. Until it answers, nothing can \
+                 be checked."
+                    .to_owned(),
+            ],
             "Open the site in CodoSEO",
         ),
         AlertKind::Test => (
+            Mood::Ok,
             format!("Test message · {}", msg.site_domain),
+            vec![
+                "This is what an alert looks like. A real one lists the changes a crawl found, \
+                 with the page and what changed."
+                    .to_owned(),
+            ],
             "Open in CodoSEO",
         ),
     };
-    let items = msg
+    let mut items: Vec<Line> = msg
         .items
         .iter()
-        .map(|i| {
-            let mut parts = Vec::new();
-            if let Some(url) = &i.url {
-                parts.push(url.clone());
-            }
-            let change = i.change_text();
-            if !change.is_empty() {
-                parts.push(change);
-            }
-            Line {
-                tone: Tone::from_severity(i.severity),
-                title: i.kind_label.clone(),
-                detail: (!parts.is_empty()).then(|| parts.join(" · ")),
-            }
+        .map(|i| Line {
+            tone: Some(Tone::from_severity(i.severity)),
+            title: i.kind_label.clone(),
+            detail: i.url.clone(),
+            before: (!i.before.is_empty()).then(|| one_line(&i.before)),
+            after: (!i.after.is_empty()).then(|| one_line(&i.after)),
         })
         .collect();
+    let rows = match msg.kind {
+        AlertKind::Unreachable => vec![
+            Row {
+                icon: Icon::Wall,
+                title: "What to check".to_owned(),
+                detail: "DNS, the firewall, and that robots.txt or the host doesn't block \
+                         CodoSEObot."
+                    .to_owned(),
+            },
+            Row {
+                icon: Icon::Retry,
+                title: "What we do next".to_owned(),
+                detail: "We keep trying on the weekly schedule and tell you when it answers."
+                    .to_owned(),
+            },
+            Row {
+                icon: Icon::Settings,
+                title: "If the site moved".to_owned(),
+                detail: "Change the start URL in the site's settings.".to_owned(),
+            },
+        ],
+        _ => Vec::new(),
+    };
+    if msg.kind == AlertKind::Test && items.is_empty() {
+        items.push(Line {
+            tone: Some(Tone::Warning),
+            title: "Example: title changed".to_owned(),
+            detail: Some(format!("https://{}/", msg.site_domain)),
+            before: Some("Old title".to_owned()),
+            after: Some("New title".to_owned()),
+        });
+    }
     let (footer, links) = match opts.unsubscribe {
         Some(url) => (
-            vec![format!("Sent to {to}, an alert channel on CodoSEO.")],
+            vec![format!(
+                "Sent to {to}, an alert channel for {} on CodoSEO.",
+                msg.site_domain
+            )],
             vec![Link {
                 label: "Unsubscribe".to_owned(),
                 url: url.to_owned(),
@@ -259,24 +302,30 @@ pub fn email(msg: &AlertMessage, to: &str, opts: &EmailOptions<'_>) -> Email {
         ),
     };
     let letter = Letter {
-        logo_url: opts.logo_url.to_owned(),
+        images: opts.images.to_owned(),
+        mascot: Some(mood),
         eyebrow: Some(eyebrow),
         title: msg.headline.clone(),
-        intro: match msg.kind {
-            AlertKind::Test => vec!["Alerts for this site reach this address.".to_owned()],
-            _ => Vec::new(),
-        },
+        intro,
         items,
         more: (msg.more > 0).then(|| more_text(msg.more)),
-        sections: Vec::new(),
+        rows,
         button: Some(Button {
             label: button_label.to_owned(),
             url: msg.site_url.clone(),
         }),
-        after: Vec::new(),
+        after: match msg.kind {
+            AlertKind::Test => vec![
+                "Nothing to do. If you wanted a different address, add it as a channel in \
+                 your alert settings."
+                    .to_owned(),
+            ],
+            _ => Vec::new(),
+        },
         footer,
         links,
         unsubscribe: opts.unsubscribe.map(str::to_owned),
+        ..Letter::default()
     };
     letter.email(to, &subject).unwrap_or_else(|e| {
         tracing::error!(error = %e, "the email letter did not render; sending the text part");

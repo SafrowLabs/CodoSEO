@@ -15,5 +15,5 @@ pub mod webhook;
 pub use crypto::{ChannelKey, CryptoError};
 pub use deliver::{ChannelKind, ChannelTarget, DeliveryError, GuardedHttp, TargetError, deliver};
 pub use email::{Email, MailError, Mailer};
-pub use letter::{Button, Group, Letter, Line, Link, Section, Tone};
+pub use letter::{Button, Group, Icon, Letter, Line, Link, Mood, Row, Score, Section, Tone};
 pub use message::{AlertItem, AlertKind, AlertMessage, EmailOptions};

@@ -446,7 +446,7 @@ impl<'a> AnonService<'a> {
             },
         );
         let email =
-            letters::confirm_monitoring(&state.email_logo_url(), &domain, &link, opt_out.as_str())
+            letters::confirm_monitoring(&state.email_images(), &domain, &link, opt_out.as_str())
                 .email(&address)
                 .map_err(|e| format!("the confirmation email did not render: {e}"))?;
         if let Err(e) = state.mailer.send(email).await {

@@ -616,7 +616,7 @@ async fn an_email_alert_carries_the_unsubscribe_link_and_an_unsubscribed_address
     assert!(
         mail.html
             .as_deref()
-            .is_some_and(|h| h.contains("https://codoseo.test/email-logo.png")),
+            .is_some_and(|h| h.contains("https://codoseo.test/email/logo.png")),
         "{:?}",
         mail.html
     );

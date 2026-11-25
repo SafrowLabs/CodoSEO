@@ -3,7 +3,7 @@
 //! and lays them out as a [`Letter`].
 
 use crate::email::Email;
-use crate::letter::{Button, Group, Letter, Line, Link, Section, Tone};
+use crate::letter::{Button, Group, Letter, Line, Link, Mood, Section, Tone};
 use crate::message::AlertItem;
 
 /// Changes of the week, counted by severity.
@@ -110,8 +110,9 @@ pub struct DigestView {
     pub settings_url: String,
     /// The one-click link that stops the digest, alerts and reminders to this address.
     pub unsubscribe_url: String,
-    /// The logo image, absolute; empty renders the name as text.
-    pub logo_url: String,
+    /// Where the email images are (`https://codoseo.com/email/`); empty renders the name as
+    /// text.
+    pub images: String,
 }
 
 impl DigestView {
@@ -138,9 +139,10 @@ impl DigestView {
         let issues = |list: &[(String, u32)], tone: Tone| -> Vec<Line> {
             list.iter()
                 .map(|(title, n)| Line {
-                    tone,
+                    tone: Some(tone),
                     title: title.clone(),
                     detail: Some(pages(n)),
+                    ..Line::default()
                 })
                 .collect()
         };
@@ -170,20 +172,12 @@ impl DigestView {
                         items: site
                             .top_changes
                             .iter()
-                            .map(|c| {
-                                let mut parts = Vec::new();
-                                if let Some(url) = &c.url {
-                                    parts.push(url.clone());
-                                }
-                                let change = c.change_text();
-                                if !change.is_empty() {
-                                    parts.push(change);
-                                }
-                                Line {
-                                    tone: Tone::from_severity(c.severity),
-                                    title: c.kind_label.clone(),
-                                    detail: (!parts.is_empty()).then(|| parts.join(" · ")),
-                                }
+                            .map(|c| Line {
+                                tone: Some(Tone::from_severity(c.severity)),
+                                title: c.kind_label.clone(),
+                                detail: c.url.clone(),
+                                before: (!c.before.is_empty()).then(|| c.before.clone()),
+                                after: (!c.after.is_empty()).then(|| c.after.clone()),
                             })
                             .collect(),
                     });
@@ -207,7 +201,8 @@ impl DigestView {
             })
             .collect();
         Letter {
-            logo_url: self.logo_url.clone(),
+            images: self.images.clone(),
+            mascot: Some(Mood::Rest),
             eyebrow: Some(format!("Weekly digest · {}", self.week_label)),
             title: self.title(),
             sections,

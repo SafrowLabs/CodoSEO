@@ -192,6 +192,8 @@ pub async fn request_link(
 pub struct AuditLink<'a> {
     pub crawl_id: Uuid,
     pub domain: &'a str,
+    /// What the audit found so far, for the email.
+    pub audit: letters::Audit,
 }
 
 /// What [`issue_link`] did.
@@ -263,7 +265,7 @@ pub async fn issue_link(
     let mut link = state.config.base_url.clone();
     link.set_path(&format!("/auth/magic/{token}"));
     let draft = match audit {
-        None => letters::sign_in(&state.email_logo_url(), link.as_str()),
+        None => letters::sign_in(&state.email_images(), link.as_str(), address),
         Some(a) => {
             // Whoever typed the address may not be its owner: the owner can stop every email.
             let opt_out = state.unsubscribe.link(
@@ -275,10 +277,11 @@ pub async fn issue_link(
                 },
             );
             letters::report_link(
-                &state.email_logo_url(),
+                &state.email_images(),
                 a.domain,
                 link.as_str(),
                 opt_out.as_str(),
+                &a.audit,
             )
         }
     };

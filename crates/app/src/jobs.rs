@@ -168,10 +168,10 @@ struct SendEmailPayload {
 }
 
 impl JobContext {
-    /// The logo image for emails, under `BASE_URL`.
-    pub fn email_logo_url(&self) -> String {
+    /// Where the pictures in emails are: `BASE_URL/email/`.
+    pub fn email_images(&self) -> String {
         let mut url = self.base_url.clone();
-        url.set_path("/email-logo.png");
+        url.set_path("/email/");
         url.to_string()
     }
 

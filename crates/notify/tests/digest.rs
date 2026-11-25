@@ -79,7 +79,7 @@ fn view(sites: Vec<SiteDigest>) -> DigestView {
         sites,
         settings_url: "https://codoseo.test/settings/alerts".into(),
         unsubscribe_url: "https://codoseo.test/email/unsubscribe/abc.def".into(),
-        logo_url: "https://codoseo.test/email-logo.png".into(),
+        images: "https://codoseo.test/email/".into(),
     }
 }
 
@@ -222,6 +222,10 @@ fn the_email_goes_to_the_account_with_both_parts_and_escapes_html() {
     );
     assert!(email.text.contains("<script>alert(1)</script>"));
     // The only image is our own logo: page content never becomes one.
-    assert_eq!(html.matches("<img").count(), 1, "{html}");
-    assert!(html.contains("<img src=\"https://codoseo.test/email-logo.png\""));
+    assert_eq!(
+        html.matches("<img").count(),
+        2,
+        "the logo and the mascot: {html}"
+    );
+    assert!(html.contains("<img src=\"https://codoseo.test/email/logo.png\""));
 }

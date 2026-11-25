@@ -134,7 +134,7 @@ async fn report_emails_carry_an_opt_out_link_that_stops_every_email() {
         signin
             .html
             .as_deref()
-            .is_some_and(|h| h.contains("email-logo.png"))
+            .is_some_and(|h| h.contains("email/logo.png"))
     );
     // ...but a report link, which anyone may have asked for, does.
     let audit = app

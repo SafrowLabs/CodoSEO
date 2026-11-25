@@ -168,7 +168,7 @@ fn email_html_escapes_page_content() {
 fn an_unsubscribe_link_is_in_both_parts_and_the_headers() {
     let link = "https://codoseo.com/email/unsubscribe/abc.def";
     let opts = EmailOptions {
-        logo_url: "https://codoseo.com/email-logo.png",
+        images: "https://codoseo.com/email/",
         unsubscribe: Some(link),
     };
     let e = message::email(&changes(1), "owner@example.com", &opts);
@@ -186,7 +186,7 @@ fn an_unsubscribe_link_is_in_both_parts_and_the_headers() {
         "{html}"
     );
     assert!(
-        html.contains("<img src=\"https://codoseo.com/email-logo.png\""),
+        html.contains("<img src=\"https://codoseo.com/email/logo.png\""),
         "{html}"
     );
     // A test message from the settings page has no link and says nothing about stopping.

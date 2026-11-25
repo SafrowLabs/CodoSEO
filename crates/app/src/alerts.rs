@@ -323,7 +323,7 @@ pub async fn deliver_alert(
                 &target,
                 &message,
                 &EmailOptions {
-                    logo_url: &ctx.email_logo_url(),
+                    images: &ctx.email_images(),
                     unsubscribe: unsubscribe.as_deref(),
                 },
             )
@@ -397,7 +397,7 @@ async fn turn_off(
         .map_err(|e| format!("bad base URL: {e}"))?;
     let unsubscribe = ctx.unsubscribe_link(account_email, Some(account_id));
     let email = letters::channel_off(
-        &ctx.email_logo_url(),
+        &ctx.email_images(),
         domain,
         channel_name(kind),
         error,

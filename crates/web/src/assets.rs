@@ -91,7 +91,107 @@ const SOURCES: &[Source] = &[
     Source {
         name: "email-logo.png",
         content_type: "image/png",
-        bytes: include_bytes!("../assets/email-logo.png"),
+        bytes: include_bytes!("../assets/email/logo.png"),
+    },
+    Source {
+        name: "email-mascot-rest.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/mascot-rest.png"),
+    },
+    Source {
+        name: "email-mascot-crawling.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/mascot-crawling.png"),
+    },
+    Source {
+        name: "email-mascot-warning.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/mascot-warning.png"),
+    },
+    Source {
+        name: "email-mascot-error.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/mascot-error.png"),
+    },
+    Source {
+        name: "email-mascot-ok.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/mascot-ok.png"),
+    },
+    Source {
+        name: "email-mascot-idle.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/mascot-idle.png"),
+    },
+    Source {
+        name: "email-icon-pages.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-pages.png"),
+    },
+    Source {
+        name: "email-icon-fix.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-fix.png"),
+    },
+    Source {
+        name: "email-icon-week.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-week.png"),
+    },
+    Source {
+        name: "email-icon-key.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-key.png"),
+    },
+    Source {
+        name: "email-icon-mail.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-mail.png"),
+    },
+    Source {
+        name: "email-icon-crawl.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-crawl.png"),
+    },
+    Source {
+        name: "email-icon-clock.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-clock.png"),
+    },
+    Source {
+        name: "email-icon-once.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-once.png"),
+    },
+    Source {
+        name: "email-icon-retry.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-retry.png"),
+    },
+    Source {
+        name: "email-icon-wall.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-wall.png"),
+    },
+    Source {
+        name: "email-icon-pause.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-pause.png"),
+    },
+    Source {
+        name: "email-icon-safe.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-safe.png"),
+    },
+    Source {
+        name: "email-icon-settings.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-settings.png"),
+    },
+    Source {
+        name: "email-icon-chat.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email/icon-chat.png"),
     },
     Source {
         name: "og.png",
@@ -285,10 +385,19 @@ pub async fn og_image(headers: HeaderMap) -> Response {
     fixed("og.png", &headers)
 }
 
-/// `GET /email-logo.png`: the logo in every email. Its URL stays put, so an email opened
-/// months after a deploy still shows it.
-pub async fn email_logo(headers: HeaderMap) -> Response {
-    fixed("email-logo.png", &headers)
+/// `GET /email/{file}`: the pictures in emails (the logo, the mascot in each mood, the
+/// icons), at fixed paths so an email opened months after a deploy still shows them.
+pub async fn email_image(Path(file): Path<String>, headers: HeaderMap) -> Response {
+    let name = format!("email-{file}");
+    if file.contains('/') || ASSETS.by_name(&name).is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            [(header::CACHE_CONTROL, "no-store")],
+            "not found",
+        )
+            .into_response();
+    }
+    fixed(&name, &headers)
 }
 
 /// `GET /site.webmanifest`: name, colours and icons for "add to home screen".

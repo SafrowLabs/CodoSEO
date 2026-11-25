@@ -658,7 +658,7 @@ async fn test_channel(
             &target,
             &message,
             &EmailOptions {
-                logo_url: &state.email_logo_url(),
+                images: &state.email_images(),
                 unsubscribe: None,
             },
         ),

@@ -507,6 +507,7 @@ async fn unlock(
                 Some(AuditLink {
                     crawl_id: audit.crawl.id,
                     domain: &audit.domain,
+                    audit: report_audit(&audit.crawl),
                 }),
                 ip,
             )
@@ -552,6 +553,33 @@ async fn finish(
         umami: state.config.umami.clone(),
     };
     Ok((status, report_headers(), html(&page)?).into_response())
+}
+
+/// What the report email says about the audit: pages, scores once done, and the fix count.
+fn report_audit(crawl: &Crawl) -> codoseo_notify::letters::Audit {
+    let summary = crawl.summary();
+    let done = crawl.status == CrawlStatus::Done;
+    codoseo_notify::letters::Audit {
+        pages: summary
+            .as_ref()
+            .map(|s| s.report_summary.pages)
+            .or_else(|| crawl.live_progress().map(|l| l.progress.pages_done))
+            .unwrap_or(0),
+        scores: match (
+            done,
+            crawl.overall_score,
+            crawl.geo_score,
+            crawl.health_score,
+        ) {
+            (true, Some(o), Some(g), Some(s)) => Some([o, g, s]),
+            _ => None,
+        },
+        fixes: if done {
+            free_audit::limit(crawl).fixes
+        } else {
+            String::new()
+        },
+    }
 }
 
 /// After a sign-in link from an audit is used: gives the account the audited site (see

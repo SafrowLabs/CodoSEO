@@ -8,46 +8,68 @@ subject: CodoSEO: 400 changes on example.com
 Instant alert · example.com
 400 changes on example.com
 
+Found on the latest crawl, compared with the one before.
+
 [Critical] Became noindex
-  https://example.com/page-0 · index → noindex
+  https://example.com/page-0
+  index → noindex
 [Warning] Status changed
-  https://example.com/page-1 · 200 → 500
+  https://example.com/page-1
+  200 → 500
 [Notice] Title changed
-  https://example.com/page-2 · index → noindex
+  https://example.com/page-2
+  index → noindex
 [Critical] Became noindex
-  https://example.com/page-3 · index → noindex
+  https://example.com/page-3
+  index → noindex
 [Warning] Status changed
-  https://example.com/page-4 · 200 → 500
+  https://example.com/page-4
+  200 → 500
 [Notice] Title changed
-  https://example.com/page-5 · index → noindex
+  https://example.com/page-5
+  index → noindex
 [Critical] Became noindex
-  https://example.com/page-6 · index → noindex
+  https://example.com/page-6
+  index → noindex
 [Warning] Status changed
-  https://example.com/page-7 · 200 → 500
+  https://example.com/page-7
+  200 → 500
 [Notice] Title changed
-  https://example.com/page-8 · index → noindex
+  https://example.com/page-8
+  index → noindex
 [Critical] Became noindex
-  https://example.com/page-9 · index → noindex
+  https://example.com/page-9
+  index → noindex
 [Warning] Status changed
-  https://example.com/page-10 · 200 → 500
+  https://example.com/page-10
+  200 → 500
 [Notice] Title changed
-  https://example.com/page-11 · index → noindex
+  https://example.com/page-11
+  index → noindex
 [Critical] Became noindex
-  https://example.com/page-12 · index → noindex
+  https://example.com/page-12
+  index → noindex
 [Warning] Status changed
-  https://example.com/page-13 · 200 → 500
+  https://example.com/page-13
+  200 → 500
 [Notice] Title changed
-  https://example.com/page-14 · index → noindex
+  https://example.com/page-14
+  index → noindex
 [Critical] Became noindex
-  https://example.com/page-15 · index → noindex
+  https://example.com/page-15
+  index → noindex
 [Warning] Status changed
-  https://example.com/page-16 · 200 → 500
+  https://example.com/page-16
+  200 → 500
 [Notice] Title changed
-  https://example.com/page-17 · index → noindex
+  https://example.com/page-17
+  index → noindex
 [Critical] Became noindex
-  https://example.com/page-18 · index → noindex
+  https://example.com/page-18
+  index → noindex
 [Warning] Status changed
-  https://example.com/page-19 · 200 → 500
+  https://example.com/page-19
+  200 → 500
 and 380 more.
 
 See the changes:
@@ -67,7 +89,7 @@ CodoSEO by SafrowLabs · https://codoseo.com
 <title>400 changes on example.com</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4F4F0;">
-<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#F4F4F0;"></div>
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#F4F4F0;">Found on the latest crawl, compared with the one before.</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F4F0;">
 <tr><td align="center" style="padding:28px 12px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;font-family:Geist,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#111613;">
@@ -77,151 +99,280 @@ CodoSEO by SafrowLabs · https://codoseo.com
 
   </td></tr>
   <tr><td style="background-color:#ffffff;border:1px solid #E2E4DE;border-radius:14px;padding:30px 32px 28px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
 
-    <p style="margin:0 0 6px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7A5E00;">Instant alert · example.com</p>
+      <td style="vertical-align:middle;">
 
-    <h1 style="margin:0 0 10px;font-size:22px;line-height:1.25;font-weight:600;letter-spacing:-.01em;color:#111613;">400 changes on example.com</h1>
+        <p style="margin:0 0 4px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7A5E00;">Instant alert · example.com</p>
+
+        <h1 style="margin:0;font-size:22px;line-height:1.25;font-weight:600;letter-spacing:-.01em;color:#111613;">400 changes on example.com</h1>
+      </td>
+    </tr></table>
+
+    <p style="margin:16px 0 0;font-size:15px;line-height:1.55;color:#4C544F;">Found on the latest crawl, compared with the one before.</p>
 
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:6px;border-top:1px solid #E2E4DE;">
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-0 · index → noindex</span>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;border-top:1px solid #E2E4DE;">
 
-      </td></tr>
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#C5221F;background-color:#FCE8E6;border-radius:5px;padding:2px 7px;">Critical</span>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-1 · 200 → 500</span>
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Became noindex</div>
 
-      </td></tr>
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-0</div>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#6B736E;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Title changed</b>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-2 · index → noindex</span>
-
-      </td></tr>
-
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
-
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-3 · index → noindex</span>
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
 
       </td></tr>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-4 · 200 → 500</span>
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9A5B00;background-color:#FDF1DC;border-radius:5px;padding:2px 7px;">Warning</span>
 
-      </td></tr>
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Status changed</div>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#6B736E;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Title changed</b>
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-1</div>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-5 · index → noindex</span>
 
-      </td></tr>
-
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
-
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-6 · index → noindex</span>
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">200</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">500</span></div>
 
       </td></tr>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-7 · 200 → 500</span>
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#4C544F;background-color:#EEEFEA;border-radius:5px;padding:2px 7px;">Notice</span>
 
-      </td></tr>
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Title changed</div>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#6B736E;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Title changed</b>
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-2</div>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-8 · index → noindex</span>
 
-      </td></tr>
-
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
-
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-9 · index → noindex</span>
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
 
       </td></tr>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-10 · 200 → 500</span>
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#C5221F;background-color:#FCE8E6;border-radius:5px;padding:2px 7px;">Critical</span>
 
-      </td></tr>
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Became noindex</div>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#6B736E;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Title changed</b>
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-3</div>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-11 · index → noindex</span>
 
-      </td></tr>
-
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
-
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-12 · index → noindex</span>
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
 
       </td></tr>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-13 · 200 → 500</span>
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9A5B00;background-color:#FDF1DC;border-radius:5px;padding:2px 7px;">Warning</span>
 
-      </td></tr>
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Status changed</div>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#6B736E;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Title changed</b>
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-4</div>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-14 · index → noindex</span>
 
-      </td></tr>
-
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
-
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-15 · index → noindex</span>
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">200</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">500</span></div>
 
       </td></tr>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-16 · 200 → 500</span>
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#4C544F;background-color:#EEEFEA;border-radius:5px;padding:2px 7px;">Notice</span>
 
-      </td></tr>
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Title changed</div>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#6B736E;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Title changed</b>
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-5</div>
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-17 · index → noindex</span>
 
-      </td></tr>
-
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#C5221F;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Became noindex</b>
-
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-18 · index → noindex</span>
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
 
       </td></tr>
 
-      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:#9A5B00;margin:0 8px 1px 0;"></span><b style="font-weight:600;">Status changed</b>
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
 
-        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">https://example.com/page-19 · 200 → 500</span>
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#C5221F;background-color:#FCE8E6;border-radius:5px;padding:2px 7px;">Critical</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Became noindex</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-6</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9A5B00;background-color:#FDF1DC;border-radius:5px;padding:2px 7px;">Warning</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Status changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-7</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">200</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">500</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#4C544F;background-color:#EEEFEA;border-radius:5px;padding:2px 7px;">Notice</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Title changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-8</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#C5221F;background-color:#FCE8E6;border-radius:5px;padding:2px 7px;">Critical</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Became noindex</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-9</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9A5B00;background-color:#FDF1DC;border-radius:5px;padding:2px 7px;">Warning</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Status changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-10</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">200</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">500</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#4C544F;background-color:#EEEFEA;border-radius:5px;padding:2px 7px;">Notice</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Title changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-11</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#C5221F;background-color:#FCE8E6;border-radius:5px;padding:2px 7px;">Critical</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Became noindex</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-12</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9A5B00;background-color:#FDF1DC;border-radius:5px;padding:2px 7px;">Warning</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Status changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-13</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">200</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">500</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#4C544F;background-color:#EEEFEA;border-radius:5px;padding:2px 7px;">Notice</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Title changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-14</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#C5221F;background-color:#FCE8E6;border-radius:5px;padding:2px 7px;">Critical</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Became noindex</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-15</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9A5B00;background-color:#FDF1DC;border-radius:5px;padding:2px 7px;">Warning</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Status changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-16</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">200</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">500</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#4C544F;background-color:#EEEFEA;border-radius:5px;padding:2px 7px;">Notice</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Title changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-17</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#C5221F;background-color:#FCE8E6;border-radius:5px;padding:2px 7px;">Critical</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Became noindex</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-18</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">index</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">noindex</span></div>
+
+      </td></tr>
+
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;">
+
+        <span style="display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#9A5B00;background-color:#FDF1DC;border-radius:5px;padding:2px 7px;">Warning</span>
+
+        <div style="margin-top:6px;font-size:15px;font-weight:600;line-height:1.35;color:#111613;">Status changed</div>
+
+        <div style="font-size:13px;color:#4C544F;word-break:break-all;">https://example.com/page-19</div>
+
+
+        <div style="margin-top:6px;"><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#6B736E;background-color:#F4F4F0;border-radius:5px;padding:2px 7px;text-decoration:line-through;">200</span><span style="font-size:12px;color:#9AA6A0;padding:0 6px;">to</span><span style="display:inline-block;font-family:'Geist Mono',Menlo,Consolas,monospace;font-size:12px;color:#111613;background-color:#FBF6DF;border-radius:5px;padding:2px 7px;">500</span></div>
 
       </td></tr>
 
@@ -232,9 +383,13 @@ CodoSEO by SafrowLabs · https://codoseo.com
 
 
 
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr><td style="background-color:#F0C42C;border-radius:10px;">
+
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;"><tr><td style="background-color:#F0C42C;border-radius:10px;">
       <a href="https://codoseo.com/sites/abc" style="display:inline-block;padding:13px 22px;font-size:15px;font-weight:600;color:#0E1A17;text-decoration:none;">See the changes</a>
     </td></tr></table>
+
+
 
 
   </td></tr>

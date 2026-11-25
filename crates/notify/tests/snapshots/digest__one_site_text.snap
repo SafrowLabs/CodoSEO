@@ -21,9 +21,11 @@ Resolved:
 
 Most important changes:
 [Critical] Became noindex
-  https://example.com/pricing · index → noindex
+  https://example.com/pricing
+  index → noindex
 [Warning] Status changed
-  https://example.com/blog/old-post · 200 → 404
+  https://example.com/blog/old-post
+  200 → 404
   and 14 more
 
 Open the dashboard:

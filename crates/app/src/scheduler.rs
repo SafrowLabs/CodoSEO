@@ -392,13 +392,15 @@ async fn warn_inactive(ctx: &SchedulerContext, now: OffsetDateTime) -> Result<u6
                 account_id: Some(account.id),
             },
         );
-        let mut logo_url = ctx.base_url.clone();
-        logo_url.set_path("/email-logo.png");
+        let mut images = ctx.base_url.clone();
+        images.set_path("/email/");
+        let pauses_on = now + schedule::WARNING_GRACE;
         let draft = letters::keep_monitoring(
-            logo_url.as_str(),
+            images.as_str(),
             &account.email,
             link.as_str(),
             unsubscribe.as_str(),
+            &format!("{} {}", month_name(pauses_on.month()), pauses_on.day()),
         );
         let Ok(mail) = draft.email(&account.email) else {
             tracing::error!("the keep-monitoring email did not render");
@@ -418,6 +420,11 @@ async fn warn_inactive(ctx: &SchedulerContext, now: OffsetDateTime) -> Result<u6
         }
     }
     Ok(warned)
+}
+
+/// "Dec", for the reminder's pause date.
+fn month_name(m: time::Month) -> String {
+    m.to_string().chars().take(3).collect()
 }
 
 /// Pings `SCHEDULER_HEARTBEAT_URL`, if set. A failure is logged and nothing more.

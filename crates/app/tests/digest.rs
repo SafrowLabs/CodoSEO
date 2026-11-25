@@ -391,7 +391,7 @@ async fn the_digest_carries_a_signed_unsubscribe_link_for_the_accounts_address()
     let html = mail.html.unwrap();
     assert!(html.contains(&link));
     assert!(
-        html.contains("https://codoseo.test/email-logo.png"),
+        html.contains("https://codoseo.test/email/logo.png"),
         "{html}"
     );
     let token = link.rsplit('/').next().unwrap();

@@ -11,7 +11,7 @@ use codoseo_notify::message::{self, AlertItem, AlertMessage, EmailOptions};
 use codoseo_notify::{Email, letters};
 use uuid::Uuid;
 
-const LOGO: &str = "https://codoseo.com/email-logo.png";
+const IMAGES: &str = "https://codoseo.com/email/";
 const UNSUB: &str = "https://codoseo.com/email/unsubscribe/eyJhIjoib3duZXJAZXhhbXBsZS5jb20ifQ.sig";
 const OPT_OUT: &str =
     "https://codoseo.com/email/unsubscribe/eyJhIjoic29tZW9uZUBleGFtcGxlLmNvbSJ9.sig";
@@ -73,11 +73,11 @@ fn main() {
     let to = "owner@example.com";
     let site = "https://codoseo.com/s/11111111-1111-1111-1111-111111111111/changes";
     let opts = EmailOptions {
-        logo_url: LOGO,
+        images: IMAGES,
         unsubscribe: Some(UNSUB),
     };
     let test_opts = EmailOptions {
-        logo_url: LOGO,
+        images: IMAGES,
         unsubscribe: None,
     };
     let digest = DigestView {
@@ -109,22 +109,27 @@ fn main() {
         }],
         settings_url: "https://codoseo.com/settings/alerts".to_owned(),
         unsubscribe_url: UNSUB.to_owned(),
-        logo_url: LOGO.to_owned(),
+        images: IMAGES.to_owned(),
     };
     let mails: Vec<(&str, Email)> = vec![
         (
             "01-sign-in",
-            letters::sign_in(LOGO, "https://codoseo.com/auth/magic/dR4kQ9s")
+            letters::sign_in(IMAGES, "https://codoseo.com/auth/magic/dR4kQ9s", to)
                 .email(to)
                 .unwrap(),
         ),
         (
             "02-report-link",
             letters::report_link(
-                LOGO,
+                IMAGES,
                 "example.com",
                 "https://codoseo.com/auth/magic/dR4kQ9s",
                 OPT_OUT,
+                &letters::Audit {
+                    pages: 100,
+                    scores: Some([78, 64, 86]),
+                    fixes: "all 9 fixes".to_owned(),
+                },
             )
             .email(to)
             .unwrap(),
@@ -132,7 +137,7 @@ fn main() {
         (
             "03-confirm-monitoring",
             letters::confirm_monitoring(
-                LOGO,
+                IMAGES,
                 "example.com",
                 "https://codoseo.com/monitoring/start/dR4kQ9s",
                 OPT_OUT,
@@ -166,10 +171,11 @@ fn main() {
         (
             "07-keep-monitoring",
             letters::keep_monitoring(
-                LOGO,
+                IMAGES,
                 to,
                 "https://codoseo.com/monitoring/resume/dR4kQ9s",
                 UNSUB,
+                "Dec 2",
             )
             .email(to)
             .unwrap(),
@@ -177,7 +183,7 @@ fn main() {
         (
             "08-channel-off",
             letters::channel_off(
-                LOGO,
+                IMAGES,
                 "example.com",
                 "Slack",
                 "the server answered 410: channel_not_found",
