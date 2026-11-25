@@ -506,10 +506,14 @@ async fn a_free_account_inactive_for_31_days_is_asked_once_and_paused_a_week_lat
         "{unsubscribe}"
     );
     assert!(
-        text.contains(&format!(
-            "Stop CodoSEO emails to quiet@example.test: {unsubscribe}"
-        )),
+        text.contains(&format!("Unsubscribe: {unsubscribe}")),
         "{text}"
+    );
+    assert!(
+        mail[0]["html"]
+            .as_str()
+            .is_some_and(|h| h.contains("Keep monitoring")),
+        "the reminder has an HTML part"
     );
     let paused: bool = sqlx::query_scalar("SELECT paused FROM accounts WHERE id = $1")
         .bind(id)

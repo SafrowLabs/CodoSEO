@@ -12,7 +12,9 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use codoseo_core::change::ChangeKind;
 use codoseo_core::plan::PlanLimits;
-use codoseo_notify::{AlertMessage, ChannelKind, ChannelTarget, DeliveryError, deliver};
+use codoseo_notify::{
+    AlertMessage, ChannelKind, ChannelTarget, DeliveryError, EmailOptions, deliver,
+};
 use codoseo_store::alert_rules::{self, ALL_KINDS};
 use codoseo_store::channels::{self, ChannelSummary, DeleteOutcome};
 use codoseo_store::events::{self, EventKind};
@@ -650,7 +652,16 @@ async fn test_channel(
     let message = AlertMessage::test(domain, dashboard);
     let outcome = tokio::time::timeout(
         TEST_TIMEOUT,
-        deliver(&state.notify_http, &state.mailer, &target, &message, None),
+        deliver(
+            &state.notify_http,
+            &state.mailer,
+            &target,
+            &message,
+            &EmailOptions {
+                logo_url: &state.email_logo_url(),
+                unsubscribe: None,
+            },
+        ),
     )
     .await;
     match outcome {

@@ -2,26 +2,37 @@
 source: crates/notify/tests/digest.rs
 expression: "view(vec![example()]).render().unwrap().text"
 ---
-CodoSEO weekly digest, Sep 28 to Oct 5, 2026
+Weekly digest · Sep 28 to Oct 5, 2026
+example.com this week: 92 (+3)
 
-== example.com: score 92 (+3) ==
+== example.com: 92 (+3) ==
 Your site passed 37/40 checks. 2 new issues.
 Changes this week: 1 critical, 4 warnings, 11 notices.
 
 New issues:
-  - Page returns a 5xx error (2 pages)
-  - Title is too long (14 pages)
+[Critical] Page returns a 5xx error
+  2 pages
+[Critical] Title is too long
+  14 pages
 
 Resolved:
-  - Missing meta description (6 pages)
+[Resolved] Missing meta description
+  6 pages
 
 Most important changes:
-  - [Critical] Became noindex: https://example.com/pricing (index → noindex)
-  - [Warning] Status changed: https://example.com/blog/old-post (200 → 404)
-  ...and 14 more
+[Critical] Became noindex
+  https://example.com/pricing · index → noindex
+[Warning] Status changed
+  https://example.com/blog/old-post · 200 → 404
+  and 14 more
 
-Open the dashboard: https://codoseo.test/s/11111111-1111-1111-1111-111111111111/audit
-Turn these pages into rankings with RankOrg: https://rankorg.com/?domain=example.com&utm_source=codoseo&utm_medium=digest
+Open the dashboard:
+https://codoseo.test/s/11111111-1111-1111-1111-111111111111/audit
+Turn these pages into rankings with RankOrg:
+https://rankorg.com/?domain=example.com&utm_source=codoseo&utm_medium=digest
 
-You get this email every Monday. Change what you hear about: https://codoseo.test/settings/alerts
-Stop CodoSEO emails to owner@example.com: https://codoseo.test/email/unsubscribe/abc.def
+You get this email every Monday.
+Change what you hear about: https://codoseo.test/settings/alerts
+Unsubscribe: https://codoseo.test/email/unsubscribe/abc.def
+
+CodoSEO by SafrowLabs · https://codoseo.com

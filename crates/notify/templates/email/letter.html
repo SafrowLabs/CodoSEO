@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>{{ letter.title }}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4F4F0;">
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#F4F4F0;">{{ letter.preheader() }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F4F0;">
+<tr><td align="center" style="padding:28px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;font-family:Geist,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#111613;">
+  <tr><td style="padding:0 0 18px 4px;">
+{% if letter.logo_url.is_empty() %}
+    <span style="font-size:16px;font-weight:600;letter-spacing:-.01em;color:#111613;">CodoSEO</span>
+{% else %}
+    <img src="{{ letter.logo_url }}" width="180" height="54" alt="CodoSEO" style="display:block;border:0;outline:none;width:180px;height:54px;margin-left:-6px;">
+{% endif %}
+  </td></tr>
+  <tr><td style="background-color:#ffffff;border:1px solid #E2E4DE;border-radius:14px;padding:30px 32px 28px;">
+{% if let Some(eyebrow) = letter.eyebrow %}
+    <p style="margin:0 0 6px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7A5E00;">{{ eyebrow }}</p>
+{% endif %}
+    <h1 style="margin:0 0 10px;font-size:22px;line-height:1.25;font-weight:600;letter-spacing:-.01em;color:#111613;">{{ letter.title }}</h1>
+{% for p in letter.intro %}
+    <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#4C544F;">{{ p }}</p>
+{% endfor %}
+{% if !letter.items.is_empty() %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:6px;border-top:1px solid #E2E4DE;">
+{% for item in letter.items %}
+      <tr><td style="padding:12px 0;border-bottom:1px solid #E2E4DE;font-size:15px;line-height:1.45;color:#111613;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:{{ item.tone.color() }};margin:0 8px 1px 0;"></span><b style="font-weight:600;">{{ item.title }}</b>
+{% if let Some(detail) = item.detail %}
+        <br><span style="display:inline-block;padding-left:16px;font-size:13px;color:#4C544F;word-break:break-word;">{{ detail }}</span>
+{% endif %}
+      </td></tr>
+{% endfor %}
+    </table>
+{% endif %}
+{% if let Some(more) = letter.more %}
+    <p style="margin:10px 0 0;font-size:13px;color:#6B736E;">{{ more }}.</p>
+{% endif %}
+{% for section in letter.sections %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:{% if loop.first %}8{% else %}26{% endif %}px;">
+      <tr>
+        <td style="font-size:17px;font-weight:600;letter-spacing:-.01em;color:#111613;padding-bottom:4px;">{{ section.heading }}</td>
+{% if let Some(aside) = section.aside %}
+        <td align="right" style="font-size:17px;font-weight:600;color:#111613;white-space:nowrap;padding-bottom:4px;">{{ aside }}</td>
+{% endif %}
+      </tr>
+    </table>
+{% for line in section.lines %}
+    <p style="margin:0 0 4px;font-size:14px;line-height:1.5;color:#4C544F;">{{ line }}</p>
+{% endfor %}
+{% for group in section.groups %}
+    <p style="margin:14px 0 4px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:{{ group.tone.color() }};">{{ group.label }}</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+{% for item in group.items %}
+      <tr><td style="padding:6px 0;border-top:1px solid #EEEFEA;font-size:14px;line-height:1.45;color:#111613;">
+        <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background-color:{{ item.tone.color() }};margin:0 8px 1px 0;"></span>{{ item.title }}
+{% if let Some(detail) = item.detail %}
+        <br><span style="display:inline-block;padding-left:15px;font-size:13px;color:#4C544F;word-break:break-word;">{{ detail }}</span>
+{% endif %}
+      </td></tr>
+{% endfor %}
+    </table>
+{% endfor %}
+{% if let Some(more) = section.more %}
+    <p style="margin:6px 0 0;font-size:13px;color:#6B736E;">{{ more }}</p>
+{% endif %}
+{% if let Some(button) = section.button %}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;"><tr><td style="background-color:#F0C42C;border-radius:10px;">
+      <a href="{{ button.url }}" style="display:inline-block;padding:11px 18px;font-size:14px;font-weight:600;color:#0E1A17;text-decoration:none;">{{ button.label }}</a>
+    </td></tr></table>
+{% endif %}
+{% if let Some(link) = section.link %}
+    <p style="margin:12px 0 0;font-size:13px;color:#6B736E;"><a href="{{ link.url }}" style="color:#4C544F;">{{ link.label }}</a></p>
+{% endif %}
+{% endfor %}
+{% if let Some(button) = letter.button %}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr><td style="background-color:#F0C42C;border-radius:10px;">
+      <a href="{{ button.url }}" style="display:inline-block;padding:13px 22px;font-size:15px;font-weight:600;color:#0E1A17;text-decoration:none;">{{ button.label }}</a>
+    </td></tr></table>
+{% endif %}
+{% for p in letter.after %}
+    <p style="margin:20px 0 0;font-size:13px;line-height:1.5;color:#6B736E;">{{ p }}</p>
+{% endfor %}
+  </td></tr>
+  <tr><td style="padding:18px 8px 0;font-size:12px;line-height:1.6;color:#6B736E;">
+{% for f in letter.footer %}{{ f }} {% endfor %}{% for link in letter.links %}<a href="{{ link.url }}" style="color:#6B736E;">{{ link.label }}</a>{% if !loop.last %} &middot; {% endif %}{% endfor %}<br>
+    CodoSEO by SafrowLabs &middot; <a href="https://codoseo.com" style="color:#6B736E;">codoseo.com</a> &middot; <a href="mailto:contact@codoseo.com" style="color:#6B736E;">contact@codoseo.com</a>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

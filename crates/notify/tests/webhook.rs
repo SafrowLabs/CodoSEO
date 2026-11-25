@@ -15,7 +15,7 @@ use codoseo_core::crawl::AddressPolicy;
 use codoseo_crawler::guard::Lookup;
 use codoseo_notify::deliver::{ChannelTarget, DeliveryError, GuardedHttp, deliver};
 use codoseo_notify::message::{AlertItem, AlertMessage};
-use codoseo_notify::{Mailer, webhook};
+use codoseo_notify::{EmailOptions, Mailer, webhook};
 use uuid::Uuid;
 
 #[test]
@@ -119,7 +119,7 @@ async fn a_webhook_gets_the_exact_body_and_a_signature_the_server_can_verify() {
         secret: "s3cr3t".into(),
     };
     let msg = message();
-    deliver(&http, &Mailer::Log, &target, &msg, None)
+    deliver(&http, &Mailer::Log, &target, &msg, &EmailOptions::default())
         .await
         .expect("delivered");
 
@@ -160,9 +160,15 @@ async fn slack_and_discord_get_their_json_without_a_signature() {
             url: url_for(addr, "/discord"),
         },
     ] {
-        deliver(&http, &Mailer::Log, &target, &message(), None)
-            .await
-            .expect("delivered");
+        deliver(
+            &http,
+            &Mailer::Log,
+            &target,
+            &message(),
+            &EmailOptions::default(),
+        )
+        .await
+        .expect("delivered");
     }
     let requests = seen.requests.lock().unwrap();
     let first: serde_json::Value = serde_json::from_slice(&requests[0].1).unwrap();
@@ -183,7 +189,7 @@ async fn email_goes_through_the_mailer() {
             to: "owner@example.com".into(),
         },
         &message(),
-        None,
+        &EmailOptions::default(),
     )
     .await
     .unwrap();
@@ -200,9 +206,15 @@ async fn a_500_is_a_delivery_error_with_status_and_excerpt() {
     let target = ChannelTarget::Slack {
         url: url_for(addr, "/"),
     };
-    let err = deliver(&http, &Mailer::Log, &target, &message(), None)
-        .await
-        .unwrap_err();
+    let err = deliver(
+        &http,
+        &Mailer::Log,
+        &target,
+        &message(),
+        &EmailOptions::default(),
+    )
+    .await
+    .unwrap_err();
     match &err {
         DeliveryError::Status { status, body } => {
             assert_eq!(*status, 500);
@@ -226,9 +238,15 @@ async fn public_policy_refuses_ip_literals_before_any_request() {
             url,
             secret: "s".into(),
         };
-        let err = deliver(&http, &Mailer::Log, &target, &message(), None)
-            .await
-            .unwrap_err();
+        let err = deliver(
+            &http,
+            &Mailer::Log,
+            &target,
+            &message(),
+            &EmailOptions::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, DeliveryError::Blocked(_)), "{err:?}");
     }
     assert!(seen.requests.lock().unwrap().is_empty());
@@ -256,9 +274,15 @@ async fn a_hostname_that_resolves_to_a_private_address_is_refused_at_delivery() 
             .unwrap(),
         secret: "s".into(),
     };
-    let err = deliver(&http, &Mailer::Log, &target, &message(), None)
-        .await
-        .unwrap_err();
+    let err = deliver(
+        &http,
+        &Mailer::Log,
+        &target,
+        &message(),
+        &EmailOptions::default(),
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, DeliveryError::Request(_)), "{err:?}");
     assert!(seen.requests.lock().unwrap().is_empty());
 
@@ -266,9 +290,15 @@ async fn a_hostname_that_resolves_to_a_private_address_is_refused_at_delivery() 
     let http = GuardedHttp::with_lookup(AddressPolicy::Public, Fixed("127.0.0.1".parse().unwrap()))
         .unwrap();
     assert!(
-        deliver(&http, &Mailer::Log, &target, &message(), None)
-            .await
-            .is_err()
+        deliver(
+            &http,
+            &Mailer::Log,
+            &target,
+            &message(),
+            &EmailOptions::default()
+        )
+        .await
+        .is_err()
     );
     assert!(seen.requests.lock().unwrap().is_empty());
 }
@@ -282,9 +312,15 @@ async fn a_redirect_is_an_error_and_is_never_followed() {
         url: url_for(outer, "/hook"),
         secret: "s".into(),
     };
-    let err = deliver(&http, &Mailer::Log, &target, &message(), None)
-        .await
-        .unwrap_err();
+    let err = deliver(
+        &http,
+        &Mailer::Log,
+        &target,
+        &message(),
+        &EmailOptions::default(),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(err, DeliveryError::Status { status: 302, .. }),
         "{err:?}"

@@ -89,6 +89,11 @@ const SOURCES: &[Source] = &[
     },
     // The 1200×630 share card for Open Graph and Twitter.
     Source {
+        name: "email-logo.png",
+        content_type: "image/png",
+        bytes: include_bytes!("../assets/email-logo.png"),
+    },
+    Source {
         name: "og.png",
         content_type: "image/png",
         bytes: include_bytes!("../assets/og.png"),
@@ -278,6 +283,12 @@ pub async fn apple_touch_icon(headers: HeaderMap) -> Response {
 /// its picture.
 pub async fn og_image(headers: HeaderMap) -> Response {
     fixed("og.png", &headers)
+}
+
+/// `GET /email-logo.png`: the logo in every email. Its URL stays put, so an email opened
+/// months after a deploy still shows it.
+pub async fn email_logo(headers: HeaderMap) -> Response {
+    fixed("email-logo.png", &headers)
 }
 
 /// `GET /site.webmanifest`: name, colours and icons for "add to home screen".

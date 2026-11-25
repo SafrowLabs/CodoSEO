@@ -21,13 +21,13 @@ use uuid::Uuid;
 use super::{CurrentUser, email, safe_next, session, signup_policy};
 use crate::abuse::{self, ClientIp};
 use crate::assets;
-use crate::auth::mailer::Email;
 use crate::error::AppError;
 use crate::render::{Hx, html};
 use crate::routes::legal::CONTACT;
 use crate::state::AppState;
 use crate::turnstile::{self, Action, Verdict};
 use crate::unsubscribe::Unsubscribe;
+use codoseo_notify::letters;
 
 pub const MAGIC_TTL: time::Duration = time::Duration::minutes(15);
 
@@ -262,46 +262,30 @@ pub async fn issue_link(
 
     let mut link = state.config.base_url.clone();
     link.set_path(&format!("/auth/magic/{token}"));
-    // Whoever typed the address may not be its owner: the owner can stop every email.
-    let opt_out = state.unsubscribe.link(
-        &state.config.base_url,
-        &Unsubscribe {
-            address: address.to_owned(),
-            scope: Scope::All,
-            account_id: None,
-        },
-    );
-    let (subject, text) = match audit {
-        None => (
-            "Your CodoSEO sign-in link".to_owned(),
-            format!(
-                "Sign in to CodoSEO:\n\n{link}\n\nThe link works once and expires in 15 minutes. \
-                 If you didn't ask for it, you can ignore this email.\n\nDon't want any email \
-                 from CodoSEO? {opt_out}"
-            ),
-        ),
-        Some(a) => (
-            format!("Your CodoSEO report for {}", a.domain),
-            format!(
-                "Open the full CodoSEO report for {}:\n\n{link}\n\nThe link works once and \
-                 expires in 15 minutes. It also starts weekly monitoring of the site, with an \
-                 email when something important breaks. If you didn't ask for it, you can \
-                 ignore this email.\n\nDon't want any email from CodoSEO? {opt_out}",
-                a.domain
-            ),
-        ),
+    let draft = match audit {
+        None => letters::sign_in(&state.email_logo_url(), link.as_str()),
+        Some(a) => {
+            // Whoever typed the address may not be its owner: the owner can stop every email.
+            let opt_out = state.unsubscribe.link(
+                &state.config.base_url,
+                &Unsubscribe {
+                    address: address.to_owned(),
+                    scope: Scope::All,
+                    account_id: None,
+                },
+            );
+            letters::report_link(
+                &state.email_logo_url(),
+                a.domain,
+                link.as_str(),
+                opt_out.as_str(),
+            )
+        }
     };
-    if let Err(e) = state
-        .mailer
-        .send(Email {
-            to: address.to_owned(),
-            subject,
-            text,
-            html: None,
-            unsubscribe: None,
-        })
-        .await
-    {
+    let email = draft
+        .email(address)
+        .map_err(|e| AppError::internal(format!("the sign-in email did not render: {e}")))?;
+    if let Err(e) = state.mailer.send(email).await {
         // The page says "if the address is registered we sent a link" either way; a broken mail
         // server is for the operator to see in the logs, not for the visitor to probe.
         tracing::error!(error = %e, "could not send the sign-in link");
