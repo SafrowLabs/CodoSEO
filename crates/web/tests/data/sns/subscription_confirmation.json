@@ -1,0 +1,12 @@
+{
+  "Type": "SubscriptionConfirmation",
+  "MessageId": "m-0",
+  "Token": "2336412f37fb687f5d51e6e2425ba1f25d81ab",
+  "TopicArn": "arn:aws:sns:eu-north-1:123456789012:codoseo-ses-feedback",
+  "Message": "You have chosen to subscribe to the topic arn:aws:sns:eu-north-1:123456789012:codoseo-ses-feedback.\nTo confirm the subscription, visit the SubscribeURL included in this message.",
+  "SubscribeURL": "https://sns.eu-north-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=arn:aws:sns:eu-north-1:123456789012:codoseo-ses-feedback&Token=2336412f37fb687f5d51e6e2425ba1f25d81ab",
+  "Timestamp": "2026-11-25T12:59:00.000Z",
+  "SignatureVersion": "2",
+  "Signature": "dMKyr3vw93B1a3IUMKdLNZ+zoTLazctYKG8mi5KVrrYpnvDZmVRhs6Zd4quCXLL8ah+O5MF8/D0n7bEFU7shzEJUGdT0mwRonY97niubys9DmZpJxJh3xdQQxqL2GIN0vpMGCi5RILq/+qEjs0XP3DAI9ODPgCQEVIel1Tm+kj8NJXg3yCAOblVlDdAZVlcwZkuxRjC9Hvd2wuR0p4eBfNAcQSpjsgtgGSL4LN/6bZjdtGAp5n1AUkO9G3s5lvlLqN3aEQLkUsfH/TmDl51cNl2fgFIlDThl79esTZ/sbyYYNV+wkPz79zWoEymgs7y63ltfhkp8RxO/Jzw6tD8Tiw==",
+  "SigningCertURL": "https://sns.eu-north-1.amazonaws.com/SimpleNotificationService-test.pem"
+}
