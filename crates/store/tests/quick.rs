@@ -610,10 +610,24 @@ fn unlock_payload(crawl: Uuid, canonical: &str) -> serde_json::Value {
 }
 
 async fn unlock(pool: &PgPool, crawl: Uuid, canonical: &str, n: u32) -> UnlockSlot {
+    unlock_from(pool, crawl, canonical, None, n).await
+}
+
+async fn unlock_from(
+    pool: &PgPool,
+    crawl: Uuid,
+    canonical: &str,
+    ip: Option<&[u8]>,
+    n: u32,
+) -> UnlockSlot {
     quick::create_unlock_token(
         pool,
         crawl,
         canonical,
+        ip.map(|ip_hash| Requester {
+            ip_hash,
+            previous_ip_hash: None,
+        }),
         format!("{crawl}-{canonical}-{n}").as_bytes(),
         unlock_payload(crawl, canonical),
         time::Duration::minutes(15),
@@ -678,6 +692,156 @@ async fn unlock_emails_are_capped_per_audit_and_per_address_each_hour() {
         .unwrap();
     assert_eq!(
         unlock(&db.pool, one, "p9@x.co", 4).await,
+        UnlockSlot::Created
+    );
+}
+
+async fn login(pool: &PgPool, canonical: &str, ip: Option<&[u8]>, n: u32) -> UnlockSlot {
+    quick::create_login_token(
+        pool,
+        canonical,
+        ip.map(|ip_hash| Requester {
+            ip_hash,
+            previous_ip_hash: None,
+        }),
+        format!("login-{canonical}-{n}").as_bytes(),
+        serde_json::json!({ "email": canonical, "canonical": canonical, "next": "/app" }),
+        time::Duration::minutes(15),
+        UnlockCaps::DEFAULT,
+    )
+    .await
+    .expect("login token")
+}
+
+#[tokio::test]
+async fn sign_in_emails_share_the_address_cap_with_unlock_emails_and_have_no_audit_cap() {
+    let db = TestDb::new().await;
+    let one = crawl_id(&start(&db.pool, "one.com", b"one").await);
+    // Two from the sign-in form and one from an audit: the hour's three for this address.
+    assert_eq!(
+        login(&db.pool, "p@x.co", None, 0).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        login(&db.pool, "p@x.co", None, 1).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        unlock(&db.pool, one, "p@x.co", 0).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        login(&db.pool, "p@x.co", None, 2).await,
+        UnlockSlot::AddressCapReached
+    );
+    assert_eq!(
+        unlock(&db.pool, one, "p@x.co", 1).await,
+        UnlockSlot::AddressCapReached
+    );
+    // Sign-in links don't count against any audit: the audit still has two slots.
+    assert_eq!(
+        unlock(&db.pool, one, "q@x.co", 0).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        unlock(&db.pool, one, "r@x.co", 0).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        unlock(&db.pool, one, "s@x.co", 0).await,
+        UnlockSlot::AuditCapReached
+    );
+    // ...and many sign-in links to many addresses are fine without a client hash.
+    for n in 0..10 {
+        assert_eq!(
+            login(&db.pool, &format!("t{n}@x.co"), None, n).await,
+            UnlockSlot::Created
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_address_gets_six_sign_in_emails_a_day_not_three_an_hour_all_day() {
+    let db = TestDb::new().await;
+    for round in 0..2 {
+        for n in 0..3 {
+            assert_eq!(
+                login(&db.pool, "victim@x.co", None, round * 10 + n).await,
+                UnlockSlot::Created,
+                "{round}/{n}"
+            );
+        }
+        sqlx::query("UPDATE login_tokens SET created_at = created_at - interval '2 hours'")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        login(&db.pool, "victim@x.co", None, 99).await,
+        UnlockSlot::AddressDayCapReached
+    );
+    assert_eq!(
+        login(&db.pool, "other@x.co", None, 0).await,
+        UnlockSlot::Created
+    );
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '25 hours'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        login(&db.pool, "victim@x.co", None, 100).await,
+        UnlockSlot::Created
+    );
+}
+
+#[tokio::test]
+async fn one_client_gets_five_sign_in_emails_an_hour_across_both_forms() {
+    let db = TestDb::new().await;
+    let one = crawl_id(&start(&db.pool, "one.com", b"one").await);
+    let two = crawl_id(&start(&db.pool, "two.com", b"two").await);
+    for n in 0..3 {
+        assert_eq!(
+            login(&db.pool, &format!("a{n}@x.co"), Some(b"ip-1"), n).await,
+            UnlockSlot::Created
+        );
+    }
+    assert_eq!(
+        unlock_from(&db.pool, one, "b@x.co", Some(b"ip-1"), 0).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        unlock_from(&db.pool, two, "c@x.co", Some(b"ip-1"), 0).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        login(&db.pool, "d@x.co", Some(b"ip-1"), 0).await,
+        UnlockSlot::IpCapReached
+    );
+    assert_eq!(
+        unlock_from(&db.pool, two, "d@x.co", Some(b"ip-1"), 1).await,
+        UnlockSlot::IpCapReached
+    );
+    // The hash is kept for the counts; another client, or none, is unaffected.
+    let stored: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM login_tokens WHERE payload->>'ip' = '69702d31'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, 5);
+    assert_eq!(
+        login(&db.pool, "d@x.co", Some(b"ip-2"), 0).await,
+        UnlockSlot::Created
+    );
+    assert_eq!(
+        login(&db.pool, "e@x.co", None, 0).await,
+        UnlockSlot::Created
+    );
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        login(&db.pool, "f@x.co", Some(b"ip-1"), 0).await,
         UnlockSlot::Created
     );
 }
@@ -1193,8 +1357,8 @@ async fn monitoring_emails_are_capped_per_address_per_client_and_per_day() {
         ..MonitoringCaps::with_daily(7)
     };
 
-    // Three to one address, the fourth is refused, whoever asks.
-    for n in 0..3 {
+    // Two to one address, the third is refused, whoever asks.
+    for n in 0..2 {
         assert_eq!(
             monitoring(&db.pool, "p@x.co", None, n, caps).await,
             MonitoringSlot::Created
@@ -1207,6 +1371,10 @@ async fn monitoring_emails_are_capped_per_address_per_client_and_per_day() {
     assert_eq!(
         monitoring(&db.pool, "p@x.co", Some(b"other-ip"), 4, caps).await,
         MonitoringSlot::AddressCapReached
+    );
+    assert_eq!(
+        monitoring(&db.pool, "p2@x.co", None, 0, caps).await,
+        MonitoringSlot::Created
     );
 
     // One client can't mail many addresses: three an hour.
@@ -1225,7 +1393,7 @@ async fn monitoring_emails_are_capped_per_address_per_client_and_per_day() {
         monitoring(&db.pool, "q9@x.co", None, 0, caps).await,
         MonitoringSlot::Created
     );
-    // ...but the daily total (3 + 3 + 1 = 7 so far) stops everyone.
+    // ...but the daily total (2 + 1 + 3 + 1 = 7 so far) stops everyone.
     assert_eq!(
         monitoring(&db.pool, "r@x.co", None, 0, caps).await,
         MonitoringSlot::DailyCapReached
@@ -1252,29 +1420,29 @@ async fn monitoring_emails_are_capped_per_address_per_client_and_per_day() {
 }
 
 #[tokio::test]
-async fn an_address_gets_five_emails_in_24_hours_not_three_an_hour_all_day() {
+async fn an_address_gets_two_emails_in_24_hours_however_the_hours_fall() {
     let db = TestDb::new().await;
     let caps = MonitoringCaps {
         per_hour: 100,
         ..MonitoringCaps::with_daily(1000)
     };
-    for n in 0..3 {
-        assert_eq!(
-            monitoring(&db.pool, "victim@x.co", None, n, caps).await,
-            MonitoringSlot::Created
-        );
-    }
-    // The hour passes: two more fit, the sixth in the day does not.
+    assert_eq!(
+        monitoring(&db.pool, "victim@x.co", None, 0, caps).await,
+        MonitoringSlot::Created
+    );
+    // The hour passes: one more fits, the third in the day does not.
     sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
         .execute(&db.pool)
         .await
         .unwrap();
-    for n in 3..5 {
-        assert_eq!(
-            monitoring(&db.pool, "victim@x.co", None, n, caps).await,
-            MonitoringSlot::Created
-        );
-    }
+    assert_eq!(
+        monitoring(&db.pool, "victim@x.co", None, 1, caps).await,
+        MonitoringSlot::Created
+    );
+    sqlx::query("UPDATE login_tokens SET created_at = created_at - interval '2 hours'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
     assert_eq!(
         monitoring(&db.pool, "victim@x.co", None, 5, caps).await,
         MonitoringSlot::AddressDayCapReached
@@ -1323,7 +1491,7 @@ async fn the_daily_email_budget_cannot_be_drained_in_one_hour() {
 }
 
 #[tokio::test]
-async fn a_monitoring_token_keeps_the_client_hash_for_the_counts_and_ten_at_once_store_three() {
+async fn a_monitoring_token_keeps_the_client_hash_for_the_counts_and_ten_at_once_store_two() {
     let db = TestDb::new().await;
     let caps = MonitoringCaps::with_daily(100);
     monitoring(&db.pool, "p@x.co", Some(b"ip-1"), 0, caps).await;
@@ -1343,5 +1511,5 @@ async fn a_monitoring_token_keeps_the_client_hash_for_the_counts_and_ten_at_once
         .iter()
         .filter(|r| **r == MonitoringSlot::Created)
         .count();
-    assert_eq!(created, 3, "{results:?}");
+    assert_eq!(created, 2, "{results:?}");
 }

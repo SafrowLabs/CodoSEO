@@ -1,3 +1,4 @@
+{%- import "partials/turnstile.html" as ts -%}
 <section id="unlock-card" class="card q-unlock"{% if unlock.oob %} hx-swap-oob="true"{% endif %} aria-label="Full report and page limit">
 {% if unlock.sent %}
   <div>
@@ -21,6 +22,7 @@
       <input id="unlock-email" class="input input-lg" name="email" type="email" value="{{ unlock.email }}" placeholder="you@company.com" autocomplete="email" required>
       <button class="btn btn-primary btn-lg" type="submit">Get the full report<span class="spinner"></span></button>
     </span>
+    {% if let Some(key) = unlock.turnstile_site_key %}{% call ts::widget(key, "unlock") %}{% endcall %}{% endif %}
     {% if let Some(err) = unlock.error %}<p class="error-text" role="alert"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}
     <span class="l-hint">We send one sign-in link. By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</span>
   </form>

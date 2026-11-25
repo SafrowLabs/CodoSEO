@@ -167,16 +167,21 @@ async fn the_waiting_page_shows_the_place_in_line() {
     assert!(!running.contains("in line"), "{running}");
 }
 
-/// A stand-in for Cloudflare's siteverify endpoint: `good-token` passes, anything else fails.
+/// A stand-in for Cloudflare's siteverify endpoint: `good-<action>` passes as a token solved for
+/// that action on codoseo.com (`good-audit@elsewhere.com` on another site), anything else fails.
 async fn fake_turnstile() -> (TestServer, Arc<Mutex<Vec<HashMap<String, String>>>>) {
     type Seen = Arc<Mutex<Vec<HashMap<String, String>>>>;
     async fn verify(
         State(seen): State<Seen>,
         Form(form): Form<HashMap<String, String>>,
     ) -> Json<serde_json::Value> {
-        let ok = form.get("response").map(String::as_str) == Some("good-token");
+        let token = form.get("response").cloned().unwrap_or_default();
         seen.lock().unwrap().push(form);
-        Json(serde_json::json!({ "success": ok }))
+        let Some(rest) = token.strip_prefix("good-") else {
+            return Json(serde_json::json!({ "success": false }));
+        };
+        let (action, host) = rest.split_once('@').unwrap_or((rest, "codoseo.com"));
+        Json(serde_json::json!({ "success": true, "action": action, "hostname": host }))
     }
     let seen: Seen = Arc::default();
     let router = Router::new()
@@ -226,13 +231,18 @@ async fn turnstile_gates_the_form_when_configured() {
     assert!(missing.body.contains("human"), "{}", missing.body);
     let bad = post(Some("forged")).await;
     assert_eq!(bad.status, StatusCode::FORBIDDEN);
+    // A token solved for another of our forms, or on a copy of the page elsewhere, is refused.
+    let other_form = post(Some("good-login")).await;
+    assert_eq!(other_form.status, StatusCode::FORBIDDEN);
+    let other_site = post(Some("good-audit@phish.example")).await;
+    assert_eq!(other_site.status, StatusCode::FORBIDDEN);
     assert_eq!(
         count(&app, "SELECT count(*) FROM crawls").await,
         0,
         "nothing starts without a pass"
     );
 
-    let good = post(Some("good-token")).await;
+    let good = post(Some("good-audit")).await;
     assert_eq!(good.status, StatusCode::SEE_OTHER);
     assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 1);
 
@@ -240,17 +250,89 @@ async fn turnstile_gates_the_form_when_configured() {
     let calls = seen.lock().unwrap().clone();
     assert_eq!(
         calls.len(),
-        2,
-        "forged and good (the missing token never left)"
+        4,
+        "forged, two mismatches and good (the missing token never left)"
     );
     assert_eq!(
-        calls[1].get("secret").map(String::as_str),
+        calls[3].get("secret").map(String::as_str),
         Some("shh-secret")
     );
     assert_eq!(
-        calls[1].get("remoteip").map(String::as_str),
+        calls[3].get("remoteip").map(String::as_str),
         Some("203.0.113.9")
     );
+}
+
+#[tokio::test]
+async fn turnstile_gates_the_sign_in_and_unlock_forms_too() {
+    let (server, _seen) = fake_turnstile().await;
+    let app = TestApp::with_config(turnstile_config(&format!("{}/verify", server.base()))).await;
+
+    // The sign-in page carries the script and a widget for its action.
+    let login = app.get("/login", None).await.body;
+    assert!(
+        login.contains("challenges.cloudflare.com/turnstile/v0/api.js"),
+        "{login}"
+    );
+    assert!(
+        login.contains(r#"data-sitekey="site-key-123" data-action="login""#),
+        "{login}"
+    );
+
+    let missing = app.post_hx("/login", "email=ana%40example.com", None).await;
+    assert_eq!(missing.status, StatusCode::FORBIDDEN);
+    assert!(missing.body.contains("human"), "{}", missing.body);
+    let wrong_form = app
+        .post_hx(
+            "/login",
+            "email=ana%40example.com&cf-turnstile-response=good-audit",
+            None,
+        )
+        .await;
+    assert_eq!(wrong_form.status, StatusCode::FORBIDDEN);
+    assert!(
+        app.mail.lock().unwrap().is_empty(),
+        "no email without a pass"
+    );
+    let good = app
+        .post_hx(
+            "/login",
+            "email=ana%40example.com&cf-turnstile-response=good-login",
+            None,
+        )
+        .await;
+    assert_eq!(good.status, StatusCode::OK, "{}", good.body);
+    assert!(good.body.contains("Check your email"), "{}", good.body);
+    assert_eq!(app.mail.lock().unwrap().len(), 1);
+
+    // The unlock form: the report page carries the script and its widget.
+    let crawl = crawl_id(
+        &app.post_with_headers(
+            "/audit",
+            "url=example.com&cf-turnstile-response=good-audit",
+            None,
+            &[(IP_HEADER, "203.0.113.9")],
+        )
+        .await,
+    );
+    let report = app.get(&format!("/audit/{crawl}"), None).await.body;
+    assert!(
+        report.contains("challenges.cloudflare.com/turnstile/v0/api.js"),
+        "{report}"
+    );
+    assert!(report.contains(r#"data-action="unlock""#), "{report}");
+    let missing = unlock(&app, crawl, "owner@example.com").await;
+    assert_eq!(missing.status, StatusCode::FORBIDDEN);
+    assert!(missing.body.contains("human"), "{}", missing.body);
+    let good = app
+        .post_hx(
+            &format!("/audit/{crawl}/unlock"),
+            "email=owner%40example.com&cf-turnstile-response=good-unlock",
+            None,
+        )
+        .await;
+    assert!(good.body.contains("Check your email"), "{}", good.body);
+    assert_eq!(app.mail.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -259,7 +341,7 @@ async fn turnstile_fails_closed_when_the_verifier_is_down() {
     let res = app
         .post_with_headers(
             "/audit",
-            "url=example.com&cf-turnstile-response=good-token",
+            "url=example.com&cf-turnstile-response=good-audit",
             None,
             &[(IP_HEADER, "203.0.113.9")],
         )
@@ -378,6 +460,51 @@ async fn the_limits_hold_across_the_utc_midnight_rollover() {
         "midnight must not reset the hourly limit: {}",
         res.body
     );
+}
+
+#[tokio::test]
+async fn the_sign_in_form_is_capped_per_address_and_per_client() {
+    let app = TestApp::with_config(cloud_config()).await;
+    let login = |email: &str, ip: &str| {
+        let form = format!("email={}", encode(email));
+        let app = &app;
+        let ip = ip.to_owned();
+        async move {
+            app.post_with_headers("/login", &form, None, &[(IP_HEADER, &ip)])
+                .await
+        }
+    };
+    // Three to one address in an hour, from anywhere, whatever the spelling.
+    for (i, ip) in ["198.51.100.1", "198.51.100.2", "198.51.100.3"]
+        .iter()
+        .enumerate()
+    {
+        let res = login("victim@example.com", ip).await;
+        assert!(res.body.contains("Check your email"), "{i}: {}", res.body);
+    }
+    let res = login("Victim+x@Example.com", "198.51.100.4").await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        res.body.contains("already sent several emails"),
+        "{}",
+        res.body
+    );
+    assert_eq!(app.mail.lock().unwrap().len(), 3);
+
+    // Five from one client in an hour, to anyone (the two above from .1 and .2 don't count
+    // for .9).
+    for i in 0..5 {
+        let res = login(&format!("person{i}@example.com"), "203.0.113.9").await;
+        assert!(res.body.contains("Check your email"), "{i}: {}", res.body);
+    }
+    let res = login("person5@example.com", "203.0.113.9").await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(res.body.contains("from your connection"), "{}", res.body);
+    // The same person from another connection is fine, and the refusals stored nothing.
+    let res = login("person5@example.com", "203.0.113.10").await;
+    assert!(res.body.contains("Check your email"), "{}", res.body);
+    assert_eq!(count(&app, "SELECT count(*) FROM login_tokens").await, 9);
+    assert_eq!(app.mail.lock().unwrap().len(), 9);
 }
 
 #[tokio::test]

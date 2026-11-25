@@ -26,6 +26,7 @@ pub mod score_bars;
 pub mod serp;
 pub mod state;
 pub mod turnstile;
+pub mod unsubscribe;
 
 use std::net::SocketAddr;
 

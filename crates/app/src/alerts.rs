@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashSet};
 use codoseo_core::change::ChangeKind;
 use codoseo_core::output::SiteFault;
 use codoseo_core::plan::PlanLimits;
-use codoseo_notify::{AlertItem, AlertMessage, ChannelKind, DeliveryError, deliver};
+use codoseo_notify::{AlertItem, AlertMessage, ChannelKind, ChannelTarget, DeliveryError, deliver};
 use codoseo_store::alert_rules::{self, AlertCrawl, Route, StoredChange};
 use codoseo_store::jobs::{ClaimedJob, JobKind, JobQueue};
 use codoseo_store::{accounts, channels};
@@ -304,9 +304,26 @@ pub async fn deliver_alert(
     };
 
     let outcome = match channels::get_target(pool, &ctx.channel_key, delivery.channel_id).await {
-        Ok(Some(target)) => deliver(&ctx.http, &ctx.mailer, &target, &message)
+        Ok(Some(target)) => {
+            let unsubscribe = match &target {
+                ChannelTarget::Email { to } => {
+                    if ctx.suppressed(to).await? {
+                        return Ok(());
+                    }
+                    Some(ctx.unsubscribe_link(to, Some(state.account_id)))
+                }
+                _ => None,
+            };
+            deliver(
+                &ctx.http,
+                &ctx.mailer,
+                &target,
+                &message,
+                unsubscribe.as_deref(),
+            )
             .await
-            .map_err(|e: DeliveryError| e.to_string()),
+            .map_err(|e: DeliveryError| e.to_string())
+        }
         Ok(None) => return Ok(()),
         // A target that won't decrypt (SECRET_KEY changed, a damaged row) is the operator's
         // problem, not the channel's: the job fails and shows up in the admin page, but the
@@ -339,6 +356,7 @@ pub async fn deliver_alert(
                     ctx,
                     delivery.channel_id,
                     state.kind,
+                    account.id,
                     &account.email,
                     &crawl.domain,
                     &error,
@@ -356,6 +374,7 @@ async fn turn_off(
     ctx: &JobContext,
     channel_id: Uuid,
     kind: ChannelKind,
+    account_id: Uuid,
     account_email: &str,
     domain: &str,
     error: &str,
@@ -374,14 +393,16 @@ async fn turn_off(
         .base_url
         .join("settings/alerts")
         .map_err(|e| format!("bad base URL: {e}"))?;
+    let unsubscribe = ctx.unsubscribe_link(account_email, Some(account_id));
     let text = format!(
         "{subject}: {error}\n\nDelivery failed on every retry. Check the address, then turn the \
-         channel back on in your alert settings: {settings}\n"
+         channel back on in your alert settings: {settings}\n\nStop CodoSEO emails to \
+         {account_email}: {unsubscribe}\n"
     );
     JobQueue::new(ctx.pool.clone())
         .enqueue(
             JobKind::SendEmail,
-            json!({ "to": account_email, "subject": subject, "text": text }),
+            json!({ "to": account_email, "subject": subject, "text": text, "unsubscribe": unsubscribe }),
         )
         .await
         .map_err(db)?;

@@ -211,8 +211,10 @@ fn more_text(more: u32) -> String {
     format!("and {more} more")
 }
 
-/// The email channel's rendering: subject, plain text and a small HTML body.
-pub fn email(msg: &AlertMessage, to: &str) -> Email {
+/// The email channel's rendering: subject, plain text and a small HTML body. With an
+/// `unsubscribe` link the footer says how to stop these emails, and the message carries the
+/// one-click headers.
+pub fn email(msg: &AlertMessage, to: &str, unsubscribe: Option<&str>) -> Email {
     let subject = format!("CodoSEO: {}", one_line(&msg.headline));
 
     let mut text = format!("{}\n\n", msg.headline);
@@ -237,6 +239,13 @@ pub fn email(msg: &AlertMessage, to: &str) -> Email {
         text.push_str(&format!("{}.\n\n", more_text(msg.more)));
     }
     text.push_str(&format!("Open in CodoSEO: {}\n", msg.site_url));
+    if let Some(url) = unsubscribe {
+        text.push_str(&format!(
+            "\nYou get this email because {} is an alert channel in CodoSEO. \
+             Stop these emails: {url}\n",
+            to
+        ));
+    }
 
     let mut html = format!(
         "<h2 style=\"font-size:18px\">{}</h2>\n",
@@ -271,11 +280,20 @@ pub fn email(msg: &AlertMessage, to: &str) -> Email {
         "<p><a href=\"{}\">Open in CodoSEO</a></p>\n",
         html_escape(&msg.site_url)
     ));
+    if let Some(url) = unsubscribe {
+        html.push_str(&format!(
+            "<p style=\"font-size:12px;color:#52525b\">You get this email because {} is an \
+             alert channel in CodoSEO. <a href=\"{u}\">Stop these emails</a>.</p>\n",
+            html_escape(to),
+            u = html_escape(url)
+        ));
+    }
 
     Email {
         to: to.to_owned(),
         subject,
         text,
         html: Some(html),
+        unsubscribe: unsubscribe.map(str::to_owned),
     }
 }

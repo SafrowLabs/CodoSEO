@@ -618,9 +618,9 @@ async fn bad_and_throwaway_addresses_get_no_email() {
 }
 
 #[tokio::test]
-async fn an_address_gets_three_emails_an_hour_whoever_asks() {
+async fn an_address_gets_two_emails_an_hour_whoever_asks() {
     let app = cloud().await;
-    for _ in 0..3 {
+    for _ in 0..2 {
         request(&app, "victim@example.org").await;
     }
     // Spelling variants are the same address.
@@ -637,11 +637,11 @@ async fn an_address_gets_three_emails_an_hour_whoever_asks() {
             "{variant}: {err}"
         );
     }
-    assert_eq!(mails(&app), 3);
-    assert_eq!(count(&app, "SELECT count(*) FROM login_tokens").await, 3);
-    // Another address is unaffected, and the hour rolls over.
+    assert_eq!(mails(&app), 2);
+    assert_eq!(count(&app, "SELECT count(*) FROM login_tokens").await, 2);
+    // Another address is unaffected, and the day rolls over.
     request(&app, "other@example.org").await;
-    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
+    sqlx::query("UPDATE login_tokens SET created_at = now() - interval '25 hours'")
         .execute(app.pool())
         .await
         .unwrap();
@@ -732,18 +732,18 @@ async fn the_daily_email_cap_stops_everyone_and_an_eighth_of_it_is_the_hourly_ca
 }
 
 #[tokio::test]
-async fn an_address_gets_five_emails_in_a_day_not_three_an_hour_all_day() {
+async fn an_address_gets_two_emails_in_a_day_however_the_hours_fall() {
     let app = cloud().await;
-    for _ in 0..3 {
-        request(&app, "victim@example.org").await;
-    }
+    request(&app, "victim@example.org").await;
     sqlx::query("UPDATE login_tokens SET created_at = now() - interval '2 hours'")
         .execute(app.pool())
         .await
         .unwrap();
-    for _ in 0..2 {
-        request(&app, "victim@example.org").await;
-    }
+    request(&app, "victim@example.org").await;
+    sqlx::query("UPDATE login_tokens SET created_at = created_at - interval '2 hours'")
+        .execute(app.pool())
+        .await
+        .unwrap();
     let err = client(&app)
         .call_err(
             "start_monitoring",
@@ -751,7 +751,39 @@ async fn an_address_gets_five_emails_in_a_day_not_three_an_hour_all_day() {
         )
         .await;
     assert!(err.contains("for today"), "{err}");
-    assert_eq!(mails(&app), 5);
+    assert_eq!(mails(&app), 2);
+}
+
+#[tokio::test]
+async fn an_address_that_opted_out_gets_no_email_and_the_agent_is_told() {
+    let app = cloud().await;
+    codoseo_store::suppressions::add(
+        app.pool(),
+        "victim@example.org",
+        codoseo_store::suppressions::Scope::All,
+        "opt_out",
+    )
+    .await
+    .unwrap();
+    let err = client(&app)
+        .call_err(
+            "start_monitoring",
+            json!({"url": "example.com", "email": "Victim+x@example.org"}),
+        )
+        .await;
+    assert!(err.contains("asked CodoSEO not to email it"), "{err}");
+    assert_eq!(mails(&app), 0);
+    // An unsubscribe from notifications is not an opt-out: the confirmation still goes.
+    codoseo_store::suppressions::add(
+        app.pool(),
+        "other@example.org",
+        codoseo_store::suppressions::Scope::Notifications,
+        "unsubscribe",
+    )
+    .await
+    .unwrap();
+    request(&app, "other@example.org").await;
+    assert_eq!(mails(&app), 1);
 }
 
 // ---- review fixes ----

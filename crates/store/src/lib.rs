@@ -32,3 +32,4 @@ pub mod site_graph;
 pub mod sitemaps;
 pub mod sites;
 pub mod stats;
+pub mod suppressions;

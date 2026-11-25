@@ -20,6 +20,7 @@ use codoseo_store::quick::{
     self, LimitWindow, Limits, MonitoringCaps, MonitoringSlot, Requester, Source, StartOutcome,
     StartRequest,
 };
+use codoseo_store::suppressions::{self, Scope};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -31,6 +32,7 @@ use crate::auth::{email, session};
 use crate::routes::quick::no_report_notice;
 use crate::routes::sites::{check_public_target, parse_start_url};
 use crate::state::AppState;
+use crate::unsubscribe::Unsubscribe;
 
 /// How long a start-monitoring link works. Longer than a sign-in link: the person has to see
 /// the email, which an agent's user may do later.
@@ -360,6 +362,16 @@ impl<'a> AnonService<'a> {
         }
         let domain = url.host_str().unwrap_or_default().to_ascii_lowercase();
         let canonical = email::canonical(&address);
+        if suppressions::blocks_all(&state.pool, &canonical)
+            .await
+            .map_err(db)?
+        {
+            return Err(
+                "That address asked CodoSEO not to email it. Ask the user to add the site at \
+                 the website instead."
+                    .to_owned(),
+            );
+        }
         let token = session::random_token();
         let hashes = who.ip_hashes(state);
         let slot = quick::create_monitoring_token(
@@ -424,6 +436,15 @@ impl<'a> AnonService<'a> {
         }
 
         let link = self.link(&format!("/monitoring/start/{token}"));
+        // The agent chose the address: its owner can stop every email.
+        let opt_out = state.unsubscribe.link(
+            &state.config.base_url,
+            &Unsubscribe {
+                address: address.clone(),
+                scope: Scope::All,
+                account_id: None,
+            },
+        );
         let text = format!(
             "An AI assistant you are working with asked CodoSEO to monitor {domain}.\n\n\
              To confirm, open this link and press the button:\n\n{link}\n\n\
@@ -432,7 +453,8 @@ impl<'a> AnonService<'a> {
              important breaks. It also shows you an API key once, which lets your assistant \
              read your site's results.\n\n\
              The link works once and expires in 24 hours. If you didn't ask for this, ignore \
-             this email and nothing happens."
+             this email and nothing happens.\n\n\
+             Don't want any email from CodoSEO? {opt_out}"
         );
         if let Err(e) = state
             .mailer
@@ -441,6 +463,7 @@ impl<'a> AnonService<'a> {
                 subject: format!("Confirm monitoring for {domain}"),
                 text,
                 html: None,
+                unsubscribe: None,
             })
             .await
         {

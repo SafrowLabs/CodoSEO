@@ -78,7 +78,26 @@ fn view(sites: Vec<SiteDigest>) -> DigestView {
         week_label: "Sep 28 to Oct 5, 2026".into(),
         sites,
         settings_url: "https://codoseo.test/settings/alerts".into(),
+        unsubscribe_url: "https://codoseo.test/email/unsubscribe/abc.def".into(),
     }
+}
+
+#[test]
+fn the_digest_carries_its_unsubscribe_link_in_both_parts_and_the_headers() {
+    let e = three().render().unwrap();
+    let link = "https://codoseo.test/email/unsubscribe/abc.def";
+    assert_eq!(e.unsubscribe.as_deref(), Some(link));
+    assert!(
+        e.text
+            .contains(&format!("Stop CodoSEO emails to owner@example.com: {link}")),
+        "{}",
+        e.text
+    );
+    assert!(
+        e.html
+            .unwrap()
+            .contains(&format!("<a href=\"{link}\">stop these emails</a>"))
+    );
 }
 
 fn three() -> DigestView {

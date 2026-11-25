@@ -69,7 +69,7 @@ pub async fn build_digest(
     let Some(account) = digest::account(pool, account_id).await.map_err(db)? else {
         return Ok(None);
     };
-    if account.paused {
+    if account.paused || ctx.suppressed(&account.email).await? {
         return Ok(None);
     }
     let tz = parse_tz(&account.timezone);
@@ -90,6 +90,7 @@ pub async fn build_digest(
         return Ok(None);
     }
     Ok(Some(DigestView {
+        unsubscribe_url: ctx.unsubscribe_link(&account.email, Some(account_id)),
         account_email: account.email,
         week_label: week_label(&tz, now),
         sites: digests,

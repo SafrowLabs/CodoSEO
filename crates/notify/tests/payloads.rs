@@ -46,7 +46,7 @@ fn json(v: &serde_json::Value) -> String {
 }
 
 fn email_snapshot(msg: &AlertMessage) -> String {
-    let e = message::email(msg, "owner@example.com");
+    let e = message::email(msg, "owner@example.com", None);
     format!(
         "to: {}\nsubject: {}\n--- text ---\n{}\n--- html ---\n{}\n",
         e.to,
@@ -158,8 +158,29 @@ fn slack_escapes_what_it_treats_as_markup() {
 fn email_html_escapes_page_content() {
     let mut msg = changes(1);
     msg.items[0].after = "<script>alert(1)</script>".into();
-    let e = message::email(&msg, "owner@example.com");
+    let e = message::email(&msg, "owner@example.com", None);
     let html = e.html.unwrap();
     assert!(!html.contains("<script>"), "{html}");
     assert!(html.contains("&lt;script&gt;"));
+}
+
+#[test]
+fn an_unsubscribe_link_is_in_both_parts_and_the_headers() {
+    let link = "https://codoseo.com/email/unsubscribe/abc.def";
+    let e = message::email(&changes(1), "owner@example.com", Some(link));
+    assert_eq!(e.unsubscribe.as_deref(), Some(link));
+    assert!(
+        e.text.contains(&format!("Stop these emails: {link}")),
+        "{}",
+        e.text
+    );
+    let html = e.html.unwrap();
+    assert!(
+        html.contains(&format!("<a href=\"{link}\">Stop these emails</a>")),
+        "{html}"
+    );
+    // A test message from the settings page has no link and says nothing about stopping.
+    let e = message::email(&changes(1), "owner@example.com", None);
+    assert!(e.unsubscribe.is_none());
+    assert!(!e.text.contains("Stop these emails"));
 }

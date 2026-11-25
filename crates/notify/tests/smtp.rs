@@ -60,6 +60,7 @@ async fn sends_a_multipart_message_through_smtp() {
             subject: "Weekly digest".into(),
             text: "plain part".into(),
             html: Some("<p>html part</p>".into()),
+            unsubscribe: None,
         })
         .await
         .expect("sent");
@@ -91,6 +92,7 @@ async fn a_refused_connection_is_a_send_error() {
             subject: "x".into(),
             text: "y".into(),
             html: None,
+            unsubscribe: None,
         })
         .await
         .unwrap_err();

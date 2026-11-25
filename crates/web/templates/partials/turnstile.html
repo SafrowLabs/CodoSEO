@@ -1,0 +1,4 @@
+{#- The Turnstile widget for one form, with the page's theme. Cloudflare's script renders every
+    widget it finds when it loads; a widget that arrives later (an htmx swap of the form) is
+    rendered here, once, if the script is already there. -#}
+{% macro widget(key, action) %}<div class="cf-turnstile ts" data-sitekey="{{ key }}" data-action="{{ action }}"></div><script>(function(){var e=document.currentScript.previousElementSibling,t=document.documentElement.dataset.theme==="dark"?"dark":"light";e.dataset.theme=t;if(window.turnstile&&!e.children.length)turnstile.render(e,{sitekey:e.dataset.sitekey,action:e.dataset.action,theme:t})})()</script>{% endmacro %}

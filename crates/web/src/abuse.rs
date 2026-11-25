@@ -64,6 +64,16 @@ pub fn ip_hash(secret: &str, ip: IpAddr, day: Date) -> Vec<u8> {
     hash.finalize().to_vec()
 }
 
+/// Today's hash and yesterday's, for counts over windows that can span the salt change at
+/// midnight UTC. Only today's is stored.
+pub fn ip_hashes(secret: &str, ip: IpAddr) -> (Vec<u8>, Option<Vec<u8>>) {
+    let today = time::OffsetDateTime::now_utc().date();
+    (
+        ip_hash(secret, ip, today),
+        today.previous_day().map(|day| ip_hash(secret, ip, day)),
+    )
+}
+
 fn normalise(ip: IpAddr) -> String {
     match ip {
         IpAddr::V4(v4) => v4.to_string(),

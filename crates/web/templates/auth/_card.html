@@ -1,3 +1,4 @@
+{%- import "partials/turnstile.html" as ts -%}
 <div class="auth-card" id="auth-card">
 {% if card.sent %}
   <div class="sent">
@@ -7,6 +8,7 @@
     {% if card.dev_hint %}<p class="hint" style="margin-bottom:16px">No email server set up? The link is printed in the CodoSEO server log.</p>{% endif %}
     <form hx-post="/login" hx-target="#auth-card" hx-swap="outerHTML">
       <input type="hidden" name="email" value="{{ card.email }}"><input type="hidden" name="next" value="{{ card.next }}">
+      {% if let Some(key) = card.turnstile_site_key %}{% call ts::widget(key, "login") %}{% endcall %}{% endif %}
       <button class="btn btn-ghost" type="submit" style="align-self:flex-start;padding:0">Send it again<span class="spinner"></span></button>
     </form>
   </div>
@@ -24,6 +26,7 @@
       {% if let Some(err) = card.error %}<span class="error-text"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</span>{% endif %}
     </div>
     <input type="hidden" name="next" value="{{ card.next }}">
+    {% if let Some(key) = card.turnstile_site_key %}{% call ts::widget(key, "login") %}{% endcall %}{% endif %}
     <button class="btn btn-primary btn-lg btn-block" type="submit">Email me a sign-in link<span class="spinner"></span></button>
   </form>
   {% if card.legal %}<p class="hint auth-legal">By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>{% endif %}

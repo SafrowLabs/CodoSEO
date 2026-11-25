@@ -292,19 +292,29 @@ pub async fn queue_depth(pool: &PgPool) -> Result<i64, sqlx::Error> {
         .await
 }
 
-/// How many sign-in emails an audit's unlock form may trigger, per audit and per recipient, per
-/// hour. The form mails an arbitrary address, so the recipient cap is what stops it being used
-/// to flood someone's inbox through many different audits.
+/// How many sign-in emails the public forms may trigger. Both the sign-in form and an audit's
+/// unlock form mail an arbitrary address, so the recipient caps are what stop them being used
+/// to flood someone's inbox, and the client cap is what stops one machine working through a
+/// list of addresses. The counts cover both forms together: they store the same token purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnlockCaps {
+    /// Per audit, per hour (unlock form only).
     pub per_audit: i64,
+    /// Per recipient (canonical address), per hour.
     pub per_address: i64,
+    /// Per recipient, per 24 hours: the hourly cap alone would let someone mail an address
+    /// three times an hour all day.
+    pub per_address_day: i64,
+    /// Per client address (hash), per hour. Only applies when the caller has an `ip_hash`.
+    pub per_ip: i64,
 }
 
 impl UnlockCaps {
     pub const DEFAULT: UnlockCaps = UnlockCaps {
         per_audit: 3,
         per_address: 3,
+        per_address_day: 6,
+        per_ip: 5,
     };
 }
 
@@ -314,46 +324,120 @@ pub enum UnlockSlot {
     Created,
     AuditCapReached,
     AddressCapReached,
+    /// The address has had its sign-in emails for the last 24 hours.
+    AddressDayCapReached,
+    IpCapReached,
 }
 
 /// Stores the magic-link token for an unlock email unless a cap is reached. The counts and the
 /// insert happen under advisory locks, so concurrent requests can't all pass the count before
 /// any of them inserts. `canonical` (the address's deduplication key) must also be in `payload`,
-/// which is what later counts read.
+/// which is what later counts read; with a `requester` the payload also gets its IP hash (`ip`).
+#[allow(clippy::too_many_arguments)] // one flat call per email, as the caller reads it
 pub async fn create_unlock_token(
     pool: &PgPool,
     crawl_id: Uuid,
     canonical: &str,
+    requester: Option<Requester<'_>>,
     token_hash: &[u8],
     payload: serde_json::Value,
     ttl: time::Duration,
     caps: UnlockCaps,
 ) -> Result<UnlockSlot, sqlx::Error> {
+    create_magic_link_token(
+        pool,
+        Some(crawl_id),
+        canonical,
+        requester,
+        token_hash,
+        payload,
+        ttl,
+        caps,
+    )
+    .await
+}
+
+/// Stores the magic-link token for the sign-in form's email unless a recipient or client cap is
+/// reached (`per_audit` doesn't apply). Same locks and payload rules as
+/// [`create_unlock_token`].
+pub async fn create_login_token(
+    pool: &PgPool,
+    canonical: &str,
+    requester: Option<Requester<'_>>,
+    token_hash: &[u8],
+    payload: serde_json::Value,
+    ttl: time::Duration,
+    caps: UnlockCaps,
+) -> Result<UnlockSlot, sqlx::Error> {
+    create_magic_link_token(
+        pool, None, canonical, requester, token_hash, payload, ttl, caps,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)] // one flat call per email, as both callers read it
+async fn create_magic_link_token(
+    pool: &PgPool,
+    audit: Option<Uuid>,
+    canonical: &str,
+    requester: Option<Requester<'_>>,
+    token_hash: &[u8],
+    mut payload: serde_json::Value,
+    ttl: time::Duration,
+    caps: UnlockCaps,
+) -> Result<UnlockSlot, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    // Always address first, then audit, so two requests can't wait on each other.
+    // Always address first, then audit, then client, so two requests can't wait on each other.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.unlock.address:' || $1))")
         .bind(canonical)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.unlock.audit:' || $1))")
-        .bind(crawl_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-    let (audit, address): (i64, i64) = sqlx::query_as(
-        "SELECT count(*) FILTER (WHERE payload->>'audit' = $1), \
-                count(*) FILTER (WHERE payload->>'canonical' = $2) \
+    let audit = audit.map(|id| id.to_string());
+    if let Some(audit) = &audit {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.unlock.audit:' || $1))")
+            .bind(audit)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let ips: Vec<String> = requester
+        .iter()
+        .flat_map(|r| std::iter::once(r.ip_hash).chain(r.previous_ip_hash))
+        .map(hex)
+        .collect();
+    if let Some(r) = requester {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('codoseo.unlock.ip:' || $1))")
+            .bind(hex(r.ip_hash))
+            .execute(&mut *tx)
+            .await?;
+        payload["ip"] = serde_json::json!(hex(r.ip_hash));
+    }
+    let (audit_count, address_day, address, ip): (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE created_at > now() - interval '1 hour' \
+                                   AND payload->>'audit' = $1), \
+                count(*) FILTER (WHERE payload->>'canonical' = $2), \
+                count(*) FILTER (WHERE created_at > now() - interval '1 hour' \
+                                   AND payload->>'canonical' = $2), \
+                count(*) FILTER (WHERE created_at > now() - interval '1 hour' \
+                                   AND payload->>'ip' = ANY($3)) \
          FROM login_tokens \
-         WHERE purpose = 'magic_link' AND created_at > now() - interval '1 hour'",
+         WHERE purpose = 'magic_link' AND created_at > now() - interval '1 day'",
     )
-    .bind(crawl_id.to_string())
+    .bind(audit.as_deref().unwrap_or(""))
     .bind(canonical)
+    .bind(&ips)
     .fetch_one(&mut *tx)
     .await?;
-    if audit >= caps.per_audit {
+    if audit.is_some() && audit_count >= caps.per_audit {
         return Ok(UnlockSlot::AuditCapReached);
     }
     if address >= caps.per_address {
         return Ok(UnlockSlot::AddressCapReached);
+    }
+    if address_day >= caps.per_address_day {
+        return Ok(UnlockSlot::AddressDayCapReached);
+    }
+    if requester.is_some() && ip >= caps.per_ip {
+        return Ok(UnlockSlot::IpCapReached);
     }
     sqlx::query(
         "INSERT INTO login_tokens (purpose, token_hash, payload, expires_at) \
@@ -387,12 +471,13 @@ pub struct MonitoringCaps {
 }
 
 impl MonitoringCaps {
-    /// 3 per address (5 a day) and 3 per client address an hour; `per_day` is the configured
-    /// daily cap, of which an eighth (at least 1) may go in any one hour.
+    /// 2 per address an hour and a day (an agent that asks twice has asked enough; the person
+    /// can add the site at the website) and 3 per client address an hour; `per_day` is the
+    /// configured daily cap, of which an eighth (at least 1) may go in any one hour.
     pub fn with_daily(per_day: i64) -> MonitoringCaps {
         MonitoringCaps {
-            per_address: 3,
-            per_address_day: 5,
+            per_address: 2,
+            per_address_day: 2,
             per_ip: 3,
             per_day,
             per_hour: hourly_share(per_day),

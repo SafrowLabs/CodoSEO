@@ -9,8 +9,10 @@ use codoseo_core::plan::{Plan, PlanLimits, Schedule};
 use codoseo_store::jobs::JobQueue;
 use codoseo_store::plans;
 use codoseo_store::schedule::{self, DueSite};
+use codoseo_store::suppressions::Scope;
 use codoseo_web::auth::session;
 use codoseo_web::metrics;
+use codoseo_web::unsubscribe::{Signer, Unsubscribe};
 use codoseo_web::{Config, Mode};
 use jiff::civil::{Time, Weekday};
 use jiff::tz::TimeZone;
@@ -118,6 +120,8 @@ pub struct SchedulerContext {
     /// `SCHEDULER_HEARTBEAT_URL`: pinged with a GET after each tick (a dead-man's switch).
     pub heartbeat_url: Option<Url>,
     pub http: reqwest::Client,
+    /// Signs the unsubscribe link in the "Keep monitoring?" email.
+    pub unsubscribe: Signer,
 }
 
 impl SchedulerContext {
@@ -139,6 +143,7 @@ impl SchedulerContext {
             pool,
             mode: config.mode,
             base_url: config.base_url.clone(),
+            unsubscribe: Signer::derive(&config.secret_key),
             heartbeat_url,
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
@@ -378,6 +383,14 @@ async fn warn_inactive(ctx: &SchedulerContext, now: OffsetDateTime) -> Result<u6
         let token = session::random_token();
         let mut link = ctx.base_url.clone();
         link.set_path(&format!("/monitoring/resume/{token}"));
+        let unsubscribe = ctx.unsubscribe.link(
+            &ctx.base_url,
+            &Unsubscribe {
+                address: account.email.clone(),
+                scope: Scope::Notifications,
+                account_id: Some(account.id),
+            },
+        );
         let email = serde_json::json!({
             "to": account.email,
             "subject": "Keep monitoring your site on CodoSEO?",
@@ -387,8 +400,11 @@ async fn warn_inactive(ctx: &SchedulerContext, now: OffsetDateTime) -> Result<u6
                  {link}\n\n\
                  If we don't hear from you within 7 days we'll pause monitoring. Nothing is \
                  deleted, and signing in again turns it back on.\n\n\
-                 The link works once and expires in 7 days."
+                 The link works once and expires in 7 days.\n\n\
+                 Stop CodoSEO emails to {}: {unsubscribe}",
+                account.email
             ),
+            "unsubscribe": unsubscribe.to_string(),
         });
         if schedule::send_keep_monitoring(&ctx.pool, account.id, now, &session::hash(&token), email)
             .await?

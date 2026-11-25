@@ -56,6 +56,7 @@ impl World {
             http: GuardedHttp::new(AddressPolicy::AllowPrivate).unwrap(),
             rankorg_url,
             recheck: codoseo::recheck::RecheckSettings::new(AddressPolicy::AllowPrivate),
+            unsubscribe: codoseo_web::unsubscribe::Signer::derive("test secret"),
         };
         let account = sqlx::query_scalar(
             "INSERT INTO accounts (email, email_canonical, timezone) \
@@ -354,6 +355,54 @@ async fn a_paused_account_gets_no_digest() {
 }
 
 #[tokio::test]
+async fn an_address_that_unsubscribed_gets_no_digest() {
+    let w = World::new().await;
+    w.example().await;
+    assert!(send_digest_at(&w.ctx, w.account, now()).await.unwrap());
+    assert_eq!(w.sent().len(), 1);
+    codoseo_store::suppressions::add(
+        w.pool(),
+        "owner@example.com",
+        codoseo_store::suppressions::Scope::Notifications,
+        "unsubscribe",
+    )
+    .await
+    .unwrap();
+    assert!(!send_digest_at(&w.ctx, w.account, now()).await.unwrap());
+    assert_eq!(w.sent().len(), 1, "nothing more");
+}
+
+#[tokio::test]
+async fn the_digest_carries_a_signed_unsubscribe_link_for_the_accounts_address() {
+    let w = World::new().await;
+    w.example().await;
+    assert!(send_digest_at(&w.ctx, w.account, now()).await.unwrap());
+    let mail = w.sent().remove(0);
+    let link = mail.unsubscribe.clone().expect("one-click headers");
+    assert!(
+        link.starts_with("https://codoseo.test/email/unsubscribe/"),
+        "{link}"
+    );
+    assert!(
+        mail.text
+            .contains(&format!("Stop CodoSEO emails to owner@example.com: {link}")),
+        "{}",
+        mail.text
+    );
+    assert!(mail.html.unwrap().contains(&link));
+    let token = link.rsplit('/').next().unwrap();
+    let claims = codoseo_web::unsubscribe::Signer::derive("test secret")
+        .parse(token)
+        .expect("signed by this process");
+    assert_eq!(claims.address, "owner@example.com");
+    assert_eq!(
+        claims.scope,
+        codoseo_store::suppressions::Scope::Notifications
+    );
+    assert_eq!(claims.account_id, Some(w.account));
+}
+
+#[tokio::test]
 async fn the_rankorg_line_is_cloud_only() {
     let cloud = World::new().await;
     let site = cloud.example().await;
@@ -464,6 +513,7 @@ async fn a_digest_goes_out_on_monday_at_eight_in_the_accounts_time_zone() {
         base_url: Url::parse("https://codoseo.test").unwrap(),
         heartbeat_url: None,
         http: reqwest::Client::new(),
+        unsubscribe: codoseo_web::unsubscribe::Signer::derive("test secret"),
     };
     let queue = JobQueue::new(w.pool().clone());
 

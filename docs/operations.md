@@ -106,3 +106,9 @@ psql "postgres://postgres:...@db.internal:5432/postgres" \
 - Together they cap CodoSEO at 15 connections on the shared server. `web_password` is optional and defaults to `password`. Use letters and digits, since both go inside `postgres://` URLs.
 
 The CSV export and the admin funnel pages are the deliberate exceptions to the 5 second limit: they lift it for their own transaction (`SET LOCAL statement_timeout = '120s'`), so a big export is not cancelled.
+
+## Email
+
+Every email CodoSEO sends is one of two kinds. Sign-in links (the sign-in form, an audit's "get the full report" form, the no-key MCP tool `start_monitoring`) go to whatever address was typed, so they are gated by Turnstile where it is configured and capped: 3 an hour and 6 a day to one address, 5 an hour from one client address, 3 an hour per audit, and the MCP tool's own caps. Each carries a "Don't want any email from CodoSEO?" link. Notifications (instant alerts, the Monday digest, the "Keep monitoring?" reminder, a channel-switched-off notice) go to accounts and their alert channels, and carry an unsubscribe link in the footer plus the `List-Unsubscribe` and `List-Unsubscribe-Post` headers, so mail clients show their own unsubscribe button.
+
+Both links lead to `/email/unsubscribe/{token}`: a signed token naming the address, nothing stored until the person presses the button (or their mail client posts the one-click form). The result is a row in `email_suppressions`: scope `notifications` for an unsubscribe (alerts, digests and reminders stop; sign-in links still work, and the account's alert settings page offers "Turn email back on"), scope `all` for an opt-out (nothing is sent, and the forms say so). Bounces and complaints from your mail provider belong in the same table: `INSERT INTO email_suppressions (address, scope, reason) VALUES ('<canonical address>', 'all', 'bounce')`, where the canonical address is lowercase with any `+tag` removed (and dots removed for Gmail).
