@@ -243,8 +243,12 @@ async fn the_alert_settings_page_says_email_is_off_and_turns_it_back_on() {
     let page = app.get("/settings/alerts", Some(&cookie)).await.body;
     assert!(!page.contains("Turn email back on"), "{page}");
     // Signed out, the route only sends you to sign in.
-    app.post(&link("Owner@example.com", Scope::Notifications), "confirm=1", None)
-        .await;
+    app.post(
+        &link("Owner@example.com", Scope::Notifications),
+        "confirm=1",
+        None,
+    )
+    .await;
     let res = app.post("/settings/alerts/email/resume", "", None).await;
     assert!(
         res.location().is_some_and(|l| l.starts_with("/login")),
