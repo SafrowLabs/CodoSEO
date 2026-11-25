@@ -13,7 +13,10 @@ use std::collections::{BTreeMap, HashSet};
 use codoseo_core::change::ChangeKind;
 use codoseo_core::output::SiteFault;
 use codoseo_core::plan::PlanLimits;
-use codoseo_notify::{AlertItem, AlertMessage, ChannelKind, ChannelTarget, DeliveryError, deliver};
+use codoseo_notify::{
+    AlertItem, AlertMessage, ChannelKind, ChannelTarget, DeliveryError, EmailOptions, deliver,
+    letters,
+};
 use codoseo_store::alert_rules::{self, AlertCrawl, Route, StoredChange};
 use codoseo_store::jobs::{ClaimedJob, JobKind, JobQueue};
 use codoseo_store::{accounts, channels};
@@ -319,7 +322,10 @@ pub async fn deliver_alert(
                 &ctx.mailer,
                 &target,
                 &message,
-                unsubscribe.as_deref(),
+                &EmailOptions {
+                    images: &ctx.email_images(),
+                    unsubscribe: unsubscribe.as_deref(),
+                },
             )
             .await
             .map_err(|e: DeliveryError| e.to_string())
@@ -385,24 +391,26 @@ async fn turn_off(
     if !switched {
         return Ok(());
     }
-    let subject = format!(
-        "We turned off your {} alerts for {domain}",
-        channel_name(kind)
-    );
     let settings = ctx
         .base_url
         .join("settings/alerts")
         .map_err(|e| format!("bad base URL: {e}"))?;
     let unsubscribe = ctx.unsubscribe_link(account_email, Some(account_id));
-    let text = format!(
-        "{subject}: {error}\n\nDelivery failed on every retry. Check the address, then turn the \
-         channel back on in your alert settings: {settings}\n\nStop CodoSEO emails to \
-         {account_email}: {unsubscribe}\n"
-    );
+    let email = letters::channel_off(
+        &ctx.email_images(),
+        domain,
+        channel_name(kind),
+        error,
+        settings.as_str(),
+        account_email,
+        &unsubscribe,
+    )
+    .email(account_email)
+    .map_err(|e| format!("the channel notice did not render: {e}"))?;
     JobQueue::new(ctx.pool.clone())
         .enqueue(
             JobKind::SendEmail,
-            json!({ "to": account_email, "subject": subject, "text": text, "unsubscribe": unsubscribe }),
+            json!({ "to": email.to, "subject": email.subject, "text": email.text, "html": email.html, "unsubscribe": unsubscribe }),
         )
         .await
         .map_err(db)?;

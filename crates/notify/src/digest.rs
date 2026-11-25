@@ -1,10 +1,10 @@
-//! The weekly digest: one email per account, one block per monitored site. The caller (the
+//! The weekly digest: one email per account, one section per monitored site. The caller (the
 //! app's `send_digest` job) gathers the numbers into a [`DigestView`]; this module words them
-//! and renders the HTML and plain-text parts.
+//! and lays them out as a [`Letter`].
 
 use crate::email::Email;
+use crate::letter::{Button, Group, Letter, Line, Link, Mood, Section, Tone};
 use crate::message::AlertItem;
-use askama::Template;
 
 /// Changes of the week, counted by severity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -110,18 +110,9 @@ pub struct DigestView {
     pub settings_url: String,
     /// The one-click link that stops the digest, alerts and reminders to this address.
     pub unsubscribe_url: String,
-}
-
-#[derive(Template)]
-#[template(path = "digest.html")]
-struct HtmlDigest<'a> {
-    view: &'a DigestView,
-}
-
-#[derive(Template)]
-#[template(path = "digest.txt")]
-struct TextDigest<'a> {
-    view: &'a DigestView,
+    /// Where the email images are (`https://codoseo.com/email/`); empty renders the name as
+    /// text.
+    pub images: String,
 }
 
 impl DigestView {
@@ -134,14 +125,105 @@ impl DigestView {
         }
     }
 
+    /// "example.com this week: 92 (+3)", or "3 sites this week".
+    pub fn title(&self) -> String {
+        match self.sites.as_slice() {
+            [one] => format!("{} this week: {}", one.domain, one.score_label()),
+            many => format!("{} sites this week", many.len()),
+        }
+    }
+
+    /// The digest as a letter: one section per site.
+    pub fn letter(&self) -> Letter {
+        let pages = |n: &u32| format!("{n} page{}", if *n == 1 { "" } else { "s" });
+        let issues = |list: &[(String, u32)], tone: Tone| -> Vec<Line> {
+            list.iter()
+                .map(|(title, n)| Line {
+                    tone: Some(tone),
+                    title: title.clone(),
+                    detail: Some(pages(n)),
+                    ..Line::default()
+                })
+                .collect()
+        };
+        let sections = self
+            .sites
+            .iter()
+            .map(|site| {
+                let mut groups = Vec::new();
+                if !site.new_issues.is_empty() {
+                    groups.push(Group {
+                        label: "New issues".to_owned(),
+                        tone: Tone::Critical,
+                        items: issues(&site.new_issues, Tone::Critical),
+                    });
+                }
+                if !site.resolved_issues.is_empty() {
+                    groups.push(Group {
+                        label: "Resolved".to_owned(),
+                        tone: Tone::Good,
+                        items: issues(&site.resolved_issues, Tone::Good),
+                    });
+                }
+                if !site.top_changes.is_empty() {
+                    groups.push(Group {
+                        label: "Most important changes".to_owned(),
+                        tone: Tone::Notice,
+                        items: site
+                            .top_changes
+                            .iter()
+                            .map(|c| Line {
+                                tone: Some(Tone::from_severity(c.severity)),
+                                title: c.kind_label.clone(),
+                                detail: c.url.clone(),
+                                before: (!c.before.is_empty()).then(|| c.before.clone()),
+                                after: (!c.after.is_empty()).then(|| c.after.clone()),
+                            })
+                            .collect(),
+                    });
+                }
+                Section {
+                    heading: site.domain.clone(),
+                    aside: Some(site.score_label()),
+                    lines: vec![site.headline(), site.changes_line()],
+                    groups,
+                    more: (site.more_changes() > 0)
+                        .then(|| format!("and {} more", site.more_changes())),
+                    button: Some(Button {
+                        label: "Open the dashboard".to_owned(),
+                        url: site.dashboard_url.clone(),
+                    }),
+                    link: site.rankorg_url.as_ref().map(|url| Link {
+                        label: "Turn these pages into rankings with RankOrg".to_owned(),
+                        url: url.clone(),
+                    }),
+                }
+            })
+            .collect();
+        Letter {
+            images: self.images.clone(),
+            mascot: Some(Mood::Rest),
+            eyebrow: Some(format!("Weekly digest · {}", self.week_label)),
+            title: self.title(),
+            sections,
+            footer: vec!["You get this email every Monday.".to_owned()],
+            links: vec![
+                Link {
+                    label: "Change what you hear about".to_owned(),
+                    url: self.settings_url.clone(),
+                },
+                Link {
+                    label: "Unsubscribe".to_owned(),
+                    url: self.unsubscribe_url.clone(),
+                },
+            ],
+            unsubscribe: Some(self.unsubscribe_url.clone()),
+            ..Letter::default()
+        }
+    }
+
     /// The email, with both parts.
     pub fn render(&self) -> Result<Email, askama::Error> {
-        Ok(Email {
-            to: self.account_email.clone(),
-            subject: self.subject(),
-            text: TextDigest { view: self }.render()?,
-            html: Some(HtmlDigest { view: self }.render()?),
-            unsubscribe: Some(self.unsubscribe_url.clone()),
-        })
+        self.letter().email(&self.account_email, &self.subject())
     }
 }

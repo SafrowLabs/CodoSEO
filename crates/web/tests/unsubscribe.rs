@@ -121,16 +121,46 @@ async fn a_token_that_is_not_ours_is_a_friendly_404_and_changes_nothing() {
 }
 
 #[tokio::test]
-async fn sign_in_emails_carry_an_opt_out_link_that_stops_every_email() {
+async fn report_emails_carry_an_opt_out_link_that_stops_every_email() {
     let app = TestApp::with_config(cloud_config()).await;
+    // A sign-in link someone asked for themselves carries no stop link...
     let res = app
         .post_hx("/login", "email=someone%40example.com", None)
         .await;
     assert!(res.body.contains("Check your email"), "{}", res.body);
-    let text = app.mail.lock().unwrap()[0].text.clone();
+    let signin = app.mail.lock().unwrap()[0].clone();
+    assert!(!signin.text.contains("Stop all email"), "{}", signin.text);
+    assert!(
+        signin
+            .html
+            .as_deref()
+            .is_some_and(|h| h.contains("email/logo.png"))
+    );
+    // ...but a report link, which anyone may have asked for, does.
+    let audit = app
+        .post_with_headers(
+            "/audit",
+            "url=example.com",
+            None,
+            &[(IP_HEADER, "203.0.113.9")],
+        )
+        .await;
+    let crawl = audit
+        .location()
+        .unwrap()
+        .strip_prefix("/audit/")
+        .unwrap()
+        .to_owned();
+    app.post_hx(
+        &format!("/audit/{crawl}/unlock"),
+        "email=someone%40example.com",
+        None,
+    )
+    .await;
+    let text = app.mail.lock().unwrap()[1].text.clone();
     let opt_out = text
         .lines()
-        .find_map(|l| l.strip_prefix("Don't want any email from CodoSEO? "))
+        .find_map(|l| l.strip_prefix("Stop all email from CodoSEO: "))
         .expect("the opt-out line")
         .to_owned();
     assert!(
@@ -157,20 +187,6 @@ async fn sign_in_emails_carry_an_opt_out_link_that_stops_every_email() {
         "{}",
         res.body
     );
-    let audit = app
-        .post_with_headers(
-            "/audit",
-            "url=example.com",
-            None,
-            &[(IP_HEADER, "203.0.113.9")],
-        )
-        .await;
-    let crawl = audit
-        .location()
-        .unwrap()
-        .strip_prefix("/audit/")
-        .unwrap()
-        .to_owned();
     let res = app
         .post_hx(
             &format!("/audit/{crawl}/unlock"),
@@ -185,8 +201,8 @@ async fn sign_in_emails_carry_an_opt_out_link_that_stops_every_email() {
     );
     assert_eq!(
         app.mail.lock().unwrap().len(),
-        1,
-        "only the first email went"
+        2,
+        "only the first two emails went"
     );
 }
 

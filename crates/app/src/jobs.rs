@@ -168,6 +168,13 @@ struct SendEmailPayload {
 }
 
 impl JobContext {
+    /// Where the pictures in emails are: `BASE_URL/email/`.
+    pub fn email_images(&self) -> String {
+        let mut url = self.base_url.clone();
+        url.set_path("/email/");
+        url.to_string()
+    }
+
     /// The unsubscribe link for a notification to `address` (its one-click headers and footer).
     pub fn unsubscribe_link(&self, address: &str, account_id: Option<uuid::Uuid>) -> String {
         self.unsubscribe

@@ -56,6 +56,7 @@ pub fn app(state: AppState) -> Router {
         .route("/apple-touch-icon.png", get(assets::apple_touch_icon))
         .route("/site.webmanifest", get(assets::manifest))
         .route("/og.png", get(assets::og_image))
+        .route("/email/{file}", get(assets::email_image))
         .fallback(error::not_found)
         .layer(middleware::from_fn_with_state(
             state.clone(),

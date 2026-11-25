@@ -90,6 +90,7 @@ pub async fn build_digest(
         return Ok(None);
     }
     Ok(Some(DigestView {
+        images: ctx.email_images(),
         unsubscribe_url: ctx.unsubscribe_link(&account.email, Some(account_id)),
         account_email: account.email,
         week_label: week_label(&tz, now),

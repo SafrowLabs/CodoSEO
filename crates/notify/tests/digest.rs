@@ -79,6 +79,7 @@ fn view(sites: Vec<SiteDigest>) -> DigestView {
         sites,
         settings_url: "https://codoseo.test/settings/alerts".into(),
         unsubscribe_url: "https://codoseo.test/email/unsubscribe/abc.def".into(),
+        images: "https://codoseo.test/email/".into(),
     }
 }
 
@@ -88,16 +89,13 @@ fn the_digest_carries_its_unsubscribe_link_in_both_parts_and_the_headers() {
     let link = "https://codoseo.test/email/unsubscribe/abc.def";
     assert_eq!(e.unsubscribe.as_deref(), Some(link));
     assert!(
-        e.text
-            .contains(&format!("Stop CodoSEO emails to owner@example.com: {link}")),
+        e.text.contains(&format!("Unsubscribe: {link}")),
         "{}",
         e.text
     );
-    assert!(
-        e.html
-            .unwrap()
-            .contains(&format!("<a href=\"{link}\">stop these emails</a>"))
-    );
+    assert!(e.html.unwrap().contains(&format!(
+        "<a href=\"{link}\" style=\"color:#6B736E;\">Unsubscribe</a>"
+    )));
 }
 
 fn three() -> DigestView {
@@ -223,5 +221,11 @@ fn the_email_goes_to_the_account_with_both_parts_and_escapes_html() {
         "{html}"
     );
     assert!(email.text.contains("<script>alert(1)</script>"));
-    assert!(!html.contains("<img"), "no external images");
+    // The only image is our own logo: page content never becomes one.
+    assert_eq!(
+        html.matches("<img").count(),
+        2,
+        "the logo and the mascot: {html}"
+    );
+    assert!(html.contains("<img src=\"https://codoseo.test/email/logo.png\""));
 }

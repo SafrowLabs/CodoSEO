@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use codoseo_core::plan::{Plan, PlanLimits, Schedule};
+use codoseo_notify::letters;
 use codoseo_store::jobs::JobQueue;
 use codoseo_store::plans;
 use codoseo_store::schedule::{self, DueSite};
@@ -391,19 +392,25 @@ async fn warn_inactive(ctx: &SchedulerContext, now: OffsetDateTime) -> Result<u6
                 account_id: Some(account.id),
             },
         );
+        let mut images = ctx.base_url.clone();
+        images.set_path("/email/");
+        let pauses_on = now + schedule::WARNING_GRACE;
+        let draft = letters::keep_monitoring(
+            images.as_str(),
+            &account.email,
+            link.as_str(),
+            unsubscribe.as_str(),
+            &format!("{} {}", month_name(pauses_on.month()), pauses_on.day()),
+        );
+        let Ok(mail) = draft.email(&account.email) else {
+            tracing::error!("the keep-monitoring email did not render");
+            continue;
+        };
         let email = serde_json::json!({
-            "to": account.email,
-            "subject": "Keep monitoring your site on CodoSEO?",
-            "text": format!(
-                "We haven't seen you on CodoSEO for 30 days.\n\n\
-                 Do you want us to keep monitoring your site? Open this link and we will:\n\n\
-                 {link}\n\n\
-                 If we don't hear from you within 7 days we'll pause monitoring. Nothing is \
-                 deleted, and signing in again turns it back on.\n\n\
-                 The link works once and expires in 7 days.\n\n\
-                 Stop CodoSEO emails to {}: {unsubscribe}",
-                account.email
-            ),
+            "to": mail.to,
+            "subject": mail.subject,
+            "text": mail.text,
+            "html": mail.html,
             "unsubscribe": unsubscribe.to_string(),
         });
         if schedule::send_keep_monitoring(&ctx.pool, account.id, now, &session::hash(&token), email)
@@ -413,6 +420,11 @@ async fn warn_inactive(ctx: &SchedulerContext, now: OffsetDateTime) -> Result<u6
         }
     }
     Ok(warned)
+}
+
+/// "Dec", for the reminder's pause date.
+fn month_name(m: time::Month) -> String {
+    m.to_string().chars().take(3).collect()
 }
 
 /// Pings `SCHEDULER_HEARTBEAT_URL`, if set. A failure is logged and nothing more.

@@ -40,6 +40,13 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Where the pictures in emails are: `BASE_URL/email/`.
+    pub fn email_images(&self) -> String {
+        let mut url = self.config.base_url.clone();
+        url.set_path("/email/");
+        url.to_string()
+    }
+
     pub fn new(pool: PgPool, config: Config, mailer: Mailer) -> AppState {
         let policy = match config.mode {
             Mode::Cloud => AddressPolicy::Public,
