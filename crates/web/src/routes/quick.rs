@@ -35,7 +35,7 @@ use crate::error::AppError;
 use crate::free_audit::{self, FreeInput, FreeView, Limit};
 use crate::render::{Hx, html, hx_redirect};
 use crate::state::AppState;
-use crate::turnstile::{self, Action, Verdict};
+use crate::turnstile::{self, Action};
 
 pub const CLAIM_COOKIE: &str = "codoseo_audit";
 /// Unclaimed audits live 7 days (spec section 6), and so does the cookie.
@@ -87,9 +87,6 @@ pub fn clear_claim_cookie(state: &AppState) -> HeaderValue {
 #[derive(Deserialize)]
 pub struct StartForm {
     url: String,
-    /// Added to the form by Cloudflare's Turnstile script.
-    #[serde(rename = "cf-turnstile-response", default)]
-    turnstile: Option<String>,
 }
 
 async fn start(
@@ -107,25 +104,6 @@ async fn start(
             return super::landing::refuse(&state, &form.url, StatusCode::BAD_REQUEST, message);
         }
     };
-    match turnstile::verify(&state, Action::Audit, form.turnstile.as_deref(), ip).await {
-        Verdict::Passed => {}
-        Verdict::Failed => {
-            return super::landing::refuse(
-                &state,
-                &form.url,
-                StatusCode::FORBIDDEN,
-                "We couldn't confirm you're a human. Reload the page and try again.".to_owned(),
-            );
-        }
-        Verdict::Unavailable => {
-            return super::landing::refuse(
-                &state,
-                &form.url,
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Verification is unavailable right now. Please try again in a minute.".to_owned(),
-            );
-        }
-    }
     let domain = url.host_str().unwrap_or_default().to_ascii_lowercase();
     // Today's hash is stored; yesterday's is also counted, since a limit window can span
     // midnight and the salt changes then.

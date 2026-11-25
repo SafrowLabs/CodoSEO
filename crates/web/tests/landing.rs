@@ -96,26 +96,18 @@ async fn a_signed_in_visitor_sees_the_landing_with_a_way_into_the_app() {
 }
 
 #[tokio::test]
-async fn the_turnstile_widget_sits_inside_each_audit_form() {
+async fn the_audit_forms_carry_no_turnstile_widget_even_with_keys() {
     let app = TestApp::with_config(cloud_config_with(&[
         ("TURNSTILE_SITE_KEY", "site-key-123"),
         ("TURNSTILE_SECRET", "shh-secret"),
     ]))
     .await;
     let body = app.get("/", None).await.body;
-    // Cloudflare injects the hidden token input inside the widget's div, so the widget has
-    // to be a descendant of the form or the token is never submitted.
-    let mut rest = body.as_str();
-    let mut forms = 0;
-    while let Some(start) = rest.find(r#"<form class="audit-form"#) {
-        let end = rest[start..].find("</form>").expect("form closes") + start;
-        assert!(
-            rest[start..end].contains(r#"class="cf-turnstile ts" data-sitekey="site-key-123""#),
-            "{}",
-            &rest[start..end]
-        );
-        forms += 1;
-        rest = &rest[end..];
-    }
-    assert_eq!(forms, 2, "{body}");
+    assert_eq!(
+        body.matches(r#"<form class="audit-form"#).count(),
+        2,
+        "{body}"
+    );
+    assert!(!body.contains("cf-turnstile"), "{body}");
+    assert!(!body.contains("challenges.cloudflare.com"), "{body}");
 }

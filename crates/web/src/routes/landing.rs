@@ -29,8 +29,6 @@ pub struct Landing {
     pub base: String,
     /// The origin without its scheme (`codoseo.com`), where the page names the hosted service.
     pub host: String,
-    /// Set when Turnstile is configured: the widget and its script are shown.
-    pub turnstile_site_key: Option<String>,
     pub umami: Option<UmamiConfig>,
     pub categories: Vec<CategoryView>,
     /// Pages in the no-signup audit.
@@ -521,7 +519,6 @@ fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) 
             .map_or(base.as_str(), |(_, host)| host)
             .to_owned(),
         base,
-        turnstile_site_key: state.config.turnstile.as_ref().map(|t| t.site_key.clone()),
         umami: state.config.umami.clone(),
         categories: categories(),
         quick_pages: PlanLimits::quick_audit().max_pages.unwrap_or(100),

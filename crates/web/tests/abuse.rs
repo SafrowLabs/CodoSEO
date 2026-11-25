@@ -168,7 +168,7 @@ async fn the_waiting_page_shows_the_place_in_line() {
 }
 
 /// A stand-in for Cloudflare's siteverify endpoint: `good-<action>` passes as a token solved for
-/// that action on codoseo.com (`good-audit@elsewhere.com` on another site), anything else fails.
+/// that action on codoseo.com (`good-login@elsewhere.com` on another site), anything else fails.
 async fn fake_turnstile() -> (TestServer, Arc<Mutex<Vec<HashMap<String, String>>>>) {
     type Seen = Arc<Mutex<Vec<HashMap<String, String>>>>;
     async fn verify(
@@ -199,68 +199,27 @@ fn turnstile_config(verify_url: &str) -> codoseo_web::Config {
 }
 
 #[tokio::test]
-async fn turnstile_gates_the_form_when_configured() {
+async fn the_audit_form_has_no_turnstile_even_when_configured() {
     let (server, seen) = fake_turnstile().await;
     let app = TestApp::with_config(turnstile_config(&format!("{}/verify", server.base()))).await;
 
-    // The widget and its script are on the landing page only when keys are set.
+    // Starting an audit sends no email, so the landing page asks for no challenge.
     let landing = app.get("/", None).await.body;
-    assert!(
-        landing.contains("challenges.cloudflare.com/turnstile/v0/api.js"),
-        "{landing}"
-    );
-    assert!(landing.contains(r#"data-sitekey="site-key-123""#));
-    assert!(
-        !landing.contains("shh-secret"),
-        "the secret never reaches the page"
-    );
+    assert!(!landing.contains("challenges.cloudflare.com"), "{landing}");
+    assert!(!landing.contains("cf-turnstile"), "{landing}");
+    assert!(!landing.contains("shh-secret"));
 
-    let post = |token: Option<&str>| {
-        let form = match token {
-            Some(t) => format!("url=example.com&cf-turnstile-response={t}"),
-            None => "url=example.com".to_owned(),
-        };
-        let app = &app;
-        async move {
-            app.post_with_headers("/audit", &form, None, &[(IP_HEADER, "203.0.113.9")])
-                .await
-        }
-    };
-    let missing = post(None).await;
-    assert_eq!(missing.status, StatusCode::FORBIDDEN);
-    assert!(missing.body.contains("human"), "{}", missing.body);
-    let bad = post(Some("forged")).await;
-    assert_eq!(bad.status, StatusCode::FORBIDDEN);
-    // A token solved for another of our forms, or on a copy of the page elsewhere, is refused.
-    let other_form = post(Some("good-login")).await;
-    assert_eq!(other_form.status, StatusCode::FORBIDDEN);
-    let other_site = post(Some("good-audit@phish.example")).await;
-    assert_eq!(other_site.status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        count(&app, "SELECT count(*) FROM crawls").await,
-        0,
-        "nothing starts without a pass"
-    );
-
-    let good = post(Some("good-audit")).await;
-    assert_eq!(good.status, StatusCode::SEE_OTHER);
+    let res = app
+        .post_with_headers(
+            "/audit",
+            "url=example.com",
+            None,
+            &[(IP_HEADER, "203.0.113.9")],
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
     assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 1);
-
-    // Cloudflare was sent our secret and the visitor's address; a missing token costs no call.
-    let calls = seen.lock().unwrap().clone();
-    assert_eq!(
-        calls.len(),
-        4,
-        "forged, two mismatches and good (the missing token never left)"
-    );
-    assert_eq!(
-        calls[3].get("secret").map(String::as_str),
-        Some("shh-secret")
-    );
-    assert_eq!(
-        calls[3].get("remoteip").map(String::as_str),
-        Some("203.0.113.9")
-    );
+    assert!(seen.lock().unwrap().is_empty(), "Cloudflare is never asked");
 }
 
 #[tokio::test]
@@ -282,14 +241,17 @@ async fn turnstile_gates_the_sign_in_and_unlock_forms_too() {
     let missing = app.post_hx("/login", "email=ana%40example.com", None).await;
     assert_eq!(missing.status, StatusCode::FORBIDDEN);
     assert!(missing.body.contains("human"), "{}", missing.body);
-    let wrong_form = app
-        .post_hx(
-            "/login",
-            "email=ana%40example.com&cf-turnstile-response=good-audit",
-            None,
-        )
-        .await;
-    assert_eq!(wrong_form.status, StatusCode::FORBIDDEN);
+    // A token solved for the other form, or on a copy of the page elsewhere, is refused.
+    for token in ["good-unlock", "good-login@phish.example", "forged"] {
+        let res = app
+            .post_hx(
+                "/login",
+                &format!("email=ana%40example.com&cf-turnstile-response={token}"),
+                None,
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::FORBIDDEN, "{token}");
+    }
     assert!(
         app.mail.lock().unwrap().is_empty(),
         "no email without a pass"
@@ -309,7 +271,7 @@ async fn turnstile_gates_the_sign_in_and_unlock_forms_too() {
     let crawl = crawl_id(
         &app.post_with_headers(
             "/audit",
-            "url=example.com&cf-turnstile-response=good-audit",
+            "url=example.com",
             None,
             &[(IP_HEADER, "203.0.113.9")],
         )
@@ -339,16 +301,15 @@ async fn turnstile_gates_the_sign_in_and_unlock_forms_too() {
 async fn turnstile_fails_closed_when_the_verifier_is_down() {
     let app = TestApp::with_config(turnstile_config("http://127.0.0.1:9/verify")).await;
     let res = app
-        .post_with_headers(
-            "/audit",
-            "url=example.com&cf-turnstile-response=good-audit",
+        .post_hx(
+            "/login",
+            "email=ana%40example.com&cf-turnstile-response=good-login",
             None,
-            &[(IP_HEADER, "203.0.113.9")],
         )
         .await;
     assert_eq!(res.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(res.body.contains("try again"), "{}", res.body);
-    assert_eq!(count(&app, "SELECT count(*) FROM crawls").await, 0);
+    assert!(app.mail.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

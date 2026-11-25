@@ -49,7 +49,7 @@
   <h3>API and MCP</h3>
   <p>API keys are shown to you once and stored <strong>only as a SHA-256 hash</strong>, with a short prefix so you can tell them apart. We count API and MCP calls per key and per day to apply your plan's limits.</p>
   <h3>Audits without an account</h3>
-  <p>When you audit a site from the home page without signing in, we keep the site's address and results, and a cookie that lets you claim the audit later. To limit abuse we keep a hashed form of your IP address, with a salt that changes every day, rather than the address itself. The audit form may use Cloudflare Turnstile to tell people from bots.</p>
+  <p>When you audit a site from the home page without signing in, we keep the site's address and results, and a cookie that lets you claim the audit later. To limit abuse we keep a hashed form of your IP address, with a salt that changes every day, rather than the address itself.</p>
   <h3>Billing</h3>
   <p>For paid plans we keep your plan, its status and renewal dates, your Dodo Payments customer and subscription IDs, and the notifications Dodo Payments sends us about your subscription. <strong>We never receive or store card numbers</strong>: Dodo Payments collects payment details on its own checkout.</p>
   <h3>Server logs and analytics</h3>
@@ -74,7 +74,7 @@
     <li><strong>Dodo Payments</strong>, our merchant of record, for checkout, payments, taxes, invoices and subscription management.</li>
     <li><strong>Our email delivery provider</strong>, to send sign-in links, alerts and other service emails.</li>
     <li><strong>Our hosting provider</strong>, which runs the servers and database the service lives on.</li>
-    <li><strong>Cloudflare</strong>, for the Turnstile check on the audit form.</li>
+    <li><strong>Cloudflare</strong>, for the Turnstile check on the sign-in forms.</li>
     <li><strong>GitHub</strong>, only if you choose to sign in with GitHub.</li>
     <li><strong>Umami</strong> analytics, for cookie-free visit counts on the public pages.</li>
     <li><strong>Slack, Discord or your own webhook endpoints</strong>, only when you set them up as alert channels: alerts about your sites go to them.</li>
@@ -99,7 +99,7 @@
     <li><code>codoseo_audit</code>: links audits you start without an account to your browser so you can claim them, for up to 7 days.</li>
     <li><code>codoseo_oauth</code>: protects GitHub sign-in, for 10 minutes.</li>
   </ul>
-  <p>Your browser's local storage also remembers your theme and whether the sidebar is collapsed. That never leaves your device. Cloudflare Turnstile, when shown on the audit form, may store its own technical data to tell people from bots.</p>
+  <p>Your browser's local storage also remembers your theme and whether the sidebar is collapsed. That never leaves your device. Cloudflare Turnstile, when shown on a sign-in form, may store its own technical data to tell people from bots.</p>
 
   <h2>7. Your rights</h2>
   <p>Wherever you live, you can ask us to:</p>
