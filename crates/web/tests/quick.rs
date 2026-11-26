@@ -125,7 +125,7 @@ async fn the_cloud_landing_shows_the_url_box_and_self_hosted_is_unchanged() {
         r#"href="mailto:contact@codoseo.com""#,
         "Screaming Frog audits. CodoSEO watches.",
         r#""name":"Lite","price":"9""#,
-        "Free · up to 500 pages · first results in about a minute.",
+        "Free · up to 500 pages.",
         "<b>60+</b><span>SEO &amp; GEO checks</span>",
         "<b>25+</b><span>AI bots tracked</span>",
         "For developers and AI agents",

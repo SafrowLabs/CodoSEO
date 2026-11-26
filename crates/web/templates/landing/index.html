@@ -74,7 +74,7 @@
         <button class="btn btn-y" type="submit" data-umami-event="audit-start" data-umami-event-place="hero">Audit my site →</button>
       </form>
       {% if let Some(err) = error %}<p class="err" role="alert">{{ err }}</p>{% endif %}
-      <p class="hero-note" id="audit-hint">Free · up to {{ free_pages }} pages · first results in about a minute.</p>
+      <p class="hero-note" id="audit-hint">Free · up to {{ free_pages }} pages.</p>
       <div class="hero-proof">
         {% if let Some(n) = pages_crawled %}<div class="live-row"><i class="live-dot"></i><b id="pages-crawled" class="mono" data-poll="/stats/pages-crawled">{{ n }}</b><span>pages audited so far</span></div>{% endif %}
         <div><b>60+</b><span>SEO &amp; GEO checks</span></div>
