@@ -82,7 +82,9 @@ pub async fn callback(
 ) -> Result<Response, AppError> {
     let gh = state.config.github.as_ref().ok_or(AppError::NotFound)?;
     if q.error.is_some() {
-        return Ok(Redirect::to("/login").into_response());
+        // Cancelled or refused on GitHub's side: the state cookie is spent either way.
+        let clear = session::set_cookie(STATE_COOKIE, "", 0, state.config.secure_cookies());
+        return Ok(([(header::SET_COOKIE, clear)], Redirect::to("/login")).into_response());
     }
     let cookie = session::cookie(&headers, STATE_COOKIE).unwrap_or_default();
     let (nonce, next) = cookie.split_once('.').unwrap_or(("", ""));

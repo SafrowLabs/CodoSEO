@@ -486,3 +486,119 @@ async fn legacy_accounts_without_a_canonical_key_still_sign_in() {
             .unwrap();
     assert_eq!(canonical.as_deref(), Some("ana@gmail.com"));
 }
+
+/// Makes one kind of write fail with a database error until [`allow_writes`]. Each test owns a
+/// fresh database, so the trigger cannot leak into another test.
+async fn fail_writes(app: &TestApp, trigger: &str) {
+    sqlx::query(
+        "CREATE FUNCTION codoseo_test_fail() RETURNS trigger LANGUAGE plpgsql \
+         AS 'BEGIN RAISE EXCEPTION ''injected failure''; END'",
+    )
+    .execute(app.pool())
+    .await
+    .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER codoseo_test_fail {trigger} FOR EACH ROW EXECUTE FUNCTION codoseo_test_fail()"
+    ))
+    .execute(app.pool())
+    .await
+    .unwrap();
+}
+
+async fn allow_writes(app: &TestApp) {
+    sqlx::query("DROP FUNCTION codoseo_test_fail() CASCADE")
+        .execute(app.pool())
+        .await
+        .unwrap();
+}
+
+async fn session_count(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM sessions")
+        .fetch_one(app.pool())
+        .await
+        .unwrap()
+}
+
+/// A database error partway through signing in leaves no session behind and the link usable,
+/// whichever step failed.
+#[tokio::test]
+async fn a_failed_sign_in_keeps_the_link_and_leaves_no_session() {
+    for trigger in [
+        "BEFORE INSERT ON accounts",
+        "BEFORE INSERT ON sessions",
+        "BEFORE UPDATE OF last_login_at ON accounts",
+        "BEFORE UPDATE OF last_email_click_at ON accounts",
+    ] {
+        let app = TestApp::new().await;
+        let token = request_link(&app, "retry@example.com", "/account").await;
+        fail_writes(&app, trigger).await;
+        let (status, cookie, _) = consume(&app, &token).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{trigger}");
+        assert!(cookie.is_none(), "{trigger}");
+        assert_eq!(session_count(&app).await, 0, "{trigger}");
+
+        allow_writes(&app).await;
+        let (status, cookie, location) = consume(&app, &token).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{trigger}");
+        assert!(cookie.is_some(), "{trigger}");
+        assert_eq!(location.as_deref(), Some("/account"), "{trigger}");
+        assert_eq!(session_count(&app).await, 1, "{trigger}");
+        // Restored once is still single use.
+        assert_eq!(
+            consume(&app, &token).await.0,
+            StatusCode::BAD_REQUEST,
+            "{trigger}"
+        );
+    }
+}
+
+/// A refusal is not retried: the link stays spent.
+#[tokio::test]
+async fn a_refused_sign_in_still_spends_the_link() {
+    let app = TestApp::new().await;
+    let token = request_link(&app, "owner@example.com", "/").await;
+    let (_, owner_cookie, _) = consume(&app, &token).await;
+    let res = app
+        .post(
+            "/account/signups",
+            "open=false",
+            Some(&owner_cookie.unwrap()),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+
+    let token = request_link(&app, "stranger@example.com", "/").await;
+    assert_eq!(consume(&app, &token).await.0, StatusCode::FORBIDDEN);
+    let res = app
+        .post(
+            "/account/signups",
+            "open=true",
+            Some(&app.login("owner@example.com").await.1),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    assert_eq!(consume(&app, &token).await.0, StatusCode::BAD_REQUEST);
+}
+
+/// Cancelling on GitHub's side clears the OAuth state cookie.
+#[tokio::test]
+async fn github_error_callback_clears_the_state_cookie() {
+    let gh = fake_github(Arc::new(Mutex::new(Vec::new()))).await;
+    let app = TestApp::with_config(github_config(&gh)).await;
+    let start = app.get("/auth/github?next=/account", None).await;
+    let oauth_cookie = start.cookie("codoseo_oauth").unwrap();
+
+    let res = app
+        .get(
+            "/auth/github/callback?error=access_denied&state=x",
+            Some(&oauth_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER);
+    assert_eq!(res.location(), Some("/login"));
+    assert_eq!(
+        res.cookie("codoseo_oauth").as_deref(),
+        Some("codoseo_oauth=")
+    );
+    assert!(res.cookie("codoseo_session").is_none());
+}

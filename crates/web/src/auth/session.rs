@@ -50,16 +50,44 @@ pub fn set_cookie(name: &str, value: &str, max_age_secs: i64, secure: bool) -> H
 
 /// Creates a session for the account and returns the `Set-Cookie` header value.
 pub async fn start(state: &AppState, account_id: Uuid) -> Result<HeaderValue, AppError> {
+    Ok(begin(state, account_id).await?.cookie)
+}
+
+/// A session [`begin`] created whose cookie has not reached the browser yet.
+pub struct Started {
+    pub cookie: HeaderValue,
+    /// Hash of the session token, for [`revoke`] if the response carrying the cookie is never
+    /// sent.
+    pub hash: Vec<u8>,
+}
+
+/// Like [`start`], but also returns the session's hash so a caller whose later steps fail can
+/// [`revoke`] the session instead of leaving one nobody holds the cookie for.
+pub async fn begin(state: &AppState, account_id: Uuid) -> Result<Started, AppError> {
     let token = random_token();
-    codoseo_store::auth::create_session(&state.pool, account_id, &hash(&token), SESSION_TTL)
-        .await?;
-    codoseo_store::accounts::touch_login(&state.pool, account_id).await?;
-    Ok(set_cookie(
-        SESSION_COOKIE,
-        &token,
-        SESSION_TTL.whole_seconds(),
-        state.config.secure_cookies(),
-    ))
+    let token_hash = hash(&token);
+    codoseo_store::auth::create_session(&state.pool, account_id, &token_hash, SESSION_TTL).await?;
+    if let Err(e) = codoseo_store::accounts::touch_login(&state.pool, account_id).await {
+        revoke(state, &token_hash).await;
+        return Err(e.into());
+    }
+    Ok(Started {
+        cookie: set_cookie(
+            SESSION_COOKIE,
+            &token,
+            SESSION_TTL.whole_seconds(),
+            state.config.secure_cookies(),
+        ),
+        hash: token_hash,
+    })
+}
+
+/// Deletes a session whose cookie was never delivered. Best effort: a failure is logged, and the
+/// session still expires on its own.
+pub async fn revoke(state: &AppState, session_hash: &[u8]) {
+    if let Err(e) = codoseo_store::auth::revoke_session(&state.pool, session_hash).await {
+        tracing::error!(error = %e, "could not revoke an undelivered session");
+    }
 }
 
 #[cfg(test)]
