@@ -1,10 +1,12 @@
-//! Login and sessions: magic links, GitHub OAuth, the session cookie, the `Origin` check, and
+//! Login and sessions: magic links, GitHub and Google OAuth, the session cookie, the `Origin` check, and
 //! the [`CurrentUser`] extractor every signed-in route takes.
 
 pub mod email;
 pub mod github;
+pub mod google;
 pub mod magic;
 pub mod mailer;
+mod oauth;
 pub mod origin;
 pub mod session;
 
@@ -32,6 +34,8 @@ pub fn router() -> Router<AppState> {
         )
         .route("/auth/github", get(github::start))
         .route("/auth/github/callback", get(github::callback))
+        .route("/auth/google", get(google::start))
+        .route("/auth/google/callback", get(google::callback))
         .route("/logout", post(logout))
 }
 

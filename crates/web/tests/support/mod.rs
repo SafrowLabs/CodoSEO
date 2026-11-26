@@ -277,6 +277,7 @@ impl TestApp {
                 email,
                 canonical: &canonical,
                 github_id: None,
+                google_id: None,
             },
             SignupPolicy {
                 self_hosted: self.state.config.mode == codoseo_web::Mode::SelfHost,

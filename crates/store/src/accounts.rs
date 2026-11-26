@@ -56,6 +56,8 @@ pub struct SignIn<'a> {
     /// The deduplication key (see the web crate's `auth::email::canonical`).
     pub canonical: &'a str,
     pub github_id: Option<&'a str>,
+    /// The Google account's `sub` claim, for "Continue with Google".
+    pub google_id: Option<&'a str>,
 }
 
 /// How new accounts are created.
@@ -93,8 +95,9 @@ pub async fn find(pool: &PgPool, id: Uuid) -> Result<Option<Account>, sqlx::Erro
     Ok(row.map(Account::from))
 }
 
-/// Finds the account for a sign-in (by GitHub id first, then canonical email), or creates it.
-/// A GitHub sign-in that matches an existing email account links the GitHub id to it.
+/// Finds the account for a sign-in (by GitHub or Google id first, then canonical email), or
+/// creates it. A GitHub or Google sign-in that matches an existing email account links the id to
+/// it, so the email link and the provider keep opening the same account.
 pub async fn sign_in(
     pool: &PgPool,
     who: &SignIn<'_>,
@@ -113,8 +116,21 @@ pub async fn sign_in(
         tx.commit().await?;
         return Ok(SignInOutcome::Existing(found));
     }
+    if let Some(google) = who.google_id
+        && let Some(found) = find_where(&mut tx, "a.google_id = $1", google).await?
+    {
+        tx.commit().await?;
+        return Ok(SignInOutcome::Existing(found));
+    }
 
     if let Some(found) = find_where(&mut tx, "a.email_canonical = $1", who.canonical).await? {
+        if let Some(google) = who.google_id {
+            sqlx::query("UPDATE accounts SET google_id = $2 WHERE id = $1 AND google_id IS NULL")
+                .bind(found.id)
+                .bind(google)
+                .execute(&mut *tx)
+                .await?;
+        }
         let found = match who.github_id {
             Some(gh) if found.github_id.is_none() => {
                 sqlx::query("UPDATE accounts SET github_id = $2 WHERE id = $1")
@@ -170,13 +186,15 @@ pub async fn sign_in(
         Plan::Free
     };
     let row: AccountRow = sqlx::query_as(
-        "INSERT INTO accounts (email, email_canonical, github_id, plan, is_owner, last_login_at) \
-         VALUES ($1, $2, $3, $4::plan, $5, now()) \
+        "INSERT INTO accounts \
+           (email, email_canonical, github_id, google_id, plan, is_owner, last_login_at) \
+         VALUES ($1, $2, $3, $4, $5::plan, $6, now()) \
          RETURNING id, email, plan::text AS plan, is_owner, github_id, created_at",
     )
     .bind(who.email)
     .bind(who.canonical)
     .bind(who.github_id)
+    .bind(who.google_id)
     .bind(enum_slug(&plan))
     .bind(policy.self_hosted && first)
     .fetch_one(&mut *tx)

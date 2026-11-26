@@ -24,6 +24,7 @@ Settings you may want in `.env` (all optional; [configuration.md](configuration.
 | `CODOSEO_PORT` | `8080` | Host port. |
 | `BASE_URL` | `http://localhost:<CODOSEO_PORT>` | The address people open the app at. Set it when you use a domain or a proxy. |
 | `SMTP_URL`, `MAIL_FROM` | none | Outgoing mail. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | none | Google sign-in. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | none | GitHub sign-in. |
 | `ADMIN_EMAILS` | none | Admin pages. |
 | `RETENTION_DAYS_SELFHOST` | `365` | Days of crawl history to keep. |
@@ -47,7 +48,7 @@ Sign-in uses magic links. Without `SMTP_URL`, every email (the sign-in link incl
 docker compose logs codoseo | grep -A4 'email to'
 ```
 
-To send real mail, set `SMTP_URL` (for example `smtps://user:pass@smtp.example.com:465`) and `MAIL_FROM`. Alert emails and digests use the same settings. To add "Continue with GitHub", create an OAuth app on GitHub with the callback `<BASE_URL>/auth/github/callback` and set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+To send real mail, set `SMTP_URL` (for example `smtps://user:pass@smtp.example.com:465`) and `MAIL_FROM`. Alert emails and digests use the same settings. To add "Continue with GitHub", create an OAuth app on GitHub with the callback `<BASE_URL>/auth/github/callback` and set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`. For "Continue with Google", create a "Web application" OAuth client in Google Cloud (Google Auth Platform, scopes `openid` and `email`) with the redirect URI `<BASE_URL>/auth/google/callback`, publish the app, and set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 
 Alerts can also go to Slack, Discord and webhooks; configure them in the app.
 

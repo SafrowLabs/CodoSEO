@@ -38,6 +38,7 @@
   <ul>
     <li>Your email address, plus a normalised form of it so the same inbox cannot open several accounts.</li>
     <li>If you sign in with GitHub: your GitHub user ID and the email address GitHub gives us.</li>
+    <li>If you sign in with Google: your Google account ID and the verified email address Google gives us. We ask Google for nothing else.</li>
     <li>Your plan, when you signed up and last signed in, and when you last opened a link in one of our emails.</li>
   </ul>
   <h3>Sign-in and sessions</h3>
@@ -75,6 +76,7 @@
     <li><strong>Our email delivery provider</strong>, to send sign-in links, alerts and other service emails.</li>
     <li><strong>Our hosting provider</strong>, which runs the servers and database the service lives on.</li>
     <li><strong>Cloudflare</strong>, for the Turnstile check on the sign-in forms.</li>
+    <li><strong>Google</strong>, only if you choose to sign in with Google.</li>
     <li><strong>GitHub</strong>, only if you choose to sign in with GitHub.</li>
     <li><strong>Umami</strong> analytics, for cookie-free visit counts on the public pages.</li>
     <li><strong>Slack, Discord or your own webhook endpoints</strong>, only when you set them up as alert channels: alerts about your sites go to them.</li>
@@ -97,7 +99,7 @@
   <ul>
     <li><code>codoseo_session</code>: keeps you signed in, for up to 30 days.</li>
     <li><code>codoseo_audit</code>: links audits you start without an account to your browser so you can claim them, for up to 7 days.</li>
-    <li><code>codoseo_oauth</code>: protects GitHub sign-in, for 10 minutes.</li>
+    <li><code>codoseo_oauth</code>: protects GitHub and Google sign-in, for 10 minutes.</li>
   </ul>
   <p>Your browser's local storage also remembers your theme and whether the sidebar is collapsed. That never leaves your device. Cloudflare Turnstile, when shown on a sign-in form, may store its own technical data to tell people from bots.</p>
 

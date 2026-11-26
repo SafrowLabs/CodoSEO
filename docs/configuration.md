@@ -21,6 +21,7 @@ Roles: **web** (`codoseo web`), **worker** (`codoseo worker`), **all** (`codoseo
 |---|---|---|---|---|
 | `SMTP_URL` | none | web, worker, all | required | Outgoing mail, for example `smtps://user:pass@smtp.example.com:465`. Unset in self-host mode, sign-in links and alerts are written to the log instead of sent. A value that does not parse stops the process at startup. |
 | `MAIL_FROM` | `CodoSEO <hello@codoseo.com>` | web, worker, all | optional | The sender of every email. Change it when self-hosting. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | none | web, all | optional | Enable "Continue with Google". Both are needed. Create a "Web application" OAuth client in Google Cloud with the redirect URI `<BASE_URL>/auth/google/callback`. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | none | web, all | optional | Enable "Continue with GitHub". Both are needed. The OAuth callback is `<BASE_URL>/auth/github/callback`. |
 | `ADMIN_EMAILS` | none | web, worker, all | optional | Comma-separated emails that may open `/admin` in cloud mode. |
 

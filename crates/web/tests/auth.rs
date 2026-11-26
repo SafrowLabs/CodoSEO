@@ -1,4 +1,4 @@
-//! T5.2: magic links, GitHub OAuth, sessions, the `Origin` check, site ownership, the
+//! T5.2: magic links, GitHub and Google OAuth, sessions, the `Origin` check, site ownership, the
 //! self-hosted owner and closed signups, and Review focus 5 (email variants are one account).
 
 mod support;
@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use codoseo_testkit::TestServer;
 use codoseo_web::auth::CurrentUser;
-use codoseo_web::config::GithubConfig;
+use codoseo_web::config::{GithubConfig, GoogleConfig};
 use codoseo_web::{Config, Mode};
 use support::TestApp;
 use uuid::Uuid;
@@ -485,4 +485,200 @@ async fn legacy_accounts_without_a_canonical_key_still_sign_in() {
             .await
             .unwrap();
     assert_eq!(canonical.as_deref(), Some("ana@gmail.com"));
+}
+
+/// A stand-in for Google's token and userinfo endpoints. The code picks the user: `good` is a
+/// verified Gmail address, `unverified` an unverified one.
+async fn fake_google(seen: Arc<Mutex<Vec<(String, String)>>>) -> TestServer {
+    #[derive(serde::Deserialize)]
+    struct TokenForm {
+        code: String,
+        grant_type: String,
+    }
+    let router = Router::new()
+        .route(
+            "/token",
+            post(move |axum::Form(f): axum::Form<TokenForm>| {
+                let seen = seen.clone();
+                async move {
+                    seen.lock().unwrap().push((f.code.clone(), f.grant_type));
+                    match f.code.as_str() {
+                        "good" | "unverified" => {
+                            Json(serde_json::json!({ "access_token": format!("ya29.{}", f.code) }))
+                        }
+                        _ => Json(serde_json::json!({ "error_description": "bad code" })),
+                    }
+                }
+            }),
+        )
+        .route(
+            "/userinfo",
+            get(|headers: axum::http::HeaderMap| async move {
+                let auth = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default();
+                if auth == "Bearer ya29.good" {
+                    Json(serde_json::json!({
+                        "sub": "109876543210", "email": "Ana.Lima@gmail.com", "email_verified": true
+                    }))
+                } else {
+                    Json(serde_json::json!({
+                        "sub": "555", "email": "eve@example.com", "email_verified": false
+                    }))
+                }
+            }),
+        );
+    TestServer::start(router).await
+}
+
+fn google_config(g: &TestServer) -> Config {
+    let mut c = Config::for_tests();
+    c.google = Some(GoogleConfig {
+        client_id: "gid".into(),
+        client_secret: "secret".into(),
+        authorize_url: g.url("/auth"),
+        token_url: g.url("/token"),
+        userinfo_url: g.url("/userinfo"),
+    });
+    c
+}
+
+/// Starts the Google flow and returns the `state` it sent and the state cookie.
+async fn start_google(app: &TestApp, next: &str) -> (String, String) {
+    let start = app.get(&format!("/auth/google?next={next}"), None).await;
+    assert_eq!(start.status, StatusCode::SEE_OTHER);
+    let authorize = url::Url::parse(start.location().unwrap()).unwrap();
+    let param = |name: &str| {
+        authorize
+            .query_pairs()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.into_owned())
+    };
+    assert_eq!(param("client_id").as_deref(), Some("gid"));
+    assert_eq!(param("scope").as_deref(), Some("openid email"));
+    assert_eq!(param("response_type").as_deref(), Some("code"));
+    assert!(
+        param("redirect_uri")
+            .unwrap()
+            .ends_with("/auth/google/callback")
+    );
+    (
+        param("state").unwrap(),
+        start.cookie("codoseo_oauth").unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn google_sign_in_links_to_the_email_account() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let g = fake_google(seen.clone()).await;
+    let app = TestApp::with_config(google_config(&g)).await;
+
+    let page = app.get("/login", None).await;
+    assert!(page.body.contains("Continue with Google"));
+    assert!(!page.body.contains("Continue with GitHub"));
+
+    // An account already exists for a variant of the Google address.
+    let token = request_link(&app, "analima+seo@gmail.com", "/").await;
+    consume(&app, &token).await;
+
+    let (state, oauth_cookie) = start_google(&app, "/account").await;
+
+    // A forged state is refused before Google is called.
+    let res = app
+        .get(
+            "/auth/google/callback?code=good&state=forged",
+            Some(&oauth_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert!(seen.lock().unwrap().is_empty());
+
+    let res = app
+        .get(
+            &format!("/auth/google/callback?code=good&state={state}"),
+            Some(&oauth_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
+    assert_eq!(res.location(), Some("/account"));
+    assert!(res.cookie("codoseo_session").is_some());
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        &[("good".to_owned(), "authorization_code".to_owned())]
+    );
+
+    assert_eq!(account_count(&app).await, 1);
+    let google_id: Option<String> = sqlx::query_scalar("SELECT google_id FROM accounts")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(google_id.as_deref(), Some("109876543210"));
+
+    // Once linked, the Google id finds the account even if its email has since changed.
+    sqlx::query(
+        "UPDATE accounts SET email = 'new@example.com', email_canonical = 'new@example.com'",
+    )
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let (state, oauth_cookie) = start_google(&app, "/app").await;
+    let res = app
+        .get(
+            &format!("/auth/google/callback?code=good&state={state}"),
+            Some(&oauth_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
+    assert_eq!(account_count(&app).await, 1);
+}
+
+#[tokio::test]
+async fn google_sign_in_creates_an_account() {
+    let g = fake_google(Arc::new(Mutex::new(Vec::new()))).await;
+    let app = TestApp::with_config(google_config(&g)).await;
+    let (state, oauth_cookie) = start_google(&app, "/app").await;
+    let res = app
+        .get(
+            &format!("/auth/google/callback?code=good&state={state}"),
+            Some(&oauth_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
+    assert_eq!(res.location(), Some("/app"));
+    let (email, google_id): (String, Option<String>) =
+        sqlx::query_as("SELECT email, google_id FROM accounts")
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(email, "Ana.Lima@gmail.com");
+    assert_eq!(google_id.as_deref(), Some("109876543210"));
+}
+
+#[tokio::test]
+async fn google_sign_in_refuses_an_unverified_email() {
+    let g = fake_google(Arc::new(Mutex::new(Vec::new()))).await;
+    let app = TestApp::with_config(google_config(&g)).await;
+    let (state, oauth_cookie) = start_google(&app, "/app").await;
+    let res = app
+        .get(
+            &format!("/auth/google/callback?code=unverified&state={state}"),
+            Some(&oauth_cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::BAD_REQUEST);
+    assert!(res.body.contains("no verified email"), "{}", res.body);
+    assert_eq!(account_count(&app).await, 0);
+}
+
+#[tokio::test]
+async fn google_routes_are_hidden_when_not_configured() {
+    let app = TestApp::new().await;
+    for path in ["/auth/google", "/auth/google/callback?code=x&state=y"] {
+        assert_eq!(app.get(path, None).await.status, StatusCode::NOT_FOUND);
+    }
+    let page = app.get("/login", None).await;
+    assert!(!page.body.contains("Continue with Google"));
+    assert!(!page.body.contains("class=\"or\""));
 }
