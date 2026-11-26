@@ -33,6 +33,8 @@ pub struct Landing {
     pub categories: Vec<CategoryView>,
     /// Pages in the no-signup audit.
     pub quick_pages: u32,
+    /// Pages per crawl on the free plan.
+    pub free_pages: u32,
     pub free: Vec<String>,
     pub lite: Vec<String>,
     pub pro: Vec<String>,
@@ -522,6 +524,7 @@ fn view(state: &AppState, url: &str, error: Option<String>, pages: Option<i64>) 
         umami: state.config.umami.clone(),
         categories: categories(),
         quick_pages: PlanLimits::quick_audit().max_pages.unwrap_or(100),
+        free_pages: PlanLimits::for_plan(Plan::Free).max_pages.unwrap_or(500),
         free: plan_features(Plan::Free),
         lite: plan_features(Plan::Lite),
         pro: plan_features(Plan::Pro),
