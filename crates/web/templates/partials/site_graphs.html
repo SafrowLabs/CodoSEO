@@ -1,0 +1,96 @@
+{#- The bubble map's controls and stage, and the AI reach flow, shared by the site graph's tabs
+    (graph/map.html, graph/reach.html) and the free audit (quick/main.html). -#}
+{% macro bubble_map(list_id) %}
+  <div class="gv-tools gv-bar" role="group" aria-label="Map controls">
+    <div class="gv-seg" role="group" aria-label="Map type">
+      <button type="button" data-ctl="mode" data-mode="crawl" aria-pressed="true">By links</button>
+      <button type="button" data-ctl="mode" data-mode="dir" aria-pressed="false">By folders</button>
+    </div>
+    <label class="gv-ctl">Colour
+      <select data-ctl="color">
+        <option value="status">Indexability</option>
+        <option value="depth">Click depth</option>
+        <option value="section">Section</option>
+      </select>
+    </label>
+    <label class="gv-ctl">Size
+      <select data-ctl="size">
+        <option value="score">Link score</option>
+        <option value="inlinks">Inlinks</option>
+        <option value="equal">Same size</option>
+      </select>
+    </label>
+    <label class="gv-ctl">Clicks
+      <input type="range" data-ctl="depth" min="1" max="8" value="8" step="1">
+      <output data-ctl="depth-out">All</output>
+    </label>
+    <label class="gv-ctl" title="How strong the labels are. The hovered and selected page always show theirs.">Labels
+      <input type="range" data-ctl="labels" min="0" max="100" value="45" step="5" aria-label="Label strength">
+      <output data-ctl="labels-out">45%</output>
+    </label>
+    <span class="gv-spacer"></span>
+    <label class="gv-search"><svg class="icon"><use href="#i-search"/></svg><input type="search" data-ctl="q" list="{{ list_id }}" placeholder="Find a URL" aria-label="Find a URL" autocomplete="off"><datalist id="{{ list_id }}"></datalist></label>
+    <button type="button" class="btn" data-ctl="links" aria-pressed="false">Show all links</button>
+    <button type="button" class="btn btn-primary" data-ctl="fit">Fit</button>
+  </div>
+  <div class="gv-body">
+    <div class="gv-main">
+      <div class="gv-stage gv-stage-map" data-role="stage">
+        <canvas role="img" aria-label="Map of the crawled site. The panel shows the selected page."></canvas>
+        <div class="gv-float gv-stats" data-role="stats"></div>
+        <div class="gv-float gv-crumb" data-role="crumb" hidden><span>Focused on</span><b data-role="crumb-url"></b><button type="button" class="btn btn-sm" data-ctl="unfocus">Show whole site</button></div>
+        <div class="gv-float gv-maplegend" data-role="legend"></div>
+        <div class="gv-float gv-hint">Scroll to zoom · drag to pan or move a bubble · click to inspect · double-click to focus</div>
+        <div class="gv-tip" data-role="tip" hidden></div>
+        <p class="gv-msg">Loading the crawl…</p>
+      </div>
+    </div>
+    <aside class="gv-panel" data-role="panel" aria-live="polite" aria-label="Selected page"></aside>
+  </div>
+{% endmacro %}
+
+{% macro reach_legend() %}
+      <div class="gr-legend">
+        <span><i class="gr-key is-ok"></i>Allowed</span>
+        <span><i class="gr-key is-err"></i>Blocked, costs reach</span>
+        <span><i class="gr-key is-off"></i>Opted out of training</span>
+      </div>
+{% endmacro %}
+
+{% macro reach_flow(svg) %}
+      <svg class="gr-svg" viewBox="0 0 {{ svg.width }} {{ svg.height }}" role="img" aria-label="{{ svg.label }}">
+        <g class="gr-edges">
+          {% for e in svg.edges %}<path class="{{ e.class }}" d="{{ e.d }}"/>{% endfor %}
+        </g>
+        {% for g in svg.groups %}<text class="gr-group" x="330" y="{{ g.y }}">{{ g.text }}</text>{% endfor %}
+        {% for b in svg.bots %}
+        <g class="gr-bot {{ b.class }}"><title>{{ b.title }}</title>
+          <rect x="330" y="{{ b.y - 10 }}" width="236" height="20" rx="10"/>
+          <circle class="gr-bot-dot" cx="342" cy="{{ b.y }}" r="4"/>
+          <text class="gr-token" x="354" y="{{ b.y + 4 }}">{{ b.token }}</text>
+          {% if let Some(r) = b.reason %}<text class="gr-reason" x="556" y="{{ b.y + 4 }}">{{ r }}</text>{% endif %}
+        </g>
+        {% endfor %}
+        {% for e in svg.engines %}
+        <g class="gr-engine {{ e.class }}"><title>{{ e.name }}: {{ e.why }}</title>
+          <circle class="gr-ring" cx="786" cy="{{ e.y }}" r="16"/>
+          {% if let Some(src) = e.logo %}<image href="{{ src }}" x="777" y="{{ e.y - 9 }}" width="18" height="18"/>{% else %}<text class="gr-mono" x="786" y="{{ e.y + 4 }}">{{ e.monogram }}</text>{% endif %}
+          <text class="gr-engine-name" x="812" y="{{ e.y - 1 }}">{{ e.name }}</text>
+          <text class="gr-engine-state" x="812" y="{{ e.y + 15 }}">{{ e.label }}</text>
+        </g>
+        {% endfor %}
+        {% if let Some(t) = svg.training %}
+        <g class="gr-training">
+          <rect x="{{ t.x }}" y="{{ t.y }}" width="{{ t.w }}" height="36" rx="8"/>
+          <text class="gr-training-name" x="{{ t.x + 14 }}" y="{{ t.y + 23 }}">Model training</text>
+          <text class="gr-training-count" x="{{ t.x + t.w - 12 }}" y="{{ t.y + 23 }}">{{ t.count }}</text>
+        </g>
+        {% endif %}
+        <g class="gr-site"><title>{{ svg.site.cdn_note }}</title>
+          <rect x="{{ svg.site.x }}" y="{{ svg.site.y }}" width="{{ svg.site.w }}" height="{{ svg.site.h }}" rx="12"/>
+          <text class="gr-site-name" x="26" y="{{ svg.site.y + 28 }}">{{ svg.site.name }}</text>
+          <text class="gr-site-line" x="26" y="{{ svg.site.y + 50 }}">{{ svg.site.robots }}</text>
+          <text class="gr-site-line" x="26" y="{{ svg.site.y + 70 }}">{{ svg.site.cdn }}</text>
+        </g>
+      </svg>
+{% endmacro %}

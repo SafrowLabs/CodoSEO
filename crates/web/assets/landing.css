@@ -220,3 +220,11 @@
   .la-row.q-row { grid-template-columns: 56px minmax(0, 1fr); }
   .la-row.q-row .la-imp { grid-column: 2; text-align: left; padding-top: 0; }
 }
+/* The finished audit's bubble map and AI reach flow (partials/site_graphs.html), as cards. */
+.q-graph { min-width: 0; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.q-graph.gv { --gv-h: clamp(420px, 62vh, 700px); }
+.q-graph .gv-title h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.q-reach .gx-canvas { padding: 0; }
+.q-reach .gr-legend { padding-top: 0; }
+.q-reach-score { min-width: 200px; display: flex; flex-direction: column; }
+.q-reach .gr-svg { max-width: 920px; margin: 0 auto; }

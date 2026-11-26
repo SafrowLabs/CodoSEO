@@ -9,11 +9,11 @@
 use std::collections::HashMap;
 
 use askama::Template;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::{Form, Router};
+use axum::{Form, Json, Router};
 use codoseo_core::check::CheckId;
 use codoseo_core::output::LiveRow;
 use codoseo_core::output::StopReason;
@@ -30,6 +30,8 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::audit_fix::{URLS_SHOWN, known_counts};
+use super::graph::reach::{self, ReachView};
+use super::graph::trees::{self, PageParams};
 use super::sites::{FIRST_CRAWL_PRIORITY, check_public_target, parse_start_url, schedule_for};
 use crate::abuse::{self, ClientIp};
 use crate::auth::magic::{self, AuditLink, LinkOutcome};
@@ -54,6 +56,8 @@ pub fn routes() -> Router<AppState> {
         .route("/audit/{id}/live", get(live))
         .route("/audit/{id}/unlock", post(unlock))
         .route("/audit/{id}/icon", get(icon))
+        .route("/audit/{id}/graph.json", get(graph_data))
+        .route("/audit/{id}/page.json", get(graph_page))
 }
 
 /// The no-signup audit, landing page, bot page and robots.txt exist on the cloud only.
@@ -232,6 +236,17 @@ pub struct MainView {
     /// The audit as it runs, and once it is done.
     pub free: Option<FreeView>,
     pub notice: Option<Notice>,
+    /// The bubble map and the AI reach flow, once the audit is done.
+    pub graphs: Option<Graphs>,
+}
+
+/// The pictures under the scores of a finished audit.
+pub struct Graphs {
+    /// Where the bubble map loads the crawl's graph from, and one page's links.
+    pub map_src: String,
+    pub map_page: String,
+    /// `None` when the crawl stored no AI access report.
+    pub reach: Option<Box<ReachView>>,
 }
 
 /// The unlock card's state.
@@ -321,6 +336,21 @@ async fn main_view(state: &AppState, audit: &Audit) -> Result<MainView, AppError
     if view.polling && !view.running {
         view.line = line_text(quick::queue_position(&state.pool, crawl.id).await?);
     }
+    if crawl.status == CrawlStatus::Done && view.free.is_some() {
+        // A no-signup audit keeps its access report with the crawl, not in `ai_reports`.
+        let reach = match crawl.access_report() {
+            Some(report) => {
+                let intent = codoseo_store::geo::get_intent(&state.pool, audit.site_id).await?;
+                Some(Box::new(reach::build(&audit.domain, "", &report, &intent)))
+            }
+            None => None,
+        };
+        view.graphs = Some(Graphs {
+            map_src: format!("/audit/{}/graph.json", crawl.id),
+            map_page: format!("/audit/{}/page.json", crawl.id),
+            reach,
+        });
+    }
     Ok(view)
 }
 
@@ -348,6 +378,7 @@ fn build_main(
         line: None,
         free: None,
         notice: None,
+        graphs: None,
     };
     let free = || {
         FreeView::build(FreeInput {
@@ -466,6 +497,36 @@ async fn icon(State(state): State<AppState>, Path(id): Path<String>) -> Result<R
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(crate::render::icon_response(content_type, bytes))
+}
+
+/// A finished audit, for its bubble map's data: a 404 before it is done.
+async fn finished(state: &AppState, raw_id: &str) -> Result<Audit, AppError> {
+    let audit = load(state, raw_id).await?;
+    if audit.crawl.status != CrawlStatus::Done {
+        return Err(AppError::NotFound);
+    }
+    Ok(audit)
+}
+
+/// The audit's link graph, as the site graph's `data.json`.
+async fn graph_data(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, AppError> {
+    let audit = finished(&state, &id).await?;
+    let data = trees::crawl_data(&state.pool, audit.crawl.id).await?;
+    Ok((report_headers(), Json(data)).into_response())
+}
+
+/// One page of the audit's link graph, as the site graph's `page.json`.
+async fn graph_page(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<PageParams>,
+) -> Result<Response, AppError> {
+    let audit = finished(&state, &id).await?;
+    let info = trees::crawl_page(&state.pool, audit.crawl.id, &params.h).await?;
+    Ok((report_headers(), Json(info)).into_response())
 }
 
 async fn live(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {

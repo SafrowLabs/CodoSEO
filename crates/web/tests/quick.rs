@@ -475,6 +475,77 @@ async fn the_report_lists_every_fix_as_the_signed_in_audit_does() {
 }
 
 #[tokio::test]
+async fn a_finished_audit_draws_the_bubble_map_and_the_ai_reach_flow_under_the_scores() {
+    let app = cloud().await;
+    let crawl = crawl_id(&submit(&app, "example.com").await);
+    // Nothing to draw while it waits: the map's data is only served once it is done.
+    let waiting = app.get(&format!("/audit/{crawl}"), None).await.body;
+    assert!(!waiting.contains("q-graph"), "{waiting}");
+    let early = app.get(&format!("/audit/{crawl}/graph.json"), None).await;
+    assert_eq!(early.status, StatusCode::NOT_FOUND);
+
+    app.finalize_crawl_with_robots(
+        crawl,
+        messy_pages("example.com"),
+        (200, "User-agent: OAI-SearchBot\nDisallow: /\n"),
+    )
+    .await;
+    let body = app.get(&format!("/audit/{crawl}"), None).await.body;
+    // The map mounts on the audit's own data, with no Explorer behind it.
+    assert!(
+        body.contains(&format!(r#"data-src="/audit/{crawl}/graph.json""#)),
+        "{body}"
+    );
+    assert!(
+        body.contains(&format!(r#"data-page="/audit/{crawl}/page.json""#)),
+        "{body}"
+    );
+    assert!(body.contains(r#"data-base="""#), "{body}");
+    assert!(body.contains("graph.js"), "{body}");
+    // The reach flow, with the blocked search bot, and none of the signed-in links.
+    assert!(
+        body.contains("Which AI answers can read your site"),
+        "{body}"
+    );
+    assert!(body.contains("can read you"), "{body}");
+    assert!(body.contains("gr-bot is-err"), "{body}");
+    assert!(!body.contains("/ai-access"), "{body}");
+    // Both come right under the scores, before the fix list.
+    let scores = body.find("q-scores").expect("scores");
+    let map = body.find("q-urls-map").expect("map");
+    let reach = body.find("q-reach-title").expect("reach");
+    let fixes = body.find("q-fixlist").expect("fixes");
+    assert!(scores < map && map < reach && reach < fixes);
+    assert!(!body.contains('—'), "{body}");
+
+    let data = app.get(&format!("/audit/{crawl}/graph.json"), None).await;
+    assert_eq!(data.status, StatusCode::OK, "{}", data.body);
+    let json: serde_json::Value = serde_json::from_str(&data.body).unwrap();
+    let nodes = json["nodes"].as_array().expect("nodes");
+    assert!(!nodes.is_empty(), "{json}");
+    let h = nodes[0]["h"].as_str().unwrap();
+    let one = app
+        .get(&format!("/audit/{crawl}/page.json?h={h}"), None)
+        .await;
+    assert_eq!(one.status, StatusCode::OK, "{}", one.body);
+    assert!(one.body.contains("example.com"), "{}", one.body);
+    let bad = app
+        .get(&format!("/audit/{crawl}/page.json?h=zz"), None)
+        .await;
+    assert_eq!(bad.status, StatusCode::NOT_FOUND);
+
+    // An audit that kept no access report still draws the map, and leaves the flow out.
+    sqlx::query("UPDATE crawls SET summary = summary - 'access' WHERE id = $1")
+        .bind(crawl)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let body = app.get(&format!("/audit/{crawl}"), None).await.body;
+    assert!(body.contains("q-urls-map"), "{body}");
+    assert!(!body.contains("q-reach-title"), "{body}");
+}
+
+#[tokio::test]
 async fn an_audit_from_before_its_report_was_kept_still_names_its_ai_fixes() {
     let app = cloud().await;
     let crawl = crawl_id(&submit(&app, "example.com").await);

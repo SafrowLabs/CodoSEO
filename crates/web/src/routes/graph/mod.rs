@@ -7,9 +7,9 @@ mod changes;
 mod depth;
 mod links;
 mod llms;
-mod reach;
+pub(crate) mod reach;
 mod sitemap;
-mod trees;
+pub(crate) mod trees;
 
 use axum::Router;
 use axum::extract::{Path, State};
