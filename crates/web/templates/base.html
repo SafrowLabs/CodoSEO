@@ -55,7 +55,7 @@
       </summary>
       <div class="menu" role="menu">
         {% for s in shell.sites %}
-          <a href="{{ s.href }}" role="menuitem"{% if s.active %} class="is-active"{% endif %}><span class="avatar">{{ s.initial }}</span><span class="trunc">{{ s.domain }}</span></a>
+          <a href="{{ s.href }}" role="menuitem"{% if s.active %} class="is-active"{% endif %}>{% if let Some(icon) = s.icon %}<img class="avatar site-icon" src="{{ icon }}" alt="" width="20" height="20" loading="lazy">{% else %}<span class="avatar">{{ s.initial }}</span>{% endif %}<span class="trunc">{{ s.domain }}</span></a>
         {% endfor %}
         {% if !shell.sites.is_empty() %}<hr>{% endif %}
         <a href="/sites" role="menuitem"><svg class="icon"><use href="#i-globe"/></svg>All sites</a>

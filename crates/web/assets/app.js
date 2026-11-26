@@ -676,6 +676,13 @@
       else if (a === "drawer-close") drawer(false);
       else if (a === "shortcuts") { e.preventDefault(); openSheet(); }
       else if (a === "close-dialog") { const d = act.closest("dialog"); if (d) d.close(); }
+      else if (a === "open-dialog") {
+        e.preventDefault();
+        const d = document.getElementById(act.dataset.dialog);
+        const menu = act.closest("details[open]");
+        if (menu) menu.removeAttribute("open");
+        if (d && !d.open) { d.showModal(); const f = $("input", d); if (f) f.focus(); }
+      }
     }
     const copy = e.target.closest("[data-copy]");
     if (copy) {
@@ -683,6 +690,15 @@
       navigator.clipboard && navigator.clipboard.writeText(copy.dataset.copy).then(() => toast("Copied to clipboard", "info"));
     }
     $$("details[open].switcher, details[open].user, details[open][data-menu]").forEach((d) => { if (!d.contains(e.target)) d.removeAttribute("open"); });
+  });
+
+  // ── Confirm by typing: [data-confirm] enables its form's submit once it matches ─
+  document.addEventListener("input", (e) => {
+    const f = e.target.closest("[data-confirm]");
+    if (!f) return;
+    const ok = f.value.trim().toLowerCase() === f.dataset.confirm.toLowerCase();
+    const btn = f.form && $("button[type=submit]", f.form);
+    if (btn) btn.disabled = !ok;
   });
 
   // ── Site audit: the fix list's filters and page chips ─

@@ -69,6 +69,8 @@ pub struct UserView {
 pub struct SiteLink {
     pub domain: String,
     pub initial: String,
+    /// The site's own icon, as [`SiteView::icon`].
+    pub icon: Option<String>,
     pub href: String,
     pub active: bool,
 }
@@ -160,6 +162,7 @@ impl Shell {
     ) -> Result<Shell, AppError> {
         let pool = &state.pool;
         let sites = codoseo_store::sites::list_for_account(pool, user.id()).await?;
+        let icons = codoseo_store::sites::icon_versions_for_account(pool, user.id()).await?;
         let limits = PlanLimits::for_plan(user.account.plan);
         let can_add_site = limits
             .max_sites
@@ -187,9 +190,7 @@ impl Shell {
             let ai_issues = codoseo_store::geo::open_counts(pool, cur.id).await?;
             let summary = latest.as_ref().and_then(Crawl::summary);
             let base = format!("/s/{}", cur.id);
-            let icon = codoseo_store::sites::icon_version(pool, cur.id)
-                .await?
-                .map(|v| format!("/s/{}/icon?v={v}", cur.id));
+            let icon = icon_url(&icons, cur.id);
             current_view = Some(SiteView {
                 id: cur.id,
                 domain: cur.domain.clone(),
@@ -284,6 +285,7 @@ impl Shell {
             .map(|s| SiteLink {
                 domain: s.domain.clone(),
                 initial: initial(&s.domain),
+                icon: icon_url(&icons, s.id),
                 href: format!("/s/{}/audit", s.id),
                 active: current.is_some_and(|cur| cur.id == s.id),
             })
@@ -400,6 +402,14 @@ async fn change_counts(state: &AppState, crawl_id: Uuid) -> Result<(i64, bool), 
     .fetch_one(&state.pool)
     .await?;
     Ok((row.0, row.1.unwrap_or(false)))
+}
+
+/// `/s/{id}/icon?v=…` for a site in `versions` (from `icon_versions_for_account`), else `None`.
+pub fn icon_url(versions: &[(Uuid, i64)], site_id: Uuid) -> Option<String> {
+    versions
+        .iter()
+        .find(|(id, _)| *id == site_id)
+        .map(|(_, v)| format!("/s/{site_id}/icon?v={v}"))
 }
 
 pub fn initial(domain: &str) -> String {

@@ -231,6 +231,136 @@ async fn the_same_domain_cannot_be_added_twice() {
 // ── Run crawl: the manual allowance ───────────────────
 
 #[tokio::test]
+async fn deleting_a_site_removes_it_with_its_crawls_and_frees_the_slot() {
+    let app = TestApp::new().await;
+    let (account, cookie) = app
+        .login_with_plan("ana@example.com", Some(Plan::Free))
+        .await;
+    add_site(&app, &cookie, "example.com").await;
+    let id = site_id(&app, &account, "example.com").await;
+
+    let res = app
+        .post(
+            &format!("/s/{id}/delete"),
+            "confirm=Example.com",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
+    assert_eq!(res.header("location"), Some("/sites"));
+    let left: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM sites WHERE id = $1) +                 (SELECT count(*) FROM crawls WHERE site_id = $1)",
+    )
+    .bind(id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(left, 0, "the site and its first crawl are gone");
+
+    let res = add_site(&app, &cookie, "second.com").await;
+    assert_eq!(
+        res.status,
+        StatusCode::SEE_OTHER,
+        "the free slot is back: {}",
+        res.body
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_site_needs_its_domain_typed_back() {
+    let app = TestApp::new().await;
+    let (account, cookie) = app.login("ana@example.com").await;
+    add_site(&app, &cookie, "example.com").await;
+    let id = site_id(&app, &account, "example.com").await;
+
+    for form in ["", "confirm=", "confirm=example.org"] {
+        let res = app
+            .post(&format!("/s/{id}/delete"), form, Some(&cookie))
+            .await;
+        assert_eq!(res.status, StatusCode::BAD_REQUEST, "{form:?}");
+    }
+    assert_eq!(site_id(&app, &account, "example.com").await, id);
+}
+
+#[tokio::test]
+async fn another_accounts_site_cannot_be_deleted() {
+    let app = TestApp::new().await;
+    let (owner, owner_cookie) = app.login("ana@example.com").await;
+    add_site(&app, &owner_cookie, "example.com").await;
+    let id = site_id(&app, &owner, "example.com").await;
+
+    let (_, cookie) = app.login("bo@example.com").await;
+    let res = app
+        .post(
+            &format!("/s/{id}/delete"),
+            "confirm=example.com",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    assert_eq!(site_id(&app, &owner, "example.com").await, id);
+}
+
+#[tokio::test]
+async fn a_boosted_delete_shows_the_list_with_a_toast() {
+    let app = TestApp::new().await;
+    let (account, cookie) = app.login("ana@example.com").await;
+    add_site(&app, &cookie, "example.com").await;
+    add_site(&app, &cookie, "keep.com").await;
+    let id = site_id(&app, &account, "example.com").await;
+
+    let res = app
+        .post_hx(
+            &format!("/s/{id}/delete"),
+            "confirm=example.com",
+            Some(&cookie),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header("hx-push-url"), Some("/sites"));
+    assert_eq!(
+        trigger_json(&res)["toast"]["message"],
+        "Deleted example.com"
+    );
+    assert!(res.body.contains("keep.com"), "{}", res.body);
+    assert!(!res.body.contains(&format!("/s/{id}/")), "{}", res.body);
+}
+
+#[tokio::test]
+async fn the_site_list_and_switcher_show_each_sites_icon() {
+    let app = TestApp::new().await;
+    let (account, cookie) = app.login("ana@example.com").await;
+    add_site(&app, &cookie, "plain.com").await;
+    add_site(&app, &cookie, "example.com").await;
+    let id = site_id(&app, &account, "example.com").await;
+    let plain = site_id(&app, &account, "plain.com").await;
+    sqlx::query(
+        "INSERT INTO site_icons (site_id, content_type, bytes) VALUES ($1, 'image/png', '\\x89')",
+    )
+    .bind(id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+
+    // The sidebar pill shows plain.com (the first site), so example.com's icon comes from
+    // the switcher's list and the card.
+    let res = app.get("/sites", Some(&cookie)).await;
+    let icon = format!("src=\"/s/{id}/icon?v=");
+    assert_eq!(
+        res.body.matches(&icon).count(),
+        2,
+        "card and switcher: {}",
+        res.body
+    );
+    assert!(
+        !res.body.contains(&format!("/s/{plain}/icon")),
+        "{}",
+        res.body
+    );
+    assert!(res.body.contains("Delete plain.com?"), "{}", res.body);
+}
+
+#[tokio::test]
 async fn free_allows_one_manual_crawl_a_week() {
     let app = TestApp::new().await;
     let (account, cookie) = app
