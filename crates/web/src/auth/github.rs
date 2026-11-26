@@ -23,7 +23,7 @@ pub async fn start(
     Query(q): Query<StartQuery>,
 ) -> Result<Response, AppError> {
     let gh = state.config.github.as_ref().ok_or(AppError::NotFound)?;
-    let (nonce, cookie) = oauth::begin(&state, q.next.as_deref());
+    let (nonce, cookie) = oauth::begin(&state, q.next.as_deref(), None);
     let mut url = gh.authorize_url.clone();
     url.query_pairs_mut()
         .append_pair("client_id", &gh.client_id)
@@ -67,7 +67,7 @@ pub async fn callback(
     if q.error.is_some() {
         return Ok(oauth::cancelled(&state));
     }
-    let next = oauth::verify(&headers, q.state.as_deref(), "GitHub")?;
+    let after = oauth::verify(&headers, q.state.as_deref(), "GitHub")?;
     let code = q
         .code
         .ok_or_else(|| AppError::BadRequest("GitHub didn't send a code.".to_owned()))?;
@@ -137,5 +137,5 @@ pub async fn callback(
         })?;
 
     let github_id = user.id.to_string();
-    oauth::finish(&state, &address, Some(&github_id), None, &next).await
+    oauth::finish(&state, &headers, &address, Some(&github_id), None, &after).await
 }

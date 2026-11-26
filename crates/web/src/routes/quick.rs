@@ -261,6 +261,8 @@ pub struct UnlockCard {
     pub oob: bool,
     /// Turnstile's site key, when the form is gated.
     pub turnstile_site_key: Option<String>,
+    /// "Continue with Google" is configured.
+    pub google: bool,
 }
 
 impl UnlockCard {
@@ -273,6 +275,7 @@ impl UnlockCard {
             limit: free_audit::limit(crawl),
             oob: false,
             turnstile_site_key: state.config.turnstile.as_ref().map(|t| t.site_key.clone()),
+            google: state.config.google.is_some(),
         }
     }
 }

@@ -820,3 +820,74 @@ async fn google_error_callback_clears_the_state_cookie() {
     );
     assert!(res.cookie("codoseo_session").is_none());
 }
+
+/// "Continue with Google" on the free audit's unlock card attaches that audit, as the emailed
+/// link does: the claim cookie moves the audit itself into the new account.
+#[tokio::test]
+async fn google_from_the_unlock_card_attaches_the_audit() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let g = fake_google(seen.clone()).await;
+    let mut config = support::cloud_config();
+    config.google = google_config(&g).google;
+    let app = TestApp::with_config(config).await;
+
+    let started = app.post("/audit", "url=example.com", None).await;
+    assert_eq!(started.status, StatusCode::SEE_OTHER, "{}", started.body);
+    let crawl =
+        Uuid::parse_str(started.location().unwrap().strip_prefix("/audit/").unwrap()).unwrap();
+    let claim = started.cookie("codoseo_audit").expect("claim cookie");
+    app.finalize_crawl(
+        crawl,
+        vec![support::page("example.com", "/")],
+        Vec::new(),
+        codoseo_core::output::StopReason::Completed,
+    )
+    .await;
+
+    let report = app.get(&format!("/audit/{crawl}"), Some(&claim)).await;
+    assert!(
+        report
+            .body
+            .contains(&format!(r#"href="/auth/google?audit={crawl}""#)),
+        "{}",
+        report.body
+    );
+    assert!(
+        report.body.contains("q-quota"),
+        "the meter sits in the head"
+    );
+
+    let start = app
+        .get(&format!("/auth/google?audit={crawl}"), Some(&claim))
+        .await;
+    assert_eq!(start.status, StatusCode::SEE_OTHER);
+    let authorize = url::Url::parse(start.location().unwrap()).unwrap();
+    let state = authorize
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.into_owned())
+        .unwrap();
+    let oauth_cookie = start.cookie("codoseo_oauth").unwrap();
+
+    let res = app
+        .get(
+            &format!("/auth/google/callback?code=good&state={state}"),
+            Some(&format!("{oauth_cookie}; {claim}")),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::SEE_OTHER, "{}", res.body);
+    assert!(res.cookie("codoseo_session").is_some());
+    let (site, owner, claim_hash): (Uuid, Option<Uuid>, Option<Vec<u8>>) = sqlx::query_as(
+        "SELECT s.id, s.account_id, s.claim_token_hash FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
+    )
+    .bind(crawl)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let account: Uuid = sqlx::query_scalar("SELECT id FROM accounts")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    assert_eq!((owner, claim_hash), (Some(account), None));
+    assert_eq!(res.location(), Some(format!("/s/{site}/audit").as_str()));
+}

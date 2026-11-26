@@ -135,6 +135,9 @@ html { overflow-x: hidden; }
 .hero h1 { font-size: clamp(32px, 4vw, 50px); font-weight: 650; letter-spacing: -0.03em; line-height: 1.06; }
 .hero h1 .ai { color: var(--h-ai); background: var(--h-ai-bg); padding: 0 .06em; }
 .hero .lede { color: var(--h-fg-2); font-size: 17px; max-width: 52ch; }
+/* The engines named in the hero, each with its mark; ChatGPT's follows the text colour. */
+.hero-eng { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; color: var(--h-fg); font-weight: 500; }
+.hero-eng svg { width: 15px; height: 15px; flex: none; align-self: center; }
 .audit-form { display: flex; gap: 8px; background: var(--h-surface); border: 1px solid var(--h-line); border-radius: 12px; padding: 6px; max-width: 560px; min-width: 0; }
 .audit-form input { flex: 1; min-width: 0; height: 44px; border: 0; background: transparent; color: var(--h-fg); font: 500 15px var(--mono); padding: 0 12px; }
 .audit-form input::placeholder { color: var(--h-fg-3); }

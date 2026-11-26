@@ -17,9 +17,12 @@
       <summary>Why do we ask you to sign in?</summary>
       <p>Crawls hit real servers. Signing in stops people from flooding sites that aren't theirs, so anonymous audits stay small (100 pages, 3 an hour). It's free.</p>
     </details>
-    <span class="q-meter" aria-hidden="true"><span style="width:{{ unlock.limit.bar }}%"></span></span>
-    <span class="q-meter-l">{{ unlock.limit.line }}</span>
   </div>
+  <div class="q-unlock-go">
+  {% if unlock.google %}
+  <a class="btn btn-lg btn-block q-google" href="/auth/google?audit={{ unlock.id }}" hx-boost="false"><svg class="icon"><use href="#i-google"/></svg>Continue with Google</a>
+  <div class="or">or get a sign-in link</div>
+  {% endif %}
   <form method="post" action="/audit/{{ unlock.id }}/unlock" hx-post="/audit/{{ unlock.id }}/unlock" hx-target="#unlock-card" hx-swap="outerHTML" hx-disabled-elt="find button">
     <label for="unlock-email">Work email</label>
     <span class="q-unlock-row">
@@ -30,5 +33,6 @@
     {% if let Some(err) = unlock.error %}<p class="error-text" role="alert"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg>{{ err }}</p>{% endif %}
     <span class="l-hint">We send one sign-in link. By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</span>
   </form>
+  </div>
 {% endif %}
 </section>
