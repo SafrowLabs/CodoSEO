@@ -15,10 +15,13 @@
 {% else %}
   <h1>Sign in to CodoSEO</h1>
   <p class="lead">Use your email and we'll send you a magic link. No password needed.</p>
+  {% if card.google %}
+    <a class="btn btn-lg btn-block" href="/auth/google?next={{ card.next|urlencode }}" hx-boost="false"><svg class="icon"><use href="#i-google"/></svg>Continue with Google</a>
+  {% endif %}
   {% if card.github %}
     <a class="btn btn-lg btn-block" href="/auth/github?next={{ card.next|urlencode }}" hx-boost="false"><svg class="icon"><use href="#i-github"/></svg>Continue with GitHub</a>
-    <div class="or">or</div>
   {% endif %}
+  {% if card.google || card.github %}<div class="or">or</div>{% endif %}
   <form method="post" action="/login" hx-post="/login" hx-target="#auth-card" hx-swap="outerHTML" hx-disabled-elt="find button">
     <div class="field">
       <label class="label" for="email">Email</label>

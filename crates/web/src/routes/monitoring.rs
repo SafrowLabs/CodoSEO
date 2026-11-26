@@ -258,6 +258,7 @@ async fn confirm_start(
             email: &address,
             canonical: &canonical,
             github_id: None,
+            google_id: None,
         },
         signup_policy(state),
     )
