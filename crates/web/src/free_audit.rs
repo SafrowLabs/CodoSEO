@@ -1,23 +1,29 @@
 //! The no-signup audit as it runs and once it is done (`/audit/{id}`): GEO first, the Overall
-//! score large with SEO and GEO under it, every page as it is checked, then every fix for the
-//! pages checked. Nothing is held back; signing in carries the audit past the free page cap.
+//! score large with SEO and GEO under it, every page as it is checked, then the signed-in
+//! audit's "Fix these, in order" list for the pages checked: each fix with the pages it is on,
+//! the change and a coding-agent prompt. Signing in carries the audit past the free page cap.
 //!
 //! The running view is the live audit's (`live_audit`): the same steps, rows and issue ranking,
 //! without the in-app chrome.
 
-use codoseo_checks::{def, points_regained};
+use std::collections::HashMap;
+
+use codoseo_checks::{Thresholds, def};
 use codoseo_core::check::{CheckId, Severity};
 use codoseo_core::output::{LivePhase, LiveProgress, LiveRow, StopReason};
 use codoseo_core::plan::PlanLimits;
-use codoseo_geo::score::{GEO_WEIGHT, GeoCheck, GeoScore, SEO_WEIGHT, Status};
+use codoseo_geo::Intent;
+use codoseo_geo::findings::{Finding, findings};
+use codoseo_geo::score::{GeoCheck, GeoScore, Status};
 use codoseo_store::crawls::{Crawl, CrawlStatus, StoredSummary};
+use codoseo_store::geo::Incident;
 use time::OffsetDateTime;
 
 use crate::fmt;
 use crate::live_audit::{
     IssueView, PhaseView, RowView, clock, expected_pages, issues, phases, row_view, severity_dot,
 };
-use crate::routes::audit_fix::{geo_check_label, reads_seo};
+use crate::routes::audit_fix::{AiFixInput, FixInput, FixList, fix_list, geo_check_label};
 use crate::score_bars::ScoreBar;
 
 /// Pages listed while the audit runs: the newest.
@@ -45,8 +51,8 @@ pub struct FreeView {
     /// `24 of ~100 pages`.
     pub counter: String,
     pub issues: Vec<IssueView>,
-    pub fixes: Vec<Fix>,
-    pub all_clear: bool,
+    /// What to fix, once the audit is done.
+    pub fixes: Option<FixList>,
     pub stop_chip: Option<String>,
     /// The counted link to RankOrg, once the audit is done.
     pub rankorg: String,
@@ -58,17 +64,6 @@ pub struct Card {
     pub value: String,
     pub unit: &'static str,
     pub tags: Vec<(&'static str, String)>,
-}
-
-pub struct Fix {
-    pub dot: &'static str,
-    pub title: &'static str,
-    /// `t-ai` or `t-seo`.
-    pub track_class: &'static str,
-    pub track: &'static str,
-    pub evidence: String,
-    /// Overall points the fix gives back: `+3.2`.
-    pub points: String,
 }
 
 /// The sign-in card's words, which depend on how far the audit got.
@@ -85,8 +80,12 @@ pub struct Limit {
 
 pub struct FreeInput<'a> {
     pub crawl: &'a Crawl,
+    /// The audit's start URL, which the AI fixes are written for.
+    pub origin: &'a str,
     /// The newest rows, newest first, while it runs.
     pub rows: &'a [LiveRow],
+    /// Example URLs per failing SEO check, once it is done.
+    pub examples: &'a HashMap<CheckId, Vec<String>>,
     pub now: OffsetDateTime,
 }
 
@@ -124,8 +123,7 @@ pub fn limit(crawl: &Crawl) -> Limit {
         ),
         (false, false) => format!("This free audit stops at {cap} pages."),
     };
-    let fixes = summary
-        .map(|s| fix_count(&s))
+    let fixes = Some(fix_count(crawl))
         .filter(|&n| n > 0 && finished)
         .map_or("every fix".to_owned(), |n| {
             format!("all {n} fix{}", if n == 1 { "" } else { "es" })
@@ -182,7 +180,6 @@ impl FreeView {
             summary.as_ref(),
         );
 
-        let fixes_all = summary.as_ref().map(all_fixes).unwrap_or_default();
         FreeView {
             running,
             signal: signal(phase),
@@ -211,7 +208,7 @@ impl FreeView {
             score_note: if running {
                 "Scores so far are estimates. GEO and Overall come when the audit is done."
             } else {
-                "Overall is 60% SEO and 40% GEO. Points show how much a fix adds to Overall."
+                "Overall is 60% SEO and 40% GEO. Points show what a fix gives back to SEO or GEO."
             },
             rows: i
                 .rows
@@ -228,9 +225,10 @@ impl FreeView {
             } else {
                 Vec::new()
             },
-            all_clear: !running && fixes_all.is_empty(),
             rankorg: format!("/go/rankorg?src=audit&audit={}", c.id),
-            fixes: fixes_all,
+            fixes: (!running)
+                .then(|| fixes(c, i.origin, i.examples, i.now))
+                .flatten(),
             stop_chip: summary.as_ref().and_then(|s| match s.stop_reason {
                 StopReason::PageLimit => {
                     Some(format!("Stopped at the free limit of {} pages", cap()))
@@ -388,55 +386,75 @@ fn pages_card(running: bool, live: Option<&LiveProgress>, done: u32, total: u32)
     }
 }
 
-/// Every fix the audit found, AI first, then search, each by the Overall points it gives back.
-fn all_fixes(s: &StoredSummary) -> Vec<Fix> {
-    let mut out = Vec::new();
-    if let Some(geo) = &s.geo {
-        let mut failing: Vec<_> = geo
-            .checks
-            .iter()
-            .filter(|c| c.status == Status::Fail)
-            .collect();
-        // The checks only AI products ask about first; those that read SEO's (titles,
-        // descriptions) come after them.
-        failing.sort_by(|a, b| {
-            reads_seo(a.check)
-                .cmp(&reads_seo(b.check))
-                .then(b.points_regained.total_cmp(&a.points_regained))
-        });
-        out.extend(failing.into_iter().map(|c| Fix {
-            dot: severity_dot(c.severity.unwrap_or(Severity::Warning)),
-            title: geo_check_label(c.check),
-            track_class: "t-ai",
-            track: "AI",
-            evidence: "Costs you in AI answers.".to_owned(),
-            points: format!("+{:.1}", c.points_regained * GEO_WEIGHT),
-        }));
-    }
-    let counts: Vec<(CheckId, u32)> = s
-        .counts
+/// The finished audit's fix list, as the signed-in audit draws it: the failing SEO checks with
+/// `examples` of their pages, and the AI findings of the access report the audit kept, under the
+/// default intent (there is no owner to have another). `None` before the audit has a summary.
+pub fn fixes(
+    crawl: &Crawl,
+    origin: &str,
+    examples: &HashMap<CheckId, Vec<String>>,
+    now: OffsetDateTime,
+) -> Option<FixList> {
+    let summary = crawl.summary()?;
+    let report = crawl.access_report();
+    let intent = Intent::default();
+    let at = crawl.finished_at.unwrap_or(now);
+    let open: Vec<Incident> = report
         .iter()
-        .filter_map(|(slug, n)| Some((CheckId::from_slug(slug)?, *n)))
+        .flat_map(|r| findings(r, &intent))
+        .enumerate()
+        .map(|(n, f)| incident(n, f, crawl, at))
         .collect();
-    let pages = s.report_summary.pages.max(1);
-    let mut gains = points_regained(&counts, pages);
-    gains.sort_by(|a, b| b.1.total_cmp(&a.1));
-    out.extend(gains.into_iter().filter_map(|(id, pts)| {
-        let n = counts.iter().find(|c| c.0 == id)?.1;
-        Some(Fix {
-            dot: severity_dot(def(id).severity),
-            title: def(id).title,
-            track_class: "t-seo",
-            track: "SEO",
-            evidence: format!("On {} of {}.", fmt::thousands(n), fmt::pages(pages)),
-            points: format!("+{:.1}", pts * SEO_WEIGHT),
-        })
-    }));
-    out
+    let count = |n: Option<i16>| n.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
+    Some(fix_list(FixInput {
+        base: "",
+        demo: true,
+        crawl_id: crawl.id,
+        current: Some(&summary),
+        previous: None,
+        seo_passed: count(crawl.checks_passed),
+        seo_total: count(crawl.checks_total),
+        examples,
+        ai: report.as_ref().map(|report| AiFixInput {
+            origin,
+            report,
+            intent: &intent,
+            open: &open,
+            now,
+        }),
+        thresholds: Thresholds::DEFAULT,
+    }))
 }
 
-fn fix_count(s: &StoredSummary) -> usize {
-    all_fixes(s).len()
+/// A finding as the open incident a full crawl would keep for it, first seen by this audit.
+fn incident(n: usize, f: Finding, crawl: &Crawl, at: OffsetDateTime) -> Incident {
+    Incident {
+        id: n as i64 + 1,
+        kind: f.kind,
+        subject: f.subject,
+        severity: f.severity,
+        title: f.title,
+        summary: f.summary,
+        evidence: serde_json::to_value(&f.evidence).expect("evidence always serializes"),
+        opened_crawl_id: Some(crawl.id),
+        opened_at: at,
+        last_seen_at: at,
+        resolved_at: None,
+        resolution: None,
+        quiet: true,
+        before: None,
+        accepted_at: None,
+        accepted_by: None,
+        snoozed_until: None,
+        recovered_at: None,
+        verified_at: None,
+        resolved_by: None,
+    }
+}
+
+/// How many fixes the finished audit lists.
+fn fix_count(crawl: &Crawl) -> usize {
+    fixes(crawl, "", &HashMap::new(), OffsetDateTime::now_utc()).map_or(0, |f| f.total)
 }
 
 #[cfg(test)]
@@ -509,7 +527,9 @@ mod tests {
         };
         let v = FreeView::build(FreeInput {
             crawl: &c,
+            origin: "https://shop.example.com/",
             rows: &[row],
+            examples: &HashMap::new(),
             now: OffsetDateTime::now_utc(),
         });
         assert!(v.running);
@@ -540,7 +560,9 @@ mod tests {
         let c = crawl(CrawlStatus::Running, &live(5, 20));
         let v = FreeView::build(FreeInput {
             crawl: &c,
+            origin: "https://shop.example.com/",
             rows: &[],
+            examples: &HashMap::new(),
             now: OffsetDateTime::now_utc(),
         });
         for text in [

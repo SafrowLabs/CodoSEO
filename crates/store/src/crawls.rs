@@ -86,6 +86,15 @@ impl Crawl {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
+    /// The access report a no-signup audit keeps in `summary.access`; `None` for any other
+    /// crawl (theirs are in `ai_reports`) and for audits from before it was kept.
+    pub fn access_report(&self) -> Option<codoseo_geo::report::AccessReport> {
+        self.summary
+            .as_ref()
+            .and_then(|v| v.get("access"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+    }
+
     /// Wall-clock duration of a finished (or failed) crawl.
     pub fn duration(&self) -> Option<time::Duration> {
         Some(self.finished_at? - self.started_at?)

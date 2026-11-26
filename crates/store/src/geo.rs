@@ -2208,6 +2208,13 @@ fn without_nul(s: &str) -> String {
     s.replace('\0', "")
 }
 
+/// `report` as JSON a `jsonb` column takes.
+pub(crate) fn report_json(report: &AccessReport) -> Value {
+    let mut v = serde_json::to_value(report).expect("a report always serializes");
+    strip_nul(&mut v);
+    v
+}
+
 /// Postgres text and jsonb can't hold a NUL; robots.txt and header values can.
 fn strip_nul(v: &mut Value) {
     match v {

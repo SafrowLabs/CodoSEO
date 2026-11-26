@@ -342,6 +342,26 @@ impl TestApp {
         crawl_id
     }
 
+    /// [`finalize_crawl`](Self::finalize_crawl) for a crawl that read this robots.txt (`status`,
+    /// `body`), so it has an AI access report.
+    pub async fn finalize_crawl_with_robots(
+        &self,
+        crawl_id: Uuid,
+        pages: Vec<PageRecord>,
+        robots: (u16, &str),
+    ) {
+        let extras = CrawlExtras {
+            robots: Some(RobotsFile {
+                status: robots.0,
+                body: robots.1.to_owned(),
+                hash: xxhash_rust::xxh3::xxh3_64(robots.1.as_bytes()),
+            }),
+            ..CrawlExtras::default()
+        };
+        self.finalize_with(crawl_id, pages, Vec::new(), StopReason::Completed, extras)
+            .await;
+    }
+
     /// Like [`finished_crawl`](Self::finished_crawl), with the robots.txt the crawl read
     /// (`status`, `body`) and the AI access report the worker builds from it under the site's
     /// intent and starred pages, so `finalize` opens and resolves incidents as in production.
@@ -511,8 +531,9 @@ impl TestApp {
             llms,
             markdown,
         } = extras;
-        let (site_id, start_url): (Uuid, String) = sqlx::query_as(
-            "SELECT s.id, s.start_url FROM crawls c JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
+        let (site_id, start_url, quick): (Uuid, String, bool) = sqlx::query_as(
+            "SELECT s.id, s.start_url, c.trigger = 'quick' FROM crawls c \
+             JOIN sites s ON s.id = c.site_id WHERE c.id = $1",
         )
         .bind(crawl_id)
         .fetch_one(self.pool())
@@ -569,7 +590,12 @@ impl TestApp {
                 if let (Some(l), Some((_, true))) = (report.llms_txt.as_mut(), llms.as_ref()) {
                     l.adopted = true;
                 }
-                Some(codoseo_store::geo::GeoInput::new(report))
+                // As the worker does: a no-signup audit is scored, and opens nothing.
+                Some(if quick {
+                    codoseo_store::geo::GeoInput::score_only(report)
+                } else {
+                    codoseo_store::geo::GeoInput::new(report)
+                })
             }
             None => None,
         };

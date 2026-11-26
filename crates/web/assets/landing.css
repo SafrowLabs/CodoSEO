@@ -196,10 +196,10 @@
 .q-facts li { display: flex; align-items: center; gap: 8px; }
 .ck-run { color: var(--blue); border-color: var(--blue); background: var(--surface); }
 .la-row.q-row { grid-template-columns: 60px minmax(0, 1fr) 96px; }
-.q-fix { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; border-top: 1px solid var(--line-soft); }
-.q-fix .sdot { margin-top: 6px; }
-.q-fix-t { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px; }
-.q-fix .up { color: var(--ok); }
+/* The signed-in audit's fix list, at its full height: the page scrolls, not the card. */
+.q-fixlist { flex: 1 1 100%; min-width: 0; }
+.q-fixlist .fx-scroll { max-height: none; overflow: visible; }
+.q-fixlist .fx-gh { position: static; }
 .q-unlock { margin-top: 0; display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: center; padding: 18px 20px; background: var(--accent-soft); border-color: var(--accent-strong); box-shadow: none; }
 .q-unlock h2 { font-size: 17px; letter-spacing: -0.01em; }
 .q-unlock-text { flex: 1 1 380px; min-width: 0; }

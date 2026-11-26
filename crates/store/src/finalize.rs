@@ -86,6 +86,11 @@ pub async fn finalize_with_policy(
     if let Some(p) = policy {
         summary["policy"] = serde_json::to_value(p).expect("a policy report always serializes");
     }
+    // A no-signup audit keeps its access report with the crawl (no `ai_reports` row, no
+    // incidents), so its public report can say what to change.
+    if let Some(input) = geo.filter(|g| g.score_only) {
+        summary["access"] = geo::report_json(&input.report);
+    }
     let result = sqlx::query(
         "UPDATE crawls SET status = 'done', finished_at = now(), health_score = $2, \
          checks_passed = $3, checks_total = $4, summary = $5 \

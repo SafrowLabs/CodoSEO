@@ -1,5 +1,6 @@
 {%- import "partials/mascot.html" as m -%}
 {%- import "partials/score_bars.html" as sb -%}
+{%- import "partials/fix_list.html" as fx -%}
 <section id="audit-main" class="q-main"{% if main.polling %} hx-get="/audit/{{ main.id }}/live" hx-trigger="every 2s" hx-swap="outerHTML" data-quiet{% endif %}>
   <div class="q-head">
     <p class="l-eyebrow">{% if main.polling %}<i class="la-dot" aria-hidden="true"></i>Free audit · live{% else %}Free audit{% endif %}</p>
@@ -80,21 +81,7 @@
       </section>
     </aside>
     {% else %}
-    <section class="card la-stream q-fixes" aria-label="Fix these first">
-      <div class="la-stream-head">
-        <div>
-          <h2>Fix these first</h2>
-          <p class="muted au-small">{% if v.all_clear %}Nothing to fix on these pages.{% else %}AI fixes first, then search.{% endif %}</p>
-        </div>
-      </div>
-      {% for f in v.fixes %}
-      <div class="q-fix">
-        <i class="sdot {{ f.dot }}" aria-hidden="true"></i>
-        <div class="grow"><div class="q-fix-t"><b>{{ f.title }}</b><span class="atag {{ f.track_class }}">{{ f.track }}</span></div><div class="muted au-small">{{ f.evidence }}</div></div>
-        <b class="up num">{{ f.points }}</b>
-      </div>
-      {% endfor %}
-    </section>
+    {% if let Some(f) = v.fixes %}<div class="q-fixlist">{% call fx::card(f, 0, "", true, true) %}{% endcall %}</div>{% endif %}
     {% endif %}
   </div>
   {% if !v.running %}<p class="q-rankorg"><a href="{{ v.rankorg }}" target="_blank" rel="noopener">Take this site to RankOrg ↗</a> <span class="muted">We pass along your domain and its top pages.</span></p>{% endif %}
