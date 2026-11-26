@@ -1,7 +1,7 @@
 //! `/sites`: the account's sites and the add-site form (onboarding when there are none).
 
 use askama::Template;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::HeaderName;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
@@ -16,22 +16,58 @@ use crate::auth::CurrentUser;
 use crate::config::Mode;
 use crate::error::AppError;
 use crate::fmt;
-use crate::layout::{Screen, Shell, initial};
-use crate::render::{Hx, html};
+use crate::layout::{Screen, Shell, icon_url, initial};
+use crate::render::{Hx, ToastKind, html, toast};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/sites", get(index).post(create))
+    Router::new()
+        .route("/sites", get(index).post(create))
+        .route("/s/{site}/delete", axum::routing::post(delete))
 }
 
 /// Priority lane for a site's first crawl (spec section 10).
 pub const FIRST_CRAWL_PRIORITY: i16 = 1;
 
 pub struct SiteCard {
+    pub id: String,
     pub domain: String,
     pub initial: String,
+    /// The site's own icon, when its newest crawl found one.
+    pub icon: Option<String>,
     pub href: String,
+    /// The start URL when it isn't just the homepage, e.g. `example.com/blog`.
+    pub start: Option<String>,
     pub added: String,
+    pub overall: Option<i16>,
+    pub seo: Option<i16>,
+    pub geo: Option<i16>,
+    /// `240 pages`, once a crawl finished.
+    pub pages: Option<String>,
+    /// `6 failing checks`, once a crawl finished.
+    pub failing: Option<String>,
+    /// `crawled 2h ago` or `not crawled yet`.
+    pub last_crawl: String,
+    /// Dot class (`running`, `queued`, `off` or empty) and label for the status line.
+    pub status: (&'static str, &'static str),
+    /// The site the sidebar shows.
+    pub current: bool,
+}
+
+impl SiteCard {
+    /// The score's colour, by the same bands as the crawl history.
+    pub fn tone(score: &Option<i16>) -> &'static str {
+        match score {
+            Some(s) if *s >= 90 => "c-ok",
+            Some(s) if *s >= 70 => "c-warn",
+            Some(_) => "c-err",
+            None => "faint",
+        }
+    }
+
+    pub fn shown(score: &Option<i16>) -> String {
+        score.map_or_else(|| "–".to_owned(), |s| s.to_string())
+    }
 }
 
 #[derive(Template)]
@@ -55,17 +91,73 @@ pub struct AddSiteForm {
 }
 
 async fn index(State(state): State<AppState>, user: CurrentUser) -> Result<Response, AppError> {
-    let shell = Shell::load(&state, &user, None, Screen::Sites).await?;
-    let sites = codoseo_store::sites::list_for_account(&state.pool, user.id()).await?;
-    let cards = sites
-        .iter()
-        .map(|s| SiteCard {
+    Ok(render_index(&state, &user).await?.into_response())
+}
+
+async fn render_index(
+    state: &AppState,
+    user: &CurrentUser,
+) -> Result<axum::response::Html<String>, AppError> {
+    let shell = Shell::load(state, user, None, Screen::Sites).await?;
+    let pool = &state.pool;
+    let sites = codoseo_store::sites::list_for_account(pool, user.id()).await?;
+    let icons = codoseo_store::sites::icon_versions_for_account(pool, user.id()).await?;
+    let current = shell.current.as_ref().map(|c| c.id);
+    let mut cards = Vec::with_capacity(sites.len());
+    for s in &sites {
+        let latest = codoseo_store::crawls::latest_done(pool, s.id).await?;
+        let active = codoseo_store::crawls::active(pool, s.id).await?;
+        let summary = latest.as_ref().and_then(|c| c.summary());
+        let status = match &active {
+            Some(c) if c.status == codoseo_store::crawls::CrawlStatus::Running => {
+                ("running", "Crawling now")
+            }
+            Some(_) => ("queued", "Crawl queued"),
+            None if !s.monitoring_active => ("off", "Paused by plan"),
+            None => match s.schedule.as_deref() {
+                Some("daily") => ("", "Monitored daily"),
+                Some("weekly") => ("", "Monitored weekly"),
+                Some(_) => ("", "Monitored"),
+                None => ("off", "Not monitored"),
+            },
+        };
+        cards.push(SiteCard {
+            id: s.id.to_string(),
             domain: s.domain.clone(),
             initial: initial(&s.domain),
+            icon: icon_url(&icons, s.id),
             href: format!("/s/{}/audit", s.id),
+            start: start_label(&s.start_url),
             added: fmt::date(s.created_at),
-        })
-        .collect::<Vec<_>>();
+            overall: latest
+                .as_ref()
+                .and_then(|c| c.overall_score.or(c.health_score)),
+            seo: latest.as_ref().and_then(|c| c.health_score),
+            geo: latest.as_ref().and_then(|c| c.geo_score),
+            pages: summary.as_ref().map(|x| {
+                let n = x.report_summary.pages;
+                format!(
+                    "{} page{}",
+                    fmt::thousands(n),
+                    if n == 1 { "" } else { "s" }
+                )
+            }),
+            failing: latest.as_ref().and_then(|c| {
+                let failing = c.checks_total? - c.checks_passed?;
+                Some(match failing {
+                    0 => "all checks pass".to_owned(),
+                    1 => "1 failing check".to_owned(),
+                    n => format!("{n} failing checks"),
+                })
+            }),
+            last_crawl: match latest.as_ref().and_then(|c| c.finished_at) {
+                Some(at) => format!("crawled {}", fmt::ago(at)),
+                None => "not crawled yet".to_owned(),
+            },
+            status,
+            current: current == Some(s.id),
+        });
+    }
     let limit_note = PlanLimits::for_plan(user.account.plan)
         .max_sites
         .map(|max| format!("{} of {max} sites on your plan", sites.len()));
@@ -77,14 +169,68 @@ async fn index(State(state): State<AppState>, user: CurrentUser) -> Result<Respo
     };
     let stopped_by_plan =
         state.config.mode == Mode::Cloud && super::billing::has_stopped_sites(&sites);
-    Ok(html(&SitesPage {
+    html(&SitesPage {
         shell,
         cards,
         form,
         limit_note,
         stopped_by_plan,
-    })?
-    .into_response())
+    })
+}
+
+/// The start URL without its scheme, when it is more than the bare homepage.
+fn start_label(start_url: &str) -> Option<String> {
+    let url = Url::parse(start_url).ok()?;
+    let rest = &url[url::Position::BeforePath..];
+    (rest != "/").then(|| format!("{}{rest}", url.host_str().unwrap_or_default()))
+}
+
+#[derive(Deserialize)]
+pub struct DeleteSite {
+    /// The domain, typed again to confirm.
+    #[serde(default)]
+    confirm: String,
+}
+
+/// `POST /s/{site}/delete`: removes the site and all its data, once its domain is typed back.
+async fn delete(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    hx: Hx,
+    Path(site): Path<String>,
+    Form(form): Form<DeleteSite>,
+) -> Result<Response, AppError> {
+    let id = super::audit::site_id(&site)?;
+    let site = codoseo_store::sites::get_for_account(&state.pool, user.id(), id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if !form.confirm.trim().eq_ignore_ascii_case(&site.domain) {
+        return Err(AppError::BadRequest(format!(
+            "Type {} to confirm deleting it.",
+            site.domain
+        )));
+    }
+    if !codoseo_store::sites::delete(&state.pool, user.id(), site.id).await? {
+        return Err(AppError::NotFound);
+    }
+    tracing::info!(site = %site.id, domain = %site.domain, "site deleted");
+    if hx.request {
+        // A boosted form: show the list in place, with the address bar back on /sites.
+        let page = render_index(&state, &user).await?;
+        let msg = format!("Deleted {}", site.domain);
+        return Ok((
+            [
+                toast(ToastKind::Ok, &msg),
+                (
+                    HeaderName::from_static("hx-push-url"),
+                    axum::http::HeaderValue::from_static("/sites"),
+                ),
+            ],
+            page,
+        )
+            .into_response());
+    }
+    Ok(Redirect::to("/sites").into_response())
 }
 
 #[derive(Deserialize)]

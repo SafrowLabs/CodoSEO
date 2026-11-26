@@ -278,3 +278,29 @@ pub async fn icon_version(pool: &PgPool, site_id: Uuid) -> Result<Option<i64>, s
     .fetch_optional(pool)
     .await
 }
+
+/// When each of the account's sites last changed its icon, for the sites that have one.
+pub async fn icon_versions_for_account(
+    pool: &PgPool,
+    account_id: Uuid,
+) -> Result<Vec<(Uuid, i64)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT i.site_id, EXTRACT(EPOCH FROM i.updated_at)::bigint \
+         FROM site_icons i JOIN sites s ON s.id = i.site_id WHERE s.account_id = $1",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// Deletes one of the account's sites with everything kept for it (crawls, pages, changes,
+/// alert rules, policy, icon: all cascade). A crawl still running stops at its next heartbeat,
+/// which finds its row gone. False when the site doesn't exist or belongs to someone else.
+pub async fn delete(pool: &PgPool, account_id: Uuid, site_id: Uuid) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query("DELETE FROM sites WHERE id = $1 AND account_id = $2")
+        .bind(site_id)
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+    Ok(done.rows_affected() == 1)
+}

@@ -15,20 +15,70 @@
 </div>
 {% else %}
 <div class="page">
-  <div class="page-head"><h1>Sites</h1>{% if let Some(note) = limit_note %}<span class="chip">{{ note }}</span>{% endif %}</div>
+  <div class="page-head sx-head-row">
+    <div>
+      <h1>All sites</h1>
+      <p class="muted sx-sub">{{ cards.len() }} site{% if cards.len() != 1 %}s{% endif %}, each with the scores from its latest crawl.</p>
+    </div>
+    <span class="grow"></span>
+    {% if let Some(note) = limit_note %}<span class="chip">{{ note }}</span>{% endif %}
+    {% if form.can_add %}<a class="btn btn-primary" href="#add"><svg class="icon" style="width:14px;height:14px"><use href="#i-plus"/></svg>Add site</a>{% endif %}
+  </div>
   {% if stopped_by_plan %}<p class="plan-banner" role="status"><svg class="icon" style="width:14px;height:14px"><use href="#i-alert"/></svg><span>Some of your sites aren't being monitored because of your plan. <a href="/billing/sites">Choose which sites stay monitored</a>.</span></p>{% endif %}
-  <div class="site-cards">
+  <div class="sx-grid">
     {% for c in cards %}
-      <a class="site-card" href="{{ c.href }}"><span class="avatar">{{ c.initial }}</span><span style="flex:1;min-width:0"><b class="trunc" style="display:block;font-weight:500">{{ c.domain }}</b><span class="faint mono" style="font-size:11.5px">added {{ c.added }}</span></span><svg class="icon go" style="opacity:1;transform:none"><use href="#i-arrow"/></svg></a>
+      <article class="sx-card{% if c.current %} is-current{% endif %}">
+        <div class="sx-top">
+          {% if let Some(icon) = c.icon %}<img class="avatar site-icon sx-icon" src="{{ icon }}" alt="" width="36" height="36" loading="lazy">{% else %}<span class="avatar sx-icon">{{ c.initial }}</span>{% endif %}
+          <div class="sx-name">
+            <a class="sx-link trunc" href="{{ c.href }}">{{ c.domain }}</a>
+            <span class="faint mono trunc">{% if let Some(start) = c.start %}{{ start }}{% else %}added {{ c.added }}{% endif %}</span>
+          </div>
+          {% if c.current %}<span class="sx-tag">Current</span>{% endif %}
+          <details class="sx-menu" data-menu>
+            <summary class="icon-btn" aria-label="Actions for {{ c.domain }}"><svg class="icon"><use href="#i-more"/></svg></summary>
+            <div class="menu" role="menu">
+              <a href="{{ c.href }}" role="menuitem"><svg class="icon"><use href="#i-audit"/></svg>Open audit</a>
+              <a href="/s/{{ c.id }}/crawls" role="menuitem"><svg class="icon"><use href="#i-crawls"/></svg>Crawl history</a>
+              <a href="/s/{{ c.id }}/policy" role="menuitem"><svg class="icon"><use href="#i-policy"/></svg>Site policy</a>
+              <hr>
+              <button type="button" class="sx-danger" role="menuitem" data-action="open-dialog" data-dialog="del-{{ c.id }}"><svg class="icon"><use href="#i-trash"/></svg>Delete site</button>
+            </div>
+          </details>
+        </div>
+        <div class="sx-scores">
+          <div class="sx-score sx-overall"><span class="sx-num {{ SiteCard::tone(c.overall) }}">{{ SiteCard::shown(c.overall) }}</span><span class="sx-lbl">Overall</span></div>
+          <div class="sx-score"><span class="sx-num {{ SiteCard::tone(c.seo) }}">{{ SiteCard::shown(c.seo) }}</span><span class="sx-lbl">SEO</span></div>
+          <div class="sx-score"><span class="sx-num {{ SiteCard::tone(c.geo) }}">{{ SiteCard::shown(c.geo) }}</span><span class="sx-lbl">GEO</span></div>
+        </div>
+        <div class="sx-facts mono">
+          {% if let Some(pages) = c.pages %}<span>{{ pages }}</span>{% endif %}
+          {% if let Some(failing) = c.failing %}<span>{{ failing }}</span>{% endif %}
+          <span>{{ c.last_crawl }}</span>
+        </div>
+        <div class="sx-foot"><span class="dot {{ c.status.0 }}"></span>{{ c.status.1 }}<span class="grow"></span><svg class="icon sx-go"><use href="#i-arrow"/></svg></div>
+      </article>
     {% endfor %}
   </div>
   <div class="card card-pad add-site-card" id="add">
     <div class="add-site-text">
       <div class="card-title">Add a site</div>
-      <p class="muted">{% if form.can_add %}The first crawl starts right away.{% else %}You've reached your plan's site limit.{% endif %}</p>
+      <p class="muted">{% if form.can_add %}The first crawl starts right away.{% else %}You've reached your plan's site limit. Delete a site or upgrade to add another.{% endif %}</p>
     </div>
     {{ form|safe }}
   </div>
+  {% for c in cards %}
+  <dialog id="del-{{ c.id }}" class="sheet" aria-label="Delete {{ c.domain }}">
+    <form class="sheet-box sx-del" method="post" action="/s/{{ c.id }}/delete" hx-disabled-elt="find button[type=submit]">
+      <h2>Delete {{ c.domain }}?<span class="grow"></span><button class="icon-btn" type="button" data-action="close-dialog" aria-label="Close">✕</button></h2>
+      <p class="muted">This removes the site with its crawl history, scores, changes, alert rules and policy, and stops any crawl in progress. It can't be undone, and it frees a site on your plan.</p>
+      <label class="sx-del-field"><span>Type <b class="mono">{{ c.domain }}</b> to confirm</span>
+        <input class="input" name="confirm" required autocomplete="off" autocapitalize="off" spellcheck="false" data-confirm="{{ c.domain }}">
+      </label>
+      <div class="sx-del-actions"><button type="button" class="btn" data-action="close-dialog">Cancel</button><button class="btn btn-danger" type="submit" disabled>Delete site</button></div>
+    </form>
+  </dialog>
+  {% endfor %}
 </div>
 {% endif %}
 {% endblock %}
