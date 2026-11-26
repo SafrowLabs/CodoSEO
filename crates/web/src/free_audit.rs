@@ -1,5 +1,6 @@
 //! The no-signup audit as it runs and once it is done (`/audit/{id}`): GEO first, the Overall
-//! score large with SEO and GEO under it, every page as it is checked, then the signed-in
+//! score large with SEO and GEO under it, every page as it is checked; once done, the site graph's
+//! bubble map and AI reach flow under the scores (`routes::quick::Graphs`), then the signed-in
 //! audit's "Fix these, in order" list for the pages checked: each fix with the pages it is on,
 //! the change and a coding-agent prompt. Signing in carries the audit past the free page cap.
 //!

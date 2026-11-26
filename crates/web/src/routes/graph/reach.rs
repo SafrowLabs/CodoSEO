@@ -16,7 +16,6 @@ use codoseo_geo::report::AccessReport;
 use codoseo_geo::robots::RobotsAvailability;
 use codoseo_geo::{Bot, Intent, Purpose, Stance, registry};
 use codoseo_store::geo;
-use codoseo_store::sites::Site;
 
 use super::llms::short;
 use super::{Empty, Tab, TabLink};
@@ -177,7 +176,7 @@ async fn reach_page(
             Some(latest) => {
                 let intent = geo::get_intent(&state.pool, ctx.site.id).await?;
                 Some(Box::new(build(
-                    &ctx.site,
+                    &ctx.site.domain,
                     &ctx.base,
                     &latest.report,
                     &intent,
@@ -417,7 +416,7 @@ fn curve(x1: u32, y1: u32, x2: u32, y2: u32) -> String {
     format!("M{x1} {y1}C{mid} {y1} {mid} {y2} {x2} {y2}")
 }
 
-pub fn build(site: &Site, base: &str, report: &AccessReport, intent: &Intent) -> ReachView {
+pub fn build(domain: &str, base: &str, report: &AccessReport, intent: &Intent) -> ReachView {
     let mut bots = Vec::new();
     let mut groups = Vec::new();
     let mut y = 36;
@@ -440,7 +439,7 @@ pub fn build(site: &Site, base: &str, report: &AccessReport, intent: &Intent) ->
         y: site_mid - SITE_H / 2,
         w: SITE_W,
         h: SITE_H,
-        name: short(&site.domain, 20),
+        name: short(domain, 20),
         robots: robots_words(report),
         cdn,
         cdn_note,

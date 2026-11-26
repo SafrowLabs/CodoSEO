@@ -1,6 +1,7 @@
 {%- import "partials/mascot.html" as m -%}
 {%- import "partials/score_bars.html" as sb -%}
 {%- import "partials/fix_list.html" as fx -%}
+{%- import "partials/site_graphs.html" as sg -%}
 <section id="audit-main" class="q-main"{% if main.polling %} hx-get="/audit/{{ main.id }}/live" hx-trigger="every 2s" hx-swap="outerHTML" data-quiet{% endif %}>
   <div class="q-head">
     <p class="l-eyebrow">{% if main.polling %}<i class="la-dot" aria-hidden="true"></i>Free audit · live{% else %}Free audit{% endif %}</p>
@@ -48,6 +49,37 @@
     {% endfor %}
   </section>
   <p class="la-note">{{ v.score_note }}{% if let Some(chip) = v.stop_chip %} {{ chip }}.{% endif %}</p>
+
+  {% if let Some(g) = main.graphs %}
+  <section class="card q-graph gv gv-map" data-graph="map" data-src="{{ g.map_src }}" data-page="{{ g.map_page }}" data-base="" aria-labelledby="q-map-title">
+    <div class="gv-head">
+      <div class="gv-title">
+        <h2 id="q-map-title">Your site at a glance</h2>
+        <p>Each bubble is a page, joined to the page the crawler found it from. Bigger bubbles carry more link score. Click one to see its links.</p>
+      </div>
+    </div>
+    {% call sg::bubble_map("q-urls-map") %}{% endcall %}
+  </section>
+
+  {% if let Some(r) = g.reach %}
+  <section class="card q-graph q-reach" aria-labelledby="q-reach-title">
+    <div class="gx-head gx-head-row">
+      <div>
+        <h2 class="gx-title" id="q-reach-title">Which AI answers can read your site</h2>
+        <p class="gx-sub">Your rules on the left, each AI crawler in the middle, the answer engine it feeds on the right.</p>
+      </div>
+      <div class="q-reach-score">
+        <b class="gr-score">{{ r.reach }} <span>of {{ r.engines }} can read you</span></b>
+        <div class="gr-bar" aria-hidden="true">{% for p in r.bar %}<span class="{{ p.class }}" style="flex: {{ p.n }}"></span>{% endfor %}</div>
+      </div>
+    </div>
+    {% call sg::reach_legend() %}{% endcall %}
+    <div class="gx-canvas">
+      {% call sg::reach_flow(r.svg) %}{% endcall %}
+    </div>
+  </section>
+  {% endif %}
+  {% endif %}
 
   <div class="la-grid">
     {% if v.running %}

@@ -309,7 +309,8 @@
       h("div", { class: "gv-actions" },
         ctx.root && n.kids.length ? h("button", { type: "button", class: "btn btn-primary", onclick: () => ctx.root(n) }, ctx.rootLabel || "Start tree from here") : null,
         ctx.zoom ? h("button", { type: "button", class: "btn", onclick: () => ctx.zoom(n) }, "Zoom to") : null,
-        h("a", { class: "btn", href: explorerHref(ctx.base, n) }, "Open in Explorer")));
+        // The free audit has no Explorer: it mounts the map with an empty base.
+        ctx.base ? h("a", { class: "btn", href: explorerHref(ctx.base, n) }, "Open in Explorer") : null));
 
     getJSON(`${ctx.pageSrc}?h=${n.hash}`)
       .then((p) => {
@@ -322,7 +323,7 @@
           const row = [h("span", { class: "gv-lu", title: l.url }, label), h("span", { class: "gv-la", title: l.anchor }, anchor + (l.nofollow ? " · nofollow" : ""))];
           return local ? h("button", { type: "button", onclick: () => ctx.select(local) }, row) : h("div", {}, row);
         }));
-        const more = p.linked_from > p.links.length ? h("p", { class: "gv-muted" }, `The ${p.links.length} best-linked shown. `, h("a", { href: explorerHref(ctx.base, n) + "&tab=inlinks" }, "All inlinks in Explorer")) : null;
+        const more = p.linked_from > p.links.length && ctx.base ? h("p", { class: "gv-muted" }, `The ${p.links.length} best-linked shown. `, h("a", { href: explorerHref(ctx.base, n) + "&tab=inlinks" }, "All inlinks in Explorer")) : null;
         fill(linked, head, p.links.length ? list : null, more);
       })
       .catch(() => linked.isConnected && fill(linked, h("span", { class: "gv-eyebrow" }, "Linked from"), h("p", { class: "gv-muted" }, "The links didn't load.")));

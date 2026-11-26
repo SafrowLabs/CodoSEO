@@ -213,14 +213,20 @@ async fn data(
     Path(site): Path<String>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    let Some(crawl) = crawls::latest_done(&state.pool, site.id).await? else {
-        return Ok(Json(Data::empty()).into_response());
+    let data = match crawls::latest_done(&state.pool, site.id).await? {
+        Some(crawl) => crawl_data(&state.pool, crawl.id).await?,
+        None => Data::empty(),
     };
-    let Some(g) = graph::load(&state.pool, crawl.id).await? else {
-        return Ok(Json(Data::empty()).into_response());
+    Ok(Json(data).into_response())
+}
+
+/// `data.json` for one finished crawl; also served for the free audit's bubble map.
+pub async fn crawl_data(pool: &sqlx::PgPool, crawl_id: uuid::Uuid) -> Result<Data, AppError> {
+    let Some(g) = graph::load(pool, crawl_id).await? else {
+        return Ok(Data::empty());
     };
-    let details = by_hash(graph_pages(&state.pool, crawl.id, None).await?);
-    Ok(Json(build(&g.pages, &g.edges, &details, MAX_NODES, MAX_LINKS)).into_response())
+    let details = by_hash(graph_pages(pool, crawl_id, None).await?);
+    Ok(build(&g.pages, &g.edges, &details, MAX_NODES, MAX_LINKS))
 }
 
 impl Data {
@@ -422,7 +428,7 @@ fn short_url(url: &str, host: Option<&str>) -> String {
 #[derive(Debug, Deserialize)]
 pub struct PageParams {
     #[serde(default)]
-    h: String,
+    pub h: String,
 }
 
 /// `page.json`: one page for the side panel.
@@ -468,11 +474,20 @@ async fn page(
     Query(params): Query<PageParams>,
 ) -> Result<Response, AppError> {
     let site = load_site(&state, &user, site_id(&site)?).await?;
-    let hash = parse_hex(&params.h).ok_or(AppError::NotFound)?;
     let crawl = crawls::latest_done(&state.pool, site.id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let g = graph::load(&state.pool, crawl.id)
+    Ok(Json(crawl_page(&state.pool, crawl.id, &params.h).await?).into_response())
+}
+
+/// `page.json` for one finished crawl; also served for the free audit's bubble map.
+pub async fn crawl_page(
+    pool: &sqlx::PgPool,
+    crawl_id: uuid::Uuid,
+    h: &str,
+) -> Result<PageInfo, AppError> {
+    let hash = parse_hex(h).ok_or(AppError::NotFound)?;
+    let g = graph::load(pool, crawl_id)
         .await?
         .ok_or(AppError::NotFound)?;
     let i = g.index_of(hash).ok_or(AppError::NotFound)?;
@@ -496,7 +511,7 @@ async fn page(
         .chain(route.iter().copied())
         .map(|j| g.pages[j as usize].url_hash)
         .collect();
-    let details = by_hash(graph_pages(&state.pool, crawl.id, Some(&wanted)).await?);
+    let details = by_hash(graph_pages(pool, crawl_id, Some(&wanted)).await?);
     let me = details.get(&hash).ok_or(AppError::NotFound)?;
     let url_of = |j: u32| {
         let h = g.pages[j as usize].url_hash;
@@ -537,7 +552,7 @@ async fn page(
             })
             .collect(),
     };
-    Ok(Json(info).into_response())
+    Ok(info)
 }
 
 #[cfg(test)]
