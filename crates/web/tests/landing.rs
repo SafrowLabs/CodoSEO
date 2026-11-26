@@ -16,7 +16,10 @@ async fn the_cloud_landing_renders_the_plans_from_the_code() {
     let body = res.body;
 
     // The hero, the free audit box and its size.
-    assert!(body.contains("Find out your site broke"), "{body}");
+    assert!(
+        body.contains("Open-source SEO and GEO monitoring"),
+        "{body}"
+    );
     assert!(
         body.contains(r#"<form class="audit-form" method="post" action="/audit">"#),
         "{body}"

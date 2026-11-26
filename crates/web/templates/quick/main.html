@@ -12,6 +12,7 @@
       {% if v.running && main.running %}<span class="la-signal" role="status" aria-live="polite"><i class="la-dot" aria-hidden="true"></i><span class="la-signal-text">{{ v.signal }}</span><b class="num">{{ v.count }}</b><span class="la-bar" aria-hidden="true"><span style="width:{{ v.bar }}%"></span></span><span class="mono">{{ v.elapsed }}</span></span>{% endif %}
       {% if !v.running %}<span class="la-signal is-done" role="status"><i class="sdot is-ok" aria-hidden="true"></i><span><b>Audit finished</b> · {{ v.done_line }}</span></span>{% endif %}
       {% endif %}
+      {% if main.free.is_some() && !unlock.sent %}<a class="q-quota" href="#unlock-email"><span class="q-quota-l">{{ unlock.limit.line }}</span><span class="q-meter" aria-hidden="true"><span style="width:{{ unlock.limit.bar }}%"></span></span><b>{% if unlock.limit.more_pages %}Audit the rest free ↓{% else %}Keep this audit free ↓{% endif %}</b></a>{% endif %}
     </div>
     {% if let Some(start) = main.start_url %}<p class="muted q-start">Started from {{ start }}</p>{% endif %}
     {% if let Some(v) = main.free %}<p class="q-lede">{{ v.lede }}</p>{% endif %}
@@ -116,7 +117,7 @@
     {% if let Some(f) = v.fixes %}<div class="q-fixlist">{% call fx::card(f, 0, "", true, true) %}{% endcall %}</div>{% endif %}
     {% endif %}
   </div>
-  {% if !v.running %}<p class="q-rankorg"><a href="{{ v.rankorg }}" target="_blank" rel="noopener">Take this site to RankOrg ↗</a> <span class="muted">We pass along your domain and its top pages.</span></p>{% endif %}
+  {% if !v.running %}<p class="q-rankorg"><a href="{{ v.rankorg }}" target="_blank" rel="noopener">Write articles that rank for {{ main.domain }} ↗</a> <span class="muted">RankOrg starts from the pages we just checked.</span></p>{% endif %}
   {% endif %}
 {% endif %}
 </section>

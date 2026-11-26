@@ -211,12 +211,22 @@
 .q-why { margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
 .q-why summary { cursor: pointer; font-weight: 600; min-height: 24px; }
 .q-why p { margin: 6px 0 0; max-width: 620px; line-height: 1.5; }
-.q-meter { display: flex; max-width: 420px; height: 6px; margin-top: 10px; border-radius: 3px; background: var(--surface); overflow: hidden; }
+.q-unlock-go { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.q-unlock-go form { flex: none; }
+.q-google { background: var(--surface); }
+.q-unlock .or { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.q-unlock .or::before, .q-unlock .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+/* The free page quota, top right of the audit's title row, pointing at the sign-in card below. */
+.q-quota { margin-left: auto; display: flex; flex-direction: column; gap: 5px; min-width: 220px; padding: 8px 12px; border: 1px solid var(--accent-strong); border-radius: var(--r-md, 10px); background: var(--accent-soft); color: inherit; text-decoration: none; font-size: 12px; }
+.q-quota:hover { border-color: var(--accent); }
+.q-quota-l { color: var(--ink-2); }
+.q-quota b { font-weight: 600; }
+.q-meter { display: flex; height: 6px; border-radius: 3px; background: var(--surface); overflow: hidden; }
 .q-meter > span { background: var(--accent-strong); }
-.q-meter-l { display: block; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
 .q-foot { font-size: 12.5px; }
 @media (max-width: 560px) {
   .q-unlock form { flex-direction: column; }
+  .q-quota { margin-left: 0; flex: 1 1 100%; }
   .la-row.q-row { grid-template-columns: 56px minmax(0, 1fr); }
   .la-row.q-row .la-imp { grid-column: 2; text-align: left; padding-top: 0; }
 }

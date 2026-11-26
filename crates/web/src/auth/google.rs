@@ -7,6 +7,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::Response;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use super::oauth;
 use crate::error::AppError;
@@ -17,6 +18,8 @@ const CALLBACK_PATH: &str = "/auth/google/callback";
 #[derive(Deserialize)]
 pub struct StartQuery {
     next: Option<String>,
+    /// Set by the no-signup audit's unlock card: the audit to attach once signed in.
+    audit: Option<Uuid>,
 }
 
 pub async fn start(
@@ -24,7 +27,7 @@ pub async fn start(
     Query(q): Query<StartQuery>,
 ) -> Result<Response, AppError> {
     let g = state.config.google.as_ref().ok_or(AppError::NotFound)?;
-    let (nonce, cookie) = oauth::begin(&state, q.next.as_deref());
+    let (nonce, cookie) = oauth::begin(&state, q.next.as_deref(), q.audit);
     let mut url = g.authorize_url.clone();
     url.query_pairs_mut()
         .append_pair("client_id", &g.client_id)
@@ -67,7 +70,7 @@ pub async fn callback(
     if q.error.is_some() {
         return Ok(oauth::cancelled(&state));
     }
-    let next = oauth::verify(&headers, q.state.as_deref(), "Google")?;
+    let after = oauth::verify(&headers, q.state.as_deref(), "Google")?;
     let code = q
         .code
         .ok_or_else(|| AppError::BadRequest("Google didn't send a code.".to_owned()))?;
@@ -119,5 +122,5 @@ pub async fn callback(
         )
     })?;
 
-    oauth::finish(&state, &address, None, Some(&user.sub), &next).await
+    oauth::finish(&state, &headers, &address, None, Some(&user.sub), &after).await
 }
