@@ -133,6 +133,7 @@
   /* Promo video under the hero: the muted loop plays while on screen; the play button swaps in the full cut with sound */
   var promo = $('promo'), loop = $('promo-loop'), full = $('promo-full'), playBtn = $('promo-play');
   if (promo && loop && full && playBtn) {
+    full.defaultPlaybackRate = 1.5; // the full cut starts at 1.5x; the player's controls can change it
     if (reduce) { loop.removeAttribute('autoplay'); loop.pause(); }
     else if ('IntersectionObserver' in window) {
       new IntersectionObserver(function (es) {
@@ -147,6 +148,7 @@
       promo.classList.add('playing');
       full.hidden = false;
       full.currentTime = 0;
+      full.playbackRate = full.defaultPlaybackRate;
       var p = full.play(); if (p && p.catch) p.catch(function () {});
       full.focus({ preventScroll: true });
     });
