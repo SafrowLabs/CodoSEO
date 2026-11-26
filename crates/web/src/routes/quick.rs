@@ -6,12 +6,15 @@
 //! The report is keyed by the crawl id, so one cached report serves everyone who audits the
 //! same domain within 24 hours. Only `quick` crawls are ever served here.
 
+use std::collections::HashMap;
+
 use askama::Template;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
+use codoseo_core::check::CheckId;
 use codoseo_core::output::LiveRow;
 use codoseo_core::output::StopReason;
 use codoseo_core::plan::PlanLimits;
@@ -26,6 +29,7 @@ use serde_json::json;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use super::audit_fix::{URLS_SHOWN, known_counts};
 use super::sites::{FIRST_CRAWL_PRIORITY, check_public_target, parse_start_url, schedule_for};
 use crate::abuse::{self, ClientIp};
 use crate::auth::magic::{self, AuditLink, LinkOutcome};
@@ -300,7 +304,17 @@ async fn main_view(state: &AppState, audit: &Audit) -> Result<MainView, AppError
     } else {
         Vec::new()
     };
-    let mut view = build_main(audit, &rows);
+    let examples = if crawl.status == CrawlStatus::Done {
+        let failing: Vec<CheckId> = crawl
+            .summary()
+            .map(|s| known_counts(&s).into_iter().map(|c| c.0).collect())
+            .unwrap_or_default();
+        codoseo_store::explorer::example_urls(&state.pool, crawl.id, &failing, URLS_SHOWN as i64)
+            .await?
+    } else {
+        HashMap::new()
+    };
+    let mut view = build_main(audit, &rows, &examples);
     view.icon = codoseo_store::sites::icon_version(&state.pool, audit.site_id)
         .await?
         .map(|v| format!("/audit/{}/icon?v={v}", crawl.id));
@@ -310,7 +324,11 @@ async fn main_view(state: &AppState, audit: &Audit) -> Result<MainView, AppError
     Ok(view)
 }
 
-fn build_main(audit: &Audit, rows: &[LiveRow]) -> MainView {
+fn build_main(
+    audit: &Audit,
+    rows: &[LiveRow],
+    examples: &HashMap<CheckId, Vec<String>>,
+) -> MainView {
     let crawl = &audit.crawl;
     let mut view = MainView {
         initial: audit
@@ -334,7 +352,9 @@ fn build_main(audit: &Audit, rows: &[LiveRow]) -> MainView {
     let free = || {
         FreeView::build(FreeInput {
             crawl,
+            origin: &audit.start_url,
             rows,
+            examples,
             now: OffsetDateTime::now_utc(),
         })
     };

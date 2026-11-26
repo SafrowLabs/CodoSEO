@@ -1,5 +1,6 @@
 {%- import "partials/mascot.html" as m -%}
 {%- import "partials/operator_logo.html" as op -%}
+{%- import "partials/fix_list.html" as fx -%}
 <div id="audit-body" class="page au"{% if reloads_on_queue() %} hx-get="{{ base }}/audit" hx-trigger="crawlQueued from:body" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
 {% if let Some(w) = watch %}
   {{ w|safe }}
@@ -56,77 +57,7 @@
   </section>
 
   <div class="au-main">
-    <section id="fix" class="card fx" aria-labelledby="fx-h">
-      <div class="fx-top">
-        <div class="fx-title-block">
-          <h2 id="fx-h">Fix these, in order</h2>
-          <p class="muted">SEO and AI issues in one list, ranked by the points you get back. Blocks you marked as intended are left out.</p>
-        </div>
-        {% if !d.fixes.is_clear() %}
-        <div class="fx-tools">
-          <div class="fx-filters" role="group" aria-label="Show">
-            <button type="button" class="btn btn-sm" data-fx-filter="all" aria-pressed="true">All <span class="n">{{ d.fixes.total }}</span></button>
-            <button type="button" class="btn btn-sm" data-fx-filter="critical" aria-pressed="false">Critical <span class="n">{{ d.fixes.critical }}</span></button>
-            <button type="button" class="btn btn-sm" data-fx-filter="seo" aria-pressed="false">SEO <span class="n">{{ d.fixes.seo }}</span></button>
-            <button type="button" class="btn btn-sm" data-fx-filter="ai" aria-pressed="false">AI <span class="n">{{ d.fixes.ai }}</span></button>
-          </div>
-          <button type="button" class="btn btn-sm" data-copy="{{ d.fixes.all_prompts }}"><svg class="icon"><use href="#i-copy"/></svg>Copy all fix prompts</button>
-        </div>
-        {% endif %}
-      </div>
-      <div class="fx-scroll" tabindex="0" role="region" aria-label="Issues to fix">
-        {% if d.fixes.is_clear() %}
-        <div class="fx-clear">
-          <span class="fx-check" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
-          <b>Nothing to fix · {{ d.fixes.checks_passed }} of {{ d.fixes.checks_total }}</b>
-          <span class="muted">All {{ d.fixes.checks_total }} checks pass on crawl #{{ d.number }}. You’ll hear if the next crawl finds something.</span>
-        </div>
-        {% endif %}
-        {% for g in d.fixes.groups %}
-        <div class="fx-group" data-sev="{{ g.slug() }}">
-          <div class="fx-gh is-{{ g.slug() }}"><i class="sdot is-{{ g.slug() }}" aria-hidden="true"></i><b>{{ g.label() }} · <span data-fx-count>{{ g.rows.len() }}</span></b><span class="fx-hint">{{ g.hint }}</span></div>
-          {% for r in g.rows %}
-          <div class="fx-row" id="{{ r.id }}" data-sev="{{ r.severity_slug() }}" data-kind="{{ r.kind }}">
-            <span class="fx-sev is-{{ r.severity_slug() }}"><i class="sdot is-{{ r.severity_slug() }}" aria-hidden="true"></i>{{ r.severity_label() }}</span>
-            <div class="fx-body">
-              <div class="fx-head"><span class="atag t-{{ r.kind }}">{{ r.kind_label() }}</span>{% if r.fresh %}<span class="atag t-fresh">New this crawl</span>{% endif %}<span class="fx-name">{{ r.title }}</span></div>
-              <p class="fx-ev">{% for s in r.evidence %}{% if s.code %}<code>{{ s.text }}</code>{% else %}{{ s.text }}{% endif %}{% endfor %}</p>
-              {% if !r.urls.is_empty() %}
-              <div class="fx-urls" id="{{ r.id }}-urls" hidden>
-                {% for u in r.urls %}<span class="fx-url mono" title="{{ u.1 }}">{{ u.0 }}</span>{% endfor %}
-                {% if let Some(h) = r.all_href %}<a class="au-link fx-all" href="{{ h }}">All {{ r.pages }} in the URL explorer</a>{% endif %}
-              </div>
-              {% endif %}
-            </div>
-            <div class="fx-side">
-              {% if let Some(gain) = r.gain %}<span class="fx-gain mono" title="{{ r.gain_tip }}">{{ gain }}</span>{% endif %}
-              <div class="fx-actions">
-                {% if let Some(i) = r.intend %}<form method="post" action="{{ i.0 }}" hx-confirm="{{ i.1 }}"><button class="btn btn-sm" type="submit">Mark intended</button></form>{% endif %}
-                <button type="button" class="q q-lg" popovertarget="{{ r.id }}-fix" aria-label="How to fix: {{ r.title }}">?</button>
-                {% if r.urls.is_empty() %}<span class="fx-pages">{{ r.pages }}</span>{% else %}<button type="button" class="btn btn-sm fx-toggle" aria-expanded="false" aria-controls="{{ r.id }}-urls" data-fx-toggle>{{ r.pages }}<svg class="icon"><use href="#i-chev"/></svg></button>{% endif %}
-              </div>
-            </div>
-            <div id="{{ r.id }}-fix" popover class="pop pop-fix">
-              <span class="pop-h">How to fix</span>
-              <pre class="mono">{{ r.fix }}</pre>
-              <button type="button" class="btn btn-sm" data-copy="{{ r.prompt }}"><svg class="icon"><use href="#i-copy"/></svg>Copy fix prompt</button>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        {% endfor %}
-        <p class="fx-none muted" hidden>Nothing in this filter.</p>
-      </div>
-      <div class="fx-foot">
-        {% if !d.fixes.intended.is_empty() %}
-        <span class="fx-foot-line"><i class="sdot is-na" aria-hidden="true"></i><span>{{ d.fixes.intended.len() }} {% if d.fixes.intended.len() == 1 %}block{% else %}blocks{% endif %} marked intended, not counted:</span> <b>{{ d.fixes.intended|join(", ") }}</b>{% if !demo %} · <a class="au-link" href="{{ base }}/policy?tab=ai">review</a>{% endif %}</span>
-        {% endif %}
-        {% if !d.fixes.fixed.is_empty() %}
-        <span class="fx-foot-line"><b class="c-ok">✓ {{ d.fixes.fixed.len() }} fixed since last crawl:</b> <span>{{ d.fixes.fixed|join(" · ") }}</span></span>
-        {% endif %}
-        <span class="fx-foot-line fx-passing">{% for p in d.fixes.passing %}<span class="c-ok">✓ {{ p }}</span>{% endfor %}<span>{{ d.fixes.checks_passed }} passing checks</span></span>
-      </div>
-    </section>
+    {% call fx::card(d.fixes, d.number, base, demo, false) %}{% endcall %}
 
     <div class="au-side">
       <section id="trend" class="card tr" aria-labelledby="tr-h">

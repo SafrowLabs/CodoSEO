@@ -53,7 +53,10 @@ pub struct FixRow {
     pub pages: String,
     /// The URL chips, `(path, full URL)`.
     pub urls: Vec<(String, String)>,
-    /// Every page in the URL explorer; `None` on the demo and for site-wide checks.
+    /// More pages are affected than `urls` lists.
+    pub more: bool,
+    /// Every page in the URL explorer; `None` on the demo, on the no-signup audit and for
+    /// site-wide checks.
     pub all_href: Option<String>,
 }
 
@@ -149,6 +152,7 @@ pub struct AiFixInput<'a> {
 pub struct FixInput<'a> {
     /// `/s/{site}`, or `/demo`.
     pub base: &'a str,
+    /// No site to link into or to keep an intent for: the demo and the no-signup audit.
     pub demo: bool,
     pub crawl_id: uuid::Uuid,
     pub current: Option<&'a StoredSummary>,
@@ -354,6 +358,7 @@ pub fn fix_list(input: FixInput<'_>) -> FixList {
                 } else {
                     fmt::pages(n)
                 },
+                more: !site_wide && n as usize > urls.len(),
                 urls,
                 all_href: (!site_wide && !input.demo)
                     .then(|| format!("{}/explorer?filter=check:{}", input.base, id.slug())),
@@ -432,6 +437,7 @@ pub fn fix_list(input: FixInput<'_>) -> FixList {
                     0 => "site-wide".to_owned(),
                     n => fmt::pages(n as u32),
                 },
+                more: total > urls.len(),
                 urls,
                 all_href: None,
             });
@@ -478,10 +484,41 @@ pub fn fix_list(input: FixInput<'_>) -> FixList {
                 fix,
                 pages: "site-wide".to_owned(),
                 urls: Vec::new(),
+                more: false,
                 all_href: None,
             });
         }
         intended = intended_blocks(ai.report, ai.intent);
+    } else if let Some(geo) = geo {
+        // A GEO score with no access report behind it (a no-signup audit from before its report
+        // was kept): the failing checks are named, and the exact change comes with a new audit.
+        for c in &geo.checks {
+            if c.status != Status::Fail || reads_seo(c.check) {
+                continue;
+            }
+            let title = geo_check_label(c.check);
+            let evidence = "This check fails. It costs you in AI answers.";
+            let fix = "Audit the site again to get the exact change for this check.";
+            let (gain, gain_tip) = gain(c.points_regained, "GEO", GEO_WEIGHT);
+            rows.push(FixRow {
+                id: format!("fx-ai-{}", rows.len()),
+                severity: c.severity.unwrap_or(Severity::Warning),
+                kind: "ai",
+                fresh: false,
+                title: title.to_owned(),
+                evidence: summary_segments(evidence),
+                gain,
+                gain_tip,
+                rank: c.points_regained * GEO_WEIGHT,
+                intend: None,
+                fix: fix.to_owned(),
+                prompt: seo_prompt(title, evidence, fix, &[], 0),
+                pages: "site-wide".to_owned(),
+                urls: Vec::new(),
+                more: false,
+                all_href: None,
+            });
+        }
     }
 
     // Most severe first; inside a severity, the most points back first.

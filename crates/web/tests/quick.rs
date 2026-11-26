@@ -391,7 +391,7 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
     let res = app.get_hx(&format!("{path}/live"), None).await;
     assert_eq!(res.status, StatusCode::OK);
     assert!(res.body.contains("Audit finished"), "{}", res.body);
-    assert!(res.body.contains("Fix these first"), "{}", res.body);
+    assert!(res.body.contains("Fix these, in order"), "{}", res.body);
     assert!(
         !res.body.contains("every 2s"),
         "a finished audit stops polling"
@@ -416,10 +416,16 @@ async fn the_report_page_walks_through_waiting_running_and_done() {
 }
 
 #[tokio::test]
-async fn the_report_shows_every_fix_unblurred_and_no_page_urls() {
+async fn the_report_lists_every_fix_as_the_signed_in_audit_does() {
     let app = cloud().await;
     let crawl = crawl_id(&submit(&app, "example.com").await);
-    finish(&app, crawl, messy_pages("example.com")).await;
+    // Search bots kept out of the whole site: an AI finding beside the SEO ones.
+    app.finalize_crawl_with_robots(
+        crawl,
+        messy_pages("example.com"),
+        (200, "User-agent: OAI-SearchBot\nDisallow: /\n"),
+    )
+    .await;
 
     let failing: i32 = sqlx::query_scalar(
         "SELECT jsonb_array_length(summary->'counts') FROM crawls WHERE id = $1",
@@ -432,16 +438,63 @@ async fn the_report_shows_every_fix_unblurred_and_no_page_urls() {
         failing > 5,
         "the fixture should fail more than five checks, got {failing}"
     );
+    // A no-signup audit keeps its access report with the crawl, and opens nothing.
+    assert_eq!(
+        count(&app, "SELECT count(*) FROM crawls WHERE summary ? 'access'").await,
+        1
+    );
+    assert_eq!(count(&app, "SELECT count(*) FROM ai_reports").await, 0);
+    assert_eq!(count(&app, "SELECT count(*) FROM ai_incidents").await, 0);
 
     let body = app.get(&format!("/audit/{crawl}"), None).await.body;
-    // Every fix for the pages checked, none held back or blurred.
-    assert!(body.matches(r#"<div class="q-fix">"#).count() > 5, "{body}");
+    // Every fix for the pages checked, none held back or blurred, grouped by severity.
+    assert!(
+        body.matches(r#"<div class="fx-row""#).count() > failing as usize,
+        "the SEO rows and the AI ones: {body}"
+    );
+    assert!(body.contains(r#"data-kind="ai""#), "{body}");
+    assert!(body.contains("fx-gh is-critical"), "{body}");
     assert!(!body.contains("q-locked"), "{body}");
-    assert!(!body.contains("shown free"), "{body}");
     assert!(body.contains("the whole result"), "{body}");
-    // The lead magnet: no page URLs before the email.
-    assert!(!body.contains("hidden-secret-path"));
-    assert!(!body.contains("/messy-0"));
+    // Each fix says how, hands over a prompt, and names the pages it is on.
+    assert!(body.contains("How to fix"), "{body}");
+    assert!(body.contains("Copy fix prompt"), "{body}");
+    assert!(body.contains("Copy all fix prompts"), "{body}");
+    assert!(body.contains("OAI-SearchBot"), "{body}");
+    assert!(
+        body.contains(r#"title="https://example.com/messy-0""#),
+        "{body}"
+    );
+    // Nothing that needs a site behind it.
+    assert!(!body.contains("Mark intended"), "{body}");
+    assert!(!body.contains("/explorer"), "{body}");
+    assert!(!body.contains("crawl #"), "{body}");
+    assert!(!body.contains('—'), "{body}");
+}
+
+#[tokio::test]
+async fn an_audit_from_before_its_report_was_kept_still_names_its_ai_fixes() {
+    let app = cloud().await;
+    let crawl = crawl_id(&submit(&app, "example.com").await);
+    app.finalize_crawl_with_robots(
+        crawl,
+        messy_pages("example.com"),
+        (200, "User-agent: OAI-SearchBot\nDisallow: /\n"),
+    )
+    .await;
+    sqlx::query("UPDATE crawls SET summary = summary - 'access' WHERE id = $1")
+        .bind(crawl)
+        .execute(app.pool())
+        .await
+        .unwrap();
+
+    let body = app.get(&format!("/audit/{crawl}"), None).await.body;
+    assert!(body.contains(r#"data-kind="ai""#), "{body}");
+    assert!(
+        body.contains("AI search bots can reach your pages"),
+        "{body}"
+    );
+    assert!(body.contains("Audit the site again"), "{body}");
 }
 
 #[tokio::test]
