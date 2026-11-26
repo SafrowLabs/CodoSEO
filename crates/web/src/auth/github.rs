@@ -1,30 +1,21 @@
-//! "Sign in with GitHub": the OAuth web flow. A random `state` value in a short-lived cookie
-//! ties the callback to the browser that started it. The account email is the user's primary
-//! verified GitHub email, so a GitHub login and a magic link for that address are one account.
+//! "Sign in with GitHub": the OAuth web flow (see [`super::oauth`] for the `state` cookie). The
+//! account email is the user's primary verified GitHub email, so a GitHub login and a magic link
+//! for that address are one account.
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, header};
-use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
-use codoseo_store::accounts::{SignIn, SignInOutcome};
+use axum::response::Response;
 use serde::Deserialize;
 
-use super::magic::signups_closed;
-use super::{email, safe_next, session, signup_policy};
+use super::oauth;
 use crate::error::AppError;
 use crate::state::AppState;
 
-const STATE_COOKIE: &str = "codoseo_oauth";
-const STATE_TTL_SECS: i64 = 600;
+const CALLBACK_PATH: &str = "/auth/github/callback";
 
 #[derive(Deserialize)]
 pub struct StartQuery {
     next: Option<String>,
-}
-
-fn callback_url(state: &AppState) -> String {
-    let mut u = state.config.base_url.clone();
-    u.set_path("/auth/github/callback");
-    u.to_string()
 }
 
 pub async fn start(
@@ -32,22 +23,14 @@ pub async fn start(
     Query(q): Query<StartQuery>,
 ) -> Result<Response, AppError> {
     let gh = state.config.github.as_ref().ok_or(AppError::NotFound)?;
-    let nonce = session::random_token();
-    let next = safe_next(q.next.as_deref());
+    let (nonce, cookie) = oauth::begin(&state, q.next.as_deref());
     let mut url = gh.authorize_url.clone();
     url.query_pairs_mut()
         .append_pair("client_id", &gh.client_id)
-        .append_pair("redirect_uri", &callback_url(&state))
+        .append_pair("redirect_uri", &oauth::callback_url(&state, CALLBACK_PATH))
         .append_pair("scope", "read:user user:email")
         .append_pair("state", &nonce);
-    // The cookie carries the nonce and where to go afterwards: `<nonce>.<urlencoded next>`.
-    let cookie = session::set_cookie(
-        STATE_COOKIE,
-        &format!("{nonce}.{}", super::urlencode(next)),
-        STATE_TTL_SECS,
-        state.config.secure_cookies(),
-    );
-    Ok(([(header::SET_COOKIE, cookie)], Redirect::to(url.as_str())).into_response())
+    Ok(oauth::start_response(cookie, url.as_str()))
 }
 
 #[derive(Deserialize)]
@@ -82,22 +65,9 @@ pub async fn callback(
 ) -> Result<Response, AppError> {
     let gh = state.config.github.as_ref().ok_or(AppError::NotFound)?;
     if q.error.is_some() {
-        // Cancelled or refused on GitHub's side: the state cookie is spent either way.
-        let clear = session::set_cookie(STATE_COOKIE, "", 0, state.config.secure_cookies());
-        return Ok(([(header::SET_COOKIE, clear)], Redirect::to("/login")).into_response());
+        return Ok(oauth::cancelled(&state));
     }
-    let cookie = session::cookie(&headers, STATE_COOKIE).unwrap_or_default();
-    let (nonce, next) = cookie.split_once('.').unwrap_or(("", ""));
-    let next: String = url::form_urlencoded::parse(format!("n={next}").as_bytes())
-        .find(|(k, _)| k == "n")
-        .map(|(_, v)| v.into_owned())
-        .unwrap_or_default();
-    let sent_state = q.state.unwrap_or_default();
-    if nonce.is_empty() || !constant_time_eq(nonce.as_bytes(), sent_state.as_bytes()) {
-        return Err(AppError::BadRequest(
-            "GitHub sign-in expired. Please try again.".to_owned(),
-        ));
-    }
+    let next = oauth::verify(&headers, q.state.as_deref(), "GitHub")?;
     let code = q
         .code
         .ok_or_else(|| AppError::BadRequest("GitHub didn't send a code.".to_owned()))?;
@@ -110,7 +80,10 @@ pub async fn callback(
             ("client_id", gh.client_id.as_str()),
             ("client_secret", gh.client_secret.as_str()),
             ("code", code.as_str()),
-            ("redirect_uri", callback_url(&state).as_str()),
+            (
+                "redirect_uri",
+                oauth::callback_url(&state, CALLBACK_PATH).as_str(),
+            ),
         ])
         .send()
         .await
@@ -164,34 +137,5 @@ pub async fn callback(
         })?;
 
     let github_id = user.id.to_string();
-    let canonical = email::canonical(&address);
-    let outcome = codoseo_store::accounts::sign_in(
-        &state.pool,
-        &SignIn {
-            email: &address,
-            canonical: &canonical,
-            github_id: Some(&github_id),
-        },
-        signup_policy(&state),
-    )
-    .await?;
-    let account = match outcome {
-        SignInOutcome::Existing(a) | SignInOutcome::Created(a) => a,
-        SignInOutcome::SignupsClosed => return Err(signups_closed()),
-    };
-    let session_cookie = session::start(&state, account.id).await?;
-    let clear = session::set_cookie(STATE_COOKIE, "", 0, state.config.secure_cookies());
-    // Two Set-Cookie headers: an array of pairs would insert, keeping only the last one.
-    Ok((
-        AppendHeaders([
-            (header::SET_COOKIE, session_cookie),
-            (header::SET_COOKIE, clear),
-        ]),
-        Redirect::to(safe_next(Some(&next))),
-    )
-        .into_response())
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    oauth::finish(&state, &address, Some(&github_id), None, &next).await
 }

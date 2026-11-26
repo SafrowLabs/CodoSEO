@@ -34,6 +34,28 @@ impl std::fmt::Debug for GithubConfig {
     }
 }
 
+/// Google OAuth client credentials, plus the endpoints so tests can point them at a fake.
+#[derive(Clone)]
+pub struct GoogleConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub authorize_url: Url,
+    pub token_url: Url,
+    pub userinfo_url: Url,
+}
+
+impl std::fmt::Debug for GoogleConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GoogleConfig")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("authorize_url", &self.authorize_url.as_str())
+            .field("token_url", &self.token_url.as_str())
+            .field("userinfo_url", &self.userinfo_url.as_str())
+            .finish()
+    }
+}
+
 /// Cloudflare Turnstile keys, plus the verify endpoint so tests can point it at a fake.
 #[derive(Clone)]
 pub struct TurnstileConfig {
@@ -136,6 +158,7 @@ pub struct Config {
     /// The sender of every email (`MAIL_FROM`).
     pub mail_from: String,
     pub github: Option<GithubConfig>,
+    pub google: Option<GoogleConfig>,
     /// The fixed address cloud crawls come from, listed on the bot page (`CODOSEO_BOT_IP`).
     pub bot_ip: Option<String>,
     /// Turnstile on the audit form: `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`. Cloud only.
@@ -203,6 +226,7 @@ impl std::fmt::Debug for Config {
             .field("smtp_url", &self.smtp_url.as_deref().map(redact_url))
             .field("mail_from", &self.mail_from)
             .field("github", &self.github)
+            .field("google", &self.google)
             .field("bot_ip", &self.bot_ip)
             .field("turnstile", &self.turnstile)
             .field("ses_feedback", &self.ses_feedback)
@@ -305,6 +329,19 @@ impl Config {
             _ => None,
         };
 
+        let google = match (get("GOOGLE_CLIENT_ID"), get("GOOGLE_CLIENT_SECRET")) {
+            (Some(client_id), Some(client_secret)) => Some(GoogleConfig {
+                client_id,
+                client_secret,
+                authorize_url: Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
+                    .expect("static url"),
+                token_url: Url::parse("https://oauth2.googleapis.com/token").expect("static url"),
+                userinfo_url: Url::parse("https://openidconnect.googleapis.com/v1/userinfo")
+                    .expect("static url"),
+            }),
+            _ => None,
+        };
+
         let turnstile = match (get("TURNSTILE_SITE_KEY"), get("TURNSTILE_SECRET")) {
             (Some(site_key), Some(secret)) if mode == Mode::Cloud => {
                 let verify = get("TURNSTILE_VERIFY_URL").unwrap_or_else(|| {
@@ -359,6 +396,7 @@ impl Config {
             smtp_url,
             mail_from: get("MAIL_FROM").unwrap_or_else(|| DEFAULT_MAIL_FROM.to_owned()),
             github,
+            google,
             bot_ip: get("CODOSEO_BOT_IP"),
             turnstile,
             umami,
@@ -698,10 +736,17 @@ mod tests {
             ("SMTP_URL", "smtps://mailer:p4ssw0rd-x@mail.example.com:465"),
             ("GITHUB_CLIENT_ID", "gh-id"),
             ("GITHUB_CLIENT_SECRET", "gh-secret-value"),
+            ("GOOGLE_CLIENT_ID", "g-id"),
+            ("GOOGLE_CLIENT_SECRET", "g-secret-value"),
         ])
         .unwrap();
         let shown = format!("{c:?}");
-        for secret in ["hunter2-the-key", "p4ssw0rd-x", "gh-secret-value"] {
+        for secret in [
+            "hunter2-the-key",
+            "p4ssw0rd-x",
+            "gh-secret-value",
+            "g-secret-value",
+        ] {
             assert!(!shown.contains(secret), "{secret} leaked: {shown}");
         }
         assert!(shown.contains("mail.example.com"), "{shown}");
@@ -873,6 +918,17 @@ mod tests {
                 .unwrap()
                 .mail_from,
             "Me <me@example.com>"
+        );
+    }
+
+    #[test]
+    fn google_needs_both_keys() {
+        assert!(cfg(&[("GOOGLE_CLIENT_ID", "a")]).unwrap().google.is_none());
+        assert!(
+            cfg(&[("GOOGLE_CLIENT_ID", "a"), ("GOOGLE_CLIENT_SECRET", "b")])
+                .unwrap()
+                .google
+                .is_some()
         );
     }
 

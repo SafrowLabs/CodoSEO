@@ -8,7 +8,7 @@ Two ways to run CodoSEO on [Coolify](https://coolify.io): the one-click self-hos
 
 1. In Coolify, create a **Docker Compose** service (or add the template to your Coolify templates) and paste the contents of `deploy/coolify/template.yml`.
 2. Coolify generates the secrets from the template's magic variables: the database password (`SERVICE_PASSWORD_POSTGRES`) and `SECRET_KEY` (`SERVICE_BASE64_64_SECRETKEY`). It also assigns a domain (`SERVICE_FQDN_CODOSEO_8080`) and routes it to container port 8080; `BASE_URL` is set from that domain. If `BASE_URL` comes out empty after the import, set it to the service's public URL by hand.
-3. Optional settings appear as environment variables on the service: `SMTP_URL`, `MAIL_FROM`, `ADMIN_EMAILS`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RETENTION_DAYS_SELFHOST`. See [configuration.md](configuration.md).
+3. Optional settings appear as environment variables on the service: `SMTP_URL`, `MAIL_FROM`, `ADMIN_EMAILS`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `RETENTION_DAYS_SELFHOST`. See [configuration.md](configuration.md).
 4. Deploy, open the domain and sign in. The first account becomes the owner.
 
 The image is `ghcr.io/safrowlabs/codoseo:latest`. To pin a version, edit the tag in the compose file. The container applies migrations when it starts, so a redeploy with a new tag upgrades the database. Back up the Postgres volume (or run `pg_dump`) before upgrading; see [operations.md](operations.md#backups).

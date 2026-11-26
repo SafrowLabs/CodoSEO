@@ -39,6 +39,7 @@ pub struct Card {
     /// The link was sent: show "check your email" instead of the form.
     pub sent: bool,
     pub github: bool,
+    pub google: bool,
     pub dev_hint: bool,
     /// On the cloud: signing in accepts the Terms and Privacy Policy, so the card links them.
     pub legal: bool,
@@ -85,6 +86,7 @@ fn card(state: &AppState, email: String, next: String, error: Option<String>, se
         error,
         sent,
         github: state.config.github.is_some(),
+        google: state.config.google.is_some(),
         dev_hint: state.config.mode == crate::config::Mode::SelfHost,
         legal: state.config.mode == crate::config::Mode::Cloud,
         turnstile_site_key: state.config.turnstile.as_ref().map(|t| t.site_key.clone()),
@@ -369,6 +371,7 @@ async fn sign_in_with_link(
             email: address,
             canonical: &canonical,
             github_id: None,
+            google_id: None,
         },
         signup_policy(state),
     )
