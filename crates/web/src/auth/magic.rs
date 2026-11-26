@@ -313,22 +313,56 @@ pub async fn consume(
     Path(token): Path<String>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let used = codoseo_store::auth::consume_token(
-        &state.pool,
-        TokenPurpose::MagicLink,
-        &session::hash(&token),
-    )
-    .await?
-    .ok_or_else(|| {
-        AppError::BadRequest(
-            "This sign-in link has expired or was already used. Ask for a new one.".to_owned(),
-        )
-    })?;
+    let token_hash = session::hash(&token);
+    let used =
+        codoseo_store::auth::consume_token(&state.pool, TokenPurpose::MagicLink, &token_hash)
+            .await?
+            .ok_or_else(|| {
+                AppError::BadRequest(
+                    "This sign-in link has expired or was already used. Ask for a new one."
+                        .to_owned(),
+                )
+            })?;
 
     let payload = used.payload.unwrap_or_default();
     let address = payload["email"]
         .as_str()
         .ok_or_else(|| AppError::internal("magic link without an email"))?;
+    let mut started = None;
+    let result = sign_in_with_link(&state, &payload, address, &headers, &mut started).await;
+    if let Err(e) = &result {
+        // The browser never gets this response's cookie, so the session is no use to anyone.
+        if let Some(hash) = &started {
+            session::revoke(&state, hash).await;
+        }
+        // A database hiccup should not cost the person their link; a refusal (signups closed,
+        // plan limits) would refuse again, so that link stays spent.
+        if matches!(e, AppError::Internal(_) | AppError::Unavailable) {
+            match codoseo_store::auth::unconsume_token(
+                &state.pool,
+                TokenPurpose::MagicLink,
+                &token_hash,
+            )
+            .await
+            {
+                Ok(_) => {}
+                Err(e) => tracing::error!(error = %e, "could not restore a magic link"),
+            }
+        }
+    }
+    result
+}
+
+/// Everything after the token is spent: signs in (or up), starts the session and, for a link
+/// from the no-signup audit, attaches the audited site. `started` gets the new session's hash so
+/// [`consume`] can revoke it when a later step fails.
+async fn sign_in_with_link(
+    state: &AppState,
+    payload: &serde_json::Value,
+    address: &str,
+    headers: &HeaderMap,
+    started: &mut Option<Vec<u8>>,
+) -> Result<Response, AppError> {
     let next = safe_next(payload["next"].as_str()).to_owned();
     let canonical = email::canonical(address);
     let outcome = codoseo_store::accounts::sign_in(
@@ -339,14 +373,16 @@ pub async fn consume(
             github_id: None,
             google_id: None,
         },
-        signup_policy(&state),
+        signup_policy(state),
     )
     .await?;
     let account = match outcome {
         SignInOutcome::Existing(a) | SignInOutcome::Created(a) => a,
         SignInOutcome::SignupsClosed => return Err(signups_closed()),
     };
-    let cookie = session::start(&state, account.id).await?;
+    let session = session::begin(state, account.id).await?;
+    let cookie = session.cookie;
+    *started = Some(session.hash);
     // Opening a link from one of our emails counts as activity for the inactivity check.
     codoseo_store::accounts::record_email_click(&state.pool, account.id).await?;
 
@@ -357,8 +393,8 @@ pub async fn consume(
     let Some(audit) = audit else {
         return Ok(([(header::SET_COOKIE, cookie)], Redirect::to(&next)).into_response());
     };
-    let to = crate::routes::quick::attach_after_login(&state, &account, audit, &headers).await?;
-    let spent = crate::routes::quick::clear_claim_cookie(&state);
+    let to = crate::routes::quick::attach_after_login(state, &account, audit, headers).await?;
+    let spent = crate::routes::quick::clear_claim_cookie(state);
     Ok((
         AppendHeaders([(header::SET_COOKIE, cookie), (header::SET_COOKIE, spent)]),
         Redirect::to(&to),

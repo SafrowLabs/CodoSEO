@@ -39,6 +39,13 @@ pub(super) fn start_response(cookie: HeaderValue, to: &str) -> Response {
     ([(header::SET_COOKIE, cookie)], Redirect::to(to)).into_response()
 }
 
+/// The person cancelled or the provider refused: back to the login page, and the `state` cookie
+/// is spent either way.
+pub(super) fn cancelled(state: &AppState) -> Response {
+    let clear = session::set_cookie(STATE_COOKIE, "", 0, state.config.secure_cookies());
+    ([(header::SET_COOKIE, clear)], Redirect::to("/login")).into_response()
+}
+
 /// Checks the `state` the provider sent back against the cookie and returns the `next` path.
 pub(super) fn verify(
     headers: &HeaderMap,

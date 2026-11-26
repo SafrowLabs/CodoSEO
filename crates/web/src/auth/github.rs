@@ -4,7 +4,7 @@
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::Response;
 use serde::Deserialize;
 
 use super::oauth;
@@ -65,7 +65,7 @@ pub async fn callback(
 ) -> Result<Response, AppError> {
     let gh = state.config.github.as_ref().ok_or(AppError::NotFound)?;
     if q.error.is_some() {
-        return Ok(Redirect::to("/login").into_response());
+        return Ok(oauth::cancelled(&state));
     }
     let next = oauth::verify(&headers, q.state.as_deref(), "GitHub")?;
     let code = q
