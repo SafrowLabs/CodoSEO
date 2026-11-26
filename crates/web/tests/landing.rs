@@ -21,11 +21,9 @@ async fn the_cloud_landing_renders_the_plans_from_the_code() {
         body.contains(r#"<form class="audit-form" method="post" action="/audit">"#),
         "{body}"
     );
-    let quick = PlanLimits::quick_audit().max_pages.unwrap_or(0);
+    let free = PlanLimits::for_plan(Plan::Free).max_pages.unwrap_or(0);
     assert!(
-        body.contains(&format!(
-            "Free · up to {quick} pages · takes about a minute."
-        )),
+        body.contains(&format!("Free · up to {free} pages.")),
         "{body}"
     );
 
