@@ -761,7 +761,7 @@ async fn unlocking_emails_a_link_that_attaches_the_audit_and_queues_the_first_cr
             &format!("SELECT count(*) FROM alert_rules WHERE site_id = '{site}'")
         )
         .await,
-        11,
+        codoseo_store::alert_rules::DEFAULT_INSTANT.len() as i64,
         "the default instant rules are on for the attached site"
     );
 
