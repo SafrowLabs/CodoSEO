@@ -120,29 +120,39 @@ async fn the_level_barrier_keeps_depth_exact_with_parallel_fetches() {
 }
 
 #[tokio::test]
-async fn link_graph_uses_page_indices_and_nofollow_is_recorded_not_followed() {
+async fn link_graph_uses_page_indices_and_nofollow_targets_are_fetched() {
     let site = SiteBuilder::new()
         .page(
             "/",
             Page::html(r#"<a href="/x">X</a><a rel="nofollow" href="/nf">NF</a>"#),
         )
         .html("/x", "X", &["/"])
-        .html("/nf", "NF", &[])
+        .html("/nf", "NF", &["/deeper"])
+        .html("/deeper", "Deeper", &[])
         .start()
         .await;
     let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
-    assert!(try_page(&out, "/nf").is_none());
-    assert_eq!(site.path_hits("/nf"), 0);
+    // The page behind a nofollow link is fetched, and so are the pages it links to.
+    assert_eq!(page(&out, "/nf").status, 200);
+    assert_eq!(site.path_hits("/nf"), 1);
+    assert_eq!(depth_of(&out, "/deeper"), Some(2));
     assert_eq!(page(&out, "/").outlinks_nofollow, 1);
-    let e = out
-        .links
-        .edges
-        .iter()
-        .find(|e| out.pages[e.from as usize].url.path() == "/")
-        .unwrap();
-    assert_eq!(out.pages[e.to as usize].url.path(), "/x");
+    let from_home = |to: &str| {
+        out.links
+            .edges
+            .iter()
+            .find(|e| {
+                out.pages[e.from as usize].url.path() == "/"
+                    && out.pages[e.to as usize].url.path() == to
+            })
+            .unwrap()
+    };
+    let e = from_home("/x");
     assert_eq!(out.links.anchor(e), "X");
     assert!(!e.nofollow);
+    let e = from_home("/nf");
+    assert_eq!(out.links.anchor(e), "NF");
+    assert!(e.nofollow, "the edge keeps the flag");
     // /x links back home.
     assert!(out.links.edges.iter().any(|e| {
         out.pages[e.from as usize].url.path() == "/x" && out.pages[e.to as usize].url.path() == "/"
@@ -414,6 +424,24 @@ async fn a_redirect_into_a_robots_disallowed_path_keeps_only_the_redirect_record
     assert_eq!(site.path_hits("/leak"), 0, "its links are not followed");
     assert!(try_page(&out, "/leak").is_none());
     assert_eq!(out.stop, StopReason::Completed);
+}
+
+#[tokio::test]
+async fn a_broken_page_behind_a_nofollow_link_is_found() {
+    let site = SiteBuilder::new()
+        .page(
+            "/",
+            Page::html(r#"<a rel="nofollow ugc noopener" href="/gone">Gone</a>"#),
+        )
+        .start()
+        .await;
+    let out = crawl(cfg(site.url("/")), |_| {}).await.unwrap();
+    assert_eq!(page(&out, "/gone").status, 404);
+    assert!(out.links.edges.iter().any(|e| {
+        out.pages[e.from as usize].url.path() == "/"
+            && out.pages[e.to as usize].url.path() == "/gone"
+            && e.nofollow
+    }));
 }
 
 #[tokio::test]
