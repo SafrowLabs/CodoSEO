@@ -391,8 +391,8 @@ fn counts_are_in_check_id_order_and_checks_passed_follows() {
     let ids: Vec<u8> = r.counts.iter().map(|(c, _)| c.bit()).collect();
     assert!(ids.windows(2).all(|w| w[0] < w[1]));
     assert!(r.counts.iter().all(|(_, n)| *n > 0));
-    assert_eq!(r.checks_total, 44);
-    assert_eq!(usize::from(r.checks_passed), 44 - r.counts.len());
+    assert_eq!(r.checks_total, 47);
+    assert_eq!(usize::from(r.checks_passed), 47 - r.counts.len());
 }
 
 #[test]
@@ -403,4 +403,42 @@ fn check_page_runs_page_checks_only() {
     check_page(&mut p);
     assert!(p.issues.has_check(CheckId::Http4xx));
     assert!(!p.issues.has_check(CheckId::SlowResponse));
+}
+
+#[test]
+fn dead_outbound_targets_flag_every_page_that_uses_them() {
+    use codoseo_core::output::{BrokenTarget, OutboundKind, OutboundReport};
+
+    let mut o = out(vec![home(), pg("/a"), pg("/b")], &[(0, 1), (0, 2)]);
+    let target = |path: &str, kind, from: &[u32]| BrokenTarget {
+        url: u(&format!("https://other.org{path}")),
+        kind,
+        status: 404,
+        from: from.to_vec(),
+    };
+    o.outbound = OutboundReport {
+        checked: 9,
+        unchecked: 0,
+        broken: vec![
+            target("/dead", OutboundKind::Link, &[0, 1]),
+            target("/gone.png", OutboundKind::Image, &[1]),
+            target("/gone.js", OutboundKind::Script, &[2]),
+            target("/gone.css", OutboundKind::Stylesheet, &[2, 99]),
+        ],
+    };
+    let r = run_checks(&mut o);
+    let count = |id: CheckId| {
+        r.counts
+            .iter()
+            .find(|(c, _)| *c == id)
+            .map_or(0, |(_, n)| *n)
+    };
+    assert_eq!(count(CheckId::LinksToBrokenExternal), 2);
+    assert_eq!(count(CheckId::BrokenImages), 1);
+    // A script and a stylesheet on the same page are one affected page.
+    assert_eq!(count(CheckId::BrokenResources), 1);
+    assert!(o.pages[0].issues.has_check(CheckId::LinksToBrokenExternal));
+    assert!(!o.pages[0].issues.has_check(CheckId::BrokenImages));
+    assert!(o.pages[1].issues.has_check(CheckId::BrokenImages));
+    assert!(o.pages[2].issues.has_check(CheckId::BrokenResources));
 }

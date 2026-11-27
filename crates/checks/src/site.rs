@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use codoseo_core::check::{CheckId, IssueBits};
-use codoseo_core::output::{CrawlOutput, StopReason};
+use codoseo_core::output::{CrawlOutput, OutboundKind, StopReason};
 use codoseo_core::page::{Indexability, PageRecord};
 use url::Url;
 
@@ -38,6 +38,20 @@ pub(crate) fn site_issues(out: &CrawlOutput) -> Vec<IssueBits> {
             bits[e.from as usize].set_check(CheckId::LinksToBroken);
         } else if is_redirect(target) {
             bits[e.from as usize].set_check(CheckId::LinksToRedirect);
+        }
+    }
+
+    // What the checks after the crawl found gone, on every page that uses it.
+    for target in &out.outbound.broken {
+        let id = match target.kind {
+            OutboundKind::Link => CheckId::LinksToBrokenExternal,
+            OutboundKind::Image => CheckId::BrokenImages,
+            OutboundKind::Script | OutboundKind::Stylesheet => CheckId::BrokenResources,
+        };
+        for &from in &target.from {
+            if let Some(b) = bits.get_mut(from as usize) {
+                b.set_check(id);
+            }
         }
     }
 

@@ -95,6 +95,7 @@ fn page(path: &str, meta_robots: Option<&str>) -> PageRecord {
 /// A five-page crawl of example.com with the given robots.txt answer.
 fn crawl_of(robots_status: u16, robots_body: &str, meta_robots: Option<&str>) -> CrawlOutput {
     CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse("https://example.com/").unwrap(),
         pages: ["/", "/a", "/b", "/c", "/d"]
             .iter()

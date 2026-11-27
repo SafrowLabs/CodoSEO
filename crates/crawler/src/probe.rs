@@ -622,6 +622,7 @@ pub async fn probe_page(
     };
     let robots_status = file.status;
     let out = CrawlOutput {
+        outbound: Default::default(),
         origin: origin.clone(),
         pages: vec![page],
         links: LinkGraph::default(),

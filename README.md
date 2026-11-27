@@ -7,7 +7,7 @@
 [![License: AGPL-3.0](https://img.shields.io/crates/l/codoseo)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![CI](https://github.com/SafrowLabs/CodoSEO/actions/workflows/ci.yml/badge.svg)](https://github.com/SafrowLabs/CodoSEO/actions/workflows/ci.yml)
 
-CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in Rust. It crawls a site, runs **44 SEO checks** across response health, indexability, on-page factors, content, links, schema and more plus **9 AI & GEO checks** (53 in all), scores the SEO side 0-100, and compares each crawl with the one before so a regression shows up the day it ships. It comes in four forms:
+CodoSEO is a fast, polite, open-source SEO crawler and site auditor written in Rust. It crawls a site, runs **47 SEO checks** across response health, indexability, on-page factors, content, links, schema and more plus **9 AI & GEO checks** (53 in all), scores the SEO side 0-100, and compares each crawl with the one before so a regression shows up the day it ships. It comes in four forms:
 
 - **A CLI** for one-off audits and CI gates (`codoseo crawl`, `codoseo diff`).
 - **A local MCP server** (`codoseo mcp`) so an AI agent such as Claude Code can audit sites from your machine.
@@ -85,7 +85,7 @@ codoseo diff baseline.json audit.json
 # CodoSEO report for https://example.com/
 
 - **Health score:** 84 / 100
-- **Checks:** 37 of 44 checks passed
+- **Checks:** 40 of 47 checks passed
 - **Stop reason:** Completed
 
 ## Critical (1)
@@ -116,7 +116,7 @@ codoseo diff baseline.json audit.json
 
 | Command | Description |
 |---|---|
-| `codoseo crawl <URL>` | Crawl a site, run all 44 SEO checks and the 9 AI & GEO checks, print a report |
+| `codoseo crawl <URL>` | Crawl a site, run all 47 SEO checks and the 9 AI & GEO checks, print a report |
 | `codoseo check <URL>` | Inspect one page: fields, raw HTML content, redirect chain, page-level issues |
 | `codoseo robots <URL>` | Show the site's `robots.txt`, test whether CodoSEObot may fetch a path and what it says to each AI bot |
 | `codoseo bots` | List the AI crawlers, fetchers and control tokens CodoSEO knows (`--format json` prints the public registry file) |
@@ -187,7 +187,7 @@ Run `codoseo <command> --help` for the full flag list.
 
 ---
 
-## The 44 SEO checks
+## The 47 SEO checks
 
 Every crawled page is evaluated against these checks. Severity: **C** = Critical · **W** = Warning · **N** = Notice.
 
@@ -236,6 +236,7 @@ Every crawled page is evaluated against these checks. Severity: **C** = Critical
 |---|---|---|
 | Page content duplicates another page | W | `content_duplicate` |
 | Page has under 200 words | N | `thin_content` |
+| Page has a broken image | W | `broken_images` |
 | Images are missing alt text | N | `images_missing_alt` |
 
 ### Links
@@ -247,6 +248,7 @@ Every crawled page is evaluated against these checks. Severity: **C** = Critical
 | Page links to a redirecting URL | N | `links_to_redirect` |
 | Page has no internal links out | N | `no_internal_outlinks` |
 | Page has nofollow internal links | N | `nofollow_internal_links` |
+| Page links to a broken page on another site | N | `links_to_broken_external` |
 | Page is more than 3 clicks from the homepage | N | `deep_page` |
 
 ### Technical
@@ -255,6 +257,7 @@ Every crawled page is evaluated against these checks. Severity: **C** = Critical
 |---|---|---|
 | HTTPS page loads HTTP resources | W | `mixed_content` |
 | Page is served over HTTP | W | `not_https` |
+| Page loads a broken script or stylesheet | W | `broken_resources` |
 | Response took over 1 second | N | `slow_response` |
 
 ### Sitemap
@@ -275,6 +278,10 @@ Every crawled page is evaluated against these checks. Severity: **C** = Critical
 | Open Graph title or image is missing | N | `og_missing` |
 | Hreflang has no entry for the page itself | N | `hreflang_missing_self` |
 
+### Links to other sites, images, scripts and stylesheets
+
+`links_to_broken_external`, `broken_images` and `broken_resources` come from a pass after the page crawl: each distinct link to another site, image, script and stylesheet gets one request (free plan 300, paid plans 2,000 to 5,000, CLI 2,000 per crawl). Only an answer that plainly means gone is reported: 404 or 410 anywhere, any other 4xx or 5xx on your own host except 401, 403 and 429, or a host that does not exist. A 403, 429 or timeout from another site is not reported, since many sites turn crawlers away while serving visitors. These requests do not count toward the page limit. The page view lists each dead address, and `--format json` carries them as `broken_targets`.
+
 ### Site policy
 
 The [site policy](docs/policy.md) can also change the standard checks: its **check thresholds** set the limits (title and description length, the word count of a thin page, the slow page time, redirect hops, whether missing alt text is checked), and its **exceptions** take a check off the health score for pages matching a pattern (the issue stays listed, marked as excepted).
@@ -291,7 +298,7 @@ Five more checks run only when the site policy declares the rule behind them; th
 
 ## The 9 AI & GEO checks
 
-Next to the 44 SEO checks, every crawl runs 9 AI & GEO checks, one per kind of [AI access](docs/ai-access.md) finding: 44 + 9 = 53 checks in all. They are judged against your intent (which bots you want in or out) and are **not part of the health score**, which stays SEO-only. In CI, `--fail-on geo` (or a single kind) can still fail a build on them ([docs/ci.md](docs/ci.md)).
+Next to the 47 SEO checks, every crawl runs 9 AI & GEO checks, one per kind of [AI access](docs/ai-access.md) finding: 47 + 9 = 56 checks in all. They are judged against your intent (which bots you want in or out) and are **not part of the health score**, which stays SEO-only. In CI, `--fail-on geo` (or a single kind) can still fail a build on them ([docs/ci.md](docs/ci.md)).
 
 | Check | Slug |
 |---|---|
@@ -372,7 +379,7 @@ The action installs the release binary (checksum verified), annotates the run an
 
 ### Health score
 
-The score is 0–100 and reads only the 44 SEO checks. Each check carries a weight proportional to its severity (critical > warning > notice) and the fraction of affected pages. A site where every page fails every check scores 0; a site with no failures scores 100. The site audit's **Fix these, in order** list ranks failing checks by the points fixing each one alone would give back, from the same formula (`codoseo_checks::points_regained`), side by side with the AI access issues and the GEO points they cost ([docs/scores.md](docs/scores.md)).
+The score is 0–100 and reads only the 47 SEO checks. Each check carries a weight proportional to its severity (critical > warning > notice) and the fraction of affected pages. A site where every page fails every check scores 0; a site with no failures scores 100. The site audit's **Fix these, in order** list ranks failing checks by the points fixing each one alone would give back, from the same formula (`codoseo_checks::points_regained`), side by side with the AI access issues and the GEO points they cost ([docs/scores.md](docs/scores.md)).
 
 ---
 
@@ -504,7 +511,7 @@ The project is a Cargo workspace:
 crates/
   core/       — shared types: URLs, page records, check IDs, audit format
   crawler/    — fetcher, robots.txt, sitemaps, politeness, crawl loop
-  checks/     — the 44 SEO check definitions, scoring, site-wide analysis
+  checks/     — the 47 SEO check definitions, scoring, site-wide analysis
   diff/       — audit comparison engine
   geo/        — AI bot registry (CC0 data), robots.txt verdicts, AI access report and findings
   mcp/        — MCP server: the 12 local tools and the hosted tools, over rmcp

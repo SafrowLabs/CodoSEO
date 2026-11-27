@@ -2,7 +2,7 @@
 
 > Open-source SEO crawler and site monitor built in Rust. Know the moment your SEO breaks.
 
-CodoSEO is a command-line tool, web app and MCP server for technical SEO auditing and monitoring. Current release: 0.1.0-rc.1. It crawls a website, runs 44 SEO checks across 9 categories, scores the site 0–100, and can diff two audits to catch regressions in CI. Built by SafrowLabs (the team behind RankOrg) and licensed AGPL-3.0.
+CodoSEO is a command-line tool, web app and MCP server for technical SEO auditing and monitoring. Current release: 0.1.0-rc.1. It crawls a website, runs 47 SEO checks across 9 categories, scores the site 0–100, and can diff two audits to catch regressions in CI. Built by SafrowLabs (the team behind RankOrg) and licensed AGPL-3.0.
 
 ## Install
 
@@ -16,15 +16,15 @@ Prebuilt binaries: https://github.com/SafrowLabs/CodoSEO/releases
 
 ## Commands
 
-- `codoseo crawl <URL>` — crawl a site, run all 44 checks, print a report
+- `codoseo crawl <URL>` — crawl a site, run all 47 checks, print a report
 - `codoseo check <URL>` — inspect a single page: fields, redirect chain, page issues
 - `codoseo robots <URL>` — fetch and display robots.txt, test a path
 - `codoseo redirects <URL>` — follow a URL's redirect chain hop by hop
 - `codoseo diff <BEFORE> <AFTER>` — compare two saved JSON audits
 
-## The 44 SEO checks
+## The 47 SEO checks
 
-Categories: Response (6), Indexability (6), On-Page (12), Content (3), Links (6), Technical (3), Sitemap (5), Social (1), Schema (2).
+Categories: Response (6), Indexability (6), On-Page (12), Content (4), Links (7), Technical (4), Sitemap (5), Social (1), Schema (2).
 
 Severities: Critical (exits 1 with --fail-on critical), Warning, Notice.
 

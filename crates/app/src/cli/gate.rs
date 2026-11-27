@@ -713,6 +713,7 @@ mod tests {
             ..PolicyReport::default()
         };
         Audit {
+            broken_targets: Default::default(),
             format_version: 1,
             tool_version: "test".to_owned(),
             created_at: 0,

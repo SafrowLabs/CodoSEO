@@ -105,6 +105,9 @@ check_ids! {
     PolicyKeepOutPartial = 46 => "policy_keep_out_partial",
     PolicyParamCanonical = 47 => "policy_param_canonical",
     MustWorkFailed = 48 => "must_work_failed",
+    LinksToBrokenExternal = 49 => "links_to_broken_external",
+    BrokenImages = 50 => "broken_images",
+    BrokenResources = 51 => "broken_resources",
 }
 
 // IDs are unique, below 64, and `ALL` lists them in ascending order. Each ID is written

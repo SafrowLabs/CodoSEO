@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
+use codoseo_core::output::OutboundKind;
 use codoseo_core::page::{AiMeta, JsonLdStatus, MountPoint, OgTags, PageFields, RawSignals};
 use codoseo_core::url::normalize;
 use encoding_rs::{Decoder, Encoding, UTF_8, UTF_16BE, UTF_16LE};
@@ -71,10 +72,18 @@ pub struct Link {
     pub nofollow: bool,
 }
 
+/// An image, script or stylesheet the page loads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Resource {
+    pub url: Url,
+    pub kind: OutboundKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Extracted {
     pub fields: PageFields,
     pub links: Vec<Link>,
+    pub resources: Vec<Resource>,
 }
 
 /// Extracts everything from a complete body in one call.
@@ -356,13 +365,16 @@ fn build_rewriter(
             if !el.has_attribute("alt") {
                 st.images_missing_alt += 1;
             }
-            st.check_mixed(el.get_attribute("src").as_deref());
+            let src = el.get_attribute("src");
+            st.check_mixed(src.as_deref());
+            st.resource(src, OutboundKind::Image);
             Ok(())
         }))
         .append_element_content_handler(element!("script", move |el| {
             let mut st = s_script.borrow_mut();
             let src = el.get_attribute("src");
             st.check_mixed(src.as_deref());
+            st.resource(src.clone(), OutboundKind::Script);
             let is_jsonld = el
                 .get_attribute("type")
                 .is_some_and(|t| t.trim().eq_ignore_ascii_case("application/ld+json"));
@@ -448,6 +460,9 @@ struct RawLink {
     anchor: String,
     nofollow: bool,
 }
+
+/// The most images, scripts and stylesheets kept from one page.
+const MAX_RESOURCES: usize = 500;
 
 /// Counts words and hashes the visible text with whitespace collapsed.
 struct WordCounter {
@@ -610,6 +625,7 @@ struct State {
     h2: Vec<String>,
     heading: Option<(u8, String)>,
     links_raw: Vec<RawLink>,
+    resources_raw: Vec<(String, OutboundKind)>,
     anchor_open: bool,
     images_missing_alt: u32,
     og: OgTags,
@@ -663,6 +679,7 @@ impl State {
             h2: Vec::new(),
             heading: None,
             links_raw: Vec::new(),
+            resources_raw: Vec::new(),
             anchor_open: false,
             images_missing_alt: 0,
             og: OgTags::default(),
@@ -811,13 +828,30 @@ impl State {
                             .push((lang.trim().to_owned(), href.clone()));
                     }
                 }
-                "stylesheet" => self.check_mixed(Some(&href)),
+                "stylesheet" => {
+                    self.check_mixed(Some(&href));
+                    self.resource(Some(href.clone()), OutboundKind::Stylesheet);
+                }
                 // A module the page will run: SvelteKit and Vite list their chunks this way and
                 // load them from an inline script, with no `<script src>` at all.
                 "modulepreload" => self.scripts_external = self.scripts_external.saturating_add(1),
                 _ => {}
             }
         }
+    }
+
+    /// Keeps the address of an image, script or stylesheet for the status checks. Inline
+    /// `data:` content has nothing to request.
+    fn resource(&mut self, src: Option<String>, kind: OutboundKind) {
+        let Some(src) = src else { return };
+        let trimmed = src.trim_start();
+        let inline = trimmed
+            .get(..5)
+            .is_some_and(|p| p.eq_ignore_ascii_case("data:"));
+        if trimmed.is_empty() || inline || self.resources_raw.len() >= MAX_RESOURCES {
+            return;
+        }
+        self.resources_raw.push((src, kind));
     }
 
     fn check_mixed(&mut self, src: Option<&str>) {
@@ -905,6 +939,16 @@ impl State {
             })
             .collect();
 
+        let mut seen = HashSet::new();
+        let resources = self
+            .resources_raw
+            .drain(..)
+            .filter_map(|(raw, kind)| {
+                let url = resolve(&raw)?;
+                seen.insert(url.clone()).then_some(Resource { url, kind })
+            })
+            .collect();
+
         let jsonld = if self.jsonld_invalid {
             JsonLdStatus::Invalid
         } else if self.jsonld_too_large {
@@ -951,7 +995,11 @@ impl State {
                 noscript_js: self.noscript_js,
             },
         };
-        Extracted { fields, links }
+        Extracted {
+            fields,
+            links,
+            resources,
+        }
     }
 }
 

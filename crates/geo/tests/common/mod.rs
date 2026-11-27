@@ -84,6 +84,7 @@ impl PageExt for PageRecord {
 /// allows everything.
 pub fn crawl(pages: Vec<PageRecord>) -> CrawlOutput {
     CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse(ORIGIN).expect("origin"),
         pages,
         links: LinkGraph::default(),

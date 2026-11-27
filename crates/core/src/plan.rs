@@ -49,6 +49,8 @@ pub struct PlanLimits {
     pub probe_max_requests: u16,
     /// Links from the site's `llms.txt` that get a status check of their own per crawl.
     pub llms_link_checks: u16,
+    /// Links to other sites, images, scripts and stylesheets that get a status check per crawl.
+    pub outbound_checks: u32,
     /// Manual AI access rechecks an account may ask for in 24 hours (follow-ups the system
     /// queues don't count); `None` means unlimited.
     pub ai_rechecks_per_day: Option<u16>,
@@ -75,6 +77,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(45),
                 probe_max_requests: 30,
                 llms_link_checks: 5,
+                outbound_checks: 300,
                 ai_rechecks_per_day: Some(3),
                 max_must_work: Some(5),
             },
@@ -91,6 +94,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(90),
                 probe_max_requests: 70,
                 llms_link_checks: 20,
+                outbound_checks: 2000,
                 ai_rechecks_per_day: Some(20),
                 max_must_work: Some(20),
             },
@@ -107,6 +111,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(120),
                 probe_max_requests: 120,
                 llms_link_checks: 20,
+                outbound_checks: 5000,
                 ai_rechecks_per_day: Some(60),
                 max_must_work: Some(50),
             },
@@ -126,6 +131,7 @@ impl PlanLimits {
                 probe_budget: Duration::from_secs(180),
                 probe_max_requests: 160,
                 llms_link_checks: 20,
+                outbound_checks: 5000,
                 ai_rechecks_per_day: None,
                 max_must_work: None,
             },
@@ -149,6 +155,7 @@ impl PlanLimits {
             probe_max_requests: 0,
             // A few of llms.txt's links, for its GEO check.
             llms_link_checks: 5,
+            outbound_checks: 100,
             ai_rechecks_per_day: Some(0),
             // A no-signup audit is judged under the default policy, which lists none.
             max_must_work: Some(0),

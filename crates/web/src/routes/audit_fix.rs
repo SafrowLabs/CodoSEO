@@ -747,6 +747,18 @@ pub fn seo_hint(id: CheckId) -> (&'static str, &'static str) {
             "Visitors and crawlers follow links to dead pages.",
             "Update or remove the links that point to broken URLs.",
         ),
+        CheckId::LinksToBrokenExternal => (
+            "Visitors who click through land on a page that is gone.",
+            "Point each link at a page that still exists, or remove it.",
+        ),
+        CheckId::BrokenImages => (
+            "The image does not load, so visitors see a gap and image search has nothing to show.",
+            "Upload the missing image again, or fix or remove the image address.",
+        ),
+        CheckId::BrokenResources => (
+            "A script or stylesheet does not load, so the page can look or behave wrong.",
+            "Restore the missing file, or fix or remove the tag that loads it.",
+        ),
         CheckId::LinksToRedirect => (
             "Each link costs crawlers an extra hop.",
             "Update the links to point at the final URLs.",

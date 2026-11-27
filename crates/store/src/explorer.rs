@@ -510,6 +510,34 @@ pub async fn inlinks(
     .await
 }
 
+/// Something a page links to or loads that the checks after the crawl found gone.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct BrokenTarget {
+    /// `link`, `image`, `script` or `stylesheet`.
+    pub kind: String,
+    /// What it answered; 0 when the host does not exist or refused the connection.
+    pub status: i16,
+    pub target_url: String,
+}
+
+/// Up to `limit` dead links, images, scripts and stylesheets on the page with `url_hash`.
+pub async fn broken_targets(
+    pool: &PgPool,
+    crawl_id: Uuid,
+    url_hash: u64,
+    limit: i64,
+) -> Result<Vec<BrokenTarget>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT kind, status, target_url FROM broken_targets \
+         WHERE crawl_id = $1 AND from_url_hash = $2 ORDER BY kind, target_url LIMIT $3",
+    )
+    .bind(crawl_id)
+    .bind(hash::to_db(url_hash))
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
 /// What the site graph draws for one page of a crawl.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphPage {

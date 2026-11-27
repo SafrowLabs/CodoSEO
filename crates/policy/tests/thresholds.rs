@@ -82,6 +82,7 @@ fn with_words(path: &str, words: u32) -> PageRecord {
 
 fn out(pages: Vec<PageRecord>) -> CrawlOutput {
     CrawlOutput {
+        outbound: Default::default(),
         origin: url("/"),
         pages,
         links: LinkGraph::default(),
@@ -224,7 +225,7 @@ fn thresholds_flag_and_unflag_pages() {
         flagged(&o, CheckId::RedirectChain),
         ["/hops/two", "/hops/three"]
     );
-    assert_eq!(r.checks_total, 44);
+    assert_eq!(r.checks_total, 47);
 
     let mut p = SitePolicy::default();
     let t = &mut p.seo.thresholds;
@@ -249,7 +250,7 @@ fn thresholds_flag_and_unflag_pages() {
     assert!(flagged(&o, CheckId::DescriptionTooLong).is_empty());
     assert!(flagged(&o, CheckId::DescriptionTooShort).is_empty());
     // The image alt check is off, so it is not one of the checks run.
-    assert_eq!(r.checks_total, 43);
+    assert_eq!(r.checks_total, 46);
     assert_eq!(
         usize::from(r.checks_passed) + r.counts.len(),
         usize::from(r.checks_total)

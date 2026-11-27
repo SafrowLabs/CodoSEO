@@ -61,7 +61,7 @@ use Scope::{Page, Site, SiteWide};
 use Severity::{Critical as C, Notice as N, Warning as W};
 
 /// Every check, in `CheckId` order.
-pub static CHECKS: [CheckDef; 49] = [
+pub static CHECKS: [CheckDef; 52] = [
     d(
         CheckId::Http4xx,
         C,
@@ -392,6 +392,27 @@ pub static CHECKS: [CheckDef; 49] = [
         Policy,
         Page,
         "Must-work page doesn't answer 200 or isn't indexable",
+    ),
+    d(
+        CheckId::LinksToBrokenExternal,
+        N,
+        Links,
+        Site,
+        "Page links to a broken page on another site",
+    ),
+    d(
+        CheckId::BrokenImages,
+        W,
+        Content,
+        Site,
+        "Page has a broken image",
+    ),
+    d(
+        CheckId::BrokenResources,
+        W,
+        Technical,
+        Site,
+        "Page loads a broken script or stylesheet",
     ),
 ];
 

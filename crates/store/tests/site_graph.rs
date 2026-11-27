@@ -79,6 +79,7 @@ async fn crawl(pool: &PgPool, site: Uuid, pages: Vec<PageRecord>, links: &[(u32,
     .await
     .unwrap();
     let out = CrawlOutput {
+        outbound: Default::default(),
         origin: url("/"),
         pages,
         links: LinkGraph {

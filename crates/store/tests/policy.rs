@@ -183,6 +183,7 @@ async fn full_crawl(pool: &PgPool, site: Uuid, robots: &str) -> Uuid {
     .await
     .unwrap();
     let out = CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse("https://example.com/").unwrap(),
         pages: ["/", "/a", "/b"].iter().map(|p| page(p)).collect(),
         links: LinkGraph::default(),
@@ -425,6 +426,7 @@ async fn checked_crawl(pool: &PgPool, site: Uuid, pages: Vec<PageRecord>) -> Uui
     .await
     .unwrap();
     let mut out = CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse("https://example.com/").unwrap(),
         pages,
         links: LinkGraph::default(),

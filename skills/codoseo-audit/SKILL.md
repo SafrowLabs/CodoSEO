@@ -7,7 +7,7 @@ compatibility: Needs the CodoSEO MCP server (local `codoseo mcp`, or https://cod
 
 # CodoSEO audit
 
-CodoSEO crawls a site and runs 44 SEO checks (they make the 0-100 health score) and 9 AI & GEO checks (who among the AI bots may read the site, whether pages can be quoted in AI answers, and whether robots.txt declares Content Signals and the home page has a Markdown version; never part of the health score). This skill is how to run it, read it and turn it into fixes.
+CodoSEO crawls a site and runs 47 SEO checks (they make the 0-100 health score) and 9 AI & GEO checks (who among the AI bots may read the site, whether pages can be quoted in AI answers, and whether robots.txt declares Content Signals and the home page has a Markdown version; never part of the health score). This skill is how to run it, read it and turn it into fixes.
 
 ## Pick the tool you have
 

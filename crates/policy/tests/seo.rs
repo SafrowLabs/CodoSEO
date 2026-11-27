@@ -578,6 +578,7 @@ must_work = ["/", "/pricing", "/checkout/cart"]
 
 fn crawl(pages: Vec<PageRecord>) -> (CrawlOutput, CrawlReport) {
     let out = CrawlOutput {
+        outbound: Default::default(),
         origin: url("/"),
         pages,
         links: LinkGraph::default(),
@@ -629,7 +630,7 @@ fn the_policy_pass_sets_bits_counts_and_rescores() {
         report.counts,
         [(CheckId::Noindex, 1), (CheckId::MustWorkFailed, 1)]
     );
-    assert_eq!((report.checks_passed, report.checks_total), (43, 45));
+    assert_eq!((report.checks_passed, report.checks_total), (46, 48));
     assert!(report.health_score < 100);
     let again = report.clone();
     apply_to_crawl(&p, &mut out, &mut report, &HashSet::new(), &[]);

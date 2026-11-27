@@ -90,6 +90,7 @@ mod tests {
 
     fn sample_audit() -> Audit {
         Audit {
+            broken_targets: Default::default(),
             format_version: AUDIT_FORMAT_VERSION,
             tool_version: "0.0.1".to_owned(),
             created_at: 1_700_000_000,

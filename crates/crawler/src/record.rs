@@ -7,7 +7,7 @@ use codoseo_core::page::{FetchFailure, Indexability, PageFields, PageRecord, ind
 use codoseo_core::url::{normalize, url_hash};
 use url::Url;
 
-use crate::extract::{Link, extract};
+use crate::extract::{Link, Resource, extract};
 use crate::fetch::{FetchError, FetchResult};
 use crate::scope::SiteScope;
 
@@ -15,6 +15,8 @@ use crate::scope::SiteScope;
 pub(crate) struct Built {
     pub record: PageRecord,
     pub links: Vec<Link>,
+    /// The images, scripts and stylesheets the page loads.
+    pub resources: Vec<Resource>,
     /// False when the page's links must not be queued: the response is not a readable HTML
     /// page. A `nofollow` in the page's robots meta or header does not stop the crawl, since
     /// the links still have to be checked.
@@ -52,6 +54,7 @@ pub(crate) fn from_fetch(
     let mut built = vec![Built {
         record,
         links: Vec::new(),
+        resources: Vec::new(),
         follow_links: false,
     }];
 
@@ -85,13 +88,13 @@ fn page(
     record.size_bytes = res.size_bytes;
     record.content_type = res.content_type.clone();
 
-    let links = match &res.body {
+    let (links, resources) = match &res.body {
         Some(body) => {
             let extracted = extract(url, res.content_type.as_deref(), body);
             record.fields = extracted.fields;
-            extracted.links
+            (extracted.links, extracted.resources)
         }
-        None => Vec::new(),
+        None => (Vec::new(), Vec::new()),
     };
     record.fields.x_robots_tag = res.x_robots_tag.clone();
     record.indexability = indexability(url, record.status, &record.fields, false);
@@ -118,6 +121,7 @@ fn page(
     Built {
         record,
         links,
+        resources,
         follow_links,
     }
 }
