@@ -12,6 +12,7 @@ use common::sample_record;
 
 fn output() -> CrawlOutput {
     CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse("https://e.com/").unwrap(),
         pages: vec![sample_record()],
         links: LinkGraph::default(),
@@ -27,6 +28,7 @@ fn output() -> CrawlOutput {
 fn audit() -> Audit {
     let out = output();
     Audit {
+        broken_targets: Default::default(),
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: "0.0.1".into(),
         created_at: 1_790_000_000,

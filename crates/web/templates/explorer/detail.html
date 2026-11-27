@@ -14,6 +14,7 @@
       {% for f in d.fields %}<div class="field-row"><span class="k">{{ f.k }}</span><span class="v {{ f.class }}" title="{{ f.v }}">{% if let Some(h) = f.href %}<a class="url" href="{{ h }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ f.v }}</a>{% else %}{{ f.v }}{% endif %}</span></div>
       {% endfor %}
       <div class="field-row" style="grid-column:1/-1"><span class="k">Issues</span><span class="v" style="white-space:normal;display:flex;flex-wrap:wrap;gap:6px">{% for i in d.issues %}<a class="badge {{ i.sev }}" href="{{ i.href }}">{{ i.title }}</a>{% if let Some(note) = i.excepted %}<span class="tag" title="{{ note }}">Excepted · {{ note }}</span>{% endif %}{% else %}<span class="c-ok">No issues on this URL</span>{% endfor %}</span></div>
+      {% if !d.broken.is_empty() %}<div class="field-row" style="grid-column:1/-1"><span class="k">Broken on this page</span><span class="v" style="white-space:normal;display:flex;flex-direction:column;gap:4px">{% for b in d.broken %}<span><span class="badge warning">{{ b.kind }} · {{ b.status }}</span> <a class="url" href="{{ b.url }}" target="_blank" rel="noopener noreferrer nofollow" hx-boost="false">{{ b.url }}</a></span>{% endfor %}</span></div>{% endif %}
     </div>
   {% endif %}
   {% if let Some(s) = p.serp %}

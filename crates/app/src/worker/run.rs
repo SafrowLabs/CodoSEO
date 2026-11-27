@@ -359,6 +359,7 @@ async fn run_one_crawl(
             max_pages,
             max_duration,
             llms_link_checks: limits.llms_link_checks,
+            outbound_checks: limits.outbound_checks,
             ..CrawlLimits::default()
         },
         politeness: Politeness::default(),

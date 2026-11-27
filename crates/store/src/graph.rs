@@ -391,6 +391,7 @@ mod tests {
     fn output() -> CrawlOutput {
         let long = "é".repeat(250);
         CrawlOutput {
+            outbound: Default::default(),
             origin: Url::parse("https://e.com/").unwrap(),
             pages: vec![
                 page(0, Some(0)),

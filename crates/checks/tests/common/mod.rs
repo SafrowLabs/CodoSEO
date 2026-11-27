@@ -83,6 +83,7 @@ pub fn home() -> PageRecord {
 /// A crawl of `pages` with one edge per `(from, to)` pair and a 3-URL sitemap.
 pub fn out(pages: Vec<PageRecord>, edges: &[(u32, u32)]) -> CrawlOutput {
     CrawlOutput {
+        outbound: Default::default(),
         origin: u("https://e.com/"),
         pages,
         links: LinkGraph {

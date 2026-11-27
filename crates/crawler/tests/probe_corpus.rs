@@ -714,6 +714,7 @@ fn crawl_of(site: &TestSite, paths: &[&str], robots: &str) -> CrawlOutput {
         })
         .collect();
     CrawlOutput {
+        outbound: Default::default(),
         origin: site.url("/"),
         pages,
         links: LinkGraph::default(),

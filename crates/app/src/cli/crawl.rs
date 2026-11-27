@@ -196,7 +196,9 @@ pub async fn run(args: CrawlArgs) -> Outcome {
             Some(&access),
         ))
     });
+    let broken_targets = std::mem::take(&mut out.outbound.broken);
     let audit = Audit {
+        broken_targets,
         format_version: AUDIT_FORMAT_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
         created_at: SystemTime::now()

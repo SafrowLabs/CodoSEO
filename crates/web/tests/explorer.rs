@@ -608,3 +608,52 @@ async fn empty_state_before_the_first_crawl() {
     )));
     assert!(!res.body.contains("grid-row"));
 }
+
+#[tokio::test]
+async fn details_name_the_dead_links_and_files_on_the_page() {
+    let (app, site, cookie) = setup().await;
+    let crawl: uuid::Uuid = sqlx::query_scalar(
+        "SELECT id FROM crawls WHERE site_id = $1 ORDER BY finished_at DESC LIMIT 1",
+    )
+    .bind(site.id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let hash = u64::from_str_radix(&hash_hex("/down"), 16)
+        .unwrap()
+        .cast_signed();
+    for (kind, status, url) in [
+        ("link", 404_i16, "https://other.example/dead"),
+        ("image", 0, "https://cdn.example/gone.png"),
+    ] {
+        sqlx::query(
+            "INSERT INTO broken_targets (crawl_id, from_url_hash, kind, status, target_url) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(crawl)
+        .bind(hash)
+        .bind(kind)
+        .bind(status)
+        .bind(url)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    }
+    let detail = |path: &str| {
+        let url = format!(
+            "/s/{}/explorer/detail?sel={}&tab=details",
+            site.id,
+            hash_hex(path)
+        );
+        let app = &app;
+        let cookie = cookie.clone();
+        async move { app.get_hx(&url, Some(&cookie)).await.body }
+    };
+    let b = detail("/down").await;
+    assert!(b.contains("Broken on this page"), "{b}");
+    assert!(b.contains("Link · 404"), "{b}");
+    assert!(b.contains("https://other.example/dead"));
+    assert!(b.contains("Image · No answer"), "{b}");
+    // A page with nothing dead on it has no such row.
+    assert!(!detail("/old").await.contains("Broken on this page"));
+}

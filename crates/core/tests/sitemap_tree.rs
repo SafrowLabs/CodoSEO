@@ -152,6 +152,7 @@ fn samples_stop_at_ten_per_bucket() {
 #[test]
 fn an_output_without_sitemap_files_still_reads() {
     let out = CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse("https://e.com/").unwrap(),
         pages: Vec::new(),
         links: LinkGraph::default(),

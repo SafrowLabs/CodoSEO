@@ -104,7 +104,9 @@ impl Backend for LocalBackend {
                     let report = run_checks(&mut out);
                     // The same section `codoseo crawl` saves, under the default intent.
                     let ai_access = codoseo_geo::assess_with_defaults(&out);
+                    let broken_targets = std::mem::take(&mut out.outbound.broken);
                     let audit = Audit {
+                        broken_targets,
                         format_version: AUDIT_FORMAT_VERSION,
                         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
                         created_at: now_secs(),

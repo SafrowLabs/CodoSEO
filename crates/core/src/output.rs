@@ -34,6 +34,70 @@ impl LinkGraph {
     }
 }
 
+/// What a page points at that is not one of the site's pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutboundKind {
+    /// An `<a href>` to another site.
+    Link,
+    /// An `<img src>`, on any host.
+    Image,
+    /// A `<script src>`, on any host.
+    Script,
+    /// A `<link rel="stylesheet">`, on any host.
+    Stylesheet,
+}
+
+impl OutboundKind {
+    pub fn slug(self) -> &'static str {
+        match self {
+            OutboundKind::Link => "link",
+            OutboundKind::Image => "image",
+            OutboundKind::Script => "script",
+            OutboundKind::Stylesheet => "stylesheet",
+        }
+    }
+
+    pub fn from_slug(s: &str) -> Option<OutboundKind> {
+        [
+            OutboundKind::Link,
+            OutboundKind::Image,
+            OutboundKind::Script,
+            OutboundKind::Stylesheet,
+        ]
+        .into_iter()
+        .find(|k| k.slug() == s)
+    }
+}
+
+/// A link to another site, or an image, script or stylesheet, that is gone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrokenTarget {
+    pub url: Url,
+    pub kind: OutboundKind,
+    /// What it answered; 0 when the host does not exist or refused the connection.
+    pub status: u16,
+    /// Indices into `CrawlOutput::pages` of the pages that use it.
+    pub from: Vec<u32>,
+}
+
+/// The status checks of what pages point at beyond the site's own pages. One request per
+/// distinct address; only the dead ones are kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutboundReport {
+    /// Distinct addresses that got a request.
+    pub checked: u32,
+    /// Distinct addresses left out by the cap, the time limit or robots.txt.
+    pub unchecked: u32,
+    pub broken: Vec<BrokenTarget>,
+}
+
+impl OutboundReport {
+    pub fn is_empty(&self) -> bool {
+        *self == OutboundReport::default()
+    }
+}
+
 /// Why a crawl ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "reason")]
@@ -457,6 +521,9 @@ pub struct CrawlOutput {
     pub duration_ms: u64,
     #[serde(default)]
     pub signals: SiteSignals,
+    /// Empty when the checks are off or nothing was checked.
+    #[serde(default, skip_serializing_if = "OutboundReport::is_empty")]
+    pub outbound: OutboundReport,
 }
 
 #[cfg(test)]

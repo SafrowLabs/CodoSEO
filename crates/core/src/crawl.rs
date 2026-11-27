@@ -31,6 +31,14 @@ pub struct CrawlLimits {
     /// How many links from `llms.txt` get a status check; the rest count as unchecked.
     #[serde(default = "default_llms_link_checks")]
     pub llms_link_checks: u16,
+    /// How many links to other sites, images, scripts and stylesheets get a status check after
+    /// the pages are crawled; the rest count as unchecked. 0 switches the checks off.
+    #[serde(default = "default_outbound_checks")]
+    pub outbound_checks: u32,
+}
+
+fn default_outbound_checks() -> u32 {
+    2000
 }
 
 fn default_llms_link_checks() -> u16 {
@@ -47,6 +55,7 @@ impl Default for CrawlLimits {
             max_redirects: 10,
             max_sitemap_urls: 50_000,
             llms_link_checks: default_llms_link_checks(),
+            outbound_checks: default_outbound_checks(),
         }
     }
 }

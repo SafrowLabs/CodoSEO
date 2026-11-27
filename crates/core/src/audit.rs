@@ -38,6 +38,12 @@ pub struct Audit {
     /// require it. Adding it did not change [`AUDIT_FORMAT_VERSION`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<serde_json::Value>,
+    /// The links to other sites, images, scripts and stylesheets found gone, each with the
+    /// pages that use it (`from`: indices into `snapshot.pages`). Empty when none were found or
+    /// the checks did not run; absent in audits saved before they existed. Adding it did not
+    /// change [`AUDIT_FORMAT_VERSION`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub broken_targets: Vec<crate::output::BrokenTarget>,
 }
 
 impl Audit {

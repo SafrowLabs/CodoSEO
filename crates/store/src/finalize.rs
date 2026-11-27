@@ -69,6 +69,7 @@ pub async fn finalize_with_policy(
 
     copy_pages(&mut tx, crawl_id, site_id, &out.pages).await?;
     copy_inlinks(&mut tx, crawl_id, out, report).await?;
+    copy_broken_targets(&mut tx, crawl_id, out).await?;
     graph::write(&mut tx, crawl_id, out).await?;
     insert_site_files(&mut tx, crawl_id, site_id, out).await?;
     insert_changes(&mut tx, crawl_id, site_id, changes).await?;
@@ -124,7 +125,13 @@ pub async fn finalize_with_policy(
     }
 
     // Keep only the latest 2 `done` crawls' per-URL data (spec section 6).
-    for table in ["pages", "inlinks", "site_files", "crawl_graphs"] {
+    for table in [
+        "pages",
+        "inlinks",
+        "broken_targets",
+        "site_files",
+        "crawl_graphs",
+    ] {
         let sql = format!(
             "DELETE FROM {table} WHERE crawl_id IN (\
                SELECT id FROM crawls WHERE site_id = $1 AND status = 'done' \
@@ -424,6 +431,58 @@ async fn copy_inlinks(
         if (i + 1) % COPY_BATCH == 0 {
             copy.send(buf.as_bytes()).await?;
             buf.clear();
+        }
+    }
+    if !buf.is_empty() {
+        copy.send(buf.as_bytes()).await?;
+    }
+    copy.finish().await?;
+    Ok(())
+}
+
+/// The most `broken_targets` rows one crawl stores: a dead footer link on a large site would
+/// otherwise write a row per page. The page bits still mark every affected page.
+const MAX_BROKEN_TARGET_ROWS: usize = 20_000;
+
+async fn copy_broken_targets(
+    tx: &mut Transaction<'_, Postgres>,
+    crawl_id: Uuid,
+    out: &CrawlOutput,
+) -> Result<(), sqlx::Error> {
+    if out.outbound.broken.is_empty() {
+        return Ok(());
+    }
+    let mut copy = tx
+        .copy_in_raw(
+            "COPY broken_targets (crawl_id, from_url_hash, kind, status, target_url) \
+             FROM STDIN WITH (FORMAT text)",
+        )
+        .await?;
+    let mut buf = String::new();
+    let mut rows = 0usize;
+    'targets: for target in &out.outbound.broken {
+        for &from in &target.from {
+            let Some(page) = out.pages.get(from as usize) else {
+                continue;
+            };
+            if rows >= MAX_BROKEN_TARGET_ROWS {
+                break 'targets;
+            }
+            rows += 1;
+            buf.push_str(&crawl_id.to_string());
+            buf.push('\t');
+            buf.push_str(&hash::to_db(page.url_hash).to_string());
+            buf.push('\t');
+            buf.push_str(target.kind.slug());
+            buf.push('\t');
+            buf.push_str(&target.status.to_string());
+            buf.push('\t');
+            buf.push_str(&escape(target.url.as_str()));
+            buf.push('\n');
+            if rows.is_multiple_of(COPY_BATCH) {
+                copy.send(buf.as_bytes()).await?;
+                buf.clear();
+            }
         }
     }
     if !buf.is_empty() {

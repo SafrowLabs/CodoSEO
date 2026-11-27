@@ -619,6 +619,7 @@ mod tests {
         use codoseo_core::snapshot::Snapshot;
         let url = Url::parse("https://example.com/").unwrap();
         Audit {
+            broken_targets: Default::default(),
             format_version: AUDIT_FORMAT_VERSION,
             tool_version: "0.0.1".to_owned(),
             created_at: 0,

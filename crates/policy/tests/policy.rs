@@ -305,6 +305,7 @@ fn page(path: &str) -> PageRecord {
 
 fn report(robots: &str) -> AccessReport {
     let out = CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse("https://example.com/").unwrap(),
         pages: ["/", "/a"].iter().map(|p| page(p)).collect(),
         links: LinkGraph::default(),

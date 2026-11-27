@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use codoseo_core::crawl::{CrawlConfig, RobotsFile, SitemapSummary};
 use codoseo_core::output::{
-    CrawlOutput, Edge, LinkGraph, LiveFiles, LivePhase, Progress, SiteSignals, StopReason,
+    CrawlOutput, Edge, LinkGraph, LiveFiles, LivePhase, OutboundKind, OutboundReport, Progress,
+    SiteSignals, StopReason,
 };
 use codoseo_core::page::PageRecord;
 use codoseo_core::sitemap::SitemapFile;
@@ -27,6 +28,7 @@ use crate::frontier::{Frontier, Queued};
 use crate::icon::fetch_icon;
 use crate::llms::{LinkCheck, check_links, fetch_llms_txt};
 use crate::markdown::fetch_markdown;
+use crate::outbound::{self, Targets};
 use crate::politeness::{Limiter, retry_after_of};
 use crate::preflight::{BLOCKED_MSG, LOGIN_MSG, Preflight, fetch_tdmrep, origin_of, preflight};
 use crate::record::{self, Built};
@@ -130,6 +132,7 @@ pub async fn crawl_shared(
             stop: StopReason::TimeLimit,
             duration_ms: elapsed_ms(started),
             signals: SiteSignals::default(),
+            outbound: OutboundReport::default(),
         });
     };
     let Preflight {
@@ -215,7 +218,22 @@ pub async fn crawl_shared(
         };
         check_links(llms, &run.pages, check).await;
     }
-    Ok(run.finish(origin, robots, sitemap, sitemap_files, signals))
+    // A site that blocked or failed the crawl gets no more requests, and what its few pages
+    // point at says little.
+    let outbound = if run.stop.is_none() {
+        let check = outbound::Check {
+            fetcher: &fetcher,
+            limiter: &limiter,
+            rules: &run.rules,
+            scope: &run.scope,
+            max_checks: cfg.limits.outbound_checks,
+            deadline,
+        };
+        outbound::check(std::mem::take(&mut run.outbound), check).await
+    } else {
+        OutboundReport::default()
+    };
+    Ok(run.finish(origin, robots, sitemap, sitemap_files, signals, outbound))
 }
 
 /// Fetches `cfg.start_url` once, without reading robots.txt, and returns the record of
@@ -316,6 +334,8 @@ struct Run {
     pages: Vec<PageRecord>,
     edges: Vec<PendingEdge>,
     anchors: HashMap<String, u32>,
+    /// Links to other sites and the resources pages load, for the checks after the crawl.
+    outbound: Targets,
     /// URLs already retried once after a 429 or 503.
     retried: HashSet<u64>,
     connections: usize,
@@ -349,6 +369,7 @@ impl Run {
             pages: Vec::new(),
             edges: Vec::new(),
             anchors: HashMap::new(),
+            outbound: Targets::default(),
             retried: HashSet::new(),
             connections: cfg.politeness.per_site_connections.max(1) as usize,
             fetch_timeout: cfg.limits.request_timeout.saturating_mul(2),
@@ -522,6 +543,14 @@ impl Run {
                 }
             }
         }
+        for link in &b.links {
+            if !self.scope.is_internal(&link.url) {
+                self.outbound.note(&link.url, OutboundKind::Link, from);
+            }
+        }
+        for r in &b.resources {
+            self.outbound.note(&r.url, r.kind, from);
+        }
         let mut by_target: HashMap<u64, usize> = HashMap::new();
         for link in b.links {
             if !self.scope.is_internal(&link.url) || !self.frontier.is_seen(&link.url) {
@@ -594,6 +623,7 @@ impl Run {
         sitemap: SitemapSummary,
         sitemap_files: Vec<SitemapFile>,
         signals: SiteSignals,
+        outbound: OutboundReport,
     ) -> CrawlOutput {
         let stop = match self.stop {
             Some(stop) => stop,
@@ -633,6 +663,7 @@ impl Run {
             stop,
             duration_ms: elapsed_ms(self.started),
             signals,
+            outbound,
         }
     }
 }

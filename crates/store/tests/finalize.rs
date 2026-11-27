@@ -94,6 +94,7 @@ fn sample_page(idx: u64) -> PageRecord {
 
 fn empty_output(pages: Vec<PageRecord>, stop: StopReason) -> CrawlOutput {
     CrawlOutput {
+        outbound: Default::default(),
         origin: Url::parse("https://example.com/").unwrap(),
         pages,
         links: LinkGraph::default(),
@@ -1046,4 +1047,73 @@ async fn a_quick_crawl_never_alerts() {
     .await
     .expect("finalize");
     assert!(alert_jobs(&db.pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn finalize_stores_the_dead_outbound_targets_per_page() {
+    use codoseo_core::output::{BrokenTarget, OutboundKind, OutboundReport};
+
+    let db = TestDb::new().await;
+    let site_id = make_site(&db.pool, "outbound.example").await;
+    let crawl_id = make_crawl(&db.pool, site_id, "outbound.example").await;
+    let mut out = empty_output(vec![sample_page(1), sample_page(2)], StopReason::Completed);
+    out.outbound = OutboundReport {
+        checked: 3,
+        unchecked: 0,
+        broken: vec![
+            BrokenTarget {
+                url: Url::parse("https://other.org/dead").unwrap(),
+                kind: OutboundKind::Link,
+                status: 404,
+                from: vec![0, 1],
+            },
+            BrokenTarget {
+                url: Url::parse("https://nowhere.invalid/x.png").unwrap(),
+                kind: OutboundKind::Image,
+                status: 0,
+                // A page index the crawl does not have is skipped, not an error.
+                from: vec![1, 7],
+            },
+        ],
+    };
+    finalize(
+        &db.pool,
+        crawl_id,
+        site_id,
+        WORKER_ID,
+        &out,
+        &empty_report(),
+        &[],
+        None,
+    )
+    .await
+    .expect("finalize");
+
+    let on = |i: usize| {
+        let hash = out.pages[i].url_hash;
+        let pool = db.pool.clone();
+        async move {
+            codoseo_store::explorer::broken_targets(&pool, crawl_id, hash, 50)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|t| (t.kind, t.status, t.target_url))
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(
+        on(0).await,
+        vec![("link".to_owned(), 404, "https://other.org/dead".to_owned())]
+    );
+    assert_eq!(
+        on(1).await,
+        vec![
+            (
+                "image".to_owned(),
+                0,
+                "https://nowhere.invalid/x.png".to_owned()
+            ),
+            ("link".to_owned(), 404, "https://other.org/dead".to_owned()),
+        ]
+    );
 }

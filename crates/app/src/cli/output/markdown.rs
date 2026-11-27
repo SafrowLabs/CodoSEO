@@ -54,6 +54,36 @@ pub(super) fn crawl(w: &mut impl Write, audit: &Audit) -> std::io::Result<()> {
             )?;
         }
     }
+    if !audit.broken_targets.is_empty() {
+        writeln!(w, "\n## Broken links and files\n")?;
+        writeln!(
+            w,
+            "| Address | Kind | Answer | Used on |\n|---|---|---|---|"
+        )?;
+        for t in &audit.broken_targets {
+            let answer = match t.status {
+                0 => "no answer".to_owned(),
+                s => s.to_string(),
+            };
+            let first = t
+                .from
+                .first()
+                .and_then(|&i| audit.snapshot.pages.get(i as usize))
+                .map_or_else(|| "-".to_owned(), |p| md_cell(p.url.as_str()));
+            let used = match t.from.len() {
+                0 | 1 => first,
+                n => format!("{first} and {} more", n - 1),
+            };
+            writeln!(
+                w,
+                "| {} | {} | {} | {} |",
+                md_cell(t.url.as_str()),
+                t.kind.slug(),
+                answer,
+                used
+            )?;
+        }
+    }
     if let Some(rows) = ai_access_findings(audit) {
         writeln!(w, "\n## AI access\n")?;
         if let Some(probes) = audit_probes(audit) {

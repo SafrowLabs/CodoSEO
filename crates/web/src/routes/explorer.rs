@@ -294,6 +294,16 @@ pub struct TabLink {
 pub struct DetailsTab {
     pub fields: Vec<Field>,
     pub issues: Vec<IssueChip>,
+    /// The dead links to other sites, images, scripts and stylesheets on this page.
+    pub broken: Vec<BrokenView>,
+}
+
+pub struct BrokenView {
+    /// `Link`, `Image`, `Script` or `Stylesheet`.
+    pub kind: &'static str,
+    /// `404`, or `No answer`.
+    pub status: String,
+    pub url: String,
 }
 
 pub struct Field {
@@ -914,7 +924,18 @@ async fn detail_panel(
     match tab {
         Tab::Details => {
             let policy = codoseo_store::policy::get(&state.pool, site.id).await?;
-            view.details = Some(details_tab(&base, &p, &policy));
+            let mut details = details_tab(&base, &p, &policy);
+            details.broken = codoseo_store::explorer::broken_targets(
+                &state.pool,
+                crawl.id,
+                p.url_hash,
+                BROKEN_SHOWN,
+            )
+            .await?
+            .into_iter()
+            .map(broken_view)
+            .collect();
+            view.details = Some(details);
         }
         Tab::Serp => view.serp = Some(serp_view(&p)),
         Tab::Inlinks => {
@@ -1102,7 +1123,31 @@ fn details_tab(base: &str, p: &PageDetail, policy: &codoseo_policy::SitePolicy) 
             href: format!("{base}/explorer?filter=check:{}", id.slug()),
         })
         .collect();
-    DetailsTab { fields, issues }
+    DetailsTab {
+        fields,
+        issues,
+        broken: Vec::new(),
+    }
+}
+
+/// The dead targets listed on one page's details.
+const BROKEN_SHOWN: i64 = 50;
+
+fn broken_view(t: codoseo_store::explorer::BrokenTarget) -> BrokenView {
+    BrokenView {
+        kind: match t.kind.as_str() {
+            "image" => "Image",
+            "script" => "Script",
+            "stylesheet" => "Stylesheet",
+            _ => "Link",
+        },
+        status: if t.status == 0 {
+            "No answer".to_owned()
+        } else {
+            t.status.to_string()
+        },
+        url: t.target_url,
+    }
 }
 
 /// `23.4 KB`

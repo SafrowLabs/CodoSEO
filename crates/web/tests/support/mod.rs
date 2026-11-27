@@ -559,6 +559,7 @@ impl TestApp {
             })
             .collect();
         let mut out = CrawlOutput {
+            outbound: Default::default(),
             origin,
             pages,
             links: LinkGraph {

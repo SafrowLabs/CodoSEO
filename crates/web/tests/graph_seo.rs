@@ -85,6 +85,7 @@ async fn crawl(
         })
         .collect();
     let mut out = CrawlOutput {
+        outbound: Default::default(),
         origin: url("/"),
         pages,
         links: LinkGraph { edges, anchors },
