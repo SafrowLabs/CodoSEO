@@ -11,13 +11,15 @@ use uuid::Uuid;
 
 use crate::dbenum::enum_slug;
 
-/// What is instant by default: a key page going noindex, a 4xx/5xx spike, robots.txt changing,
+/// What is instant by default: a key page going noindex, a page other pages link to breaking,
+/// a 4xx/5xx spike, robots.txt changing,
 /// the sitemap losing 10% or more, the site moving, and the AI access incidents that cost
 /// visibility: AI bots blocked (by robots.txt or, in a synthetic fetch, by the server), AI answers
 /// restricted, content missing from the HTML as served, one of those resolving, and a page the
 /// site policy says must always work failing.
-pub const DEFAULT_INSTANT: [ChangeKind; 11] = [
+pub const DEFAULT_INSTANT: [ChangeKind; 12] = [
     ChangeKind::BecameNoindex,
+    ChangeKind::BrokenLink,
     ChangeKind::ErrorSpike,
     ChangeKind::RobotsTxtChanged,
     ChangeKind::SitemapShrank,
@@ -31,9 +33,10 @@ pub const DEFAULT_INSTANT: [ChangeKind; 11] = [
 ];
 
 /// Every change kind, in the order the settings grid lists them.
-pub const ALL_KINDS: [ChangeKind; 21] = [
+pub const ALL_KINDS: [ChangeKind; 25] = [
     ChangeKind::MustWorkFailed,
     ChangeKind::BecameNoindex,
+    ChangeKind::BrokenLink,
     ChangeKind::ErrorSpike,
     ChangeKind::RobotsTxtChanged,
     ChangeKind::SitemapShrank,
@@ -49,8 +52,11 @@ pub const ALL_KINDS: [ChangeKind; 21] = [
     ChangeKind::NewUrl,
     ChangeKind::TitleChanged,
     ChangeKind::TitleRemoved,
+    ChangeKind::DescriptionChanged,
+    ChangeKind::H1Changed,
     ChangeKind::CanonicalChanged,
     ChangeKind::RedirectChainGrew,
+    ChangeKind::AddedToSitemap,
     ChangeKind::AiBlockNotApplied,
     ChangeKind::AiPreferencesChanged,
 ];

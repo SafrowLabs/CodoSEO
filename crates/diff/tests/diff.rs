@@ -114,6 +114,20 @@ fn only(changes: Vec<Change>) -> Change {
     changes.into_iter().next().unwrap()
 }
 
+/// The one change left when the `broken_link` that goes with a linked page failing is set aside.
+fn only_besides_broken_link(changes: Vec<Change>) -> Change {
+    only(
+        changes
+            .into_iter()
+            .filter(|c| c.kind != ChangeKind::BrokenLink)
+            .collect(),
+    )
+}
+
+fn of_kind(changes: &[Change], kind: ChangeKind) -> Vec<Change> {
+    changes.iter().filter(|c| c.kind == kind).cloned().collect()
+}
+
 fn robots(status: u16, body: &str) -> Option<RobotsFile> {
     Some(RobotsFile {
         status,
@@ -144,7 +158,7 @@ fn status_200_to_404_is_a_warning() {
         p.status = 404;
         p.indexability = Indexability::ClientError;
     });
-    let c = only(diff(&prev, &curr, &none()));
+    let c = only_besides_broken_link(diff(&prev, &curr, &none()));
     assert_eq!(
         (c.kind, c.severity),
         (ChangeKind::StatusChanged, Severity::Warning)
@@ -162,7 +176,7 @@ fn status_change_on_a_key_page_is_critical() {
         p.indexability = Indexability::ClientError;
     });
     let key: HashSet<u64> = [url_hash(&u("https://e.com/a"))].into();
-    let c = only(diff(&prev, &curr, &key));
+    let c = only_besides_broken_link(diff(&prev, &curr, &key));
     assert_eq!(
         (c.kind, c.severity),
         (ChangeKind::StatusChanged, Severity::Critical)
@@ -177,7 +191,7 @@ fn the_origin_page_is_always_a_key_page() {
         p.status = 500;
         p.indexability = Indexability::ServerError;
     });
-    let c = only(diff(&prev, &curr, &none()));
+    let c = only_besides_broken_link(diff(&prev, &curr, &none()));
     assert_eq!(c.severity, Severity::Critical);
 }
 
@@ -212,7 +226,7 @@ fn robots_blocked_record_is_not_an_error_state() {
     let mut curr = prev.clone();
     edit(&mut curr, "https://e.com/a", |p| p.status = 404);
     assert_eq!(
-        only(diff(&prev, &curr, &none())).severity,
+        only_besides_broken_link(diff(&prev, &curr, &none())).severity,
         Severity::Warning
     );
     // And status 0 with a fetch error is an error: 200 to failed is a warning.
@@ -222,7 +236,7 @@ fn robots_blocked_record_is_not_an_error_state() {
         p.status = 0;
         p.error = Some(FetchFailure::Timeout);
     });
-    let c = only(diff(&prev, &curr, &none()));
+    let c = only_besides_broken_link(diff(&prev, &curr, &none()));
     assert_eq!((c.severity, c.after.as_str()), (Severity::Warning, "0"));
 }
 
@@ -816,6 +830,136 @@ fn url_hashes_are_recomputed_from_the_url() {
     edit(&mut changed, "https://e.com/a", |p| p.status = 404);
     let keys = key_pages(&curr, &none());
     assert!(keys.contains(&url_hash(&u("https://e.com/a"))));
-    let c = only(diff(&prev, &changed, &keys));
+    let c = only_besides_broken_link(diff(&prev, &changed, &keys));
     assert_eq!(c.severity, Severity::Critical);
+}
+
+#[test]
+fn a_linked_page_that_breaks_is_a_broken_link() {
+    let prev = site_at("https://e.com/");
+    let mut curr = prev.clone();
+    edit(&mut curr, "https://e.com/a", |p| {
+        p.status = 404;
+        p.indexability = Indexability::ClientError;
+        p.inlinks = 3;
+    });
+    let changes = diff(&prev, &curr, &none());
+    let c = only(of_kind(&changes, ChangeKind::BrokenLink));
+    assert_eq!(c.severity, Severity::Warning);
+    assert_eq!(c.url, Some(u("https://e.com/a")));
+    assert_eq!((c.before.as_str(), c.after.as_str()), ("200", "404"));
+    // Still broken on the next crawl: said once, not on every crawl.
+    assert!(of_kind(&diff(&curr, &curr, &none()), ChangeKind::BrokenLink).is_empty());
+    let mut later = curr.clone();
+    edit(&mut later, "https://e.com/a", |p| p.status = 410);
+    assert!(of_kind(&diff(&curr, &later, &none()), ChangeKind::BrokenLink).is_empty());
+}
+
+#[test]
+fn a_broken_page_nothing_links_to_is_not_a_broken_link() {
+    let prev = site_at("https://e.com/");
+    let mut curr = prev.clone();
+    edit(&mut curr, "https://e.com/a", |p| {
+        p.status = 404;
+        p.inlinks = 0;
+    });
+    let changes = diff(&prev, &curr, &none());
+    assert_eq!(kinds(&changes), vec![ChangeKind::StatusChanged]);
+}
+
+#[test]
+fn a_new_url_that_is_linked_and_broken_is_a_broken_link() {
+    let prev = site_at("https://e.com/");
+    let mut curr = prev.clone();
+    curr.pages.push(page("https://e.com/gone", 404, ""));
+    let changes = diff(&prev, &curr, &none());
+    let c = only(of_kind(&changes, ChangeKind::BrokenLink));
+    assert_eq!((c.before.as_str(), c.after.as_str()), ("", "404"));
+    assert_eq!(of_kind(&changes, ChangeKind::NewUrl).len(), 1);
+    // A new page that answers is only a new URL.
+    let mut fine = prev.clone();
+    fine.pages.push(page("https://e.com/new", 200, "New"));
+    assert_eq!(
+        kinds(&diff(&prev, &fine, &none())),
+        vec![ChangeKind::NewUrl]
+    );
+    // After a crawl that stopped early, a page it never reached is not news.
+    let mut partial = prev.clone();
+    partial.stop = StopReason::PageLimit;
+    assert!(diff(&partial, &curr, &none()).is_empty());
+}
+
+#[test]
+fn description_and_h1_changes() {
+    let mut prev = site_at("https://e.com/");
+    edit(&mut prev, "https://e.com/a", |p| {
+        p.fields.meta_description = Some("Old words".into());
+        p.fields.h1 = vec!["Old heading".into()];
+    });
+    let mut curr = prev.clone();
+    edit(&mut curr, "https://e.com/a", |p| {
+        p.fields.meta_description = Some(" New words ".into());
+        p.fields.h1 = vec![];
+    });
+    let changes = diff(&prev, &curr, &none());
+    assert_eq!(
+        kinds(&changes),
+        vec![ChangeKind::DescriptionChanged, ChangeKind::H1Changed]
+    );
+    assert_eq!(
+        (changes[0].before.as_str(), changes[0].after.as_str()),
+        ("Old words", "New words")
+    );
+    assert_eq!(
+        (changes[1].before.as_str(), changes[1].after.as_str()),
+        ("Old heading", "")
+    );
+    assert!(changes.iter().all(|c| c.severity == Severity::Notice));
+
+    // Only spacing differs: nothing to report.
+    let mut spaced = prev.clone();
+    edit(&mut spaced, "https://e.com/a", |p| {
+        p.fields.meta_description = Some("Old words ".into());
+    });
+    assert!(diff(&prev, &spaced, &none()).is_empty());
+
+    // A page that stopped answering lost its wording with it: the status says so.
+    let mut broken = prev.clone();
+    edit(&mut broken, "https://e.com/a", |p| {
+        p.status = 404;
+        p.inlinks = 0;
+        p.fields.meta_description = None;
+        p.fields.h1 = vec![];
+    });
+    assert_eq!(
+        kinds(&diff(&prev, &broken, &none())),
+        vec![ChangeKind::StatusChanged]
+    );
+}
+
+#[test]
+fn pages_added_to_the_sitemap() {
+    let mut prev = site_at("https://e.com/");
+    prev.sitemap = sitemap(10);
+    let mut curr = prev.clone();
+    curr.sitemap = sitemap(12);
+    edit(&mut curr, "https://e.com/a", |p| p.in_sitemap = true);
+    let mut fresh = page("https://e.com/fresh", 200, "Fresh");
+    fresh.in_sitemap = true;
+    curr.pages.push(rehash(fresh));
+    let changes = diff(&prev, &curr, &none());
+    let added: Vec<_> = of_kind(&changes, ChangeKind::AddedToSitemap)
+        .iter()
+        .map(|c| c.url.clone().unwrap())
+        .collect();
+    assert_eq!(added, vec![u("https://e.com/a"), u("https://e.com/fresh")]);
+
+    // The first sitemap a site publishes lists every page: not reported page by page.
+    let mut first = prev.clone();
+    first.sitemap = sitemap(0);
+    assert!(of_kind(&diff(&first, &curr, &none()), ChangeKind::AddedToSitemap).is_empty());
+    // A sitemap that could not be read whole proves nothing.
+    let mut partial = curr.clone();
+    partial.sitemap.complete = false;
+    assert!(of_kind(&diff(&prev, &partial, &none()), ChangeKind::AddedToSitemap).is_empty());
 }

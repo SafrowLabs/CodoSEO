@@ -41,6 +41,15 @@ pub enum ChangeKind {
     /// A page the site policy says must always work (a must-work path, a starred page or the home
     /// page) did not answer 200 or was not indexable. Recorded on every crawl it keeps failing.
     MustWorkFailed,
+    /// A page other pages of the site link to stopped answering (4xx, 5xx or no response), or
+    /// was first seen that way. `before` is the status it had, empty when the page is new.
+    BrokenLink,
+    /// The meta description is different (added, removed or reworded).
+    DescriptionChanged,
+    /// The first H1 is different (added, removed or reworded).
+    H1Changed,
+    /// The page is listed in the sitemap and was not on the earlier crawl.
+    AddedToSitemap,
 }
 
 impl ChangeKind {
@@ -68,6 +77,10 @@ impl ChangeKind {
             ChangeKind::AiContentMissing => "ai_content_missing",
             ChangeKind::AiLlmsTxtUnavailable => "ai_llms_txt_unavailable",
             ChangeKind::MustWorkFailed => "must_work_failed",
+            ChangeKind::BrokenLink => "broken_link",
+            ChangeKind::DescriptionChanged => "description_changed",
+            ChangeKind::H1Changed => "h1_changed",
+            ChangeKind::AddedToSitemap => "added_to_sitemap",
         }
     }
 
@@ -95,6 +108,10 @@ impl ChangeKind {
             ChangeKind::AiContentMissing => "Content missing from HTML (AI)",
             ChangeKind::AiLlmsTxtUnavailable => "llms.txt unavailable",
             ChangeKind::MustWorkFailed => "Must-work page failed",
+            ChangeKind::BrokenLink => "Broken link",
+            ChangeKind::DescriptionChanged => "Meta description changed",
+            ChangeKind::H1Changed => "H1 changed",
+            ChangeKind::AddedToSitemap => "Added to sitemap",
         }
     }
 
@@ -152,6 +169,10 @@ mod tests {
             ChangeKind::AiContentMissing,
             ChangeKind::AiLlmsTxtUnavailable,
             ChangeKind::MustWorkFailed,
+            ChangeKind::BrokenLink,
+            ChangeKind::DescriptionChanged,
+            ChangeKind::H1Changed,
+            ChangeKind::AddedToSitemap,
         ];
         for kind in all {
             assert_eq!(
