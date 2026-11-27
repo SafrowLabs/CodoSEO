@@ -17,7 +17,9 @@ pub(crate) struct Built {
     pub links: Vec<Link>,
     /// The images, scripts and stylesheets the page loads.
     pub resources: Vec<Resource>,
-    /// False when the page's links are recorded but must not be followed.
+    /// False when the page's links must not be queued: the response is not a readable HTML
+    /// page. A `nofollow` in the page's robots meta or header does not stop the crawl, since
+    /// the links still have to be checked.
     pub follow_links: bool,
 }
 
@@ -114,7 +116,7 @@ fn page(
     record.outlinks_external = count(&external);
     record.outlinks_nofollow = count(&nofollow);
 
-    let follow_links = record.is_html_ok() && !record.fields.is_nofollow();
+    let follow_links = record.is_html_ok();
     record.key_hash = record.compute_key_hash();
     Built {
         record,
@@ -313,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_nofollow_keeps_links_but_does_not_follow() {
+    fn meta_nofollow_keeps_links_and_still_checks_them() {
         let nf = fetch_result(
             200,
             "text/html",
@@ -327,7 +329,7 @@ mod tests {
             &scope(),
             |_| true,
         )[0];
-        assert!(!b.follow_links);
+        assert!(b.follow_links);
         assert_eq!(b.links.len(), 1);
         assert_eq!(b.record.outlinks_internal, 1);
     }
@@ -349,7 +351,7 @@ mod tests {
             Some("noindex, nofollow")
         );
         assert_eq!(b.record.indexability, Indexability::Noindex);
-        assert!(!b.follow_links);
+        assert!(b.follow_links);
     }
 
     #[test]

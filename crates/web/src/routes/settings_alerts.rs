@@ -222,6 +222,7 @@ fn add_form(state: &AppState, email_only: bool) -> AddChannelForm {
 fn note(kind: ChangeKind) -> &'static str {
     match kind {
         ChangeKind::BecameNoindex => "key pages only",
+        ChangeKind::BrokenLink => "a page your own pages link to stopped working",
         ChangeKind::ErrorSpike => "a burst of new 4xx and 5xx pages",
         ChangeKind::SitemapShrank => "lost 10% or more",
         ChangeKind::AiBotBlocked => "bots you want are blocked, or robots.txt is failing",

@@ -527,8 +527,12 @@ impl Run {
         }
     }
 
-    /// Adds a record, queues its followed internal links and keeps its edges to pages
-    /// the frontier knows. Pages with no depth (sitemap-only) are not followed.
+    /// Adds a record, queues its internal links and keeps its edges to pages the frontier
+    /// knows. Pages with no depth (sitemap-only) are not followed.
+    ///
+    /// `nofollow` links are queued like the others: the audit has to know whether the page
+    /// behind one answers, and a broken target is broken whatever the `rel` says. The edge
+    /// keeps the flag.
     ///
     /// A page that links the same URL several times gets one edge: it keeps the first
     /// anchor text, and is `nofollow` only when every one of those links is.
@@ -542,7 +546,7 @@ impl Run {
             && let Some(d) = depth
         {
             for link in &b.links {
-                if !link.nofollow && self.scope.is_internal(&link.url) {
+                if self.scope.is_internal(&link.url) {
                     self.frontier.push_link(link.url.clone(), d);
                 }
             }
