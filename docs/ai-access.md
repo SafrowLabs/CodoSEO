@@ -358,7 +358,7 @@ Three ways to say "I know":
 
 The site audit opens on an **AI & search · GEO audit** section, above the health score and labelled as access and checks, not traffic, and not part of the score. It shows:
 
-- the **AI & GEO checks** passed out of 9 (one per kind of finding, judged on the latest report; kinds that report couldn't judge are not counted as passed) next to the 48 SEO checks in the page head; the failing-checks KPI counts both, out of 53;
+- the **AI & GEO checks** passed out of 9 (one per kind of finding, judged on the latest report; kinds that report couldn't judge are not counted as passed) next to the 51 SEO checks in the page head; the failing-checks KPI counts both, out of 53;
 - tiles for search bots allowed, training bots blocked against your intent, the synthetic fetch checks, content in raw HTML and llms.txt (informational);
 - one card per operator with its logo, each of its registry bots, its purpose, what robots.txt says (with **Blocked · intended** when your intent asks for it) and what the synthetic fetch saw (**Not probed** where none ran). On a phone each operator is one summary line;
 - **Can AI answers quote you?**: the important pages each answer engine may quote;

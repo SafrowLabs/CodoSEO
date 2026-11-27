@@ -391,8 +391,8 @@ fn counts_are_in_check_id_order_and_checks_passed_follows() {
     let ids: Vec<u8> = r.counts.iter().map(|(c, _)| c.bit()).collect();
     assert!(ids.windows(2).all(|w| w[0] < w[1]));
     assert!(r.counts.iter().all(|(_, n)| *n > 0));
-    assert_eq!(r.checks_total, 48);
-    assert_eq!(usize::from(r.checks_passed), 48 - r.counts.len());
+    assert_eq!(r.checks_total, 51);
+    assert_eq!(usize::from(r.checks_passed), 51 - r.counts.len());
 }
 
 #[test]
@@ -482,4 +482,61 @@ fn a_home_page_address_that_does_not_lead_to_the_site_fails_site_wide() {
     );
     assert_eq!(r.summary.broken_home_variants.len(), 1);
     assert_eq!(r.summary.broken_home_variants[0].status, 404);
+}
+
+#[test]
+fn hreflang_alternates_must_load_be_indexable_and_link_back() {
+    let alt = |p: &mut codoseo_core::page::PageRecord, pairs: &[(&str, &str)]| {
+        p.fields.hreflang = pairs
+            .iter()
+            .map(|(lang, path)| ((*lang).to_owned(), u(&format!("https://e.com{path}"))))
+            .collect();
+    };
+    // /en and /de name each other; /fr is named by /en but does not link back; /es is gone;
+    // /it is noindex. An alternate on another site was never fetched and says nothing.
+    let mut en = pg("/en");
+    alt(
+        &mut en,
+        &[
+            ("en", "/en"),
+            ("de", "/de"),
+            ("fr", "/fr"),
+            ("es", "/es"),
+            ("it", "/it"),
+        ],
+    );
+    en.fields
+        .hreflang
+        .push(("ja".to_owned(), u("https://e.jp/")));
+    let mut de = pg("/de");
+    alt(&mut de, &[("de", "/de"), ("en", "/en")]);
+    let mut fr = pg("/fr");
+    alt(&mut fr, &[("fr", "/fr")]);
+    let mut es = pg("/es");
+    es.status = 404;
+    es.indexability = Indexability::ClientError;
+    let mut it = pg("/it");
+    it.indexability = Indexability::Noindex;
+    let mut bad = pg("/bad");
+    alt(&mut bad, &[("en_US", "/bad"), ("en-UK", "/bad")]);
+
+    let mut o = out(
+        vec![home(), en, de, fr, es, it, bad],
+        &[(0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6)],
+    );
+    run_checks(&mut o);
+    let has = |i: usize, id: CheckId| o.pages[i].issues.has_check(id);
+    assert!(
+        has(1, CheckId::HreflangToBroken),
+        "/es is 404 and /it is noindex"
+    );
+    assert!(has(1, CheckId::HreflangNoReturn), "/fr does not name /en");
+    assert!(!has(2, CheckId::HreflangToBroken));
+    assert!(
+        !has(2, CheckId::HreflangNoReturn),
+        "/de and /en name each other"
+    );
+    assert!(!has(3, CheckId::HreflangNoReturn), "/fr names only itself");
+    assert!(has(6, CheckId::HreflangInvalidCode));
+    assert!(!has(1, CheckId::HreflangInvalidCode));
 }

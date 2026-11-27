@@ -841,6 +841,18 @@ pub fn seo_hint(id: CheckId) -> (&'static str, &'static str) {
             "Hreflang sets need an entry for the page itself.",
             "Add a hreflang link for each page's own language and URL.",
         ),
+        CheckId::HreflangInvalidCode => (
+            "Search engines ignore a hreflang value they can't read, so that language version isn't matched to its readers.",
+            "Use a language code, optionally with a region: en, en-GB, pt-BR, or x-default. Hyphen, not underscore; GB, not UK.",
+        ),
+        CheckId::HreflangToBroken => (
+            "The alternate version doesn't load or can't be indexed, so the hreflang entry is ignored.",
+            "Point each hreflang link at a page that answers 200 and is indexable, or remove the entry.",
+        ),
+        CheckId::HreflangNoReturn => (
+            "Hreflang only counts when both pages name each other.",
+            "Add a hreflang link on the target page that points back to this page.",
+        ),
         CheckId::PolicyAddress => (
             "Your site policy names one preferred address; other forms split signals and cost a redirect hop.",
             "301-redirect every other host and trailing-slash form to the preferred one, and point canonicals and internal links straight at it.",

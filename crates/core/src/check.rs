@@ -109,6 +109,9 @@ check_ids! {
     BrokenImages = 50 => "broken_images",
     BrokenResources = 51 => "broken_resources",
     HomeVariantBroken = 52 => "home_variant_broken",
+    HreflangInvalidCode = 53 => "hreflang_invalid_code",
+    HreflangToBroken = 54 => "hreflang_to_broken",
+    HreflangNoReturn = 55 => "hreflang_no_return",
 }
 
 // IDs are unique, below 64, and `ALL` lists them in ascending order. Each ID is written

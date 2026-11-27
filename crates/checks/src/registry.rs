@@ -61,7 +61,7 @@ use Scope::{Page, Site, SiteWide};
 use Severity::{Critical as C, Notice as N, Warning as W};
 
 /// Every check, in `CheckId` order.
-pub static CHECKS: [CheckDef; 53] = [
+pub static CHECKS: [CheckDef; 56] = [
     d(
         CheckId::Http4xx,
         C,
@@ -420,6 +420,27 @@ pub static CHECKS: [CheckDef; 53] = [
         Technical,
         SiteWide,
         "An address of the home page doesn't lead to the site",
+    ),
+    d(
+        CheckId::HreflangInvalidCode,
+        W,
+        Schema,
+        Page,
+        "Hreflang has an invalid language or region code",
+    ),
+    d(
+        CheckId::HreflangToBroken,
+        W,
+        Schema,
+        Site,
+        "Hreflang points to a page that is broken, redirected or not indexable",
+    ),
+    d(
+        CheckId::HreflangNoReturn,
+        W,
+        Schema,
+        Site,
+        "Hreflang target doesn't link back",
     ),
 ];
 

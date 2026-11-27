@@ -152,6 +152,10 @@ fn each_page_check_triggers_on_its_fixture() {
         (CheckId::HreflangMissingSelf, |p| {
             p.fields.hreflang = vec![("de".into(), u("https://e.com/de"))]
         }),
+        (CheckId::HreflangInvalidCode, |p| {
+            let own = p.url.clone();
+            p.fields.hreflang = vec![("en-UK".into(), own)]
+        }),
     ];
     for (id, mutate) in &cases {
         let mut p = clean();
