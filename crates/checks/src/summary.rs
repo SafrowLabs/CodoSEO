@@ -38,6 +38,13 @@ pub(crate) fn summarise(out: &CrawlOutput) -> CrawlSummary {
         depth: depth[..used].to_vec(),
         no_depth,
         avg_response_ms: response_ms.checked_div(responses).unwrap_or(0) as u32,
+        broken_home_variants: out
+            .signals
+            .home_variants
+            .iter()
+            .filter(|v| !v.ok)
+            .cloned()
+            .collect(),
     }
 }
 

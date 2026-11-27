@@ -36,6 +36,10 @@ pub struct CrawlSummary {
     /// Pages with no depth (found only in sitemaps).
     pub no_depth: u32,
     pub avg_response_ms: u32,
+    /// The other addresses of the home page that answered but do not lead to the site (see
+    /// `home_variant_broken`). Empty when they all do, and in older reports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub broken_home_variants: Vec<crate::output::HomeVariant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

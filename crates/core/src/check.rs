@@ -108,6 +108,7 @@ check_ids! {
     LinksToBrokenExternal = 49 => "links_to_broken_external",
     BrokenImages = 50 => "broken_images",
     BrokenResources = 51 => "broken_resources",
+    HomeVariantBroken = 52 => "home_variant_broken",
 }
 
 // IDs are unique, below 64, and `ALL` lists them in ascending order. Each ID is written

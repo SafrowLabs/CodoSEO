@@ -442,6 +442,24 @@ pub struct SiteSignals {
     /// on its own and never serialized with the signals.
     #[serde(skip)]
     pub icon: Option<SiteIcon>,
+    /// The other addresses of the home page (`http`/`https`, with and without `www.`) that
+    /// answered, each with where it ended. Empty when none answered, the origin has no such
+    /// family (an IP address, a custom port), signals were off, and in older crawls.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub home_variants: Vec<HomeVariant>,
+}
+
+/// One of the other addresses of the home page, as it answered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HomeVariant {
+    /// The address asked for, e.g. `http://www.example.com/`.
+    pub url: Url,
+    /// The final status, after redirects.
+    pub status: u16,
+    /// Where the redirects ended.
+    pub final_url: Url,
+    /// It ended on the site's own origin without an error.
+    pub ok: bool,
 }
 
 /// A site's icon as fetched: a small raster image whose type was read from its own bytes.
