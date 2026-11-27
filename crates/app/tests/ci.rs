@@ -156,8 +156,8 @@ fn a_geo_regression_against_the_baseline_fails_the_build_with_a_sarif_result() {
     let run = &doc["runs"][0];
     assert_eq!(run["originalUriBaseIds"]["SITE"]["uri"], after.as_str());
     let rules = run["tool"]["driver"]["rules"].as_array().expect("rules");
-    // 48 SEO checks, 5 site policy checks and 9 AI & GEO checks, one rule each.
-    assert_eq!(rules.len(), 62);
+    // 51 SEO checks, 5 site policy checks and 9 AI & GEO checks, one rule each.
+    assert_eq!(rules.len(), 65);
     assert!(
         rules
             .iter()
@@ -452,7 +452,7 @@ fn a_policy_file_turns_on_its_checks_and_gates() {
     assert_eq!(failed[0]["level"], "error");
     let saved: serde_json::Value =
         serde_json::from_slice(&fs::read(&audit).expect("the audit")).expect("json");
-    assert_eq!(saved["report"]["checks_total"], 49);
+    assert_eq!(saved["report"]["checks_total"], 52);
     assert_eq!(saved["policy"]["report"]["seo_gaps"], 1);
 
     // The saved audit against the file: one gap, exit 1; without the rule, none.

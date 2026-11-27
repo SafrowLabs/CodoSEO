@@ -139,7 +139,7 @@ async fn the_default_policy_changes_nothing() {
         );
     }
     let (summary, passed, total) = summary(&db, crawl).await;
-    assert_eq!(total, 48);
+    assert_eq!(total, 51);
     assert!(passed <= 44);
     let report = &summary["policy"];
     assert_eq!(report["seo_gaps"], 0);
@@ -197,7 +197,7 @@ async fn a_declared_policy_sets_its_checks_and_a_failing_must_work_page_alerts_i
 
     let (summary, passed, total) = summary(&db, first).await;
     // Index mismatch, keep-out partial and must-work failed are declared.
-    assert_eq!(total, 51);
+    assert_eq!(total, 54);
     let counts = summary["counts"].as_array().unwrap();
     assert!(
         counts

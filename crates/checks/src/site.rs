@@ -60,6 +60,23 @@ pub(crate) fn site_issues(out: &CrawlOutput) -> Vec<IssueBits> {
 
     for (i, p) in pages.iter().enumerate() {
         let b = &mut bits[i];
+        // Hreflang alternates that are pages of this crawl. Ones on other sites (a ccTLD per
+        // country) were not fetched, so nothing can be said about them.
+        if p.is_html_ok() {
+            for (_, target) in &p.fields.hreflang {
+                if *target == p.url {
+                    continue;
+                }
+                let Some(t) = by_url.get(target) else {
+                    continue;
+                };
+                if !t.is_html_ok() || t.indexability != Indexability::Indexable {
+                    b.set_check(CheckId::HreflangToBroken);
+                } else if !t.fields.hreflang.iter().any(|(_, back)| *back == p.url) {
+                    b.set_check(CheckId::HreflangNoReturn);
+                }
+            }
+        }
         // Listed in the sitemap but never reached by links: a page with a depth was found
         // by following links (the origin, or a redirect target), so it isn't an orphan.
         if p.in_sitemap && p.depth.is_none() && p.inlinks == 0 {

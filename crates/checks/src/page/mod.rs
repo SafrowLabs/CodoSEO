@@ -67,7 +67,7 @@ pub fn threshold_issues(page: &PageRecord, t: &Thresholds) -> IssueBits {
 }
 
 /// Every other Page-scope check, in `CheckId` order.
-const PAGE_CHECKS: [(CheckId, PageCheck); 22] = [
+const PAGE_CHECKS: [(CheckId, PageCheck); 23] = [
     (CheckId::Http4xx, response::http_4xx),
     (CheckId::Http5xx, response::http_5xx),
     (CheckId::FetchFailed, response::fetch_failed),
@@ -93,6 +93,7 @@ const PAGE_CHECKS: [(CheckId, PageCheck); 22] = [
     (CheckId::OgMissing, social::og_missing),
     (CheckId::JsonldInvalid, social::jsonld_invalid),
     (CheckId::HreflangMissingSelf, social::hreflang_missing_self),
+    (CheckId::HreflangInvalidCode, social::hreflang_invalid_code),
 ];
 
 /// The Page-scope checks that fail on this page, under the default thresholds.

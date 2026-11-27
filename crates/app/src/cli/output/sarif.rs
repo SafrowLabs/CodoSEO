@@ -1,6 +1,6 @@
 //! SARIF 2.1.0, for GitHub code scanning and any other SARIF reader.
 //!
-//! One run, one rule per check: the 48 SEO checks (`seo/<slug>`) and the 9 AI & GEO checks
+//! One run, one rule per check: the 51 SEO checks (`seo/<slug>`) and the 9 AI & GEO checks
 //! (`geo/<kind>`), always all of them so rule indexes never move. A failing page check gives one
 //! result per page (at most [`MAX_PER_RULE`]), a site-wide check one result at the start URL and
 //! an AI access finding one result at the page it names first. Locations are the page URLs

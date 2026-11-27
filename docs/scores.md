@@ -2,7 +2,7 @@
 
 Every finished crawl of a monitored site has three scores out of 100:
 
-- **SEO**, the health score: how the site does on the 48 SEO checks, plus the site policy checks its policy turns on.
+- **SEO**, the health score: how the site does on the 51 SEO checks, plus the site policy checks its policy turns on.
 - **GEO**: how ready the site is for AI products, from the [AI access](ai-access.md) checks and a few SEO checks that help AI understand pages.
 - **Overall**: the two blended, `round(0.6 × SEO + 0.4 × GEO)`.
 

@@ -228,7 +228,7 @@ pub fn confirm_monitoring(images: &str, domain: &str, link: &str, opt_out: &str)
                 Row {
                     icon: Icon::Crawl,
                     title: format!("We crawl {domain} now"),
-                    detail: "Up to 500 pages, 48 SEO checks and 9 AI checks on each.".to_owned(),
+                    detail: "Up to 500 pages, 51 SEO checks and 9 AI checks on each.".to_owned(),
                 },
                 row(
                     Icon::Week,
