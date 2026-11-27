@@ -389,6 +389,10 @@ fn title(c: &ChangeRow) -> String {
         ChangeKind::AiContentMissing => "Content missing from HTML (AI)".to_owned(),
         ChangeKind::AiLlmsTxtUnavailable => "llms.txt unavailable".to_owned(),
         ChangeKind::MustWorkFailed => "Must-work page failed".to_owned(),
+        ChangeKind::BrokenLink => "Broken link".to_owned(),
+        ChangeKind::DescriptionChanged => "Meta description changed".to_owned(),
+        ChangeKind::H1Changed => "H1 changed".to_owned(),
+        ChangeKind::AddedToSitemap => "Added to sitemap".to_owned(),
     }
 }
 
@@ -414,6 +418,10 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
                 format!("not in crawl #{}", crawl.number)
             }
             ChangeKind::TitleRemoved => "no title".to_owned(),
+            ChangeKind::DescriptionChanged => "no description".to_owned(),
+            ChangeKind::H1Changed => "no H1".to_owned(),
+            ChangeKind::BrokenLink => format!("not in crawl #{}", crawl.number),
+            ChangeKind::AddedToSitemap => "not in the sitemap".to_owned(),
             _ => "—".to_owned(),
         },
         ChangeKind::ErrorSpike => count("error page", "error pages"),
@@ -438,6 +446,11 @@ fn diff_value(c: &ChangeRow, value: &str, crawl: &Crawl) -> String {
         ChangeKind::AiLlmsTxtUnavailable if value == "llms.txt served" => {
             "llms.txt served".to_owned()
         }
+        ChangeKind::BrokenLink => match value.parse::<u16>() {
+            Ok(0) => "no answer".to_owned(),
+            Ok(_) => format!("HTTP {value}"),
+            Err(_) => value.to_owned(),
+        },
         ChangeKind::MustWorkFailed => match value.parse::<u16>() {
             Ok(200..=299) => format!("{value}, indexable"),
             Ok(_) => format!("HTTP {value}"),

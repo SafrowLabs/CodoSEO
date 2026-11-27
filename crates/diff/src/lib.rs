@@ -19,7 +19,10 @@ use codoseo_core::snapshot::Snapshot;
 use codoseo_core::url::url_hash;
 use url::Url;
 
-use kinds::{PrevPage, chain_grew, is_error, ordinal, page_changes, raise, sitemap_shrank};
+use kinds::{
+    PrevPage, broken_link, chain_grew, is_error, ordinal, page_changes, raise, sitemap_shrank,
+    sitemaps_comparable,
+};
 pub use robots::robots_fingerprint;
 
 /// Pages from the top of the inlink ranking that count as key pages.
@@ -129,6 +132,11 @@ pub fn diff(prev: &Snapshot, curr: &Snapshot, key_pages: &HashSet<u64>) -> Vec<C
         });
     };
 
+    // A sitemap that existed before and can be read whole on both crawls: only then does a
+    // page newly in it mean it was added (a first sitemap would list every page).
+    let sitemap_additions =
+        prev.sitemap.url_count > 0 && sitemaps_comparable(&prev.sitemap, &curr.sitemap);
+
     let mut newly_failing = 0usize;
     for (hash, page) in &curr_pages {
         match prev_pages.get(hash) {
@@ -147,6 +155,19 @@ pub fn diff(prev: &Snapshot, curr: &Snapshot, key_pages: &HashSet<u64>) -> Vec<C
                 for (kind, severity, before, after) in page_changes(old, page) {
                     page_change(*hash, kind, severity, &page.url, before, after);
                 }
+                if let Some((kind, severity, before, after)) = broken_link(Some(old.rec), page) {
+                    page_change(*hash, kind, severity, &page.url, before, after);
+                }
+                if sitemap_additions && page.in_sitemap && !old.rec.in_sitemap {
+                    page_change(
+                        *hash,
+                        ChangeKind::AddedToSitemap,
+                        Severity::Notice,
+                        &page.url,
+                        String::new(),
+                        "in sitemap".to_owned(),
+                    );
+                }
             }
             None if prev.stop.is_complete() => {
                 if is_error(page) {
@@ -160,6 +181,19 @@ pub fn diff(prev: &Snapshot, curr: &Snapshot, key_pages: &HashSet<u64>) -> Vec<C
                     String::new(),
                     page.status.to_string(),
                 );
+                if let Some((kind, severity, before, after)) = broken_link(None, page) {
+                    page_change(*hash, kind, severity, &page.url, before, after);
+                }
+                if sitemap_additions && page.in_sitemap {
+                    page_change(
+                        *hash,
+                        ChangeKind::AddedToSitemap,
+                        Severity::Notice,
+                        &page.url,
+                        String::new(),
+                        "in sitemap".to_owned(),
+                    );
+                }
             }
             None => {}
         }
