@@ -58,6 +58,10 @@ pub(crate) fn ordinal(kind: ChangeKind) -> u8 {
         ChangeKind::AiContentMissing => 18,
         ChangeKind::AiLlmsTxtUnavailable => 19,
         ChangeKind::MustWorkFailed => 20,
+        ChangeKind::BrokenLink => 21,
+        ChangeKind::DescriptionChanged => 22,
+        ChangeKind::H1Changed => 23,
+        ChangeKind::AddedToSitemap => 24,
     }
 }
 
@@ -68,6 +72,39 @@ fn title(p: &PageRecord) -> Option<&str> {
         .as_deref()
         .map(str::trim)
         .filter(|t| !t.is_empty())
+}
+
+/// Trimmed text, or `None` when it is missing or blank.
+fn text(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|t| !t.is_empty())
+}
+
+/// A field that was added, removed or reworded, as one change of `kind`.
+fn text_changed(kind: ChangeKind, old: Option<&str>, new: Option<&str>) -> Option<PageChange> {
+    let (old, new) = (text(old), text(new));
+    (old != new).then(|| {
+        (
+            kind,
+            Severity::Notice,
+            old.unwrap_or_default().to_owned(),
+            new.unwrap_or_default().to_owned(),
+        )
+    })
+}
+
+/// A page other pages link to that does not answer now and did before (or is new, when `old`
+/// is `None`). A page nothing links to is left to `status_changed`: no visitor reaches it by
+/// a link.
+pub(crate) fn broken_link(old: Option<&PageRecord>, curr: &PageRecord) -> Option<PageChange> {
+    if !is_error(curr) || curr.inlinks == 0 || old.is_some_and(is_error) {
+        return None;
+    }
+    Some((
+        ChangeKind::BrokenLink,
+        Severity::Warning,
+        old.map(|p| p.status.to_string()).unwrap_or_default(),
+        curr.status.to_string(),
+    ))
 }
 
 fn url_or_none(u: Option<&Url>) -> String {
@@ -128,6 +165,20 @@ pub(crate) fn page_changes(prev: &PrevPage<'_>, curr: &PageRecord) -> Vec<PageCh
         )),
         _ => {}
     }
+    // Wording only matters on a page that answers: an error page has no description or H1 of
+    // the site's choosing, and its status change already says what happened.
+    if !is_error(old) && !is_error(curr) {
+        out.extend(text_changed(
+            ChangeKind::DescriptionChanged,
+            old.fields.meta_description.as_deref(),
+            curr.fields.meta_description.as_deref(),
+        ));
+        out.extend(text_changed(
+            ChangeKind::H1Changed,
+            old.fields.h1.first().map(String::as_str),
+            curr.fields.h1.first().map(String::as_str),
+        ));
+    }
     if prev.canonical != curr.fields.canonical {
         out.push((
             ChangeKind::CanonicalChanged,
@@ -137,6 +188,12 @@ pub(crate) fn page_changes(prev: &PrevPage<'_>, curr: &PageRecord) -> Vec<PageCh
         ));
     }
     out
+}
+
+/// Whether both sitemap readings are whole, so a page's `in_sitemap` can be compared.
+pub(crate) fn sitemaps_comparable(prev: &SitemapSummary, curr: &SitemapSummary) -> bool {
+    let whole = |s: &SitemapSummary| s.failed_files == 0 && s.complete && !s.truncated;
+    whole(prev) && whole(curr)
 }
 
 /// The sitemap lost 10% or more of its URLs. Skipped when either summary may be partial.

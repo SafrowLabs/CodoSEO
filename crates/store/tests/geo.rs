@@ -739,7 +739,7 @@ async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
     let channel = codoseo_store::channels::ensure_default_email(&db.pool, &key, account)
         .await
         .unwrap();
-    // A site from before the GEO kinds: it has only the five original rules (and must-work).
+    // A site from before the GEO kinds: it has only the rules that are not about AI access.
     alert_rules::create_defaults_for_site(&db.pool, account, site)
         .await
         .unwrap();
@@ -758,12 +758,13 @@ async fn the_new_instant_kinds_are_default_rules_and_reach_an_existing_site() {
                 .unwrap()
         }
     };
-    assert_eq!(count(&db.pool).await, 6);
+    let not_ai = DEFAULT_INSTANT.iter().filter(|k| !k.is_ai()).count() as i64;
+    assert_eq!(count(&db.pool).await, not_ai);
 
     alert_rules::create_defaults_for_site(&db.pool, account, site)
         .await
         .unwrap();
-    assert_eq!(count(&db.pool).await, 11);
+    assert_eq!(count(&db.pool).await, DEFAULT_INSTANT.len() as i64);
     for kind in [
         codoseo_core::change::ChangeKind::AiBotBlocked,
         codoseo_core::change::ChangeKind::AiAnswersRestricted,
