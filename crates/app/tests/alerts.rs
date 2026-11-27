@@ -547,18 +547,26 @@ async fn four_new_404s_on_a_200_page_site_alert_as_a_spike() {
     let mails = w.mail_to("owner@example.com");
     assert_eq!(mails.len(), 1);
     assert!(mails[0].text.contains("Error spike"), "{}", mails[0].text);
-    // Only the spike was instant: the four status changes wait for the digest.
+    assert!(mails[0].text.contains("Broken link"), "{}", mails[0].text);
+    // The spike and the four broken links are instant, in one message: the four status
+    // changes wait for the digest.
     let deliveries = w.deliveries().await;
-    assert_eq!(deliveries[0]["change_ids"].as_array().unwrap().len(), 1);
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0]["change_ids"].as_array().unwrap().len(), 5);
 }
 
 #[tokio::test]
-async fn two_new_404s_on_a_200_page_site_are_no_spike_and_nothing_is_sent() {
+async fn two_new_404s_on_a_200_page_site_are_no_spike_but_the_broken_links_are_sent() {
     let (w, changes) = alert_for(2).await;
     assert!(!changes.iter().any(|c| c.kind == ChangeKind::ErrorSpike));
-    assert!(!changes.is_empty());
-    assert!(w.deliveries().await.is_empty());
-    assert!(w.mail.lock().unwrap().is_empty());
+    // Each page has a link pointing at it, so each is a broken link: one message for both.
+    let mails = w.mail_to("owner@example.com");
+    assert_eq!(mails.len(), 1);
+    assert!(mails[0].text.contains("Broken link"), "{}", mails[0].text);
+    assert!(!mails[0].text.contains("Error spike"), "{}", mails[0].text);
+    let deliveries = w.deliveries().await;
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0]["change_ids"].as_array().unwrap().len(), 2);
 }
 
 // ---- plans and channel state -----------------------------------------------------------------
