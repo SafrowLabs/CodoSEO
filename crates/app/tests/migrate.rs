@@ -41,8 +41,9 @@ async fn migrate_creates_every_table() {
     // api_usage from 0010, ai_reports and ai_incidents from 0011, ai_rechecks from 0014,
     // deploy_hooks from 0016, crawl_stats and crawled_websites from 0017, policy_history from
     // 0019, crawl_live_rows from 0021, site_icons from 0022, crawl_graphs from 0023,
-    // email_suppressions from 0025, and sqlx's own _sqlx_migrations bookkeeping table.
-    assert_eq!(count, 29);
+    // email_suppressions from 0025, broken_targets from 0028, and sqlx's own _sqlx_migrations
+    // bookkeeping table.
+    assert_eq!(count, 30);
 
     // 0012: the per-site switch for synthetic agent fetch probes, on unless switched off.
     let (nullable, default): (String, Option<String>) = sqlx::query_as(
