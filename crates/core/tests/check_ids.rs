@@ -5,13 +5,13 @@ use codoseo_core::check::{CheckId, IssueBits};
 #[test]
 fn check_ids_are_dense_unique_and_below_64() {
     let bits: Vec<u8> = CheckId::ALL.iter().map(|c| c.bit()).collect();
-    assert_eq!(bits, (0..52).collect::<Vec<u8>>());
+    assert_eq!(bits, (0..53).collect::<Vec<u8>>());
     for c in CheckId::ALL {
         assert_eq!(CheckId::from_bit(c.bit()), Some(c));
     }
-    assert_eq!(CheckId::from_bit(52), None);
+    assert_eq!(CheckId::from_bit(53), None);
     let slugs: HashSet<_> = CheckId::ALL.iter().map(|c| c.slug()).collect();
-    assert_eq!(slugs.len(), 52);
+    assert_eq!(slugs.len(), 53);
     assert_eq!(
         serde_json::to_string(&CheckId::TitleMissing).unwrap(),
         "\"title_missing\""
@@ -29,7 +29,7 @@ fn slug_matches_serde_name_for_every_check() {
 }
 
 /// The persisted bit of every check. Never edit an existing row; new checks are appended.
-const PINNED: [(&str, u8); 52] = [
+const PINNED: [(&str, u8); 53] = [
     ("http_4xx", 0),
     ("http_5xx", 1),
     ("fetch_failed", 2),
@@ -82,6 +82,7 @@ const PINNED: [(&str, u8); 52] = [
     ("links_to_broken_external", 49),
     ("broken_images", 50),
     ("broken_resources", 51),
+    ("home_variant_broken", 52),
 ];
 
 #[test]
@@ -99,6 +100,7 @@ fn stable_values_never_move() {
     assert_eq!(CheckId::PolicyAddress as u8, 44);
     assert_eq!(CheckId::MustWorkFailed as u8, 48);
     assert_eq!(CheckId::BrokenResources as u8, 51);
+    assert_eq!(CheckId::HomeVariantBroken as u8, 52);
 }
 
 #[test]

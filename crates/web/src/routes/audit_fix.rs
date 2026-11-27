@@ -329,16 +329,30 @@ pub fn fix_list(input: FixInput<'_>) -> FixList {
                 format!("On {} of {}. {why}", fmt::thousands(n), fmt::pages(pages))
             };
             let (gain, gain_tip) = gain(points, "SEO", SEO_WEIGHT);
-            let urls: Vec<(String, String)> = input
-                .examples
-                .get(&id)
-                .map(|v| {
-                    v.iter()
-                        .take(URLS_SHOWN)
-                        .map(|u| (path_of(u), u.clone()))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let urls: Vec<(String, String)> = if id == CheckId::HomeVariantBroken {
+                // Not pages of the crawl: the addresses themselves, with what each answered.
+                s.report_summary
+                    .broken_home_variants
+                    .iter()
+                    .map(|v| {
+                        (
+                            format!("{} answered {}", v.url, v.status),
+                            v.url.to_string(),
+                        )
+                    })
+                    .collect()
+            } else {
+                input
+                    .examples
+                    .get(&id)
+                    .map(|v| {
+                        v.iter()
+                            .take(URLS_SHOWN)
+                            .map(|u| (path_of(u), u.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
             let prompt = seo_prompt(&title, &evidence, fix, &urls, n);
             rows.push(FixRow {
                 id: format!("fx-seo-{}", id.slug()),
@@ -758,6 +772,10 @@ pub fn seo_hint(id: CheckId) -> (&'static str, &'static str) {
         CheckId::BrokenResources => (
             "A script or stylesheet does not load, so the page can look or behave wrong.",
             "Restore the missing file, or fix or remove the tag that loads it.",
+        ),
+        CheckId::HomeVariantBroken => (
+            "Someone who types or follows the http or www address of the home page gets an error or a second copy of the site.",
+            "Redirect every http and www address of the home page to the one you use (a 301 at the server or CDN).",
         ),
         CheckId::LinksToRedirect => (
             "Each link costs crawlers an extra hop.",

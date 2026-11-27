@@ -173,6 +173,10 @@ pub async fn crawl_shared(
         }
         if let Some(home) = start.as_ref().and_then(|(_, r)| r.as_ref().ok()) {
             signals.icon = fetch_icon(&fetcher, &limiter, home, &rules, deadline).await;
+            // Only for a home page that answered: a site that is down has one problem, not four.
+            if home.status < 400 {
+                signals.home_variants = crate::variants::probe(&fetcher, &origin, deadline).await;
+            }
         }
     }
 

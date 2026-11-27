@@ -97,6 +97,9 @@ pub(crate) fn site_wide_issues(out: &CrawlOutput) -> Vec<CheckId> {
     if out.sitemap.url_count == 0 {
         fired.push(CheckId::SitemapMissing);
     }
+    if out.signals.home_variants.iter().any(|v| !v.ok) {
+        fired.push(CheckId::HomeVariantBroken);
+    }
     fired
 }
 

@@ -391,8 +391,8 @@ fn counts_are_in_check_id_order_and_checks_passed_follows() {
     let ids: Vec<u8> = r.counts.iter().map(|(c, _)| c.bit()).collect();
     assert!(ids.windows(2).all(|w| w[0] < w[1]));
     assert!(r.counts.iter().all(|(_, n)| *n > 0));
-    assert_eq!(r.checks_total, 47);
-    assert_eq!(usize::from(r.checks_passed), 47 - r.counts.len());
+    assert_eq!(r.checks_total, 48);
+    assert_eq!(usize::from(r.checks_passed), 48 - r.counts.len());
 }
 
 #[test]
@@ -441,4 +441,45 @@ fn dead_outbound_targets_flag_every_page_that_uses_them() {
     assert!(!o.pages[0].issues.has_check(CheckId::BrokenImages));
     assert!(o.pages[1].issues.has_check(CheckId::BrokenImages));
     assert!(o.pages[2].issues.has_check(CheckId::BrokenResources));
+}
+
+#[test]
+fn a_home_page_address_that_does_not_lead_to_the_site_fails_site_wide() {
+    use codoseo_core::output::HomeVariant;
+
+    let variant = |url: &str, status: u16, final_url: &str, ok: bool| HomeVariant {
+        url: u(url),
+        status,
+        final_url: u(final_url),
+        ok,
+    };
+    let mut o = out(vec![home(), pg("/a")], &[(0, 1)]);
+    o.signals.home_variants = vec![
+        variant("http://e.com/", 200, "https://e.com/", true),
+        variant("https://www.e.com/", 200, "https://e.com/", true),
+    ];
+    let r = run_checks(&mut o);
+    assert!(
+        !r.counts
+            .iter()
+            .any(|(c, _)| *c == CheckId::HomeVariantBroken)
+    );
+    assert!(r.summary.broken_home_variants.is_empty());
+
+    o.signals.home_variants.push(variant(
+        "http://www.e.com/",
+        404,
+        "http://www.e.com/",
+        false,
+    ));
+    let r = run_checks(&mut o);
+    // Site-wide: counted once, and no page carries the bit.
+    assert!(r.counts.contains(&(CheckId::HomeVariantBroken, 1)));
+    assert!(
+        o.pages
+            .iter()
+            .all(|p| !p.issues.has_check(CheckId::HomeVariantBroken))
+    );
+    assert_eq!(r.summary.broken_home_variants.len(), 1);
+    assert_eq!(r.summary.broken_home_variants[0].status, 404);
 }

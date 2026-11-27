@@ -10,7 +10,7 @@ fn clean_site_scores_100() {
     let mut o = out(clean_site(), &chain_edges());
     let r = run_checks(&mut o);
     assert_eq!(r.health_score, 100);
-    assert_eq!(r.checks_passed, 47);
+    assert_eq!(r.checks_passed, 48);
     assert!(r.counts.is_empty());
 }
 

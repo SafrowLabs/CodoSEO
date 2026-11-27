@@ -41,6 +41,7 @@ fn audit() -> Audit {
             counts: vec![(CheckId::OgMissing, 1)],
             inlink_samples: Vec::new(),
             summary: CrawlSummary {
+                broken_home_variants: Default::default(),
                 pages: 1,
                 indexable: 1,
                 status: StatusCounts {

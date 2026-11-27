@@ -19,3 +19,4 @@ pub(crate) mod record;
 pub mod robots;
 pub mod scope;
 pub mod sitemap;
+pub(crate) mod variants;

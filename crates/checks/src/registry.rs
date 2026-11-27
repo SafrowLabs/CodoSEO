@@ -61,7 +61,7 @@ use Scope::{Page, Site, SiteWide};
 use Severity::{Critical as C, Notice as N, Warning as W};
 
 /// Every check, in `CheckId` order.
-pub static CHECKS: [CheckDef; 52] = [
+pub static CHECKS: [CheckDef; 53] = [
     d(
         CheckId::Http4xx,
         C,
@@ -413,6 +413,13 @@ pub static CHECKS: [CheckDef; 52] = [
         Technical,
         Site,
         "Page loads a broken script or stylesheet",
+    ),
+    d(
+        CheckId::HomeVariantBroken,
+        W,
+        Technical,
+        SiteWide,
+        "An address of the home page doesn't lead to the site",
     ),
 ];
 

@@ -131,6 +131,7 @@ pub(crate) async fn preflight(
         llms_txt_skipped: None,
         markdown: None,
         icon: None,
+        home_variants: Vec::new(),
     };
     let stop = match &result {
         Err(e) => Some(StopReason::Unreachable(e.to_string())),
